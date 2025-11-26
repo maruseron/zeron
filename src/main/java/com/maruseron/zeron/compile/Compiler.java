@@ -2,6 +2,7 @@ package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.UnitLiteral;
 import com.maruseron.zeron.ast.*;
+import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
 import java.io.IOException;
@@ -55,14 +56,14 @@ public final class Compiler {
 
     public void emitBytecode(final CodeBuilder builder, final Stmt statement) {
         switch (statement) {
-            case Let(Token name, Token type, Expr initializer, boolean isFinal) ->
+            case Stmt.Var(Token name, TypeDescriptor type, Expr initializer, boolean isFinal) ->
                     todo("letdecl: implement resolver");
-            case Print(Expr expression) -> {
+            case Stmt.Print(Expr expression) -> {
                 builder.getstatic(getStdOut(builder.constantPool()));
                 emitValue(builder, expression);
                 builder.invokevirtual(getPrintln(builder.constantPool()));
             }
-            case Expression(Expr expression) ->
+            case Stmt.Expression(Expr expression) ->
                     emitValue(builder, expression);
             default -> throw new UnsupportedOperationException();
         }
@@ -70,11 +71,11 @@ public final class Compiler {
 
     private void emitValue(final CodeBuilder builder, final Expr expr) {
         switch (expr) {
-            case Binary(Expr left, Token operator, Expr right) ->
+            case Expr.Binary(Expr left, Token operator, Expr right) ->
                     todo("binary: implement resolver");
-            case Grouping(Expr expression) ->
+            case Expr.Grouping(Token paren, Expr expression) ->
                     emitValue(builder, expression);
-            case Literal(Object value) -> {
+            case Expr.Literal(Object value) -> {
                 switch (value) {
                     case String  s -> builder.ldc(s);
                     case Integer i -> builder.ldc(i);
@@ -91,9 +92,9 @@ public final class Compiler {
                     default -> throw new IllegalStateException("Unsupported value");
                 }
             }
-            case Unary(Token operator, Expr right) ->
+            case Expr.Unary(Token operator, Expr right) ->
                     todo("unary: implement resolver");
-            case Variable(Token name) ->
+            case Expr.Variable(Token name) ->
                     todo("variable: implement resolver");
             default -> throw new UnsupportedOperationException();
         }

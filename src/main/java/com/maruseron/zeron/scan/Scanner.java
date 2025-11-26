@@ -47,6 +47,7 @@ public final class Scanner {
             entry("this", THIS),
             entry("True", TRUE),
             entry("type", TYPE),
+            entry("typeof", TYPEOF),
             entry("Unit", UNIT),
             entry("until", UNTIL),
             entry("while", WHILE));

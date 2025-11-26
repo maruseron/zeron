@@ -7,17 +7,22 @@ letDecl        -> VARIABLE_BIND | FUNCTION_BIND ;
 VARIABLE_BIND  -> "let" IDENTIFIER (":" TYPE )? ( "=" expression )? ";" ;
 FUNCTION_BIND  -> "let" IDENTIFIER "(" ARGUMENTS ")" "->" BODY;
 BODY           -> SINGLE_EXPRESSION | FULL_BODY;
+
 statement      -> exprStmt
+                | ifStmt
                 | printStmt 
                 | block ;
 
 exprStmt       -> expression ";" ;
+ifStmt         -> "if" "(" expression ")" statement ( "else" statement )? ;
 printStmt      -> "print" "(" expression ")" ";" ;
 block          -> "{" declaration* "}"
 
 expression     -> assignment ;
 assignment     -> IDENTIFIER "=" assignment
-                | equality ;
+                | logic_or ;
+logic_or       -> logic_and ( "or" logic_and )* ;
+logic_and      -> equality ( "and" equality )* ;
 equality       -> comparison ( ( "!=" | "==" ) comparison )* ;
 comparison     -> term ( ( ">" | ">=" | "<" | "<=" ) )
 term           -> factor ( ( "-" | "+" ) factor )* ;
@@ -26,6 +31,8 @@ unary          -> ( "not" | "-" | "+" ) unary
                 | primary ;
 primary        -> NUMBER | STRING | lambda 
                 | "True" | "False" | "Null" | "Unit" 
-                | IDENTIFIER ;
+                | IDENTIFIER | ifExpr ;
+
+ifExpr         -> "if" "(" expression ")" "then" expression "else" expression ;
 
 lambda         -> "(" ARGUMENTS ")" "->" body ;

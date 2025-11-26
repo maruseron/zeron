@@ -1,6 +1,14 @@
 package com.maruseron.zeron.domain;
 
+import java.util.stream.Stream;
+
 public record TypeDescriptor(String descriptor) {
+    public boolean isBuiltIn() {
+        return switch (descriptor) {
+            case "Nothing", "Unit", "Int", "Double", "Boolean", "String" -> true;
+            default -> false;
+        };
+    }
 
     public boolean isNullable() {
         return descriptor().endsWith("?");
@@ -12,5 +20,53 @@ public record TypeDescriptor(String descriptor) {
 
     public boolean isArray() {
         return descriptor().endsWith("[]");
+    }
+
+    public Stream<String> bits() {
+        final var delimiters = "\\&|\\?|(\\[\\])";
+        return Stream.of(descriptor.split(
+                String.format("((?=%s)|(?<=%s))", delimiters, delimiters)));
+    }
+
+    public TypeDescriptor nullable() {
+        // Nothing     -> Nothing?     <- this type can only be null
+        // Int         -> Int?
+        // Employee    -> Employee?
+        // String?     -> String?      <- nullable() on a nullable type is a no op
+        // &Employee   -> &Employee?
+        // String[]    -> String[]?
+        // String?[][] -> String?[][]? <-     from array[array[nullable string]] to
+        //                                nullable array[array[nullable string]]
+        return isNullable() ? this : new TypeDescriptor(descriptor + "?");
+    }
+
+    public TypeDescriptor mutable() {
+        // Nothing     -> Nothing        <\
+        // Int         -> Int         <|-- mutable() on a builtin type is a no op.
+        // Employee    -> &Employee       /         builtin types cannot be mutated
+        // String?     -> String?       </
+        // &Employee   -> &Employee     <- mutable() on a mutable type is a no op
+        // String[]    -> &String[]     <- this modifies the base type, not the array type.
+        //                                 TODO: how to mutable array, if at all?
+        // String?[][] -> &String?[][]? <-    from array[array[        nullable string]] to
+        //                                         array[array[mutable nullable string]]
+        return isBuiltIn()
+                ? this
+                : isMutable()
+                    ? this
+                    : new TypeDescriptor("&" + descriptor);
+    }
+
+    public TypeDescriptor array() {
+        // Nothing     -> Nothing[]      <- size is always 0. Nothing?[] can only hold nulls
+        // Int         -> Int[]
+        // Employee    -> Employee[]
+        // String?     -> String?[]
+        // &Employee   -> &Employee[]
+        // String[]    -> &String[][]    <- array() on an array type nests the current type
+        //                                  into a new one
+        // String?[][] -> String?[][][] <-    from       array[array[nullable string]] to
+        //                                         array[array[array[nullable string]]
+        return new TypeDescriptor(descriptor + "[]");
     }
 }

@@ -20,7 +20,13 @@ public final class Environment {
 
     Bind get(final Token name) {
         if (values.containsKey(name.lexeme())) {
-            return values.get(name.lexeme());
+            var entry = values.get(name.lexeme());
+            if (!entry.isInitialized()) {
+                throw new RuntimeError(name,
+                        "Attempted to read variable '" +
+                        name.lexeme() + "' before initialization.");
+            }
+            return entry;
         }
 
         if (enclosing != null) return enclosing.get(name);

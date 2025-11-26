@@ -2,6 +2,7 @@ package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.UnitLiteral;
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
@@ -48,14 +49,15 @@ public final class Parser {
         boolean isFinal = !match(MUT);
         final var name = consume(IDENTIFIER, "Expect binding name.");
 
-        Token type = null;
+        TypeDescriptor type = null;
         if (match(LEFT_PAREN)) {
             // FUNCTION DECLARATION
             return null;
         } else if (match(COLON)) {
             // TODO: rework this into type consumer with modifiers like
             //       [], ? and &
-            type = consume(IDENTIFIER, "Expect type name.");
+            type = collectType();
+            //consume(IDENTIFIER, "Expect type name.");
         }
 
         Expr initializer = null;
@@ -64,13 +66,50 @@ public final class Parser {
         }
 
         consume(SEMICOLON, "Expect ';' after variable declaration.");
-        return new Let(name, type, initializer, isFinal);
+        return new Stmt.Var(name, type, initializer, isFinal);
+    }
+
+    private TypeDescriptor collectType() {
+        final var isMutable  = match(AMPERSAND);
+        final var typeName   = match(IDENTIFIER);
+        TypeDescriptor td = new TypeDescriptor(
+                (isMutable ? "&" : "") + previous().lexeme());
+
+        while (match(HUH, LEFT_BRACKET)) {
+            // matching []
+            if (previous().type() == LEFT_BRACKET) {
+                consume(RIGHT_BRACKET, "Expect ']' after '['");
+                td = td.array();
+            }
+            // matching ?
+            else {
+                td = td.nullable();
+            }
+        }
+
+        return td;
     }
 
     private Stmt statement() {
+        if (match(IF)) return ifStatement();
         if (match(PRINT)) return printStatement();
+        if (match(LEFT_BRACE)) return new Stmt.Block(block());
 
         return expressionStatement();
+    }
+
+    private Stmt ifStatement() {
+        final var paren = consume(LEFT_PAREN, "Expect '(' after 'if'.");
+        final var condition = expression();
+        consume(RIGHT_PAREN, "Expect ')' after if condition.");
+
+        final var thenBranch = statement();
+        Stmt elseBranch = null;
+        if (match(ELSE)) {
+            elseBranch = statement();
+        }
+
+        return new Stmt.If(paren, condition, thenBranch, elseBranch);
     }
 
     private Stmt printStatement() {
@@ -78,13 +117,24 @@ public final class Parser {
         final var value = expression();
         consume(RIGHT_PAREN, "Expect ')' after expression.");
         consume(SEMICOLON, "Expect ';' after expression.");
-        return new Print(value);
+        return new Stmt.Print(value);
     }
 
     private Stmt expressionStatement() {
         final var expr = expression();
         consume(SEMICOLON, "Expect ';' after expression.");
-        return new Expression(expr);
+        return new Stmt.Expression(expr);
+    }
+
+    private List<Stmt> block() {
+        final var statements = new ArrayList<Stmt>();
+
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            statements.add(declaration());
+        }
+
+        consume(RIGHT_BRACE, "Expect '}' after block.");
+        return statements;
     }
 
     private Expr expression() {
@@ -92,17 +142,41 @@ public final class Parser {
     }
 
     private Expr assignment() {
-        var expr = equality();
+        var expr = or();
 
         if (match(EQUAL)) {
             final var equals = previous();
             final var value = assignment();
 
-            if (expr instanceof Variable(Token name)) {
-                return new Assignment(name, value);
+            if (expr instanceof Expr.Variable(Token name)) {
+                return new Expr.Assignment(name, value);
             }
 
             error(equals, "Invalid assignment target.");
+        }
+
+        return expr;
+    }
+
+    private Expr or() {
+        var expr = and();
+
+        while (match(OR)) {
+            final var operator = previous();
+            final var right = and();
+            expr = new Expr.Logical(expr, operator, right);
+        }
+
+        return expr;
+    }
+
+    private Expr and() {
+        var expr = equality();
+
+        while (match(AND)) {
+            final var operator = previous();
+            final var right = equality();
+            expr = new Expr.Logical(expr, operator, right);
         }
 
         return expr;
@@ -114,7 +188,7 @@ public final class Parser {
         while (match(BANG_EQUAL, EQUAL_EQUAL)) {
             final var operator = previous();
             final var right = comparison();
-            expr = new Binary(expr, operator, right);
+            expr = new Expr.Binary(expr, operator, right);
         }
 
         return expr;
@@ -126,7 +200,7 @@ public final class Parser {
         while (match(GREATER, GREATER_EQUAL, LESS, LESS_EQUAL)) {
             final var operator = previous();
             final var right = term();
-            expr = new Binary(expr, operator, right);
+            expr = new Expr.Binary(expr, operator, right);
         }
 
         return expr;
@@ -138,7 +212,7 @@ public final class Parser {
         while (match(MINUS, PLUS)) {
             final var operator = previous();
             final var right = factor();
-            expr = new Binary(expr, operator, right);
+            expr = new Expr.Binary(expr, operator, right);
         }
 
         return expr;
@@ -150,40 +224,51 @@ public final class Parser {
         while (match(SLASH, STAR)) {
             final var operator = previous();
             final var right = unary();
-            expr = new Binary(expr, operator, right);
+            expr = new Expr.Binary(expr, operator, right);
         }
 
         return expr;
     }
 
     private Expr unary() {
-        if (match(NOT, MINUS)) {
+        if (match(NOT, MINUS, TYPEOF)) {
             final var operator = previous();
             final var right = unary();
-            return new Unary(operator, right);
+            return new Expr.Unary(operator, right);
         }
 
         return primary();
     }
 
     private Expr primary() {
-        if (match(FALSE)) return new Literal(false);
-        if (match(TRUE)) return new Literal(true);
-        if (match(NULL)) return new Literal(null);
-        if (match(UNIT)) return new Literal(new UnitLiteral());
+        if (match(FALSE)) return new Expr.Literal(false);
+        if (match(TRUE)) return new Expr.Literal(true);
+        if (match(NULL)) return new Expr.Literal(null);
+        if (match(UNIT)) return new Expr.Literal(new UnitLiteral());
 
         if (match(INT, DOUBLE, STRING)) {
-            return new Literal(previous().literal());
+            return new Expr.Literal(previous().literal());
+        }
+
+        if (match(IF)) {
+            final var paren = consume(LEFT_PAREN, "Expect '(' after 'if'.");
+            final var condition = expression();
+            consume(RIGHT_PAREN, "Expect ')' after condition.");
+            consume(THEN, "Expect 'then' after ')'.");
+            final var thenExpr = expression();
+            consume(ELSE, "'Expect 'else' after expression.");
+            final var elseExpr = expression();
+            return new Expr.If(paren, condition, thenExpr, elseExpr);
         }
 
         if (match(IDENTIFIER)) {
-            return new Variable(previous());
+            return new Expr.Variable(previous());
         }
 
         if (match(LEFT_PAREN)) {
             final var expr = expression();
-            consume(RIGHT_PAREN, "Expect ')' after expression.");
-            return new Grouping(expr);
+            final var paren = consume(RIGHT_PAREN, "Expect ')' after expression.");
+            return new Expr.Grouping(paren, expr);
         }
 
         throw error(peek(), "Expect expression.");

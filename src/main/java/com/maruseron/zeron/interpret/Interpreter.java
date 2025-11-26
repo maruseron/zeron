@@ -23,9 +23,20 @@ public final class Interpreter {
 
     public void execute(final Stmt stmt) {
         switch (stmt) {
-            case Expression(Expr expression) ->
+            case Stmt.Block(List<Stmt> statements) ->
+                    executeBlock(statements, new Environment(environment));
+            case Stmt.Expression(Expr expression) ->
                     evaluate(expression);
-            case Let(Token name, Token type, Expr initializer, boolean isFinal) -> {
+            case Stmt.If(Token paren, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
+                if (ensureBoolean(paren, evaluate(condition))) {
+                    execute(thenBranch);
+                } else if (elseBranch != null) {
+                    execute(elseBranch);
+                }
+            }
+            case Stmt.Print(Expr expression) ->
+                    System.out.println(evaluate(expression));
+            case Stmt.Var(Token name, TypeDescriptor type, Expr initializer, boolean isFinal) -> {
                 Object value = null;
                 if (initializer != null) {
                     value = evaluate(initializer);
@@ -33,24 +44,35 @@ public final class Interpreter {
 
                 environment.define(
                         name.lexeme(),
-                        new TypeDescriptor(type.lexeme()),
+                        type,
                         value,
                         initializer != null,
                         isFinal);
             }
-            case Print(Expr expression) ->
-                    System.out.println(evaluate(expression));
+        }
+    }
+
+    void executeBlock(final List<Stmt> statements, final Environment environment) {
+        final var previous = this.environment;
+        try {
+            this.environment = environment;
+
+            for (final var statement : statements) {
+                execute(statement);
+            }
+        } finally {
+            this.environment = previous;
         }
     }
 
     public Object evaluate(final Expr expr) {
         return switch (expr) {
-            case Assignment(Token name, Expr expression) -> {
+            case Expr.Assignment(Token name, Expr expression) -> {
                 final var value = evaluate(expression);
                 environment.assign(name, value);
                 yield value;
             }
-            case Binary(Expr leftExpr, Token operator, Expr rightExpr) -> {
+            case Expr.Binary(Expr leftExpr, Token operator, Expr rightExpr) -> {
                 final var left = evaluate(leftExpr);
                 final var right = evaluate(rightExpr);
 
@@ -153,24 +175,45 @@ public final class Interpreter {
                     default -> throw new IllegalStateException("Invalid binary operator.");
                 };
             }
-            case Grouping(Expr expression) ->
+            case Expr.Grouping(Token paren, Expr expression) ->
                     evaluate(expression);
-            case Literal(Object value) ->
+            case Expr.If(Token paren, Expr condition, Expr thenExpr, Expr elseExpr) ->
+                    ensureBoolean(paren, evaluate(condition))
+                        ? evaluate(thenExpr)
+                        : evaluate(elseExpr);
+            case Expr.Literal(Object value) ->
                     value;
-            case Unary(Token operator, Expr right) -> {
+            case Expr.Logical(Expr leftExpr, Token operator, Expr rightExpr) -> {
+                final var left = evaluate(leftExpr);
+
+                yield switch (operator.type()) {
+                //  or short circuits to true if left is true  and evaluates right if left is false
+                // and short circuits to true if left is false and evaluates right if left is  true
+                    case OR  ->  ensureBoolean(operator, left) ? true  : evaluate(rightExpr);
+                    case AND -> !ensureBoolean(operator, left) ? false : evaluate(rightExpr);
+                    default  -> throw new IllegalStateException("Invalid logical operator.");
+                };
+            }
+            case Expr.Unary(Token operator, Expr right) -> {
                 final var value = evaluate(right);
 
                 yield switch (operator.type()) {
-                    case MINUS -> switch (ensureNumber(operator, value)) {
+                    case MINUS  -> switch (ensureNumber(operator, value)) {
                         case Double d  -> -d;
                         case Integer i -> -i;
                         default -> throw new IllegalStateException("Unsupported number type.");
                     };
-                    case NOT   -> !ensureBoolean(operator, value);
-                    default    -> throw new IllegalStateException("Unsupported unary operator.");
+                    case NOT    -> !ensureBoolean(operator, value);
+                    case TYPEOF -> {
+                        if (right instanceof Expr.Variable(Token name)) {
+                            yield environment.get(name).typeDescriptor().descriptor();
+                        }
+                        yield value.getClass().getSimpleName();
+                    }
+                    default     -> throw new IllegalStateException("Unsupported unary operator.");
                 };
             }
-            case Variable(Token name) -> environment.get(name).value();
+            case Expr.Variable(Token name) -> environment.get(name).value();
         };
     }
 

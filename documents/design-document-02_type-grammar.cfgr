@@ -1,0 +1,25 @@
+module TypeDescriptorGrammar;
+
+Identifier      : { 'a'-'z' | 'A'-'Z' | '0'-'9' } ;
+Type            : Primitive | Wrapper | Function | Generic ;
+Primitive       : "Never" | "Unit" | "Int" | "Float" | "Boolean" | "String" ;
+Wrapper         : [ { ArraySpec | NullabilitySpec | MutabilitySpec } ":" ] Type ;
+ArraySpec       : "a" ;
+MutabilitySpec  : "m" ;
+NullabilitySpec : "n" ;
+Function        : "$" Arity ArgumentList ReturnType ;
+Arity           : Integer ;
+ArgumentList    : { Type } ; # (*  * is Arity  *)
+ReturnType      : Type ;
+Generic         : "@" Type Arity ArgumentList ;
+
+# Int                              ::= Int
+# String?                          ::= n:String
+# &Person?                         ::= nm:Person
+# &List<Person?>                   ::= @ 1 m:List n:Person
+# Person?[]?[]?                    ::= nanan:Person ????? <- does this even make sense wtf
+#                                                            do i just make arrays generic
+# () -> () -> Unit                 ::= $ 0 $ 0 Unit
+# (() -> Unit) -> Unit             ::= $ 1 $ 0 Unit Unit
+# (() -> Unit) -> () -> Unit       ::= $ 1 $ 0 Unit $ 0 Unit
+# (Int, (Int?) -> Bool) -> String? ::= $ 2 Int $ 1 n:Int Bool n:String

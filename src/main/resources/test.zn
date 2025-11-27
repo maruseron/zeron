@@ -1,2 +1,3 @@
-let x: &Double = if (True) then 3 else 5;
-print(typeof x);
+let a: &Map<String, &List<Person?>>;
+
+let b: (Int, Int) -> Int = (a, b) -> a + b;

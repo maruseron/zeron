@@ -1,20 +1,38 @@
 package com.maruseron.zeron.interpret;
 
+import com.maruseron.zeron.IntRangeLiteral;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 public final class Interpreter {
-    private Environment environment = new Environment();
+    final Environment globals = new Environment();
+    private Environment environment = globals;
+
+    public Interpreter() {
+        globals.define("clock",
+                new TypeDescriptor("()Int"),
+                new ZeronCallable() {
+                    @Override public String toString() { return "<native fn clock>"; }
+                    @Override public int arity() { return 0; }
+                    @Override public Object call(Interpreter interpreter, List<Object> arguments) {
+                        return (int)(System.currentTimeMillis() / 1000L);
+                    }
+                }, true, true);
+
+    }
 
     public void interpret(final List<Stmt> statements) {
         try {
             for (final var statement : statements) {
-                execute(statement);
+                try {
+                    execute(statement);
+                } catch (BreakException _) {}
             }
         } catch (RuntimeError error) {
             Zeron.runtimeError(error);
@@ -25,8 +43,31 @@ public final class Interpreter {
         switch (stmt) {
             case Stmt.Block(List<Stmt> statements) ->
                     executeBlock(statements, new Environment(environment));
+            case Stmt.Break(Token keyword) -> throw new BreakException(keyword);
             case Stmt.Expression(Expr expression) ->
                     evaluate(expression);
+            case Stmt.For(Token iterationBind, Token in, Expr iterable, Stmt body) -> {
+                if (!(evaluate(iterable) instanceof IntRangeLiteral range))
+                    throw new RuntimeError(in, "Only ranges can be iterated.");
+
+                /*
+                    for (let i in expr) body desugars to:
+
+                    {
+                        iterator iter = Iterator(expr)
+                        while (iter.hasNext()) {
+                            let i = iter.next()
+                            execute(body)
+                        }
+                    }
+                 */
+
+                executeOverRange(range, iterationBind, body, new Environment(environment));
+            }
+            case Stmt.Function fn -> {
+                System.out.println(fn);
+                throw new UnsupportedOperationException("not implemented yet");
+            }
             case Stmt.If(Token paren, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 if (ensureBoolean(paren, evaluate(condition))) {
                     execute(thenBranch);
@@ -36,6 +77,8 @@ public final class Interpreter {
             }
             case Stmt.Print(Expr expression) ->
                     System.out.println(evaluate(expression));
+            case Stmt.Return(Expr value) ->
+                throw new IllegalStateException("not implemented yet");
             case Stmt.Var(Token name, TypeDescriptor type, Expr initializer, boolean isFinal) -> {
                 Object value = null;
                 if (initializer != null) {
@@ -49,6 +92,16 @@ public final class Interpreter {
                         initializer != null,
                         isFinal);
             }
+            case Stmt.While(Token keyword, Expr condition, Stmt body) -> {
+                switch (keyword.type()) {
+                    case LOOP -> { while (true) execute(body); }
+                    case WHILE, UNTIL -> {
+                        while (ensureBoolean(keyword, evaluate(condition))) {
+                            execute(body);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -59,6 +112,29 @@ public final class Interpreter {
 
             for (final var statement : statements) {
                 execute(statement);
+            }
+        } finally {
+            this.environment = previous;
+        }
+    }
+
+    void executeOverRange(final IntRangeLiteral range,
+                          final Token iterationBind,
+                          final Stmt body,
+                          final Environment environment) {
+        final var previous = this.environment;
+        try {
+            this.environment = environment;
+            for (final var i : range) {
+                // create synthetic variable with the iteration bind name
+                // and set it to the current iteration value.
+                // then run the body
+                execute(new Stmt.Var(
+                        iterationBind,
+                        new TypeDescriptor("<infer>"),
+                        new Expr.Literal(i),
+                        true));
+                execute(body);
             }
         } finally {
             this.environment = previous;
@@ -88,7 +164,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new IllegalStateException("Invalid operands.");
+                        throw new RuntimeError(operator, "Invalid operands.");
                     }
                     case GREATER_EQUAL -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -99,7 +175,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new IllegalStateException("Invalid operands.");
+                        throw new RuntimeError(operator, "Invalid operands.");
                     }
                     case LESS -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -110,7 +186,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new IllegalStateException("Invalid operands.");
+                        throw new RuntimeError(operator, "Invalid operands.");
                     }
                     case LESS_EQUAL -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -121,7 +197,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new IllegalStateException("Invalid operands.");
+                        throw new RuntimeError(operator, "Invalid operands.");
                     }
                     case PLUS -> {
                         // if any is a string, concatenate
@@ -137,7 +213,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is
                         // and the other isn't a string, so we throw
-                        throw new IllegalStateException("Invalid operands.");
+                        throw new RuntimeError(operator, "Invalid operands.");
                     }
                     case MINUS -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -148,7 +224,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new IllegalStateException("Invalid operands.");
+                        throw new RuntimeError(operator, "Invalid operands.");
                     }
                     case SLASH -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -159,7 +235,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new IllegalStateException("Invalid operands.");
+                        throw new RuntimeError(operator, "Invalid operands.");
                     }
                     case STAR  -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -170,10 +246,28 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new IllegalStateException("Invalid operands.");
+                        throw new RuntimeError(operator, "Invalid operands.");
                     }
-                    default -> throw new IllegalStateException("Invalid binary operator.");
+                    default -> throw new RuntimeError(operator, "Invalid binary operator.");
                 };
+            }
+            case Expr.Call(Expr calleeExpr, Token paren, List<Expr> argumentExprs) -> {
+                final var callee    = evaluate(calleeExpr);
+                final var arguments = new ArrayList<>();
+                for (final var argumentExpr : argumentExprs) {
+                    arguments.add(evaluate(argumentExpr));
+                }
+
+                if (!(callee instanceof ZeronCallable callable)) {
+                    throw new RuntimeError(paren, "Callee must be a function.");
+                }
+
+                if (arguments.size() != callable.arity()) {
+                    throw new RuntimeError(paren, "Expected " + callable.arity() + " arguments, " +
+                            "but got " + arguments.size() + " instead.");
+                }
+
+                yield callable.call(this, arguments);
             }
             case Expr.Grouping(Token paren, Expr expression) ->
                     evaluate(expression);
@@ -181,6 +275,8 @@ public final class Interpreter {
                     ensureBoolean(paren, evaluate(condition))
                         ? evaluate(thenExpr)
                         : evaluate(elseExpr);
+            case Expr.Lambda(List<Token> params, Stmt body) ->
+                throw new IllegalStateException("not implemented yet");
             case Expr.Literal(Object value) ->
                     value;
             case Expr.Logical(Expr leftExpr, Token operator, Expr rightExpr) -> {
@@ -191,7 +287,7 @@ public final class Interpreter {
                 // and short circuits to true if left is false and evaluates right if left is  true
                     case OR  ->  ensureBoolean(operator, left) ? true  : evaluate(rightExpr);
                     case AND -> !ensureBoolean(operator, left) ? false : evaluate(rightExpr);
-                    default  -> throw new IllegalStateException("Invalid logical operator.");
+                    default  -> throw new RuntimeError(operator, "Invalid logical operator.");
                 };
             }
             case Expr.Unary(Token operator, Expr right) -> {

@@ -1,0 +1,73 @@
+module ZeronGrammar;
+
+import TypeGrammar.Type as type;
+import TypeGrammar.Identifier as IDENTIFIER;
+
+program         : { declaration } EOF ;
+
+declaration     : varDecl | funDecl ; # statement
+
+varDecl         : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
+# full example  : let mut employees: &List<Person?> = expression;
+funDecl         : "let" IDENTIFIER "(" parameters ")" [":" type ]
+                ( "->" exprStmt | block ) ;
+# full example  : let doTimes(times: Int, f: () -> Unit) -> for (i : 1..times) f();
+
+# full example  : let filterNonNull<T>(list: List<T?>): List<T> {
+#                     return list.filter { it != null };
+#                 }
+#                 TODO: add generics rule
+
+parameters      : {0> IDENTIFIER ":" type $ "," <254} ;
+
+statement       : exprStmt
+                | forStmt
+                | ifStmt
+                | printStmt
+                | returnStmt
+                | unboundLoopStmt
+                | block ;
+
+exprStmt        : expression ";" ;
+forStmt         : "for" "(" VARIABLE_BIND "in" expression ")" statement ;
+ifStmt          : "if" "(" expression ")" statement [ "else" statement ] ;
+printStmt       : "print" "(" expression ")" ";" ;
+returnStmt      : "return" [ expression ] ";" ;
+unboundLoopStmt : loopStmt
+                | whileStmt
+                | untilStmt ;
+
+loopStmt        : "loop" statement ;
+whileStmt       : "while" "(" condition ")" statement ;
+untilStmt       : "until" "(" condition ")" statement ;
+block           : "{" {0> declaration } "}" ;
+
+expression      : assignment ;
+assignment      : IDENTIFIER "=" assignment
+                | logic_or ;
+
+logic_or        : { logic_and  $ "or"                        } ;
+logic_and       : { equality   $ "and"                       } ;
+equality        : { comparison $ ( "!=" | "==" )             } ;
+comparison      : { term       $ ( ">" | ">=" | "<" | "<=" ) } ;
+term            : { factor     $ ( "-" | "+" )               } ;
+factor          : { unary      $ ( "/" | "*" )               } ;
+unary           : ( "not" | "-" | "+" ) unary | call ;
+call            : primary { "(" arguments ")" } ;
+arguments       : {0> expression $ "," } ;
+primary         : Integer
+                | Float
+                | String
+                | IDENTIFIER
+                | lambda
+                | "true" | "false" | "null" | "unit"
+                | ifExpr
+                | "(" expression ")"
+                | range ;
+
+ifExpr          : "if" "(" expression ")" "then" expression "else" expression ;
+lambda          : "(" lambdaparams ")" "->" statement ;
+#                 NOTE: this grammar forces type inference. oh well!
+# small example : x -> x
+# full example  : (a, b) -> { return something; }
+range           : Integer ".." Integer ;

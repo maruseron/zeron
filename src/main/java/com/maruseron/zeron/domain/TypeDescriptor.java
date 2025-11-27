@@ -1,13 +1,27 @@
 package com.maruseron.zeron.domain;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Stream;
 
 public record TypeDescriptor(String descriptor) {
-    public boolean isBuiltIn() {
+
+    public boolean isSpecial() {
         return switch (descriptor) {
-            case "Nothing", "Unit", "Int", "Double", "Boolean", "String" -> true;
+            case "<infer>" -> true;
             default -> false;
         };
+    }
+
+    public boolean isBuiltIn() {
+        return switch (descriptor) {
+            case "Never", "Unit", "Int", "Double", "Boolean", "String" -> true;
+            default -> false;
+        };
+    }
+
+    public boolean isFunction() {
+        return descriptor.startsWith("$");
     }
 
     public boolean isNullable() {
@@ -19,7 +33,12 @@ public record TypeDescriptor(String descriptor) {
     }
 
     public boolean isArray() {
-        return descriptor().endsWith("[]");
+        return descriptor().endsWith("[]")
+            || descriptor().endsWith("[]?");
+    }
+
+    public boolean isGeneric() {
+        return descriptor().startsWith("@");
     }
 
     public Stream<String> bits() {
@@ -68,5 +87,27 @@ public record TypeDescriptor(String descriptor) {
         // String?[][] -> String?[][][] <-    from       array[array[nullable string]] to
         //                                         array[array[array[nullable string]]
         return new TypeDescriptor(descriptor + "[]");
+    }
+
+    public List<TypeDescriptor> functionParams() {
+        if (!isFunction()) {
+            throw new UnsupportedOperationException("Not a function descriptor");
+        }
+
+        // TODO: write parsing algorithm. how to parse this properly?
+        // func(): () -> Unit           would be ()()Unit
+        // func(() -> Unit): Unit       would be (()Unit)Unit
+        // func(() -> Unit): () -> Unit would be (()Unit)()Unit
+        return Arrays.stream(
+                descriptor
+                        .substring(1, descriptor.lastIndexOf(")"))
+                        .split(";"))
+                .map(TypeDescriptor::new)
+                .toList();
+    }
+
+    @Override
+    public String toString() {
+        return descriptor;
     }
 }

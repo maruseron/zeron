@@ -24,9 +24,11 @@ Haxe, Julia, CoffeeScript (see until!), F#
 - - fields can only be private, use getters and setters
 - - only one level of inheritance (abstract class)
 - - contracts are specified by interfaces/traits/type classes
+- - TODO: explore only private methods and contract upcasting for implementation detail hiding.
+this would necessitate intersection types (e.g `Iterable[T] & Autoclosable`)
 - Generics
 - Explicit resource management
-- First class nullable type widening
+- First class nullable type widening (array and mutable types too)
 - ADTs
 - Discriminated unions?
 - Immutable data structures

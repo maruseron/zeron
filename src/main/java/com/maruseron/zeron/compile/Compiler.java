@@ -1,6 +1,7 @@
 package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.UnitLiteral;
+import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
@@ -24,21 +25,38 @@ import java.util.List;
 public final class Compiler {
     private final ClassFile classFile = ClassFile.of();
     private final MethodHandles.Lookup lookup = MethodHandles.lookup();
+    private final Resolver resolver = new Resolver();
 
-    public void compile(final List<Stmt> statements) throws IOException {
+    public void compile(final List<Stmt> declarations) throws IOException {
+
+        resolver.resolve(declarations);
+
         classFile.buildTo(
-                Paths.get("Test.class").toAbsolutePath(),
+                Paths.get("/zeronTarget/Test.class").toAbsolutePath(),
                 ClassDesc.of("Test"),
-                cb -> generateClass(cb, statements));
+                cb -> generateClass(cb, declarations));
     }
 
-    public void generateClass(final ClassBuilder classBuilder, final List<Stmt> statements) {
+    public void generateClass(final ClassBuilder classBuilder, final List<Stmt> declarations) {
         // emit main
+        for (final var declaration : declarations) {
+            switch (declaration) {
+                case Stmt.Var(Token name, TypeDescriptor type, Expr initializer, boolean isFinal) -> {
+                    classBuilder.withField(
+                            classBuilder.constantPool().utf8Entry(name.lexeme()),
+                            null, // get type from symbol table
+                            isFinal
+                                    ? ClassFile.ACC_STATIC & ClassFile.ACC_FINAL
+                                    : ClassFile.ACC_STATIC);
+                }
+                default -> throw new IllegalArgumentException();
+            }
+        }
         classBuilder.withMethod(
                 "main",
                 emptyVoidMethod(),
                 ClassFile.ACC_STATIC,
-                mb -> generateMain(mb, statements));
+                mb -> generateMain(mb, declarations));
     }
 
     public void generateMain(final MethodBuilder methodBuilder, final List<Stmt> statements) {
@@ -75,7 +93,7 @@ public final class Compiler {
                     todo("binary: implement resolver");
             case Expr.Grouping(Token paren, Expr expression) ->
                     emitValue(builder, expression);
-            case Expr.Literal(Object value) -> {
+            case Expr.Literal(Object value, TypeDescriptor typeDescriptor) -> {
                 switch (value) {
                     case String  s -> builder.ldc(s);
                     case Integer i -> builder.ldc(i);

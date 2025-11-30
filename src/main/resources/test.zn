@@ -1,3 +1,15 @@
-let a: &Map<String, &List<Person?>>;
+let doTimes(times: Int, action: () -> Unit) {
+    for (let i in 1..10) {
+        action();
+    }
+}
 
-let b: (Int, Int) -> Int = (a, b) -> a + b;
+let bruh = doTimes(3,
+    () -> { print("hello world"); }
+);
+
+let l = () -> 5;
+
+let main(args: String[]): Unit {
+    print(l);
+}

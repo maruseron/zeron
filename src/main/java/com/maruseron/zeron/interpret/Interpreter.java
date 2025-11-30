@@ -131,8 +131,8 @@ public final class Interpreter {
                 // then run the body
                 execute(new Stmt.Var(
                         iterationBind,
-                        new TypeDescriptor("<infer>"),
-                        new Expr.Literal(i),
+                        new TypeDescriptor("Int"),
+                        new Expr.Literal(i, new TypeDescriptor("Int")),
                         true));
                 execute(body);
             }
@@ -251,8 +251,8 @@ public final class Interpreter {
                     default -> throw new RuntimeError(operator, "Invalid binary operator.");
                 };
             }
-            case Expr.Call(Expr calleeExpr, Token paren, List<Expr> argumentExprs) -> {
-                final var callee    = evaluate(calleeExpr);
+            case Expr.Call(Token calleeExpr, Token paren, List<Expr> argumentExprs) -> {
+                final var callee    = evaluate(null);
                 final var arguments = new ArrayList<>();
                 for (final var argumentExpr : argumentExprs) {
                     arguments.add(evaluate(argumentExpr));
@@ -275,9 +275,9 @@ public final class Interpreter {
                     ensureBoolean(paren, evaluate(condition))
                         ? evaluate(thenExpr)
                         : evaluate(elseExpr);
-            case Expr.Lambda(List<Token> params, Stmt body) ->
+            case Expr.Lambda(Token arrow, List<Token> params, List<Stmt> body) ->
                 throw new IllegalStateException("not implemented yet");
-            case Expr.Literal(Object value) ->
+            case Expr.Literal(Object value, TypeDescriptor typeDescriptor) ->
                     value;
             case Expr.Logical(Expr leftExpr, Token operator, Expr rightExpr) -> {
                 final var left = evaluate(leftExpr);

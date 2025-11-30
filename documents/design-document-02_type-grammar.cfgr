@@ -1,25 +1,40 @@
 module TypeDescriptorGrammar;
 
 Identifier      : { 'a'-'z' | 'A'-'Z' | '0'-'9' } ;
-Type            : Primitive | Wrapper | Function | Generic ;
+Type            : Primitive | Wrapper | Function | Generic | Capture ;
 Primitive       : "Never" | "Unit" | "Int" | "Float" | "Boolean" | "String" ;
 Wrapper         : [ { ArraySpec | NullabilitySpec | MutabilitySpec } ":" ] Type ;
 ArraySpec       : "a" ;
 MutabilitySpec  : "m" ;
 NullabilitySpec : "n" ;
-Function        : "$" Arity ArgumentList ReturnType ;
+Function        : "$"  Arity ArgumentList ReturnType Identifier ;
+Lambda          : "\\" Arity ArgumentList ReturnType ;
 Arity           : Integer ;
 ArgumentList    : { Type } ; # (*  * is Arity  *)
 ReturnType      : Type ;
-Generic         : "@" Type Arity ArgumentList ;
+Generic         : "@" Arity Type ArgumentList ;
+TypeParamSpec   : "#" ;
+Capture         : TypeParamSpec Integer ;
+TypeParam       : TypeParamSpec Identifier ;
 
 # Int                              ::= Int
 # String?                          ::= n:String
 # &Person?                         ::= nm:Person
 # &List<Person?>                   ::= @ 1 m:List n:Person
+# List<T>                          ::= @ 1 List #0
 # Person?[]?[]?                    ::= nanan:Person ????? <- does this even make sense wtf
 #                                                            do i just make arrays generic
-# () -> () -> Unit                 ::= $ 0 $ 0 Unit
-# (() -> Unit) -> Unit             ::= $ 1 $ 0 Unit Unit
-# (() -> Unit) -> () -> Unit       ::= $ 1 $ 0 Unit $ 0 Unit
-# (Int, (Int?) -> Bool) -> String? ::= $ 2 Int $ 1 n:Int Bool n:String
+# () -> () -> Unit                 ::= \ 0 $ 0 Unit
+# (() -> Unit) -> Unit             ::= \ 1 $ 0 Unit Unit
+# (() -> Unit) -> () -> Unit       ::= \ 1 $ 0 Unit $ 0 Unit
+# (Int, (Int?) -> Bool) -> String? ::= \ 2 Int $ 1 n:Int Bool n:String
+#
+# map<T, R>(list: List<T>, transform: (T) -> R): List<R>
+#                                  ::= $ 2 @ 1 List #T $ 1 #T #R @ 1 List #R map
+
+# INFERENCE
+# let l = () -> 5;                 ::= \ 0 Int
+# let x = fun a b -> a + b;        ::= Lambda[
+#                                          Args=[Token a, Token b],
+#                                          Body=[Binary[Token a, Operator +, Token b]]
+#                                      ]

@@ -19,8 +19,10 @@ public final class Parser {
     private int current = 0;
 
     private record LoopMarker(LoopMarker enclosing) {}
+    private record LevelMarker(LevelMarker enclosing) {}
 
-    private LoopMarker loopMarker = null;
+    private LoopMarker loopMarker   = null;
+    private LevelMarker levelMarker = null;
 
     private Parser(List<Token> tokens) {
         this.tokens = tokens;
@@ -43,7 +45,8 @@ public final class Parser {
         try {
             if (match(LET)) return letDeclaration();
 
-            return statement();
+            if (levelMarker != null) return statement();
+            throw error(peek(), "Expected declaration at top level.");
         } catch (ParseError error) {
             synchronize();
             return null;
@@ -54,17 +57,14 @@ public final class Parser {
         boolean isFinal = !match(MUT);
         final var name = consume(IDENTIFIER, "Expect binding name.");
 
-        TypeDescriptor type = new TypeDescriptor("<infer>");
+        TypeDescriptor type = TypeDescriptor.inferred();
         if (match(LEFT_PAREN)) {
             if (!isFinal)
                 error(previous(), "Function declaration cannot be mutable.");
 
             return function(name);
         } else if (match(COLON)) {
-            // TODO: rework this into type consumer with modifiers like
-            //       [], ? and &
             type = collectType();
-            //consume(IDENTIFIER, "Expect type name.");
         }
 
         Expr initializer = null;
@@ -77,8 +77,10 @@ public final class Parser {
     }
 
     private Stmt.Function function(final Token name) {
-        final var descriptorString = new StringBuilder("(");
+        levelMarker = new LevelMarker(levelMarker);
+        final var descriptorString = new StringBuilder("$ ");
         final var parameterNames = new ArrayList<Token>();
+        final var parameterTypes = new ArrayList<TypeDescriptor>();
         if (!check(RIGHT_PAREN)) {
             do {
                 if (parameterNames.size() >= 254) {
@@ -86,16 +88,17 @@ public final class Parser {
                 }
                 parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 consume(COLON, "Expect ':' after parameter name.");
-                descriptorString.append(collectType().descriptor()).append(";");
+                parameterTypes.add(collectType());
             } while (match(COMMA));
         }
         consume(RIGHT_PAREN, "Expect ')' after parameters.");
-        descriptorString.append(")");
+        String returnType = "<infer>";
         if (match(COLON)) {
-            descriptorString.append(collectType().descriptor());
-        } else {
-            descriptorString.append("<infer>");
+            returnType = collectType().descriptor();
         }
+        descriptorString.append(parameterTypes.size()).append(" ");
+        parameterTypes.forEach(it -> descriptorString.append(it).append(" "));
+        descriptorString.append(returnType).append(" ").append(name.lexeme());
 
         List<Stmt> body;
         if (match(ARROW)) {
@@ -105,6 +108,7 @@ public final class Parser {
             body = block();
         }
 
+        levelMarker = levelMarker.enclosing();
         return new Stmt.Function(
                 name,
                 parameterNames,
@@ -114,7 +118,6 @@ public final class Parser {
 
     private TypeDescriptor collectType() {
         final var descriptorString = new StringBuilder();
-        System.out.println("Collecting type...");
 
         // if type starts with a left parenthesis, it's a lambda
         if (match(LEFT_PAREN)) {
@@ -134,21 +137,18 @@ public final class Parser {
             lambdaArgs.forEach(it ->
                     descriptorString.append(it.descriptor()).append(" "));
             descriptorString.append(lambdaReturnType.descriptor());
-            System.out.println("Generated type descriptor: " + descriptorString);
+
             return new TypeDescriptor(descriptorString.toString());
         }
 
         final var isMutable  = match(AMPERSAND);
-        System.out.println("Mutable flag: " + isMutable);
         final var typeName   = consume(IDENTIFIER, "Expect bind name.");
-        System.out.println("Type name: " + typeName.lexeme());
 
         // generic type open bracket e.g &List< ... >
         var isGeneric = false;
         List<String> inner = null;
         while (match(LESS)) {
             isGeneric = true;
-            System.out.println("Matched generic type...");
             inner = collectTypeArguments();
             consume(GREATER, "Expect '>' after type.");
         }
@@ -157,10 +157,8 @@ public final class Parser {
         while (match(HUH, LEFT_BRACKET)) {
             if (previous().type() == LEFT_BRACKET) {
                 consume(RIGHT_BRACKET, "Expect ']' after '['");
-                System.out.println("Matched array modifier...");
                 descriptorString.append("a");
             } else {
-                System.out.println("Matched mutable modifier...");
                 descriptorString.append("n");
             }
         }
@@ -172,8 +170,7 @@ public final class Parser {
 
         if (isGeneric) inner.forEach(it -> descriptorString.append(it).append(" "));
 
-        System.out.println("Generated type descriptor: " + descriptorString);
-        return new TypeDescriptor(descriptorString.toString().strip());
+        return new TypeDescriptor(descriptorString.toString());
     }
 
     private List<String> collectTypeArguments() {
@@ -186,6 +183,7 @@ public final class Parser {
 
     private Stmt statement() {
         if (match(BREAK)) return new Stmt.Break(break_());
+        if (match(RETURN)) return new Stmt.Return(return_());
         if (match(FOR)) return forStatement();
         if (match(IF)) return ifStatement();
         if (match(PRINT)) return printStatement();
@@ -201,6 +199,15 @@ public final class Parser {
 
         consume(SEMICOLON, "Expect ';' after break.");
         return previous();
+    }
+
+    private Expr return_() {
+        if (levelMarker == null)
+            error(previous(), "Can only return inside of a function.");
+
+        final var expr = expression();
+        consume(SEMICOLON, "Expect ';' after expression.");
+        return expr;
     }
 
     private Stmt forStatement() {
@@ -249,7 +256,7 @@ public final class Parser {
         final var keyword = previous();
         Expr condition = switch (keyword.type()) {
             // LOOP condition is always true
-            case LOOP -> new Expr.Literal(true);
+            case LOOP -> new Expr.Literal(true, TypeDescriptor.ofBoolean());
             case WHILE -> {
                 consume(LEFT_PAREN, "Expect '(' after while.");
                 final var res = expression();
@@ -261,8 +268,9 @@ public final class Parser {
                 // UNTIL generates a synthetic negation for while.
                 // It uses a fake NOT operator with "until" as lexeme
                 final var res = new Expr.Unary(
-                    new Token(NOT, previous().lexeme(), null,previous().line()),
-                    expression());
+                        new Token(NOT, previous().lexeme(), null, previous().line()),
+                        expression(),
+                        TypeDescriptor.inferred());
                 consume(RIGHT_PAREN, "Expect ')' after condition.");
                 yield res;
             }
@@ -303,37 +311,45 @@ public final class Parser {
             final var value = assignment();
 
             // left assign_op right === left = left op right
-            if (expr instanceof Expr.Variable(Token name)) {
+            if (expr instanceof Expr.Variable(Token name, _)) {
                 return switch (operator.type()) {
-                    case EQUAL -> new Expr.Assignment(name, value);
+                    case EQUAL -> new Expr.Assignment(name, value, null);
                     case PLUS_EQUAL -> new Expr.Assignment(
                             name,
                             new Expr.Binary(
                                     expr,
                                     // synthetic plus token from plus_equal
                                     new Token(PLUS, "+", null, operator.line()),
-                                    value));
+                                    value,
+                                    TypeDescriptor.inferred()),
+                            TypeDescriptor.inferred());
                     case MINUS_EQUAL -> new Expr.Assignment(
                             name,
                             new Expr.Binary(
                                     expr,
                                     // synthetic minus token from minus_equal
                                     new Token(MINUS, "-", null, operator.line()),
-                                    value));
+                                    value,
+                                    TypeDescriptor.inferred()),
+                            TypeDescriptor.inferred());
                     case STAR_EQUAL -> new Expr.Assignment(
                             name,
                             new Expr.Binary(
                                     expr,
                                     // synthetic star token from star_equal
                                     new Token(STAR, "*", null, operator.line()),
-                                    value));
+                                    value,
+                                    TypeDescriptor.inferred()),
+                            TypeDescriptor.inferred());
                     case SLASH_EQUAL -> new Expr.Assignment(
                             name,
                             new Expr.Binary(
                                     expr,
                                     // synthetic slash token from slash_equal
                                     new Token(SLASH, "/", null, operator.line()),
-                                    value));
+                                    value,
+                                    TypeDescriptor.inferred()),
+                            TypeDescriptor.inferred());
                     default -> throw new IllegalStateException("unreachable");
                 };
             }
@@ -374,7 +390,7 @@ public final class Parser {
         while (match(BANG_EQUAL, EQUAL_EQUAL)) {
             final var operator = previous();
             final var right = comparison();
-            expr = new Expr.Binary(expr, operator, right);
+            expr = new Expr.Binary(expr, operator, right, TypeDescriptor.ofBoolean());
         }
 
         return expr;
@@ -386,7 +402,7 @@ public final class Parser {
         while (match(GREATER, GREATER_EQUAL, LESS, LESS_EQUAL)) {
             final var operator = previous();
             final var right = term();
-            expr = new Expr.Binary(expr, operator, right);
+            expr = new Expr.Binary(expr, operator, right, TypeDescriptor.ofBoolean());
         }
 
         return expr;
@@ -398,7 +414,7 @@ public final class Parser {
         while (match(MINUS, PLUS)) {
             final var operator = previous();
             final var right = factor();
-            expr = new Expr.Binary(expr, operator, right);
+            expr = new Expr.Binary(expr, operator, right, TypeDescriptor.inferred());
         }
 
         return expr;
@@ -410,7 +426,7 @@ public final class Parser {
         while (match(SLASH, STAR)) {
             final var operator = previous();
             final var right = unary();
-            expr = new Expr.Binary(expr, operator, right);
+            expr = new Expr.Binary(expr, operator, right, TypeDescriptor.inferred());
         }
 
         return expr;
@@ -420,34 +436,19 @@ public final class Parser {
         if (match(NOT, MINUS, TYPEOF)) {
             final var operator = previous();
             final var right = unary();
-            return new Expr.Unary(operator, right);
+            return new Expr.Unary(operator, right, TypeDescriptor.inferred());
         }
 
         return call();
-    }
-
-    private Expr finishCall(Expr callee) {
-        final var arguments = new ArrayList<Expr>();
-        if (!check(RIGHT_PAREN)) {
-            do {
-                if (arguments.size() >= 254) {
-                    error(peek(), "Can't have more than 254 arguments.");
-                }
-                arguments.add(expression());
-            } while (match(COMMA));
-        }
-
-        final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
-
-        return new Expr.Call(callee, paren, arguments);
     }
 
     private Expr call() {
         var expr = primary();
 
         while (true) {
+            final var token = previous();
             if (match(LEFT_PAREN)) {
-                expr = finishCall(expr);
+                expr = finishCall(token);
             } else {
                 break;
             }
@@ -456,11 +457,28 @@ public final class Parser {
         return expr;
     }
 
+    private Expr finishCall(final Token callee) {
+        final var arguments = new ArrayList<Expr>();
+        if (!check(RIGHT_PAREN)) {
+            do {
+                if (arguments.size() >= 254) {
+                    error(peek(), "Can't have more than 254 arguments.");
+                }
+                arguments.add(expression());
+                System.out.println("added argument to call: " + arguments.getLast());
+            } while (match(COMMA));
+        }
+
+        final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
+
+        return new Expr.Call(callee, paren, arguments, TypeDescriptor.inferred());
+    }
+
     private Expr primary() {
-        if (match(FALSE)) return new Expr.Literal(false);
-        if (match(TRUE)) return new Expr.Literal(true);
-        if (match(NULL)) return new Expr.Literal(null);
-        if (match(UNIT)) return new Expr.Literal(new UnitLiteral());
+        if (match(FALSE)) return new Expr.Literal(false, TypeDescriptor.ofBoolean());
+        if (match(TRUE)) return new Expr.Literal(true, TypeDescriptor.ofBoolean());
+        if (match(NULL)) return new Expr.Literal(null, TypeDescriptor.ofNever().nullable());
+        if (match(UNIT)) return new Expr.Literal(new UnitLiteral(), TypeDescriptor.ofUnit());
 
         if (match(INT)) {
             final var number = previous();
@@ -469,13 +487,18 @@ public final class Parser {
                 return new Expr.Literal(new IntRangeLiteral(
                         (Integer)number.literal(),
                         previous(),
-                        (Integer)consume(INT, "Expect Integer after range operator").literal()));
+                        (Integer)consume(INT, "Expect Integer after range operator").literal()),
+                        TypeDescriptor.genericOf(new TypeDescriptor(":Range"), TypeDescriptor.ofInt()));
             }
-            return new Expr.Literal(number.literal());
+            return new Expr.Literal(number.literal(), TypeDescriptor.ofInt());
         }
 
         if (match(DOUBLE, STRING)) {
-            return new Expr.Literal(previous().literal());
+            return new Expr.Literal(
+                    previous().literal(),
+                    previous().type() == DOUBLE
+                            ? TypeDescriptor.ofDouble()
+                            : TypeDescriptor.ofString());
         }
 
         if (match(IF)) {
@@ -486,11 +509,11 @@ public final class Parser {
             final var thenExpr = expression();
             consume(ELSE, "'Expect 'else' after expression.");
             final var elseExpr = expression();
-            return new Expr.If(paren, condition, thenExpr, elseExpr);
+            return new Expr.If(paren, condition, thenExpr, elseExpr, TypeDescriptor.inferred());
         }
 
         if (match(IDENTIFIER)) {
-            return new Expr.Variable(previous());
+            return new Expr.Variable(previous(), TypeDescriptor.inferred());
         }
 
         // ( -> must disambiguate grouping vs lambda. how?
@@ -522,28 +545,35 @@ public final class Parser {
                 // none of the others
                 else {
                     consume(RIGHT_PAREN, "Expect ')' after expression.");
-                    return new Expr.Grouping(paren, new Expr.Variable(ident));
+                    return new Expr.Grouping(
+                            paren,
+                            new Expr.Variable(
+                                    ident,
+                                    TypeDescriptor.inferred()),
+                            TypeDescriptor.inferred());
                 }
             // empty paren: definitely a no param lambda
             } else if (match(RIGHT_PAREN)) {
                 return finishLambda(List.of());
             }
             consume(RIGHT_PAREN, "Expect ')' after expression.");
-            return new Expr.Grouping(paren, expression());
+            return new Expr.Grouping(paren, expression(), TypeDescriptor.inferred());
         }
 
         throw error(peek(), "Expect expression.");
     }
 
     private Expr.Lambda finishLambda(final List<Token> params) {
-        consume(ARROW, "Expect '->' after ')'.");
-        Stmt body = null;
-        if (check(LEFT_BRACE)) {
-            body = statement();
+        final var arrow = consume(ARROW, "Expect '->' after ')'.");
+        levelMarker = new LevelMarker(levelMarker);
+        List<Stmt> body;
+        if (match(LEFT_BRACE)) {
+            body = block();
         } else {
-            body = new Stmt.Return(expression());
+            body = List.of(new Stmt.Return(expression()));
         }
-        return new Expr.Lambda(params, body);
+        levelMarker = levelMarker.enclosing();
+        return new Expr.Lambda(arrow, params, body, TypeDescriptor.inferred());
     }
 
     private boolean match(final TokenType... types) {

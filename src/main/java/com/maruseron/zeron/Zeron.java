@@ -1,9 +1,8 @@
 package com.maruseron.zeron;
 
-import com.maruseron.zeron.ast.Expr;
+import com.maruseron.zeron.analize.ResolutionError;
+import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.Parser;
-import com.maruseron.zeron.compile.Compiler;
-import com.maruseron.zeron.interpret.Interpreter;
 import com.maruseron.zeron.interpret.RuntimeError;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
@@ -17,9 +16,9 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 
 public class Zeron {
-    private static final Interpreter interpreter = new Interpreter();
     static boolean hadError = false;
     static boolean hadRuntimeError = false;
+    static boolean hadResolutionError = false;
 
     static void main(final String... args) throws IOException {
         if (args.length > 1) {
@@ -39,6 +38,7 @@ public class Zeron {
 
         if (hadError) System.exit(65);
         if (hadRuntimeError) System.exit(70);
+        if (hadResolutionError) System.exit(71);
     }
 
     private static void runPrompt() throws IOException {
@@ -61,9 +61,10 @@ public class Zeron {
 
         if (hadError) return;
 
-        // final var compiler = new Compiler();
-        // compiler.compile(stmts);
-        interpreter.interpret(stmts);
+        final var resolver = new Resolver();
+        resolver.resolve(stmts);
+
+        if (hadResolutionError) return;
     }
 
     public static void error(final int line, final String message) {
@@ -88,5 +89,12 @@ public class Zeron {
         System.err.println(error.getMessage() +
                 "\n[line " + error.token.line() + "]");
         hadRuntimeError = true;
+    }
+
+    public static void resolutionError(final ResolutionError error) {
+        System.err.println(error.getMessage() +
+                "\n[line " + error.token.line() + "]");
+        hadResolutionError = true;
+        throw error;
     }
 }

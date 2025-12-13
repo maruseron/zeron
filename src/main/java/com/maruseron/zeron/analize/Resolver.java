@@ -8,7 +8,6 @@ import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.util.*;
-import java.util.stream.IntStream;
 
 public final class Resolver {
     // this table stores every name related to a type to avoid name collisions
@@ -29,7 +28,6 @@ public final class Resolver {
             List.of());
 
     public void resolve(final List<Stmt> statements) {
-
         for (final var statement : statements) {
             resolve(statement);
         }
@@ -60,6 +58,7 @@ public final class Resolver {
                 ensureIterable(iterableType);
                 // iterable is @ 1 Iterable TYPE. we extract TYPE by doing
                 // iterableType.typeParameters() and getting the first (and only)
+                assert iterableType != null;
                 final var typeParameter = ((Generic) iterableType).typeParameters().getFirst();
                 declare(SYNTHETIC_VAR, iterationBind, typeParameter, true);
                 define(iterationBind);

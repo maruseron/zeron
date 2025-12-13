@@ -3,6 +3,7 @@ package com.maruseron.zeron;
 import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.compile.Compiler;
 import com.maruseron.zeron.interpret.RuntimeError;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
@@ -63,10 +64,12 @@ public class Zeron {
 
         if (hadError) return;
 
-        final var resolver = new Resolver();
-        resolver.resolve(stmts);
+        final var compiler = new Compiler(stmts);
+        compiler.resolve();
 
         if (hadResolutionError) return;
+
+        compiler.compile();
     }
 
     public static void error(final int line, final String message) {

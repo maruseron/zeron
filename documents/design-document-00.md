@@ -12,11 +12,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig,
 Haxe, Julia, CoffeeScript (see until!), F#
 
 ### Wishlist for this bitch ass language:
-- Bottom type, Unit type and Type inference
-- HOW DO I MAKE VARIABLES ? DO I EVEN MAKE VARIABLES ? SHOULD THE LANGUAGE ONLY SUPPORT FUNCTION 
-  BINDS THAT ALWAYS RETURN THE SAME VARIABLE INSTEAD OF CONSTANTS AT ALL ? HELP HOLY SHIT I'M 
-  GOING INSANE
-- Free functions
+- Bottom type, Unit type and Type inference: done, except for lambda expressions, which need a 
+  receiver type
+- Free functions: but not directly as types
 - ~~Implicit returns?~~ support for single expression bodies
 - Lambdas
 - Ranges and iteration

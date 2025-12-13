@@ -89,12 +89,12 @@ public final class Compiler {
 
     private void emitValue(final CodeBuilder builder, final Expr expr) {
         switch (expr) {
-            case Expr.Binary(Expr left, Token operator, Expr right) ->
+            case Expr.Binary binary ->
                     todo("binary: implement resolver");
-            case Expr.Grouping(Token paren, Expr expression) ->
-                    emitValue(builder, expression);
-            case Expr.Literal(Object value, TypeDescriptor typeDescriptor) -> {
-                switch (value) {
+            case Expr.Grouping grouping ->
+                    emitValue(builder, grouping.expression);
+            case Expr.Literal literal -> {
+                switch (literal.value) {
                     case String  s -> builder.ldc(s);
                     case Integer i -> builder.ldc(i);
                     case Double  d -> builder.ldc(d);
@@ -110,9 +110,9 @@ public final class Compiler {
                     default -> throw new IllegalStateException("Unsupported value");
                 }
             }
-            case Expr.Unary(Token operator, Expr right) ->
+            case Expr.Unary unary ->
                     todo("unary: implement resolver");
-            case Expr.Variable(Token name) ->
+            case Expr.Variable name ->
                     todo("variable: implement resolver");
             default -> throw new UnsupportedOperationException();
         }

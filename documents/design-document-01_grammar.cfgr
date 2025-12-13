@@ -9,10 +9,9 @@ declaration     : varDecl | funDecl ; # statement
 
 varDecl         : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
 # full example  : let mut employees: &List<Person?> = expression;
-funDecl         : "let" IDENTIFIER "(" parameters ")" [":" type ]
-                ( "->" exprStmt | block ) ;
-# full example  : let doTimes(times: Int, f: () -> Unit) -> for (i : 1..times) f();
-
+funDecl         : "fn" IDENTIFIER "(" parameters ")" [":" type ]
+                ( "=" exprStmt | block ) ;
+# full example  : fn adder(a: Int, b: Int): Int = a + b;
 # full example  : let filterNonNull<T>(list: List<T?>): List<T> {
 #                     return list.filter { it != null };
 #                 }
@@ -66,7 +65,7 @@ primary         : Integer
                 | range ;
 
 ifExpr          : "if" "(" expression ")" "then" expression "else" expression ;
-lambda          : "(" lambdaparams ")" "->" statement ;
+lambda          : "(" identifier ")" "->" statement ;
 #                 NOTE: this grammar forces type inference. oh well!
 # small example : x -> x
 # full example  : (a, b) -> { return something; }

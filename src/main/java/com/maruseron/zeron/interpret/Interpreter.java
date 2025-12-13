@@ -16,7 +16,7 @@ public final class Interpreter {
 
     public Interpreter() {
         globals.define("clock",
-                new TypeDescriptor("()Int"),
+                TypeDescriptor.functionOf("clock", TypeDescriptor.ofInt()),
                 new ZeronCallable() {
                     @Override public String toString() { return "<native fn clock>"; }
                     @Override public int arity() { return 0; }
@@ -131,8 +131,8 @@ public final class Interpreter {
                 // then run the body
                 execute(new Stmt.Var(
                         iterationBind,
-                        new TypeDescriptor("Int"),
-                        new Expr.Literal(i, new TypeDescriptor("Int")),
+                        TypeDescriptor.ofInt(),
+                        new Expr.Literal(i, TypeDescriptor.ofInt()),
                         true));
                 execute(body);
             }
@@ -143,16 +143,16 @@ public final class Interpreter {
 
     public Object evaluate(final Expr expr) {
         return switch (expr) {
-            case Expr.Assignment(Token name, Expr expression) -> {
-                final var value = evaluate(expression);
-                environment.assign(name, value);
+            case Expr.Assignment assignment -> {
+                final var value = evaluate(assignment.value);
+                environment.assign(assignment.name, value);
                 yield value;
             }
-            case Expr.Binary(Expr leftExpr, Token operator, Expr rightExpr) -> {
-                final var left = evaluate(leftExpr);
-                final var right = evaluate(rightExpr);
+            case Expr.Binary binary -> {
+                final var left = evaluate(binary.left);
+                final var right = evaluate(binary.right);
 
-                yield switch (operator.type()) {
+                yield switch (binary.operator.type()) {
                     case BANG_EQUAL -> !Objects.equals(left, right);
                     case EQUAL_EQUAL -> Objects.equals(left, right);
                     case GREATER -> {
@@ -164,7 +164,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new RuntimeError(operator, "Invalid operands.");
+                        throw new RuntimeError(binary.operator, "Invalid operands.");
                     }
                     case GREATER_EQUAL -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -175,7 +175,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new RuntimeError(operator, "Invalid operands.");
+                        throw new RuntimeError(binary.operator, "Invalid operands.");
                     }
                     case LESS -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -186,7 +186,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new RuntimeError(operator, "Invalid operands.");
+                        throw new RuntimeError(binary.operator, "Invalid operands.");
                     }
                     case LESS_EQUAL -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -197,7 +197,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new RuntimeError(operator, "Invalid operands.");
+                        throw new RuntimeError(binary.operator, "Invalid operands.");
                     }
                     case PLUS -> {
                         // if any is a string, concatenate
@@ -213,7 +213,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is
                         // and the other isn't a string, so we throw
-                        throw new RuntimeError(operator, "Invalid operands.");
+                        throw new RuntimeError(binary.operator, "Invalid operands.");
                     }
                     case MINUS -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -224,7 +224,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new RuntimeError(operator, "Invalid operands.");
+                        throw new RuntimeError(binary.operator, "Invalid operands.");
                     }
                     case SLASH -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -235,7 +235,7 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new RuntimeError(operator, "Invalid operands.");
+                        throw new RuntimeError(binary.operator, "Invalid operands.");
                     }
                     case STAR  -> {
                         // if both are a number, check leftmost and convert both to that type
@@ -246,70 +246,72 @@ public final class Interpreter {
 
                         // if we've reached here, either none of them are numbers or only one is,
                         // throw
-                        throw new RuntimeError(operator, "Invalid operands.");
+                        throw new RuntimeError(binary.operator, "Invalid operands.");
                     }
-                    default -> throw new RuntimeError(operator, "Invalid binary operator.");
+                    default -> throw new RuntimeError(binary.operator, "Invalid binary operator.");
                 };
             }
-            case Expr.Call(Token calleeExpr, Token paren, List<Expr> argumentExprs) -> {
+            case Expr.Call call -> {
                 final var callee    = evaluate(null);
                 final var arguments = new ArrayList<>();
-                for (final var argumentExpr : argumentExprs) {
+                for (final var argumentExpr : call.arguments) {
                     arguments.add(evaluate(argumentExpr));
                 }
 
                 if (!(callee instanceof ZeronCallable callable)) {
-                    throw new RuntimeError(paren, "Callee must be a function.");
+                    throw new RuntimeError(call.paren, "Callee must be a function.");
                 }
 
                 if (arguments.size() != callable.arity()) {
-                    throw new RuntimeError(paren, "Expected " + callable.arity() + " arguments, " +
+                    throw new RuntimeError(call.paren, "Expected " + callable.arity() + " arguments, " +
                             "but got " + arguments.size() + " instead.");
                 }
 
                 yield callable.call(this, arguments);
             }
-            case Expr.Grouping(Token paren, Expr expression) ->
-                    evaluate(expression);
-            case Expr.If(Token paren, Expr condition, Expr thenExpr, Expr elseExpr) ->
-                    ensureBoolean(paren, evaluate(condition))
-                        ? evaluate(thenExpr)
-                        : evaluate(elseExpr);
-            case Expr.Lambda(Token arrow, List<Token> params, List<Stmt> body) ->
+            case Expr.Grouping grouping ->
+                    evaluate(grouping.expression);
+            case Expr.If iff ->
+                    ensureBoolean(iff.paren, evaluate(iff.condition))
+                        ? evaluate(iff.thenExpr)
+                        : evaluate(iff.elseExpr);
+            case Expr.Lambda lambda ->
                 throw new IllegalStateException("not implemented yet");
-            case Expr.Literal(Object value, TypeDescriptor typeDescriptor) ->
-                    value;
-            case Expr.Logical(Expr leftExpr, Token operator, Expr rightExpr) -> {
-                final var left = evaluate(leftExpr);
+            case Expr.Literal literal ->
+                    literal.value;
+            case Expr.Logical logical -> {
+                final var left = evaluate(logical.left);
 
-                yield switch (operator.type()) {
+                yield switch (logical.operator.type()) {
                 //  or short circuits to true if left is true  and evaluates right if left is false
                 // and short circuits to true if left is false and evaluates right if left is  true
-                    case OR  ->  ensureBoolean(operator, left) ? true  : evaluate(rightExpr);
-                    case AND -> !ensureBoolean(operator, left) ? false : evaluate(rightExpr);
-                    default  -> throw new RuntimeError(operator, "Invalid logical operator.");
+                    case OR  ->  ensureBoolean(logical.operator, left)
+                            ? true  : evaluate(logical.right);
+                    case AND -> !ensureBoolean(logical.operator, left)
+                            ? false : evaluate(logical.right);
+                    default  -> throw new RuntimeError(logical.operator, "Invalid logical operator.");
                 };
             }
-            case Expr.Unary(Token operator, Expr right) -> {
-                final var value = evaluate(right);
+            case Expr.Unary unary -> {
+                final var value = evaluate(unary.right);
 
-                yield switch (operator.type()) {
-                    case MINUS  -> switch (ensureNumber(operator, value)) {
+                yield switch (unary.operator.type()) {
+                    case MINUS  -> switch (ensureNumber(unary.operator, value)) {
                         case Double d  -> -d;
                         case Integer i -> -i;
                         default -> throw new IllegalStateException("Unsupported number type.");
                     };
-                    case NOT    -> !ensureBoolean(operator, value);
+                    case NOT    -> !ensureBoolean(unary.operator, value);
                     case TYPEOF -> {
-                        if (right instanceof Expr.Variable(Token name)) {
-                            yield environment.get(name).typeDescriptor().descriptor();
+                        if (unary.right instanceof Expr.Variable variable) {
+                            yield environment.get(variable.name).typeDescriptor().descriptor();
                         }
                         yield value.getClass().getSimpleName();
                     }
                     default     -> throw new IllegalStateException("Unsupported unary operator.");
                 };
             }
-            case Expr.Variable(Token name) -> environment.get(name).value();
+            case Expr.Variable variable -> environment.get(variable.name).value();
         };
     }
 

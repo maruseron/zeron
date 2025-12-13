@@ -1,9 +1,11 @@
 package com.maruseron.zeron.analize;
 
+import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
-public record Bind(Token declaration,
+public record Bind(Stmt declaration,
+                   Token name,
                    int lvt,
                    TypeDescriptor type,
                    Width width,
@@ -11,11 +13,11 @@ public record Bind(Token declaration,
                    boolean isFinal) {
 
     public Bind init() {
-        return new Bind(declaration, lvt, type, width, true, isFinal);
+        return new Bind(declaration, name, lvt, type, width, true, isFinal);
     }
 
     public Bind withType(final TypeDescriptor type) {
-        return new Bind(declaration, lvt, type, width, isInit, isFinal);
+        return new Bind(declaration, name, lvt, type, width, isInit, isFinal);
     }
 
     @Override

@@ -1,15 +1,38 @@
-let doTimes(times: Int, action: () -> Unit) {
+fn doTimes(times: Int, action: () -> Unit) {
     for (let i in 1..10) {
         action();
     }
 }
 
+// this should be an Unit
 let bruh = doTimes(3,
     () -> { print("hello world"); }
 );
 
-let l = () -> 5;
+// this should be () -> Unit
+fn printer() {
+    print("hello world");
+}
 
-let main(args: String[]): Unit {
-    print(l);
+// syntax error
+let add1: (Int) -> Int = a -> a + 1;
+
+// resolution error: printer is not a variable
+// explore options:
+//   ::printer
+//    &printer
+// let p = printer;
+
+let n = null;
+
+let s = "hello " + "world";
+
+let i = 1 + 5;
+
+// what happens with fn p = printer; ?
+
+let l: () -> Int = () -> 5;
+
+fn main(args: Array<String>): Unit {
+    print(add1(5));
 }

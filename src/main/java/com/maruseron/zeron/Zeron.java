@@ -15,6 +15,8 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 
+import static java.lang.IO.println;
+
 public class Zeron {
     static boolean hadError = false;
     static boolean hadRuntimeError = false;
@@ -22,7 +24,7 @@ public class Zeron {
 
     static void main(final String... args) throws IOException {
         if (args.length > 1) {
-            System.out.println("Usage: zeron [script]");
+            println("Usage: zeron [script]");
             System.exit(64);
         } else if (args.length == 1) {
             runFile(args[0]);
@@ -44,7 +46,7 @@ public class Zeron {
     private static void runPrompt() throws IOException {
         try (final var reader = new BufferedReader(new InputStreamReader(System.in))) {
             for (;;) {
-                System.out.println("> ");
+                println("> ");
                 final var line = reader.readLine();
                 if (line == null) break;
                 run(line);
@@ -72,8 +74,7 @@ public class Zeron {
     }
 
     private static void report(final int line, final String where, final String message) {
-        System.err.println(
-                "[line " + line + "] Error" + where + ": " + message);
+        println("[line " + line + "] Error" + where + ": " + message);
         hadError = true;
     }
 
@@ -86,14 +87,12 @@ public class Zeron {
     }
 
     public static void runtimeError(final RuntimeError error) {
-        System.err.println(error.getMessage() +
-                "\n[line " + error.token.line() + "]");
+        println(error.getMessage() + "\n[line " + error.token.line() + "]");
         hadRuntimeError = true;
     }
 
     public static void resolutionError(final ResolutionError error) {
-        System.err.println(error.getMessage() +
-                "\n[line " + error.token.line() + "]");
+        println(error.getMessage() + "\n[line " + error.token.line() + "]");
         hadResolutionError = true;
         throw error;
     }

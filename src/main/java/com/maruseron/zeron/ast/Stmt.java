@@ -17,7 +17,7 @@ public sealed interface Stmt {
     record For(Token iterationBind, Token in, Expr iterable, Stmt body) implements Stmt {}
 
     record Function(Token name, List<Token> parameters,
-                    TypeDescriptor typeDescriptor, List<Stmt> body) implements Stmt, Decl {}
+                    com.maruseron.zeron.domain.Function typeDescriptor, List<Stmt> body) implements Stmt, Decl {}
 
     record If(Token paren, Expr condition, Stmt thenBranch, Stmt elseBranch) implements Stmt {}
 

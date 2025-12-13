@@ -1,217 +1,87 @@
 package com.maruseron.zeron.domain;
 
 import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-public record TypeDescriptor(String descriptor) {
+public sealed interface TypeDescriptor permits
+        Never, Infer, Unit, Nominal, Generic, Function {
 
-    public TypeDescriptor(String descriptor) {
-        this.descriptor = descriptor.strip();
+    String descriptor();
+
+    static Nominal ofName(String name) {
+        return new Nominal(name, EnumSet.noneOf(TypeModifier.class));
     }
 
-    public TypeDescriptor or(TypeDescriptor other) {
-        return isInferred() ? other : this;
+    static Infer ofInfer() {
+        return Infer.INSTANCE;
     }
 
-    public static TypeDescriptor inferred() {
-        return new TypeDescriptor("<infer>");
+    static Never ofNever() { return Never.NEVER; }
+
+    static Unit ofUnit() {
+        return Unit.UNIT;
     }
 
-    public static TypeDescriptor ofNever() {
-        return new TypeDescriptor(":Never");
+    static Nominal ofInt() {
+        return ofName("Int");
     }
 
-    public static TypeDescriptor ofUnit() {
-        return new TypeDescriptor(":Unit");
+    static Nominal ofFloat() {
+        return ofName("Float");
     }
 
-    public static TypeDescriptor ofInt() {
-        return new TypeDescriptor(":Int");
+    static Nominal ofBoolean() {
+        return ofName("Boolean");
     }
 
-    public static TypeDescriptor ofDouble() {
-        return new TypeDescriptor(":Double");
+    static Nominal ofString() {
+        return ofName("String");
     }
 
-    public static TypeDescriptor ofBoolean() {
-        return new TypeDescriptor(":Boolean");
+    static Generic genericOf(final Nominal baseType,
+                             final List<TypeDescriptor> typeParams) {
+        return new Generic(baseType, typeParams);
     }
 
-    public static TypeDescriptor ofString() {
-        return new TypeDescriptor(":String");
+    static Generic genericOf(final Nominal baseType,
+                             final TypeDescriptor... typeParameters) {
+        return genericOf(baseType, List.of(typeParameters));
     }
 
-    public TypeDescriptor arrayOf() {
-        return isArray() ? this : new TypeDescriptor("a" + descriptor);
+    static Nominal newTypeParameter(final String name) {
+        return ofName(name).toTypeParameter();
     }
 
-    public static TypeDescriptor arrayOf(final TypeDescriptor typeDescriptor) {
-        return typeDescriptor.isArray() ? typeDescriptor : typeDescriptor.arrayOf();
-    }
-
-    public static TypeDescriptor arrayOf(final String descriptorString) {
-        final var typeDescriptor = new TypeDescriptor(descriptorString);
-        return typeDescriptor.isArray() ? typeDescriptor : typeDescriptor.arrayOf();
-    }
-
-    public TypeDescriptor mutable() {
-        return isMutable() ? this : new TypeDescriptor("m" + descriptor);
-    }
-
-    public static TypeDescriptor mutable(final TypeDescriptor typeDescriptor) {
-        return typeDescriptor.isMutable() ? typeDescriptor : typeDescriptor.mutable();
-    }
-
-    public static TypeDescriptor mutable(final String descriptorString) {
-        final var typeDescriptor = new TypeDescriptor(descriptorString);
-        return typeDescriptor.isMutable() ? typeDescriptor : typeDescriptor.mutable();
-    }
-
-    public TypeDescriptor nullable() {
-        return isNullable() ? this : new TypeDescriptor("n" + descriptor);
-    }
-
-    public static TypeDescriptor nullable(final TypeDescriptor typeDescriptor) {
-        return typeDescriptor.isNullable() ? typeDescriptor : typeDescriptor.nullable();
-    }
-
-    public static TypeDescriptor nullable(final String descriptorString) {
-        final var typeDescriptor = new TypeDescriptor(descriptorString);
-        return typeDescriptor.isMutable() ? typeDescriptor : typeDescriptor.nullable();
-    }
-
-    public static TypeDescriptor genericOf(final TypeDescriptor baseType,
-                                    final TypeDescriptor... typeParameters) {
-        final var types = Arrays
-                .stream(typeParameters)
-                .map(TypeDescriptor::toString)
-                .collect(Collectors.joining(" "));
-        return new TypeDescriptor("@ " + typeParameters.length + " " + baseType + " " + types);
-    }
-
-    public static TypeDescriptor functionOf(final String name,
+    static Function functionOf(final String name,
                                      final TypeDescriptor returnType,
                                      final TypeDescriptor... parameterTypes) {
-        final var types = Arrays
-                .stream(parameterTypes)
-                .map(TypeDescriptor::toString)
-                .collect(Collectors.joining(" "));
-        return new TypeDescriptor((name.isEmpty() ? "$ " : "\\ ")
-                + parameterTypes.length + " " + types + " " + returnType);
+        return new Function(name, returnType, List.of(parameterTypes));
     }
 
-    public static TypeDescriptor lambdaOf(final TypeDescriptor returnType,
-                                   final TypeDescriptor... parameterTypes) {
-        return functionOf("", returnType, parameterTypes);
+    static Function lambdaOf(final TypeDescriptor returnType,
+                             final TypeDescriptor parameterType) {
+        return functionOf("", returnType, parameterType == null
+                ? new TypeDescriptor[]{}
+                : new TypeDescriptor[]{parameterType});
     }
 
     // CHECKERS
 
-    public boolean isBuiltIn() {
-        return switch (descriptor) {
-            case ":Never", ":Unit", ":Int", ":Double", ":Boolean", ":String" -> true;
-            default -> false;
-        };
+    default TypeDescriptor or(TypeDescriptor other) {
+        return this instanceof Infer ? other : this;
     }
 
-    public boolean isInferred() {
-        return descriptor.equals("<infer>");
-    }
-
-    public boolean isArray() {
-        if (isFunction()) return false; // functions cannot be nullable
-        if (isGeneric()) return baseType().isNullable();
-        return descriptor.split(":")[0].contains("a");
-    }
-
-    public boolean isMutable() {
-        if (isFunction()) return false; // functions cannot be nullable
-        if (isGeneric()) return baseType().isNullable();
-        return descriptor.split(":")[0].contains("m");
-    }
-
-    public boolean isNullable() {
-        if (isFunction()) return false; // functions cannot be nullable
-        if (isGeneric()) return baseType().isNullable();
-        return descriptor.split(":")[0].contains("n");
-    }
-
-    public boolean isDoubleWidth() {
+    default boolean isDoubleWidth() {
         return false;
     }
 
     // FUNCTION DESCRIPTOR SUPPORT
+    /*
 
-    public boolean isFunction() {
-        return descriptor.startsWith("$") || descriptor.startsWith("\\");
-    }
-
-    public int arity() {
-        if (!isFunction()) {
-            throw new UnsupportedOperationException("Not a function descriptor.");
-        }
-
-        final var arityIndex = descriptor.indexOf("$") + 2;
-        return Integer.parseInt(descriptor.substring(arityIndex, arityIndex + 1));
-    }
-
-    public List<TypeDescriptor> functionParams() {
-        if (!isFunction()) {
-            throw new UnsupportedOperationException("Not a function descriptor.");
-        }
-
-        final var functionTokens = Arrays
-                .stream(descriptor.split(" "))
-                .skip(1) // skip $
-                .collect(Collectors.toCollection(LinkedList::new));
-
-        final var arity = Integer.parseInt(functionTokens.removeFirst());
-        final var args = new ArrayList<TypeDescriptor>();
-
-        for (int i = 0; i < arity; i++) {
-            args.add(new TypeDescriptor(Objects.requireNonNull(extractNext(functionTokens))));
-        }
-
-        return args;
-    }
-
-    public TypeDescriptor returnType() {
-        if (!isFunction()) {
-            throw new UnsupportedOperationException("Not a function descriptor.");
-        }
-
-        final var functionTokens = Arrays
-                .stream(descriptor.split(" "))
-                .skip(1) // skip $
-                .collect(Collectors.toCollection(LinkedList::new));
-
-        final var arity = Integer.parseInt(functionTokens.removeFirst()) + 1;
-        final var args = new ArrayList<TypeDescriptor>();
-
-        for (int i = 0; i < arity; i++) {
-            args.add(new TypeDescriptor(Objects.requireNonNull(extractNext(functionTokens))));
-        }
-
-        return args.getLast();
-    }
-
-    public TypeDescriptor withReturnType(final TypeDescriptor returnType) {
-        if (!isFunction()) {
-            throw new UnsupportedOperationException("Not a function descriptor.");
-        }
-
-        final var streamBuilder = Stream.builder().add("$").add(arity());
-        functionParams().forEach(streamBuilder);
-        return new TypeDescriptor(streamBuilder
-                .add(returnType)
-                .build()
-                .map(Object::toString)
-                .collect(Collectors.joining(" ")));
-    }
+    */
 
     // GENERIC DESCRIPTOR SUPPORT
 
+    /*
     public boolean isGeneric() {
         return descriptor().startsWith("@");
     }
@@ -268,28 +138,24 @@ public record TypeDescriptor(String descriptor) {
         // function
         if (token.startsWith("$")) {
             final var arity = Integer.parseInt(tokens.removeFirst());
-            final var type = new StringBuilder("$ " + arity);
+            final var type = Stream.<String>builder().add("$ " + arity);
             for (int i = 0; i < arity + 1; i++) {
-                type.append(" ").append(extractNext(tokens));
+                type.add(extractNext(tokens));
             }
-            return type.toString().strip();
+            return type.build().map(String::strip).collect(Collectors.joining(" "));
         }
         // generic
         if (token.startsWith("@")) {
             final var arity = Integer.parseInt(tokens.removeFirst());
-            final var type = new StringBuilder("@ " + arity);
+            final var type = Stream.<String>builder().add("@ " + arity);
             for (int i = 0; i < arity + 1; i++) { // must extract arity + 1
-                type.append(" ").append(extractNext(tokens));
+                type.add(extractNext(tokens));
             }
-            return type.toString().strip();
+            return type.build().map(String::strip).collect(Collectors.joining(" "));
         }
 
         // if neither, type is flat: split on wrapper flags (:)
         return token;
     }
-
-    @Override
-    public String toString() {
-        return descriptor;
-    }
+    */
 }

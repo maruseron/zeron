@@ -1,9 +1,13 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.domain.Function;
+import com.maruseron.zeron.domain.Infer;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
+import java.nio.file.FileStore;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -43,7 +47,10 @@ public final class SymbolTable {
          lvt   [] lvt   size 0
      */
 
+    private static final int GLOBAL = -1;
 
+    private final Map<String, TypeDescriptor> types = new HashMap<>();
+    private final Map<String, Bind> functions = new HashMap<>();
     private final Map<String, Bind> symbols = new HashMap<>();
 
     static class Scope { int size; Scope enclosing; }
@@ -66,8 +73,21 @@ public final class SymbolTable {
      */
     private final List<String> locals = new ArrayList<>();
 
-    public boolean contains(final Token name) {
+    public boolean containsFunction(final Token name) {
+        return functions.containsKey(name.lexeme());
+    }
+
+    public boolean containsSymbol(final Token name) {
         return symbols.containsKey(name.lexeme());
+    }
+
+    public Bind getFunction(final Token name) {
+        if (!functions.containsKey(name.lexeme())) {
+            Zeron.resolutionError(new ResolutionError(name,
+                    "Unknown symbol: " + name.lexeme()));
+        }
+
+        return functions.get(name.lexeme());
     }
 
     public Bind getSymbol(final Token name) {
@@ -87,32 +107,61 @@ public final class SymbolTable {
         return locals;
     }
 
-    public int declare(final Token name, final TypeDescriptor type, final boolean isFinal) {
-        if (scope == null)
-            return declareGlobal(name, type, isFinal); // -1
+    public void declareFunction(final Stmt declaration,
+                                final Token name,
+                                final TypeDescriptor type) {
+        if (containsFunction(name)) {
+            Zeron.resolutionError(new ResolutionError(name,
+                    "Already a function bound to this name."));
+            return;
+        }
 
-        return declareLocal(name, type, isFinal);      // last lvt idx
+        functions.put(name.lexeme(), new Bind(
+                declaration,
+                name,
+                GLOBAL,
+                type,
+                Width.FUNCTION,
+                true,
+                true));
     }
 
-    private int declareGlobal(final Token name, final TypeDescriptor type, final boolean isFinal) {
-        if (contains(name)) {
+    public int declareSymbol(final Stmt declaration,
+                             final Token name,
+                             final TypeDescriptor type,
+                             final boolean isFinal) {
+        if (scope == null)
+            return declareGlobal(declaration, name, type, isFinal); // -1
+
+        return declareLocal(declaration, name, type, isFinal);      // last lvt idx
+    }
+
+    private int declareGlobal(final Stmt declaration,
+                              final Token name,
+                              final TypeDescriptor type,
+                              final boolean isFinal) {
+        if (containsSymbol(name)) {
             Zeron.resolutionError(new ResolutionError(name,
                     "Already a symbol bound to this name."));
             return -2;
         }
 
         symbols.put(name.lexeme(), new Bind(
+                declaration,
                 name,
-                -1,
+                GLOBAL,
                 type,
                 type.isDoubleWidth() ? Width.DOUBLE : Width.SINGLE,
                 false,
                 isFinal));
-        return -1;
+        return GLOBAL;
     }
 
-    private int declareLocal(final Token name, final TypeDescriptor type, final boolean isFinal) {
-        if (contains(name)) {
+    private int declareLocal(final Stmt declaration,
+                             final Token name,
+                             final TypeDescriptor type,
+                             final boolean isFinal) {
+        if (containsSymbol(name)) {
             Zeron.resolutionError(new ResolutionError(name,
                     "Already a symbol bound to this name."));
             return -2;
@@ -120,6 +169,7 @@ public final class SymbolTable {
 
         final var lvt = locals.size();
         symbols.put(name.lexeme(), new Bind(
+                declaration,
                 name,
                 lvt,
                 type,
@@ -133,9 +183,9 @@ public final class SymbolTable {
     }
 
     void define(Token name) {
-        if (!contains(name)) {
+        if (!containsSymbol(name)) {
             Zeron.resolutionError(new ResolutionError(name,
-                    "Unknown symbol."));
+                    "Unknown symbol: " + name.lexeme()));
             return;
         }
 
@@ -143,7 +193,7 @@ public final class SymbolTable {
     }
 
     void setResolvedType(final Token name, final TypeDescriptor resolvedType) {
-        if (!contains(name) || !getSymbol(name).type().isInferred()) {
+        if (!containsSymbol(name) || !(getSymbol(name).type() instanceof Infer)) {
             Zeron.resolutionError(new ResolutionError(name,
                     "Cannot resolve type of non-inferred bind."));
         }
@@ -154,7 +204,7 @@ public final class SymbolTable {
     void setResolvedReturnType(final Token name, final TypeDescriptor resolvedType) {
         symbols.computeIfPresent(
                 name.lexeme(),
-                (_, v) -> v.withType(v.type().withReturnType(resolvedType)));
+                (_, v) -> v.withType(((Function)v.type()).withReturnType(resolvedType)));
     }
 
     void beginScope() {
@@ -188,7 +238,12 @@ public final class SymbolTable {
 
     @Override
     public String toString() {
-        final var sb = new StringBuilder("[ >>= Symbols ]\n");
+        final var sb = new StringBuilder("[ >>= Top level functions ]\n");
+        for (final var entry : functions.entrySet()) {
+            sb.append(">  ").append(entry.getKey())
+                    .append(": ").append(entry.getValue()).append("\n");
+        }
+        sb.append("[ >>= Top level symbols ]\n");
         for (final var entry : symbols.entrySet()) {
             sb.append(">  ").append(entry.getKey())
               .append(": ").append(entry.getValue()).append("\n");

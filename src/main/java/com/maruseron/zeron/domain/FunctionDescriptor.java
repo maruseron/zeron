@@ -4,19 +4,33 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-public final class Function implements TypeDescriptor {
+public final class FunctionDescriptor implements TypeDescriptor {
     private final String name;
     private final TypeDescriptor returnType;
     private final List<TypeDescriptor> parameters;
+    private final boolean isNullable;
 
-    Function(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters) {
+    FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters,
+                       boolean isNullable) {
         this.name = name;
         this.returnType = returnType;
         this.parameters = parameters;
+        this.isNullable = isNullable;
     }
 
     public String name() {
         return name;
+    }
+
+    @Override
+    public String descriptor() {
+        // function annotation + arity
+        return "$ " + parameters.size() + " "
+                // parameters in order
+                + parameters.stream()
+                .map(TypeDescriptor::descriptor).collect(Collectors.joining(" ")) + " "
+                // return type !
+                + returnType;
     }
 
     public TypeDescriptor returnType() {
@@ -27,29 +41,32 @@ public final class Function implements TypeDescriptor {
         return parameters;
     }
 
-    @Override
-    public String descriptor() {
-            // function annotation + arity
-        return "$ " + parameters.size() + " "
-            // parameters in order
-                + parameters.stream()
-                    .map(TypeDescriptor::descriptor).collect(Collectors.joining(" ")) + " "
-            // return type !
-            + returnType;
-    }
-
     public int arity() {
         return parameters().size();
     }
 
-    public Function withReturnType(final TypeDescriptor returnType) {
-        return new Function(name, returnType, parameters);
+    public boolean isLambda() {
+        return name.isEmpty();
+    }
+
+    @Override
+    public boolean isNullable() {
+        return false;
+    }
+
+    @Override
+    public TypeDescriptor toNullable() {
+        return null;
+    }
+
+    public FunctionDescriptor toReturnType(final TypeDescriptor returnType) {
+        return new FunctionDescriptor(name, returnType, parameters, isNullable);
     }
 
     @Override
     public boolean equals(Object obj) {
         if (obj == this) return true;
-        if (!(obj instanceof Function that)) return false;
+        if (!(obj instanceof FunctionDescriptor that)) return false;
         return Objects.equals(this.parameters, that.parameters) &&
                Objects.equals(this.returnType, that.returnType);
     }

@@ -59,7 +59,7 @@ public final class Resolver {
                 // iterable is @ 1 Iterable TYPE. we extract TYPE by doing
                 // iterableType.typeParameters() and getting the first (and only)
                 assert iterableType != null;
-                final var typeParameter = ((Generic) iterableType).typeParameters().getFirst();
+                final var typeParameter = ((GenericDescriptor) iterableType).typeParameters().getFirst();
                 declare(SYNTHETIC_VAR, iterationBind, typeParameter, true);
                 define(iterationBind);
                 resolve(body);
@@ -85,9 +85,9 @@ public final class Resolver {
                 TypeDescriptor resolvedType = var.type();
 
                 // let i: Int;
-                if    (!(resolvedType instanceof Infer)
+                if    (!(resolvedType instanceof InferDescriptor)
                     && var.initializer() == null
-                    && !(resolvedType instanceof Nullable n && n.isNullable())) {
+                    && !(resolvedType.isNullable())) {
                     Zeron.resolutionError(new ResolutionError(var.name(),
                             "A variable with no initializer must be of a nullable type."));
                 }
@@ -97,18 +97,18 @@ public final class Resolver {
                     resolvedType = resolve(var.initializer());
                     resolvedType = ensureAssignable(var.type(), resolvedType);
                     // replaces <infer> with resolved type for the symbol
-                    if (var.type() instanceof Infer)
+                    if (var.type() instanceof InferDescriptor)
                         symbols.setResolvedType(var.name(), resolvedType);
                 }
 
                 // if initializer ends up as <infer>, it means expectedType was <infer> as well
-                if (resolvedType instanceof Infer) {
+                if (resolvedType instanceof InferDescriptor) {
                     Zeron.resolutionError(new ResolutionError(var.name(),
                             "Cannot infer type from declaration."));
                 }
 
                 System.out.print(" resolved variable " + var.name().lexeme() + " ");
-                if (!(var.type() instanceof Infer)) {
+                if (!(var.type() instanceof InferDescriptor)) {
                     System.out.println(var.type() + " from explicit type");
                 } else {
                     System.out.println(resolvedType + " from initializer");
@@ -157,7 +157,7 @@ public final class Resolver {
                 final var rightType = resolve(binary.right);
                 System.out.println("resolving binary   " + leftType + " " + binary.operator.lexeme() + " " + rightType);
                 ensureExact(binary.operator, leftType, rightType);
-                final var resolvedType = leftType.or(rightType);
+                final var resolvedType = leftType.orElse(rightType);
 
                 binary.setType(resolvedType);
                 yield resolvedType;
@@ -171,11 +171,11 @@ public final class Resolver {
             // return the expression tagged with the resolved type
             case Expr.Call call -> {
                 // must disambiguate call between lambda (variable) and function (global)
-                Function descriptor;
+                FunctionDescriptor descriptor;
                 // check locally first, since lambdas shadow functions
                 if (symbols.containsSymbol(call.callee)) {
                     final var symbol = getSymbol(call.callee);
-                    if (symbol instanceof Function f) {
+                    if (symbol instanceof FunctionDescriptor f) {
                         descriptor = f;
                     } else {
                         Zeron.resolutionError(new ResolutionError(call.callee,
@@ -197,7 +197,7 @@ public final class Resolver {
 
                 // if a lambda return type is inferred,
                 // parameters are generic
-                if (descriptor.returnType() instanceof Infer) {
+                if (descriptor.returnType() instanceof InferDescriptor) {
                     descriptor = resolveCallWithTypes(call.callee, call.arguments);
                 } else {
                     for (var i = 0; i < call.arguments.size(); i++) {
@@ -274,8 +274,8 @@ public final class Resolver {
         symbols.define(name);
     }
 
-    private Function getFunction(final Token name) {
-        return (Function) symbols.getFunction(name).type();
+    private FunctionDescriptor getFunction(final Token name) {
+        return (FunctionDescriptor) symbols.getFunction(name).type();
     }
 
     private TypeDescriptor getSymbol(final Token name) {
@@ -287,12 +287,12 @@ public final class Resolver {
     }
 
     // TODO: fix
-    private Function resolveLambda(final Expr.Lambda lambda) {
+    private FunctionDescriptor resolveLambda(final Expr.Lambda lambda) {
         beginScope();
         final var param = lambda.param;
         // lambdas are always of the form a -> ...; so the parameter type starts as infer
         final var paramType = TypeDescriptor.ofInfer();
-        final var generified = TypeDescriptor.newTypeParameter(param.lexeme().toUpperCase());
+        final var generified = TypeDescriptor.ofName(param.lexeme().toUpperCase());
         declare(SYNTHETIC_VAR, param, generified, true);
         define(param);
 
@@ -317,7 +317,7 @@ public final class Resolver {
         return TypeDescriptor.lambdaOf(currentReturnType, paramType);
     }
 
-    private Function resolveCallWithTypes(final Token callee, final List<Expr> arguments) {
+    private FunctionDescriptor resolveCallWithTypes(final Token callee, final List<Expr> arguments) {
         // original e.g (#A, #B) -> infer
         final var lambdaTypeDesc = getSymbol(callee);
         // candidate e.g (Int, Int) -> infer
@@ -348,9 +348,10 @@ public final class Resolver {
                 function.name(),
                 function.typeDescriptor().returnType(),
                 function.body());
-        if (function.typeDescriptor().returnType() instanceof Infer)
+        if (function.typeDescriptor().returnType() instanceof InferDescriptor) {
             symbols.setResolvedReturnType(function.name(), resolvedType);
-        System.out.println(" resolved function " + function.name().lexeme() + " -> " + function.typeDescriptor().withReturnType(resolvedType));
+        }
+        System.out.println(" resolved function " + function.name().lexeme() + " -> " + symbols.getFunction(function.name()).type());
         endScope();
     }
 
@@ -361,13 +362,13 @@ public final class Resolver {
         for (final var statement : statements) {
             if (statement instanceof Stmt.Return(Expr value)) {
                 var returnType = resolve(value);
-                if (currentType instanceof Infer)
+                if (currentType instanceof InferDescriptor)
                     currentType = returnType;
                 else
                     ensureAssignable(currentType, returnType);
             }
         }
-        return currentType instanceof Infer ? TypeDescriptor.ofUnit() : currentType;
+        return currentType instanceof InferDescriptor ? TypeDescriptor.ofUnit() : currentType;
     }
 
     public TypeDescriptor ensureExact(final Token where,
@@ -375,18 +376,19 @@ public final class Resolver {
                                       final TypeDescriptor typeB) {
         // e.g     Int + Int      ::= Int, excluding
         //     <infer> + <infer>, which should refine to a resolution error
-        if ((!(typeA instanceof Infer) && !(typeB instanceof Infer)) && typeA.equals(typeB)) return typeA;
+        if (typeA.isWellFormed() && typeB.isWellFormed() && typeA.equals(typeB)) return typeA;
         // e.g T + Int ::= Int
-        if (   typeA instanceof Infer  && !(typeB instanceof Infer)) return typeB;
+        // if (typeA instanceof TypeParameter ta && ta.isTypeParameter() && typeB.isWellFormed()) return typeB;
         // e.g Int + T ::= Int
-        if ( !(typeA instanceof Infer) &&   typeB instanceof Infer) return typeA;
+        // if (typeA.isWellFormed() && typeB instanceof TypeParameter tb && tb.isTypeParameter()) return typeA;
         // e.g T + R   ::= enforce T and R are the same
-        if (typeA instanceof TypeParameter && typeB instanceof TypeParameter)
+        /*if (   typeA instanceof TypeParameter ta && ta.isTypeParameter()
+            && typeB instanceof TypeParameter tb && tb.isTypeParameter())
             // INFERENCE FAILURE
-            return TypeDescriptor.ofNever();
+            return TypeDescriptor.ofNever();*/
 
         Zeron.resolutionError(new ResolutionError(where, "Types are not exact."));
-        return typeA instanceof Infer ? typeB : typeA;
+        return typeA instanceof InferDescriptor ? typeB : typeA;
     }
 
     public void ensureCommonParent(final Token where,
@@ -400,7 +402,7 @@ public final class Resolver {
     public TypeDescriptor ensureAssignable(TypeDescriptor expectedType, TypeDescriptor resolvedType) {
         /* if (expectedType.isInferred() && resolvedType.isInferred())
             throw new IllegalStateException("Double inferred types"); */
-        return expectedType instanceof Infer ? resolvedType : expectedType;
+        return expectedType instanceof InferDescriptor ? resolvedType : expectedType;
     }
 
     public void ensureBoolean(TypeDescriptor type) { }

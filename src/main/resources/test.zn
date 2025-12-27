@@ -1,13 +1,20 @@
 let s = "hello " + "world";
 
-let i = 5;
+let i = 5 + 1;
 
-let d = 5.3;
+let f = 5.3;
 
-let b = true;
+let bool = true;
 
-let u = unit;
+let theUnit = unit;
+
+fn adder(a: Float, b: Float) = a + b;
 
 fn main() {
-    print(s);
-}
+    let inner = 5;
+    if (bool) {
+        print(inner);
+    } else {
+        print("hello world");
+    }
+ }

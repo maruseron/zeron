@@ -1,13 +1,12 @@
-package com.maruseron.zeron.analize;
+package com.maruseron.zeron.domain;
 
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.analize.Bind;
+import com.maruseron.zeron.analize.ResolutionError;
+import com.maruseron.zeron.analize.Width;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.domain.Function;
-import com.maruseron.zeron.domain.Infer;
-import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
-import java.nio.file.FileStore;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -47,7 +46,7 @@ public final class SymbolTable {
          lvt   [] lvt   size 0
      */
 
-    private static final int GLOBAL = -1;
+    public static final int GLOBAL = -1;
 
     private final Map<String, TypeDescriptor> types = new HashMap<>();
     private final Map<String, Bind> functions = new HashMap<>();
@@ -88,6 +87,15 @@ public final class SymbolTable {
         }
 
         return functions.get(name.lexeme());
+    }
+
+    public FunctionDescriptor getFunctionType(final Token name) {
+        if (!functions.containsKey(name.lexeme())) {
+            Zeron.resolutionError(new ResolutionError(name,
+                    "Unknown symbol: " + name.lexeme()));
+        }
+
+        return (FunctionDescriptor) functions.get(name.lexeme()).type();
     }
 
     public Bind getSymbol(final Token name) {
@@ -177,12 +185,19 @@ public final class SymbolTable {
                 false,
                 isFinal));
 
-        scope.size++;
-        locals.add(name.lexeme());
+        if (type.isDoubleWidth()) {
+            scope.size += 2;
+            locals.add(name.lexeme());
+            locals.add(name.lexeme());
+        } else {
+            scope.size++;
+            locals.add(name.lexeme());
+        }
+
         return lvt;
     }
 
-    void define(Token name) {
+    public void define(Token name) {
         if (!containsSymbol(name)) {
             Zeron.resolutionError(new ResolutionError(name,
                     "Unknown symbol: " + name.lexeme()));
@@ -192,8 +207,8 @@ public final class SymbolTable {
         symbols.computeIfPresent(name.lexeme(), (_, v) -> v.init());
     }
 
-    void setResolvedType(final Token name, final TypeDescriptor resolvedType) {
-        if (!containsSymbol(name) || !(getSymbol(name).type() instanceof Infer)) {
+    public void setResolvedType(final Token name, final TypeDescriptor resolvedType) {
+        if (!containsSymbol(name) || !(getSymbol(name).type() instanceof InferDescriptor)) {
             Zeron.resolutionError(new ResolutionError(name,
                     "Cannot resolve type of non-inferred bind."));
         }
@@ -201,19 +216,19 @@ public final class SymbolTable {
         symbols.computeIfPresent(name.lexeme(), (_, v) -> v.withType(resolvedType));
     }
 
-    void setResolvedReturnType(final Token name, final TypeDescriptor resolvedType) {
-        symbols.computeIfPresent(
+    public void setResolvedReturnType(final Token name, final TypeDescriptor resolvedType) {
+        functions.computeIfPresent(
                 name.lexeme(),
-                (_, v) -> v.withType(((Function)v.type()).withReturnType(resolvedType)));
+                (_, v) -> v.withType(((FunctionDescriptor)v.type()).toReturnType(resolvedType)));
     }
 
-    void beginScope() {
+    public void beginScope() {
         final var parent = scope;
         scope = new Scope();
         scope.enclosing = parent;
     }
 
-    void endScope() {
+    public void endScope() {
         for (int i = 0; i < scope.size; i++) {
             // pop local
             final var name = locals.removeLast();

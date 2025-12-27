@@ -1,161 +1,157 @@
 package com.maruseron.zeron.domain;
 
+import java.lang.constant.ClassDesc;
+import java.lang.constant.ConstantDesc;
+import java.lang.constant.ConstantDescs;
 import java.util.*;
 
-public sealed interface TypeDescriptor permits
-        Never, Infer, Unit, Nominal, Generic, Function {
+public sealed interface TypeDescriptor
+        permits InferDescriptor, NeverDescriptor, UnitDescriptor,
+                IntDescriptor, FloatDescriptor, BooleanDescriptor, StringDescriptor,
+                NominalDescriptor, FunctionDescriptor, GenericDescriptor {
 
-    String descriptor();
+    // Contract
+    String name();
 
-    static Nominal ofName(String name) {
-        return new Nominal(name, EnumSet.noneOf(TypeModifier.class));
+    TypeDescriptor toNullable();
+    boolean isNullable();
+
+    // Overridable defaults
+    default String descriptor() {
+        final var modifierDescriptors = isNullable() ? "?" : "";
+        return modifierDescriptors + ":" + name();
     }
 
-    static Infer ofInfer() {
-        return Infer.INSTANCE;
+    // General transforms
+    default TypeDescriptor orElse(TypeDescriptor other) {
+        return this instanceof InferDescriptor ? other : this;
     }
 
-    static Never ofNever() { return Never.NEVER; }
-
-    static Unit ofUnit() {
-        return Unit.UNIT;
+    // Checkers
+    default boolean isDoubleWidth() {
+        return false;
     }
 
-    static Nominal ofInt() {
-        return ofName("Int");
+    default boolean isWellFormed() {
+        return !(this instanceof InferDescriptor); // && !(this instanceof TypeParameter tp && tp.isTypeParameter());
     }
 
-    static Nominal ofFloat() {
-        return ofName("Float");
+    // Factories
+    static TypeDescriptor of(String typeName) {
+        return switch (typeName) {
+            case "Never"   -> ofNever();
+            case "Infer"   -> ofInfer();
+            case "Unit"    -> ofUnit();
+            case "Int"     -> ofInt();
+            case "Float"   -> ofFloat();
+            case "Boolean" -> ofBoolean();
+            case "String"  -> ofString();
+            default -> ofName(typeName);
+        };
     }
 
-    static Nominal ofBoolean() {
-        return ofName("Boolean");
+    static NominalDescriptor ofName(String name) {
+        return new NominalDescriptor(name, false);
     }
 
-    static Nominal ofString() {
-        return ofName("String");
+    static InferDescriptor ofInfer() {
+        return InferDescriptor.INSTANCE;
     }
 
-    static Generic genericOf(final Nominal baseType,
-                             final List<TypeDescriptor> typeParams) {
-        return new Generic(baseType, typeParams);
+    static NeverDescriptor ofNever() {
+        return NeverDescriptor.NEVER;
     }
 
-    static Generic genericOf(final Nominal baseType,
-                             final TypeDescriptor... typeParameters) {
+    static UnitDescriptor ofUnit() {
+        return UnitDescriptor.UNIT;
+    }
+
+    static IntDescriptor ofInt() {
+        return IntDescriptor.INT;
+    }
+
+    static FloatDescriptor ofFloat() {
+        return FloatDescriptor.FLOAT;
+    }
+
+    static BooleanDescriptor ofBoolean() {
+        return BooleanDescriptor.BOOLEAN;
+    }
+
+    static StringDescriptor ofString() {
+        return StringDescriptor.STRING;
+    }
+
+    static GenericDescriptor genericOf(final NominalDescriptor baseType,
+                                       final List<TypeDescriptor> typeParams) {
+        return new GenericDescriptor(baseType, typeParams);
+    }
+
+    static GenericDescriptor genericOf(final NominalDescriptor baseType,
+                                       final TypeDescriptor... typeParameters) {
         return genericOf(baseType, List.of(typeParameters));
     }
 
-    static Nominal newTypeParameter(final String name) {
-        return ofName(name).toTypeParameter();
+    static FunctionDescriptor functionOf(final String name,
+                                         final TypeDescriptor returnType,
+                                         final TypeDescriptor... parameterTypes) {
+        return new FunctionDescriptor(name, returnType, List.of(parameterTypes), false);
     }
 
-    static Function functionOf(final String name,
-                                     final TypeDescriptor returnType,
-                                     final TypeDescriptor... parameterTypes) {
-        return new Function(name, returnType, List.of(parameterTypes));
-    }
-
-    static Function lambdaOf(final TypeDescriptor returnType,
-                             final TypeDescriptor parameterType) {
+    static FunctionDescriptor lambdaOf(final TypeDescriptor returnType,
+                                       final TypeDescriptor parameterType) {
         return functionOf("", returnType, parameterType == null
                 ? new TypeDescriptor[]{}
                 : new TypeDescriptor[]{parameterType});
     }
 
-    // CHECKERS
-
-    default TypeDescriptor or(TypeDescriptor other) {
-        return this instanceof Infer ? other : this;
+    static ClassDesc toJavaClassDesc(final TypeDescriptor td) {
+        return switch (td) {
+            case InferDescriptor    id ->
+                    throw new IllegalArgumentException(
+                            "Infer is not a valid concrete type");
+            case NeverDescriptor    nd -> ConstantDescs.CD_void;
+            case UnitDescriptor     ud -> ConstantDescs.CD_Void;
+            case IntDescriptor      id -> ConstantDescs.CD_int;
+            case FloatDescriptor    fd -> ConstantDescs.CD_double;
+            case BooleanDescriptor  bd -> ConstantDescs.CD_boolean;
+            case StringDescriptor   sd -> ConstantDescs.CD_String;
+            case NominalDescriptor  nd -> ClassDesc.of(nd.name());
+            case FunctionDescriptor fd ->
+                    throw new IllegalArgumentException(
+                            "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");
+            case GenericDescriptor  gd ->
+                    throw new UnsupportedOperationException(
+                            "Generic descriptors to be implemented");
+        };
     }
 
-    default boolean isDoubleWidth() {
-        return false;
+    static ClassDesc toJavaWrapper(final TypeDescriptor td) {
+        return switch (td) {
+            case InferDescriptor    id ->
+                    throw new IllegalArgumentException(
+                            "Infer is not a valid concrete type");
+            case NeverDescriptor    nd ->
+                    throw new IllegalArgumentException(
+                            "Illegal conversion: NeverDescriptor to java.constant.ClassDesc");
+            case UnitDescriptor     ud ->
+                    throw new IllegalArgumentException(
+                            "Illegal conversion: UnitDescriptor to java.constant.ClassDesc");
+            case IntDescriptor      id -> ConstantDescs.CD_Integer;
+            case FloatDescriptor    fd -> ConstantDescs.CD_Double;
+            case BooleanDescriptor  bd -> ConstantDescs.CD_Boolean;
+            case StringDescriptor   sd ->
+                    throw new IllegalArgumentException(
+                            "Illegal conversion: StringDescriptor to java.constant.ClassDesc");
+            case NominalDescriptor  nd ->
+                    throw new IllegalArgumentException(
+                            "Illegal conversion: NominalDescriptor to java.constant.ClassDesc");
+            case FunctionDescriptor fd ->
+                    throw new IllegalArgumentException(
+                            "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");
+            case GenericDescriptor  gd ->
+                    throw new UnsupportedOperationException(
+                            "Generic descriptors to be implemented");
+        };
     }
-
-    // FUNCTION DESCRIPTOR SUPPORT
-    /*
-
-    */
-
-    // GENERIC DESCRIPTOR SUPPORT
-
-    /*
-    public boolean isGeneric() {
-        return descriptor().startsWith("@");
-    }
-
-    public TypeDescriptor baseType() {
-        if (!isGeneric()) {
-            throw new UnsupportedOperationException("Not a generic descriptor.");
-        }
-
-        return Arrays
-                .stream(descriptor.split(" "))
-                .skip(2) // skip $ arity
-                .findFirst()
-                .map(TypeDescriptor::new)
-                .orElseThrow();
-    }
-
-    public List<TypeDescriptor> typeParameters() {
-        if (!isGeneric()) {
-            throw new UnsupportedOperationException("Not a generic descriptor.");
-        }
-
-        final var genericTokens = Arrays
-                .stream(descriptor.split(" "))
-                .skip(1) // skip $
-                .collect(Collectors.toCollection(LinkedList::new));
-
-        // @ 1 List Person
-        final var arity = Integer.parseInt(genericTokens.removeFirst());
-        genericTokens.removeFirst();
-        final var args = new ArrayList<TypeDescriptor>();
-
-        for (int i = 0; i < arity; i++) {
-            args.add(new TypeDescriptor(Objects.requireNonNull(extractNext(genericTokens))));
-        }
-
-        return args;
-    }
-
-    private Stream<String> bits() {
-        final var tokens = Arrays
-                .stream(descriptor.split(" "))
-                .collect(Collectors.toCollection(LinkedList::new));
-        return Stream.iterate(
-                extractNext(tokens),
-                Objects::nonNull,
-                _ -> extractNext(tokens));
-    }
-
-    private String extractNext(final LinkedList<String> tokens) {
-        if (tokens.isEmpty()) return null;
-
-        final var token = tokens.removeFirst();
-        // function
-        if (token.startsWith("$")) {
-            final var arity = Integer.parseInt(tokens.removeFirst());
-            final var type = Stream.<String>builder().add("$ " + arity);
-            for (int i = 0; i < arity + 1; i++) {
-                type.add(extractNext(tokens));
-            }
-            return type.build().map(String::strip).collect(Collectors.joining(" "));
-        }
-        // generic
-        if (token.startsWith("@")) {
-            final var arity = Integer.parseInt(tokens.removeFirst());
-            final var type = Stream.<String>builder().add("@ " + arity);
-            for (int i = 0; i < arity + 1; i++) { // must extract arity + 1
-                type.add(extractNext(tokens));
-            }
-            return type.build().map(String::strip).collect(Collectors.joining(" "));
-        }
-
-        // if neither, type is flat: split on wrapper flags (:)
-        return token;
-    }
-    */
 }

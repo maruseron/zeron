@@ -1,5 +1,6 @@
 package com.maruseron.zeron.ast;
 
+import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
@@ -17,7 +18,7 @@ public sealed interface Stmt {
     record For(Token iterationBind, Token in, Expr iterable, Stmt body) implements Stmt {}
 
     record Function(Token name, List<Token> parameters,
-                    com.maruseron.zeron.domain.Function typeDescriptor, List<Stmt> body) implements Stmt, Decl {}
+                    FunctionDescriptor typeDescriptor, List<Stmt> body) implements Stmt, Decl {}
 
     record If(Token paren, Expr condition, Stmt thenBranch, Stmt elseBranch) implements Stmt {}
 

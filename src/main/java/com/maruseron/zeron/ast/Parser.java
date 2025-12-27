@@ -3,7 +3,7 @@ package com.maruseron.zeron.ast;
 import com.maruseron.zeron.IntRangeLiteral;
 import com.maruseron.zeron.UnitLiteral;
 import com.maruseron.zeron.Zeron;
-import com.maruseron.zeron.domain.Nominal;
+import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
@@ -99,7 +99,10 @@ public final class Parser {
 
         List<Stmt> body;
         if (match(EQUAL)) {
-            body = List.of(expressionStatement());
+            // if single expression, change return type to infer
+            returnType = TypeDescriptor.ofInfer();
+            body = List.of(new Stmt.Return(expression()));
+            consume(SEMICOLON, "Expect ';' after expression.");
         } else {
             consume(LEFT_BRACE, "Expect '{' before function body.");
             body = block();
@@ -139,17 +142,13 @@ public final class Parser {
             consume(GREATER, "Expect '>' after type.");
         }
 
-        // match [] or ?
-        var isNullable = false;
-        if (match(HUH)) {
-            isNullable = true;
-        }
+        // match ?
+        var isNullable = match(HUH);
 
-        TypeDescriptor type = TypeDescriptor.ofName(typeName.lexeme());
+        TypeDescriptor type = TypeDescriptor.of(typeName.lexeme());
 
-        if (isMutable) type = ((Nominal)type).toMutable();
-        if (isNullable) type = ((Nominal)type).toNullable();
-        if (isGeneric) type = TypeDescriptor.genericOf((Nominal)type, inner);
+        if (isNullable) type = type.toNullable();
+        if (isGeneric) type = TypeDescriptor.genericOf((NominalDescriptor)type, inner);
 
         return type;
     }

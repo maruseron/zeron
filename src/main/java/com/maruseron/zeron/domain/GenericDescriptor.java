@@ -4,13 +4,28 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-public final class Generic implements TypeDescriptor {
-    private final Nominal baseType;
+public final class GenericDescriptor implements TypeDescriptor {
+    private final NominalDescriptor baseType;
     private final List<TypeDescriptor> typeParameters;
 
-    public Generic(Nominal baseType, List<TypeDescriptor> typeParameters) {
+    public GenericDescriptor(NominalDescriptor baseType, List<TypeDescriptor> typeParameters) {
         this.baseType = baseType;
         this.typeParameters = typeParameters;
+    }
+
+    @Override
+    public String name() {
+        return baseType.name();
+    }
+
+    @Override
+    public TypeDescriptor toNullable() {
+        return null;
+    }
+
+    @Override
+    public boolean isNullable() {
+        return false;
     }
 
     @Override
@@ -23,7 +38,7 @@ public final class Generic implements TypeDescriptor {
                 + typeParameters.stream().map(TypeDescriptor::descriptor).collect(Collectors.joining(" "));
     }
 
-    public Nominal baseType() {
+    public NominalDescriptor baseType() {
         return baseType;
     }
 
@@ -34,7 +49,7 @@ public final class Generic implements TypeDescriptor {
     @Override
     public boolean equals(Object obj) {
         if (obj == this) return true;
-        if (!(obj instanceof Generic that)) return false;
+        if (!(obj instanceof GenericDescriptor that)) return false;
         return Objects.equals(this.baseType,       that.baseType) &&
                Objects.equals(this.typeParameters, that.typeParameters);
     }

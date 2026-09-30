@@ -8,13 +8,20 @@ import java.util.*;
 public sealed interface TypeDescriptor
         permits InferDescriptor, NeverDescriptor, UnitDescriptor,
                 IntDescriptor, FloatDescriptor, BooleanDescriptor, StringDescriptor,
-                NominalDescriptor, FunctionDescriptor, GenericDescriptor {
+            NominalDescriptor, FunctionDescriptor, GenericDescriptor,
+            NullableDescriptor, NullDescriptor {
 
     // Contract
     String name();
 
-    TypeDescriptor toNullable();
-    boolean isNullable();
+    default TypeDescriptor toNullable() {
+        if (this instanceof NullableDescriptor || this instanceof NullDescriptor) return this;
+        return new NullableDescriptor(this);
+    }
+
+    default boolean isNullable() {
+        return this instanceof NullableDescriptor;
+    }
 
     // Overridable defaults
     default String descriptor() {
@@ -51,7 +58,7 @@ public sealed interface TypeDescriptor
     }
 
     static NominalDescriptor ofName(String name) {
-        return new NominalDescriptor(name, false);
+        return new NominalDescriptor(name);
     }
 
     static InferDescriptor ofInfer() {
@@ -60,6 +67,10 @@ public sealed interface TypeDescriptor
 
     static NeverDescriptor ofNever() {
         return NeverDescriptor.NEVER;
+    }
+
+    static NullDescriptor ofNull() {
+        return NullDescriptor.NULL;
     }
 
     static UnitDescriptor ofUnit() {
@@ -95,7 +106,7 @@ public sealed interface TypeDescriptor
     static FunctionDescriptor functionOf(final String name,
                                          final TypeDescriptor returnType,
                                          final TypeDescriptor... parameterTypes) {
-        return new FunctionDescriptor(name, returnType, List.of(parameterTypes), false);
+        return new FunctionDescriptor(name, returnType, List.of(parameterTypes));
     }
 
     static FunctionDescriptor lambdaOf(final TypeDescriptor returnType,
@@ -117,9 +128,15 @@ public sealed interface TypeDescriptor
             case BooleanDescriptor  bd -> ConstantDescs.CD_boolean;
             case StringDescriptor   sd -> ConstantDescs.CD_String;
             case NominalDescriptor  nd -> ClassDesc.of(nd.name());
-            case FunctionDescriptor fd ->
-                    throw new IllegalArgumentException(
-                            "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");
+            case FunctionDescriptor fd -> ClassDesc.of(FunctionShapeNames.interfaceName(fd));
+            case NullableDescriptor nd -> switch (nd.baseType()) {
+                case IntDescriptor _ -> ConstantDescs.CD_Integer;
+                case FloatDescriptor _ -> ConstantDescs.CD_Double;
+                case BooleanDescriptor _ -> ConstantDescs.CD_Boolean;
+                case NeverDescriptor _ -> ConstantDescs.CD_Object;
+                default -> toJavaClassDesc(nd.baseType());
+            };
+            case NullDescriptor _ -> ConstantDescs.CD_Object;
             case GenericDescriptor  gd ->
                     throw new UnsupportedOperationException(
                             "Generic descriptors to be implemented");
@@ -149,6 +166,8 @@ public sealed interface TypeDescriptor
             case FunctionDescriptor fd ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");
+                case NullableDescriptor nd -> toJavaClassDesc(nd);
+                case NullDescriptor _ -> ConstantDescs.CD_Object;
             case GenericDescriptor  gd ->
                     throw new UnsupportedOperationException(
                             "Generic descriptors to be implemented");

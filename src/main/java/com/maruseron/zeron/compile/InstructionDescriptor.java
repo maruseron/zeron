@@ -1,9 +1,6 @@
 package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.domain.TypeDescriptor;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
 import java.lang.classfile.Instruction;
 import java.lang.classfile.Opcode;
 import java.lang.classfile.instruction.ConstantInstruction;
@@ -26,8 +23,8 @@ import java.lang.constant.ClassDesc;
   { return,                                      none, 0, Unit, V,                null         }
  */
 public record InstructionDescriptor(Instruction instruction, Opcode.Kind kind, int size,
-                                    @Nullable TypeDescriptor zeronType, ClassDesc javaType,
-                                    @Nullable ClassDesc autoBoxer) {
+                                    TypeDescriptor zeronType, ClassDesc javaType,
+                                    ClassDesc autoBoxer) {
 
     public InstructionDescriptor {
         switch (kind) {
@@ -37,6 +34,8 @@ public record InstructionDescriptor(Instruction instruction, Opcode.Kind kind, i
                         zeronType = TypeDescriptor.ofInt();
                     case DLOAD, DLOAD_0, DLOAD_1, DLOAD_2, DLOAD_3, DLOAD_W ->
                         zeronType = TypeDescriptor.ofFloat();
+                    case ALOAD, ALOAD_0, ALOAD_1, ALOAD_2, ALOAD_3, ALOAD_W ->
+                        zeronType = null;
                     default -> throw new IllegalStateException();
                 }
             }
@@ -73,7 +72,7 @@ public record InstructionDescriptor(Instruction instruction, Opcode.Kind kind, i
     }
 
     @Override
-    public @NotNull String toString() {
+    public String toString() {
         return "InstructionDescriptor " + instruction +
                 " [ kind=" + kind +
                 ", size=" + size +

@@ -2,8 +2,6 @@ package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
-import org.jetbrains.annotations.Nullable;
-
 import java.lang.classfile.Instruction;
 import java.lang.classfile.Opcode;
 import java.lang.constant.ClassDesc;
@@ -51,7 +49,7 @@ public final class FunctionModel {
                              final Opcode.Kind type,
                              final TypeDescriptor zeronType,
                              final ClassDesc javaType,
-                   @Nullable final ClassDesc autoBoxer) {
+                             final ClassDesc autoBoxer) {
         instructions.add(new InstructionDescriptor(i, type, i.sizeInBytes(), zeronType,
                 javaType,
                 autoBoxer));

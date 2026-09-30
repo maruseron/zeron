@@ -5,16 +5,87 @@ let i = 5 + 1;
 let f = 5.3;
 
 let bool = true;
+let mut globalCount = 1;
 
 let theUnit = unit;
 
+let maybeInt: Int? = 7;
+let emptyInt: Int? = null;
+let maybeFloat: Float? = 2.5;
+let maybeBool: Boolean? = true;
+let maybeText: String? = "present";
+let emptyText: String? = null;
+
 fn adder(a: Float, b: Float) = a + b;
 
+fn apply(value: Int, operation: (Int) -> Int): Int {
+    return operation(value);
+}
+
+fn applyFloat(value: Float, operation: (Float) -> Float): Float {
+    return operation(value);
+}
+
+fn applyString(value: String, operation: (String) -> String): String {
+    return operation(value);
+}
+
+fn passNullableInt(value: Int?): Int? {
+    return value;
+}
+
 fn main() {
+    globalCount += 2;
+    print(globalCount);
+
+    let mut localCount = 4;
+    localCount = localCount + 3;
+    print(localCount);
+    {
+        let mut localCount = 20;
+        localCount += 2;
+        print(localCount);
+    }
+    localCount += 1;
+    print(localCount);
+    let assignmentValue = localCount = 9;
+    print(assignmentValue);
+    print(localCount);
+
     let inner = 5;
     if (bool) {
         print(inner);
     } else {
         print("hello world");
     }
+    let addOne = x -> x + 1;
+    let combine = (left, right) -> left + right;
+    let base = 7;
+    let addBase = value -> value + base;
+    let greeting = "hello";
+    let decorate = text -> greeting + " " + text;
+    print(addBase(5));
+    print(decorate("world"));
+    let noParam = () -> 99;
+    print(addOne(10));
+    print(combine(3, 7));
+    print(noParam());
+    print(apply(41, addOne));
+    print(apply(21, y -> y * 2));
+    print(applyFloat(2.5, number -> number * 2.0));
+    print(applyString("zeron", text -> text + "!"));
+    let localMaybe: Int? = 3;
+    let localNull: Int? = null;
+    let localDefault: Int?;
+    print(localMaybe);
+    print(localNull);
+    print(localDefault);
+    print(maybeInt);
+    print(emptyInt);
+    print(maybeFloat);
+    print(maybeBool);
+    print(maybeText);
+    print(emptyText);
+    print(passNullableInt(9));
+    print(passNullableInt(null));
  }

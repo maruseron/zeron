@@ -1,6 +1,7 @@
 package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.domain.FunctionDescriptor;
+import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
@@ -26,7 +27,8 @@ public sealed interface Stmt {
 
     record Return(Expr value) implements Stmt {}
 
-    record Var(Token name, TypeDescriptor type, Expr initializer, boolean isFinal) implements Stmt, Decl {}
+    record Var(Token name, TypeDescriptor type, Expr initializer,
+               BindingMutability mutability) implements Stmt, Decl {}
 
     record While(Token keyword, Expr condition, Stmt body) implements Stmt {}
 }

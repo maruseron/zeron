@@ -1,6 +1,7 @@
 package com.maruseron.zeron.interpret;
 
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.HashMap;
@@ -37,9 +38,9 @@ public final class Environment {
     void assign(Token name, Object value) {
         if (values.containsKey(name.lexeme())) {
             final var entry = values.get(name.lexeme());
-            if (entry.isFinal()) {
+            if (!entry.mutability().isReassignable()) {
                 throw new RuntimeError(name,
-                        "Cannot reassign final variable '" + name.lexeme() + "'.");
+                        "Cannot reassign immutable binding '" + name.lexeme() + "'.");
             }
             values.put(name.lexeme(), entry.withValue(value));
             return;
@@ -54,7 +55,7 @@ public final class Environment {
     }
 
     void define(final String name, final TypeDescriptor typeDescriptor, final Object value,
-                final boolean isInitialized, final boolean isFinal) {
-        values.put(name, new Bind(name, typeDescriptor, value, isInitialized, isFinal));
+            final boolean isInitialized, final BindingMutability mutability) {
+        values.put(name, new Bind(name, typeDescriptor, value, isInitialized, mutability));
     }
 }

@@ -19,16 +19,6 @@ public final class GenericDescriptor implements TypeDescriptor {
     }
 
     @Override
-    public TypeDescriptor toNullable() {
-        return null;
-    }
-
-    @Override
-    public boolean isNullable() {
-        return false;
-    }
-
-    @Override
     public String descriptor() {
         // generic annotation + arity
         return "@ " + typeParameters.size() + " "

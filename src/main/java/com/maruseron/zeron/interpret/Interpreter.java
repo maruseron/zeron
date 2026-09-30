@@ -4,6 +4,7 @@ import com.maruseron.zeron.IntRangeLiteral;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.ArrayList;
@@ -23,7 +24,7 @@ public final class Interpreter {
                     @Override public Object call(Interpreter interpreter, List<Object> arguments) {
                         return (int)(System.currentTimeMillis() / 1000L);
                     }
-                }, true, true);
+                }, true, BindingMutability.IMMUTABLE);
 
     }
 
@@ -79,7 +80,7 @@ public final class Interpreter {
                     System.out.println(evaluate(expression));
             case Stmt.Return(Expr value) ->
                 throw new IllegalStateException("not implemented yet");
-            case Stmt.Var(Token name, TypeDescriptor type, Expr initializer, boolean isFinal) -> {
+            case Stmt.Var(Token name, TypeDescriptor type, Expr initializer, BindingMutability mutability) -> {
                 Object value = null;
                 if (initializer != null) {
                     value = evaluate(initializer);
@@ -90,7 +91,7 @@ public final class Interpreter {
                         type,
                         value,
                         initializer != null,
-                        isFinal);
+                        mutability);
             }
             case Stmt.While(Token keyword, Expr condition, Stmt body) -> {
                 switch (keyword.type()) {
@@ -133,7 +134,7 @@ public final class Interpreter {
                         iterationBind,
                         TypeDescriptor.ofInt(),
                         new Expr.Literal(i, TypeDescriptor.ofInt()),
-                        true));
+                        BindingMutability.IMMUTABLE));
                 execute(body);
             }
         } finally {

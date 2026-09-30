@@ -8,14 +8,10 @@ public final class FunctionDescriptor implements TypeDescriptor {
     private final String name;
     private final TypeDescriptor returnType;
     private final List<TypeDescriptor> parameters;
-    private final boolean isNullable;
-
-    FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters,
-                       boolean isNullable) {
+    FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters) {
         this.name = name;
         this.returnType = returnType;
         this.parameters = parameters;
-        this.isNullable = isNullable;
     }
 
     public String name() {
@@ -49,18 +45,8 @@ public final class FunctionDescriptor implements TypeDescriptor {
         return name.isEmpty();
     }
 
-    @Override
-    public boolean isNullable() {
-        return false;
-    }
-
-    @Override
-    public TypeDescriptor toNullable() {
-        return null;
-    }
-
     public FunctionDescriptor toReturnType(final TypeDescriptor returnType) {
-        return new FunctionDescriptor(name, returnType, parameters, isNullable);
+        return new FunctionDescriptor(name, returnType, parameters);
     }
 
     @Override

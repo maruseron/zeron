@@ -2,7 +2,6 @@ package com.maruseron.zeron.domain;
 
 public final class NeverDescriptor implements TypeDescriptor {
     public static final NeverDescriptor NEVER = new NeverDescriptor();
-    public static final NeverDescriptor NULLABLE_NEVER = new NeverDescriptor();
 
     private NeverDescriptor() {}
 
@@ -13,16 +12,6 @@ public final class NeverDescriptor implements TypeDescriptor {
 
     @Override
     public String toString() {
-        return "TypeDescriptor.Never" + (isNullable() ? "?" : "");
-    }
-
-    @Override
-    public NeverDescriptor toNullable() {
-        return NULLABLE_NEVER;
-    }
-
-    @Override
-    public boolean isNullable() {
-        return this == NULLABLE_NEVER;
+        return "TypeDescriptor.Never";
     }
 }

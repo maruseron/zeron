@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.Objects;
@@ -12,14 +13,14 @@ public record Bind(Stmt declaration,
                    TypeDescriptor type,
                    Width width,
                    boolean isInit,
-                   boolean isFinal) {
+                   BindingMutability mutability) {
 
     public Bind init() {
-        return new Bind(declaration, name, lvt, type, width, true, isFinal);
+        return new Bind(declaration, name, lvt, type, width, true, mutability);
     }
 
     public Bind withType(final TypeDescriptor type) {
-        return new Bind(declaration, name, lvt, type, width, isInit, isFinal);
+        return new Bind(declaration, name, lvt, type, width, isInit, mutability);
     }
 
     @Override
@@ -37,12 +38,12 @@ public record Bind(Stmt declaration,
         result = 31 * result + Objects.hashCode(type);
         result = 31 * result + Objects.hashCode(width);
         result = 31 * result + Boolean.hashCode(isInit);
-        result = 31 * result + Boolean.hashCode(isFinal);
+        result = 31 * result + Objects.hashCode(mutability);
         return result;
     }
 
     @Override
     public String toString() {
-        return "{ type: " + type + ", final: " + isFinal + " }";
+        return "{ type: " + type + ", mutability: " + mutability + " }";
     }
 }

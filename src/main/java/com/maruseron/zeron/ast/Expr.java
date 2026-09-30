@@ -224,13 +224,13 @@ public sealed interface Expr {
 
     final class Lambda implements Expr {
         public final Token arrow;
-        public final Token param;
+        public final List<Token> params;
         public final List<Stmt> body;
         private TypeDescriptor type;
 
-        public Lambda(Token arrow, Token param, List<Stmt> body, TypeDescriptor type) {
+        public Lambda(Token arrow, List<Token> params, List<Stmt> body, TypeDescriptor type) {
             this.arrow = arrow;
-            this.param = param;
+            this.params = params == null ? List.of() : params;
             this.body = body;
             this.type = type;
         }
@@ -247,19 +247,19 @@ public sealed interface Expr {
             if (obj == this) return true;
             if (!(obj instanceof Lambda that)) return false;
             return  Objects.equals(this.arrow, that.arrow) &&
-                    Objects.equals(this.param, that.param) &&
+                    Objects.equals(this.params, that.params) &&
                     Objects.equals(this.body,  that.body)  &&
                     Objects.equals(this.type,  that.type)  ;
         }
 
         public int hashCode() {
-            return Objects.hash(arrow, param, body, type);
+            return Objects.hash(arrow, params, body, type);
         }
 
         public String toString() {
             return "Lambda[" +
                     "arrow=" + arrow + ", " +
-                    "param=" + param + ", " +
+                    "params=" + params + ", " +
                     "body="  + body  + ", " +
                     "type="  + type  + ']';
         }

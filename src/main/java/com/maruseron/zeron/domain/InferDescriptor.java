@@ -13,16 +13,6 @@ public final class InferDescriptor implements TypeDescriptor {
     }
 
     @Override
-    public TypeDescriptor toNullable() {
-        return this;
-    }
-
-    @Override
-    public boolean isNullable() {
-        return false;
-    }
-
-    @Override
     public String descriptor() {
         return "<Infer>";
     }

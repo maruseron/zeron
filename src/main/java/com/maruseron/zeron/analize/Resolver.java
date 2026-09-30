@@ -20,7 +20,7 @@ public final class Resolver {
             SYNTHETIC_IDENTIFIER,
             TypeDescriptor.ofNever(),
             null,
-            true);
+            BindingMutability.IMMUTABLE);
     public static final Stmt SYNTHETIC_FUN = new Stmt.Function(
             SYNTHETIC_IDENTIFIER,
             List.of(),
@@ -60,13 +60,13 @@ public final class Resolver {
                 // iterableType.typeParameters() and getting the first (and only)
                 assert iterableType != null;
                 final var typeParameter = ((GenericDescriptor) iterableType).typeParameters().getFirst();
-                declare(SYNTHETIC_VAR, iterationBind, typeParameter, true);
+                declare(SYNTHETIC_VAR, iterationBind, typeParameter, BindingMutability.IMMUTABLE);
                 define(iterationBind);
                 resolve(body);
                 endScope();
             }
-            case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
-                ensureBoolean(resolve(condition));
+            case Stmt.If(Token keyword, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
+                ensureBoolean(resolve(condition), keyword);
                 resolve(thenBranch);
                 if (elseBranch != null) resolve(elseBranch);
             }
@@ -81,7 +81,7 @@ public final class Resolver {
             case Stmt.Var var -> {
                 System.out.println("resolving variable " + var.name().lexeme() + " " + var.type());
 
-                declare(var, var.name(), var.type(), var.isFinal());
+                declare(var, var.name(), var.type(), var.mutability());
                 TypeDescriptor resolvedType = var.type();
 
                 // let i: Int;
@@ -95,7 +95,7 @@ public final class Resolver {
                 // let x = expression; OR let x: T = expression;
                 if (var.initializer() != null) {
                     resolvedType = resolve(var.initializer());
-                    resolvedType = ensureAssignable(var.type(), resolvedType);
+                    resolvedType = ensureAssignable(var.type(), resolvedType, var.name());
                     // replaces <infer> with resolved type for the symbol
                     if (var.type() instanceof InferDescriptor)
                         symbols.setResolvedType(var.name(), resolvedType);
@@ -116,8 +116,8 @@ public final class Resolver {
 
                 define(var.name());
             }
-            case Stmt.While(Token _, Expr condition, Stmt body) -> {
-                resolve(condition);
+            case Stmt.While(Token keyword, Expr condition, Stmt body) -> {
+                ensureBoolean(resolve(condition), keyword);
                 resolve(body);
             }
         }
@@ -129,6 +129,107 @@ public final class Resolver {
         }
     }
 
+    private void ensureImmutableCaptures(final Expr.Lambda lambda) {
+        final var lambdaLocals = new HashSet<String>();
+        for (final var param : lambda.params) {
+            lambdaLocals.add(param.lexeme());
+        }
+        walkCaptureUsage(lambda.body, lambdaLocals);
+    }
+
+    private void walkCaptureUsage(final List<Stmt> statements, final Set<String> localNames) {
+        for (final var statement : statements) {
+            walkCaptureUsage(statement, localNames);
+        }
+    }
+
+    private void walkCaptureUsage(final Stmt statement, final Set<String> localNames) {
+        switch (statement) {
+            case Stmt.Block(List<Stmt> block) -> walkCaptureUsage(block, localNames);
+            case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
+                walkCaptureUsage(condition, localNames);
+                if (thenBranch != null) walkCaptureUsage(thenBranch, localNames);
+                if (elseBranch != null) walkCaptureUsage(elseBranch, localNames);
+            }
+            case Stmt.Print(Expr expression) -> walkCaptureUsage(expression, localNames);
+            case Stmt.Return(Expr value) -> {
+                if (value != null) walkCaptureUsage(value, localNames);
+            }
+            case Stmt.Expression(Expr expression) -> walkCaptureUsage(expression, localNames);
+            case Stmt.Var(Token _, TypeDescriptor _, Expr initializer, BindingMutability _) -> {
+                if (initializer != null) walkCaptureUsage(initializer, localNames);
+            }
+            case Stmt.While(Token _, Expr condition, Stmt body) -> {
+                walkCaptureUsage(condition, localNames);
+                walkCaptureUsage(body, localNames);
+            }
+            case Stmt.For(Token _, Token _, Expr iterable, Stmt body) -> {
+                walkCaptureUsage(iterable, localNames);
+                walkCaptureUsage(body, localNames);
+            }
+            case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body) -> {
+                final var nestedNames = new HashSet<>(localNames);
+                for (final var parameter : parameters) {
+                    nestedNames.add(parameter.lexeme());
+                }
+                walkCaptureUsage(body, nestedNames);
+            }
+            default -> {}
+        }
+    }
+
+    private void walkCaptureUsage(final Expr expr, final Set<String> localNames) {
+        if (expr == null) return;
+        switch (expr) {
+            case Expr.Assignment assignment -> walkCaptureUsage(assignment.value, localNames);
+            case Expr.Binary binary -> {
+                walkCaptureUsage(binary.left, localNames);
+                walkCaptureUsage(binary.right, localNames);
+            }
+            case Expr.Call call -> {
+                for (final var argument : call.arguments) {
+                    walkCaptureUsage(argument, localNames);
+                }
+            }
+            case Expr.Grouping grouping -> walkCaptureUsage(grouping.expression, localNames);
+            case Expr.If iff -> {
+                walkCaptureUsage(iff.condition, localNames);
+                walkCaptureUsage(iff.thenExpr, localNames);
+                walkCaptureUsage(iff.elseExpr, localNames);
+            }
+            case Expr.Lambda lambda -> {
+                final var nestedNames = new HashSet<>(localNames);
+                for (final var param : lambda.params) {
+                    nestedNames.add(param.lexeme());
+                }
+                ensureImmutableCaptures(lambda, nestedNames);
+            }
+            case Expr.Literal _ -> {}
+            case Expr.Logical logical -> {
+                walkCaptureUsage(logical.left, localNames);
+                walkCaptureUsage(logical.right, localNames);
+            }
+            case Expr.Unary unary -> walkCaptureUsage(unary.right, localNames);
+            case Expr.Variable variable -> {
+                if (localNames.contains(variable.name.lexeme())) return;
+                if (symbols.containsSymbol(variable.name)
+                        && symbols.getSymbol(variable.name).mutability().isReassignable()) {
+                    Zeron.resolutionError(new ResolutionError(variable.name,
+                            "Cannot capture mutable binding '" + variable.name.lexeme() + "' in a lambda."));
+                }
+            }
+            default -> {}
+        }
+    }
+
+    private void ensureImmutableCaptures(final Expr.Lambda lambda, final Set<String> inheritedNames) {
+        final var lambdaLocals = new HashSet<>(inheritedNames);
+        for (final var param : lambda.params) {
+            lambdaLocals.add(param.lexeme());
+        }
+        walkCaptureUsage(lambda.body, lambdaLocals);
+    }
+
     private TypeDescriptor resolve(Expr expr) {
         return switch (expr) {
             // |> a = expr ::= when
@@ -138,12 +239,18 @@ public final class Resolver {
             // resolve the expression, ensure it's assignable
             // return the assigned type (the resolved one)
             case Expr.Assignment assignment -> {
-                final var expectedType = getSymbol(assignment.name);
+                final var binding = symbols.getSymbol(assignment.name);
+                if (!binding.mutability().isReassignable()) {
+                    Zeron.resolutionError(new ResolutionError(assignment.name,
+                            "Cannot reassign immutable binding '" + assignment.name.lexeme() + "'."));
+                }
+                final var expectedType = binding.type();
                 final var resolvedType = resolve(assignment.value);
-                ensureAssignable(expectedType, resolvedType);
+                ensureAssignable(expectedType, resolvedType, assignment.name);
 
-                assignment.setType(resolvedType);
-                yield resolvedType;
+                symbols.define(assignment.name);
+                assignment.setType(expectedType);
+                yield expectedType;
             }
             // |> a + b ::= when predicate x is Infer, TypeParam
             //            | predicate a && not predicate b -> typeof b
@@ -153,11 +260,18 @@ public final class Resolver {
             // resolve left and right, ensure types are exact and
             // return the expression tagged with the resolved type
             case Expr.Binary binary -> {
-                final var leftType =  resolve(binary.left);
+                final var leftType = resolve(binary.left);
                 final var rightType = resolve(binary.right);
-                System.out.println("resolving binary   " + leftType + " " + binary.operator.lexeme() + " " + rightType);
-                ensureExact(binary.operator, leftType, rightType);
-                final var resolvedType = leftType.orElse(rightType);
+                final var refinedLeftType = refineInferredType(binary.left, leftType, rightType);
+                final var refinedRightType = refineInferredType(binary.right, rightType, leftType);
+                System.out.println("resolving binary   " + refinedLeftType + " " + binary.operator.lexeme() + " " + refinedRightType);
+                if (refinedLeftType.isNullable() || refinedRightType.isNullable()
+                    || refinedLeftType instanceof NullDescriptor || refinedRightType instanceof NullDescriptor) {
+                    Zeron.resolutionError(new ResolutionError(binary.operator,
+                        "Nullable operands require a null check before using this operator."));
+                }
+                ensureExact(binary.operator, refinedLeftType, refinedRightType);
+                final var resolvedType = refinedLeftType.orElse(refinedRightType);
 
                 binary.setType(resolvedType);
                 yield resolvedType;
@@ -201,10 +315,17 @@ public final class Resolver {
                     descriptor = resolveCallWithTypes(call.callee, call.arguments);
                 } else {
                     for (var i = 0; i < call.arguments.size(); i++) {
-                        ensureAssignable(parameters.get(i), resolve(call.arguments.get(i)));
+                        final var argument = call.arguments.get(i);
+                        final var expected = parameters.get(i);
+                        final var resolved = argument instanceof Expr.Lambda lambda
+                                && expected instanceof FunctionDescriptor functionType
+                                ? resolveLambda(lambda, functionType)
+                                : resolve(argument);
+                        ensureAssignable(expected, resolved, call.callee);
                     }
                 }
 
+                call.setType(descriptor.returnType());
                 yield descriptor.returnType();
             }
             // |> (a) ::= typeof a
@@ -218,7 +339,7 @@ public final class Resolver {
             // return the expression tagged with the resolved type
             case Expr.If iff -> {
                 // ensure condition is a boolean
-                ensureBoolean(resolve(iff.condition));
+                ensureBoolean(resolve(iff.condition), iff.paren);
                 final var then = resolve(iff.thenExpr);
                 ensureCommonParent(iff.paren, then, resolve(iff.elseExpr));
                 yield then;
@@ -227,8 +348,12 @@ public final class Resolver {
             // but they need to be structurally inferred. we can extract
             // arity from the parameter count and infer a return type from
             // the body.
-            case Expr.Lambda lambda ->
-                    TypeDescriptor.ofInfer();
+            case Expr.Lambda lambda -> {
+                ensureImmutableCaptures(lambda);
+                final var resolvedType = inferLambdaType(lambda);
+                lambda.setType(resolvedType);
+                yield resolvedType;
+            }
             case Expr.Literal literal ->
                     literal.getType();
             case Expr.Logical _ ->
@@ -266,8 +391,8 @@ public final class Resolver {
     private void declare(final Stmt declaration,
                          final Token name,
                          final TypeDescriptor type,
-                         final boolean isFinal) {
-        symbols.declareSymbol(declaration, name, type, isFinal);
+                         final BindingMutability mutability) {
+        symbols.declareSymbol(declaration, name, type, mutability);
     }
 
     private void define(final Token name) {
@@ -287,34 +412,79 @@ public final class Resolver {
     }
 
     // TODO: fix
-    private FunctionDescriptor resolveLambda(final Expr.Lambda lambda) {
+    private FunctionDescriptor inferLambdaType(final Expr.Lambda lambda) {
         beginScope();
-        final var param = lambda.param;
-        // lambdas are always of the form a -> ...; so the parameter type starts as infer
-        final var paramType = TypeDescriptor.ofInfer();
-        final var generified = TypeDescriptor.ofName(param.lexeme().toUpperCase());
-        declare(SYNTHETIC_VAR, param, generified, true);
-        define(param);
-
-        final var returns = lambda.body
-                .stream()
-                .filter(it -> it instanceof Stmt.Return)
-                .map(it -> (Stmt.Return)it)
-                .toList();
-
-        if (returns.isEmpty()) return TypeDescriptor.lambdaOf(TypeDescriptor.ofUnit(), paramType);
-
-        var currentReturnType = resolve(returns.getFirst().value());
-        for (final var stmt : lambda.body) {
-            if (stmt instanceof Stmt.Return(Expr value)) {
-                currentReturnType = ensureAssignable(currentReturnType, resolve(value));
-            } else {
-                resolve(stmt);
+        try {
+            for (final var param : lambda.params) {
+                declare(SYNTHETIC_VAR, param, TypeDescriptor.ofInfer(), BindingMutability.IMMUTABLE);
+                define(param);
             }
+
+            TypeDescriptor returnType = TypeDescriptor.ofUnit();
+            for (final var stmt : lambda.body) {
+                if (stmt instanceof Stmt.Return(Expr value)) {
+                    returnType = value == null ? TypeDescriptor.ofUnit() : resolve(value);
+                } else {
+                    resolve(stmt);
+                }
+            }
+
+            final var parameterTypes = new ArrayList<TypeDescriptor>();
+            for (final var param : lambda.params) {
+                final var binding = symbols.getSymbol(param);
+                parameterTypes.add(binding.type() instanceof InferDescriptor
+                        ? TypeDescriptor.ofInfer()
+                        : binding.type());
+            }
+
+            return parameterTypes.isEmpty()
+                    ? TypeDescriptor.functionOf("", returnType)
+                    : TypeDescriptor.functionOf("", returnType,
+                            parameterTypes.toArray(TypeDescriptor[]::new));
+        } finally {
+            endScope();
+        }
+    }
+
+    private FunctionDescriptor resolveLambda(final Expr.Lambda lambda,
+                                             final FunctionDescriptor expectedType) {
+        final var lambdaArity = lambda.params.size();
+        if (lambdaArity != expectedType.arity()) {
+            Zeron.resolutionError(new ResolutionError(lambda.arrow,
+                    "Expected " + expectedType.arity() + " lambda parameters, found " + lambdaArity));
+            return expectedType;
         }
 
-        endScope();
-        return TypeDescriptor.lambdaOf(currentReturnType, paramType);
+        beginScope();
+        try {
+            for (int i = 0; i < lambda.params.size(); i++) {
+                final var parameter = lambda.params.get(i);
+                final var parameterType = expectedType.parameters().get(i);
+                declare(SYNTHETIC_VAR, parameter, parameterType, BindingMutability.IMMUTABLE);
+                define(parameter);
+            }
+
+            TypeDescriptor returnType = TypeDescriptor.ofUnit();
+            for (final var stmt : lambda.body) {
+                if (stmt instanceof Stmt.Return(Expr value)) {
+                    returnType = value == null ? TypeDescriptor.ofUnit() : resolve(value);
+                } else {
+                    resolve(stmt);
+                }
+            }
+
+            if (!(expectedType.returnType() instanceof InferDescriptor)) {
+                ensureAssignable(expectedType.returnType(), returnType, lambda.arrow);
+            }
+
+            final var resolvedType = expectedType.returnType() instanceof InferDescriptor
+                    ? expectedType.toReturnType(returnType)
+                    : expectedType;
+            lambda.setType(resolvedType);
+            return resolvedType;
+        } finally {
+            endScope();
+        }
     }
 
     private FunctionDescriptor resolveCallWithTypes(final Token callee, final List<Expr> arguments) {
@@ -330,9 +500,29 @@ public final class Resolver {
         final var declaration = (Stmt.Var)getDeclaration(callee);
         // assume lambda is inferred, so initializer is not null
         final var lambda = (Expr.Lambda)declaration.initializer();
-        final var candidate = new Expr.Lambda(lambda.arrow, lambda.param, lambda.body,
+        final var candidate = new Expr.Lambda(lambda.arrow, lambda.params, lambda.body,
                 candidateTypeDesc);
-        return resolveLambda(candidate);
+        final var resolvedType = resolveLambda(candidate, candidateTypeDesc);
+        lambda.setType(resolvedType);
+        if (declaration instanceof Stmt.Var variable) {
+            symbols.setResolvedType(variable.name(), resolvedType);
+        }
+        return resolvedType;
+    }
+
+    private TypeDescriptor refineInferredType(final Expr expr,
+                                             final TypeDescriptor type,
+                                             final TypeDescriptor otherType) {
+        if (!(expr instanceof Expr.Variable variable)
+                || !(type instanceof InferDescriptor)
+                || otherType instanceof InferDescriptor
+                || !symbols.containsSymbol(variable.name)
+                || !(symbols.getSymbol(variable.name).type() instanceof InferDescriptor)) {
+            return type;
+        }
+
+        symbols.setResolvedType(variable.name, otherType);
+        return otherType;
     }
 
     private void resolveFunction(final Stmt.Function function) {
@@ -340,7 +530,7 @@ public final class Resolver {
         final var paramNames = function.parameters();
         final var params = function.typeDescriptor().parameters();
         for (int i = 0; i < function.parameters().size(); i++) {
-            declare(SYNTHETIC_VAR, paramNames.get(i), params.get(i), true);
+            declare(SYNTHETIC_VAR, paramNames.get(i), params.get(i), BindingMutability.IMMUTABLE);
             define(paramNames.get(i));
         }
         resolveStmts(function.body());
@@ -365,7 +555,7 @@ public final class Resolver {
                 if (currentType instanceof InferDescriptor)
                     currentType = returnType;
                 else
-                    ensureAssignable(currentType, returnType);
+                    ensureAssignable(currentType, returnType, where);
             }
         }
         return currentType instanceof InferDescriptor ? TypeDescriptor.ofUnit() : currentType;
@@ -374,6 +564,9 @@ public final class Resolver {
     public TypeDescriptor ensureExact(final Token where,
                                       final TypeDescriptor typeA,
                                       final TypeDescriptor typeB) {
+        if (typeA instanceof InferDescriptor && typeB instanceof InferDescriptor) {
+            return TypeDescriptor.ofInfer();
+        }
         // e.g     Int + Int      ::= Int, excluding
         //     <infer> + <infer>, which should refine to a resolution error
         if (typeA.isWellFormed() && typeB.isWellFormed() && typeA.equals(typeB)) return typeA;
@@ -400,12 +593,34 @@ public final class Resolver {
     }
 
     public TypeDescriptor ensureAssignable(TypeDescriptor expectedType, TypeDescriptor resolvedType) {
-        /* if (expectedType.isInferred() && resolvedType.isInferred())
-            throw new IllegalStateException("Double inferred types"); */
-        return expectedType instanceof InferDescriptor ? resolvedType : expectedType;
+        return ensureAssignable(expectedType, resolvedType, SYNTHETIC_IDENTIFIER);
     }
 
-    public void ensureBoolean(TypeDescriptor type) { }
+    private TypeDescriptor ensureAssignable(TypeDescriptor expectedType,
+                                            TypeDescriptor resolvedType,
+                                            Token where) {
+        if (expectedType instanceof InferDescriptor) return resolvedType;
+        if (expectedType.equals(resolvedType)) return expectedType;
+        if (resolvedType instanceof NullDescriptor && expectedType.isNullable()) return expectedType;
+        if (expectedType instanceof NullableDescriptor nullable
+                && nullable.baseType().equals(resolvedType)) {
+            return expectedType;
+        }
+
+        Zeron.resolutionError(new ResolutionError(where,
+                "Expected " + expectedType + ", found " + resolvedType + "."));
+        return expectedType;
+    }
+
+    public void ensureBoolean(TypeDescriptor type) {
+        ensureBoolean(type, SYNTHETIC_IDENTIFIER);
+    }
+
+    private void ensureBoolean(TypeDescriptor type, Token where) {
+        if (type instanceof BooleanDescriptor) return;
+        Zeron.resolutionError(new ResolutionError(where,
+                "Condition must have non-null Boolean type."));
+    }
 
     public void ensureIterable(TypeDescriptor type) { }
 }

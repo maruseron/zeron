@@ -11,6 +11,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.Set;
 
 public final class SymbolTable {
     /*
@@ -51,9 +55,16 @@ public final class SymbolTable {
     private final Map<String, TypeDescriptor> types = new HashMap<>();
     private final Map<String, Bind> functions = new HashMap<>();
     private final Map<String, Bind> symbols = new HashMap<>();
+    private final Map<String, Bind> allSymbols = new HashMap<>();
 
-    static class Scope { int size; Scope enclosing; }
+    static class Scope {
+        int size;
+        Scope enclosing;
+        final Set<String> names = new HashSet<>();
+        final List<String> declarations = new ArrayList<>();
+    }
     private Scope scope = null;
+    private final Map<String, Deque<Bind>> shadowedSymbols = new HashMap<>();
 
     /*
     Local Variable Table: we can think of this array as a table from integer to string.
@@ -78,6 +89,10 @@ public final class SymbolTable {
 
     public boolean containsSymbol(final Token name) {
         return symbols.containsKey(name.lexeme());
+    }
+
+    public boolean containsAnySymbol(final Token name) {
+        return allSymbols.containsKey(name.lexeme());
     }
 
     public Bind getFunction(final Token name) {
@@ -107,6 +122,15 @@ public final class SymbolTable {
         return symbols.get(name.lexeme());
     }
 
+    public Bind getAnySymbol(final Token name) {
+        if (!allSymbols.containsKey(name.lexeme())) {
+            Zeron.resolutionError(new ResolutionError(name,
+                    "Unknown symbol."));
+        }
+
+        return allSymbols.get(name.lexeme());
+    }
+
     public String localName(final int index) {
         return locals.get(index);
     }
@@ -131,23 +155,23 @@ public final class SymbolTable {
                 type,
                 Width.FUNCTION,
                 true,
-                true));
+                BindingMutability.IMMUTABLE));
     }
 
     public int declareSymbol(final Stmt declaration,
                              final Token name,
                              final TypeDescriptor type,
-                             final boolean isFinal) {
+                             final BindingMutability mutability) {
         if (scope == null)
-            return declareGlobal(declaration, name, type, isFinal); // -1
+            return declareGlobal(declaration, name, type, mutability); // -1
 
-        return declareLocal(declaration, name, type, isFinal);      // last lvt idx
+        return declareLocal(declaration, name, type, mutability);      // last lvt idx
     }
 
     private int declareGlobal(final Stmt declaration,
                               final Token name,
                               final TypeDescriptor type,
-                              final boolean isFinal) {
+                              final BindingMutability mutability) {
         if (containsSymbol(name)) {
             Zeron.resolutionError(new ResolutionError(name,
                     "Already a symbol bound to this name."));
@@ -161,21 +185,26 @@ public final class SymbolTable {
                 type,
                 type.isDoubleWidth() ? Width.DOUBLE : Width.SINGLE,
                 false,
-                isFinal));
+                mutability));
+        allSymbols.put(name.lexeme(), symbols.get(name.lexeme()));
         return GLOBAL;
     }
 
     private int declareLocal(final Stmt declaration,
                              final Token name,
                              final TypeDescriptor type,
-                             final boolean isFinal) {
-        if (containsSymbol(name)) {
+                             final BindingMutability mutability) {
+        if (!scope.names.add(name.lexeme())) {
             Zeron.resolutionError(new ResolutionError(name,
                     "Already a symbol bound to this name."));
             return -2;
         }
 
         final var lvt = locals.size();
+        final var previous = symbols.get(name.lexeme());
+        if (previous != null) {
+            shadowedSymbols.computeIfAbsent(name.lexeme(), _ -> new ArrayDeque<>()).push(previous);
+        }
         symbols.put(name.lexeme(), new Bind(
                 declaration,
                 name,
@@ -183,7 +212,9 @@ public final class SymbolTable {
                 type,
                 type.isDoubleWidth() ? Width.DOUBLE : Width.SINGLE,
                 false,
-                isFinal));
+                mutability));
+        allSymbols.put(name.lexeme(), symbols.get(name.lexeme()));
+            scope.declarations.add(name.lexeme());
 
         if (type.isDoubleWidth()) {
             scope.size += 2;
@@ -208,12 +239,17 @@ public final class SymbolTable {
     }
 
     public void setResolvedType(final Token name, final TypeDescriptor resolvedType) {
-        if (!containsSymbol(name) || !(getSymbol(name).type() instanceof InferDescriptor)) {
+        final var currentType = getSymbol(name).type();
+        final var isInferredFunction = currentType instanceof FunctionDescriptor function
+                && (function.returnType() instanceof InferDescriptor
+                    || function.parameters().stream().anyMatch(parameter -> parameter instanceof InferDescriptor));
+        if (!containsSymbol(name) || !(currentType instanceof InferDescriptor || isInferredFunction)) {
             Zeron.resolutionError(new ResolutionError(name,
                     "Cannot resolve type of non-inferred bind."));
         }
 
         symbols.computeIfPresent(name.lexeme(), (_, v) -> v.withType(resolvedType));
+        allSymbols.computeIfPresent(name.lexeme(), (_, v) -> v.withType(resolvedType));
     }
 
     public void setResolvedReturnType(final Token name, final TypeDescriptor resolvedType) {
@@ -230,10 +266,18 @@ public final class SymbolTable {
 
     public void endScope() {
         for (int i = 0; i < scope.size; i++) {
-            // pop local
-            final var name = locals.removeLast();
-            // remove from table
-            symbols.remove(name);
+            locals.removeLast();
+        }
+        for (int i = scope.declarations.size() - 1; i >= 0; i--) {
+            final var name = scope.declarations.get(i);
+            final var previous = shadowedSymbols.get(name);
+            if (previous == null || previous.isEmpty()) {
+                symbols.remove(name);
+                shadowedSymbols.remove(name);
+            } else {
+                symbols.put(name, previous.pop());
+                if (previous.isEmpty()) shadowedSymbols.remove(name);
+            }
         }
         // return to parent
         scope = scope.enclosing;

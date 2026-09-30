@@ -4,6 +4,7 @@ import com.maruseron.zeron.IntRangeLiteral;
 import com.maruseron.zeron.UnitLiteral;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.domain.NominalDescriptor;
+import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
@@ -56,7 +57,9 @@ public final class Parser {
     }
 
     private Stmt letDeclaration() {
-        boolean isFinal = !match(MUT);
+        final var mutability = match(MUT)
+            ? BindingMutability.REASSIGNABLE
+            : BindingMutability.IMMUTABLE;
         final var name = consume(IDENTIFIER, "Expect binding name.");
 
         TypeDescriptor type = TypeDescriptor.ofInfer();
@@ -70,7 +73,7 @@ public final class Parser {
         }
 
         consume(SEMICOLON, "Expect ';' after variable declaration.");
-        return new Stmt.Var(name, type, initializer, isFinal);
+        return new Stmt.Var(name, type, initializer, mutability);
     }
 
     private Stmt.Function fnDeclaration() {
@@ -127,7 +130,9 @@ public final class Parser {
             consume(RIGHT_PAREN, "Expect ')' after lambda parameter types.");
             consume(ARROW, "Expect '->' after ')'.");
             final var returnType = collectType();
-            return TypeDescriptor.lambdaOf(returnType, parameter);
+            TypeDescriptor type = TypeDescriptor.lambdaOf(returnType, parameter);
+            if (match(HUH)) type = type.toNullable();
+            return type;
         }
 
         final var isMutable  = match(AMPERSAND);
@@ -147,8 +152,8 @@ public final class Parser {
 
         TypeDescriptor type = TypeDescriptor.of(typeName.lexeme());
 
-        if (isNullable) type = type.toNullable();
         if (isGeneric) type = TypeDescriptor.genericOf((NominalDescriptor)type, inner);
+        if (isNullable) type = type.toNullable();
 
         return type;
     }
@@ -458,7 +463,7 @@ public final class Parser {
     private Expr primary() {
         if (match(FALSE)) return new Expr.Literal(false, TypeDescriptor.ofBoolean());
         if (match(TRUE))  return new Expr.Literal(true,  TypeDescriptor.ofBoolean());
-        if (match(NULL))  return new Expr.Literal(null,  TypeDescriptor.ofNever().toNullable());
+        if (match(NULL))  return new Expr.Literal(null, TypeDescriptor.ofNull());
         if (match(UNIT))  return new Expr.Literal(new UnitLiteral(), TypeDescriptor.ofUnit());
 
         if (match(INT)) {
@@ -499,19 +504,44 @@ public final class Parser {
             // `a -> ...` lambda
             final var ident = previous();
             if (check(ARROW)) {
-                return finishLambda(ident);
+                return finishLambda(List.of(ident));
             }
             return new Expr.Variable(ident, TypeDescriptor.ofInfer());
         }
 
-        // ( can be `() ->` or `(a + b)`
+        // ( can be `() ->`, `(a, b) ->`, or `(a + b)`
         if (match(LEFT_PAREN)) {
-            // `()` is lambda
-            if (match(RIGHT_PAREN)) {
-                return finishLambda(null);
+            final var paren = previous();
+            if (check(RIGHT_PAREN)) {
+                advance();
+                return finishLambda(List.of());
             }
 
-            return new Expr.Grouping(previous(), expression(), TypeDescriptor.ofInfer());
+            if (check(IDENTIFIER)) {
+                final var params = new ArrayList<Token>();
+                params.add(consume(IDENTIFIER, "Expect parameter name."));
+                while (match(COMMA)) {
+                    if (params.size() >= 254) {
+                        error(peek(), "Can't have more than 254 parameters.");
+                    }
+                    params.add(consume(IDENTIFIER, "Expect parameter name."));
+                }
+                if (check(RIGHT_PAREN)) {
+                    final var nextToken = current + 1 < tokens.size() ? tokens.get(current + 1) : null;
+                    consume(RIGHT_PAREN, "Expect ')' after lambda parameters.");
+                    if (nextToken != null && nextToken.type() == ARROW) {
+                        return finishLambda(params);
+                    }
+                    if (params.size() == 1) {
+                        return new Expr.Grouping(paren,
+                                new Expr.Variable(params.getFirst(), TypeDescriptor.ofInfer()),
+                                TypeDescriptor.ofInfer());
+                    }
+                    throw error(peek(), "Expect '->' after lambda parameters.");
+                }
+            }
+
+            return new Expr.Grouping(paren, expression(), TypeDescriptor.ofInfer());
         }
 
         /*
@@ -563,8 +593,8 @@ public final class Parser {
         throw error(peek(), "Expect expression.");
     }
 
-    private Expr.Lambda finishLambda(final Token param) {
-        final var arrow = consume(ARROW, "Expect '->' after ')'.");
+    private Expr.Lambda finishLambda(final List<Token> params) {
+        final var arrow = consume(ARROW, "Expect '->' after parameters.");
         levelMarker = new LevelMarker(levelMarker);
         List<Stmt> body;
         if (match(LEFT_BRACE)) {
@@ -573,10 +603,11 @@ public final class Parser {
             body = List.of(new Stmt.Return(expression()));
         }
         levelMarker = levelMarker.enclosing();
-        return new Expr.Lambda(arrow, param, body,
-                // generate a lambda $ arity [infer...] infer instead of just infer
-                TypeDescriptor.lambdaOf(
-                        TypeDescriptor.ofInfer(), TypeDescriptor.ofInfer()));
+        final var inferredParameters = params.stream()
+                .map(_ -> TypeDescriptor.ofInfer())
+                .toArray(TypeDescriptor[]::new);
+        return new Expr.Lambda(arrow, params, body,
+                TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), inferredParameters));
     }
 
     private boolean match(final TokenType... types) {

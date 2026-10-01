@@ -8,6 +8,7 @@ import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.FloatDescriptor;
 import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -35,12 +36,15 @@ public final class Compiler {
     private final List<Expr.Lambda> lambdaImplementations = new ArrayList<>();
     private final Map<Expr.Lambda, String> lambdaMethodNames = new IdentityHashMap<>();
     private final Map<Expr.Lambda, List<Token>> lambdaCaptures = new IdentityHashMap<>();
+    private final Map<Expr.Lambda, List<TypeDescriptor>> lambdaCaptureTypes = new IdentityHashMap<>();
+    private Map<String, TypeDescriptor> activeCaptureTypes;
     private final String mainClassName;
     private SymbolTable symbols = null;
     private TypeDescriptor lastEmittedType = null;
     private TypeDescriptor currentReturnType = null;
     private FunctionModel currentFunction = null;
     private int localSlotOffset;
+    private final Deque<Label> loopExitLabels = new ArrayDeque<>();
 
     public Compiler(List<Stmt> declarations) {
         this(declarations, "ZeronMain");
@@ -68,6 +72,7 @@ public final class Compiler {
             OUTPUT_DIRECTORY.resolve(mainClassName + ".class").toAbsolutePath(),
                 ClassDesc.of(mainClassName),
                 cb -> generateClass(cb, declarations));
+        generateNominalTypes();
     }
 
     private void collectLambdaShapes(final List<Stmt> statements) {
@@ -78,6 +83,20 @@ public final class Compiler {
 
     private void collectLambdaShapes(final Stmt statement) {
         switch (statement) {
+            case Stmt.ClassDecl declaration -> {
+                for (final var field : declaration.fields()) collectFunctionShapes(field.type());
+                for (final var method : declaration.methods()) {
+                    for (final var parameter : method.typeDescriptor().parameters()) collectFunctionShapes(parameter);
+                    collectFunctionShapes(method.typeDescriptor().returnType());
+                    collectLambdaShapes(method.body());
+                }
+            }
+            case Stmt.ContractDecl declaration -> {
+                for (final var method : declaration.methods()) {
+                    for (final var parameter : method.typeDescriptor().parameters()) collectFunctionShapes(parameter);
+                    collectFunctionShapes(method.typeDescriptor().returnType());
+                }
+            }
             case Stmt.Function(Token _, List<Token> _, FunctionDescriptor type, List<Stmt> body) -> {
                 for (final var parameter : type.parameters()) collectFunctionShapes(parameter);
                 collectFunctionShapes(type.returnType());
@@ -134,6 +153,15 @@ public final class Compiler {
     private void collectLambdaShapes(final Expr expr) {
         if (expr != null) collectFunctionShapes(expr.getType());
         switch (expr) {
+            case Expr.MemberCall call -> {
+                collectLambdaShapes(call.receiver);
+                for (final var argument : call.arguments) collectLambdaShapes(argument);
+            }
+            case Expr.Property property -> collectLambdaShapes(property.receiver);
+            case Expr.PropertyAssignment assignment -> {
+                collectLambdaShapes(assignment.property.receiver);
+                collectLambdaShapes(assignment.value);
+            }
             case Expr.ArrayLiteral literal -> {
                 for (final var element : literal.elements) collectLambdaShapes(element);
             }
@@ -201,6 +229,123 @@ public final class Compiler {
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_ABSTRACT,
                     _ -> {});
         });
+    }
+
+    private void generateNominalTypes() throws IOException {
+        for (final var contract : resolver.contracts().values()) {
+            final var contractName = contract.name().lexeme();
+            if (contractName.equals(mainClassName)) {
+                throw new IllegalStateException("Contract name conflicts with generated program class: " + contractName);
+            }
+            final var contractDesc = ClassDesc.of(contractName);
+            classFile.buildTo(OUTPUT_DIRECTORY.resolve(contractName + ".class").toAbsolutePath(),
+                    contractDesc,
+                    builder -> {
+                        builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_INTERFACE | ClassFile.ACC_ABSTRACT);
+                        for (final var method : contract.methods()) {
+                            builder.withMethod(method.name().lexeme(),
+                                    toJavaMethodDescriptor(method.typeDescriptor()),
+                                    ClassFile.ACC_PUBLIC | ClassFile.ACC_ABSTRACT,
+                                    _ -> {});
+                        }
+                    });
+        }
+
+        for (final var declaration : resolver.classes().values()) {
+            final var className = declaration.name().lexeme();
+            if (className.equals(mainClassName)) {
+                throw new IllegalStateException("Class name conflicts with generated program class: " + className);
+            }
+            generateNominalClass(declaration);
+        }
+    }
+
+    private void generateNominalClass(final Stmt.ClassDecl declaration) throws IOException {
+        final var className = declaration.name().lexeme();
+        final var classDesc = ClassDesc.of(className);
+        final var interfaces = declaration.contractName() == null
+                ? List.<ClassDesc>of()
+                : List.of(ClassDesc.of(declaration.contractName().lexeme()));
+        classFile.buildTo(OUTPUT_DIRECTORY.resolve(className + ".class").toAbsolutePath(),
+                classDesc,
+                builder -> {
+                    builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
+                    if (!interfaces.isEmpty()) builder.withInterfaceSymbols(interfaces);
+                    for (final var field : declaration.fields()) {
+                        builder.withField(field.name().lexeme(), TypeDescriptor.toJavaClassDesc(field.type()),
+                                ClassFile.ACC_PRIVATE);
+                    }
+                    final var constructorParameters = declaration.fields().stream()
+                            .map(field -> TypeDescriptor.toJavaClassDesc(field.type()))
+                            .toList();
+                    final var constructorType = MethodTypeDesc.of(ConstantDescs.CD_void, constructorParameters);
+                    builder.withMethodBody("<init>", constructorType,
+                            declaration.constructor().isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE,
+                            code -> emitCanonicalConstructor(code, declaration, classDesc));
+                    for (final var method : declaration.methods()) {
+                        final var flags = method.isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE;
+                        builder.withMethodBody(method.name().lexeme(),
+                                toJavaMethodDescriptor(method.typeDescriptor()),
+                                flags,
+                                code -> emitClassMethod(code, declaration, method));
+                    }
+                });
+    }
+
+    private void emitCanonicalConstructor(final CodeBuilder code,
+                                          final Stmt.ClassDecl declaration,
+                                          final ClassDesc classDesc) {
+        code.aload(0);
+        code.invokespecial(ConstantDescs.CD_Object, "<init>", emptyVoidMethod());
+        var slot = 1;
+        for (final var field : declaration.fields()) {
+            code.aload(0);
+            loadLocal(code, slot, field.type());
+            code.putfield(classDesc, field.name().lexeme(), TypeDescriptor.toJavaClassDesc(field.type()));
+            slot += field.type().isDoubleWidth() ? 2 : 1;
+        }
+        code.return_();
+    }
+
+    private void emitClassMethod(final CodeBuilder code,
+                                 final Stmt.ClassDecl owner,
+                                 final Stmt.Method method) {
+        final var previousReturnType = currentReturnType;
+        final var previousOffset = localSlotOffset;
+        currentReturnType = method.typeDescriptor().returnType();
+        localSlotOffset = 0;
+        beginScope();
+        final var thisToken = new Token(TokenType.THIS, "this", null, method.name().line());
+        final var thisType = method.isMutating()
+                ? new ReferenceDescriptor(TypeDescriptor.of(owner.name().lexeme()))
+                : TypeDescriptor.of(owner.name().lexeme());
+        symbols.declareSymbol(Resolver.SYNTHETIC_VAR, thisToken, thisType, BindingMutability.IMMUTABLE);
+        symbols.define(thisToken);
+        for (int i = 0; i < method.parameters().size(); i++) {
+            final var parameter = method.parameters().get(i);
+            symbols.declareSymbol(Resolver.SYNTHETIC_VAR, parameter,
+                    method.typeDescriptor().parameters().get(i), BindingMutability.IMMUTABLE);
+            symbols.define(parameter);
+        }
+        try {
+            emitStmts(code, method.body());
+            if (currentReturnType instanceof UnitDescriptor) {
+                code.aconst_null();
+                code.areturn();
+            }
+        } finally {
+            endScope();
+            localSlotOffset = previousOffset;
+            currentReturnType = previousReturnType;
+        }
+    }
+
+    private void loadLocal(final CodeBuilder code, final int slot, final TypeDescriptor type) {
+        switch (TypeDescriptor.toJavaClassDesc(type).descriptorString()) {
+            case "I", "Z" -> code.iload(slot);
+            case "D" -> code.dload(slot);
+            default -> code.aload(slot);
+        }
     }
 
     public void generateClass(final ClassBuilder classBuilder, final List<Stmt> declarations) {
@@ -303,9 +448,7 @@ public final class Compiler {
                 for (final var lambda : lambdaImplementations) {
                     final var functionType = (FunctionDescriptor) lambda.getType();
                     final var implementationParameters = new ArrayList<TypeDescriptor>();
-                    for (final var capture : lambdaCaptures.getOrDefault(lambda, List.of())) {
-                        implementationParameters.add(lookupCapture(capture).type());
-                    }
+                    implementationParameters.addAll(lambdaCaptureTypes.getOrDefault(lambda, List.of()));
                     implementationParameters.addAll(functionType.parameters());
                     classBuilder.withMethodBody(
                         lambdaMethodNames.get(lambda),
@@ -323,6 +466,12 @@ public final class Compiler {
 
     public void emitStmt(final CodeBuilder composer, final Stmt statement) {
         switch (statement) {
+            case Stmt.Break _ -> {
+                if (loopExitLabels.isEmpty()) {
+                    throw new IllegalStateException("Resolved break has no enclosing loop.");
+                }
+                composer.goto_(loopExitLabels.peek());
+            }
             case Stmt.Block(List<Stmt> statements) -> {
                 beginScope();
                 emitStmts(composer, statements);
@@ -344,6 +493,21 @@ public final class Compiler {
                         composer.ifThen(c -> emitStmt(c, thenBranch));
                     }
                 }
+            }
+            case Stmt.While(Token _, Expr condition, Stmt body) -> {
+                final var loopStart = composer.newLabel();
+                final var loopExit = composer.newLabel();
+                composer.labelBinding(loopStart);
+                emitExpr(composer, condition);
+                composer.ifeq(loopExit);
+                loopExitLabels.push(loopExit);
+                try {
+                    emitStmt(composer, body);
+                } finally {
+                    loopExitLabels.pop();
+                }
+                composer.goto_(loopStart);
+                composer.labelBinding(loopExit);
             }
             case Stmt.Print(Expr expression) -> {
                 composer.getstatic(getStdOut(composer.constantPool()));
@@ -394,6 +558,31 @@ public final class Compiler {
 
     private void emitExpr(final CodeBuilder composer, final Expr expr) {
         switch (expr) {
+            case Expr.Property property -> {
+                if (property.name.lexeme().equals("length")
+                        && property.getType() instanceof IntDescriptor) {
+                    emitExpr(composer, property.receiver);
+                    composer.arraylength();
+                    lastEmittedType = TypeDescriptor.ofInt();
+                } else {
+                    final var owner = nominalName(property.receiver.getType());
+                    emitExpr(composer, property.receiver);
+                    composer.getfield(ClassDesc.of(owner), property.name.lexeme(),
+                            TypeDescriptor.toJavaClassDesc(property.getType()));
+                    lastEmittedType = property.getType();
+                }
+            }
+            case Expr.PropertyAssignment assignment -> {
+                final var property = assignment.property;
+                final var owner = nominalName(property.receiver.getType());
+                emitExpr(composer, property.receiver);
+                emitExpr(composer, assignment.value);
+                emitConversion(composer, lastEmittedType, property.getType());
+                composer.putfield(ClassDesc.of(owner), property.name.lexeme(),
+                        TypeDescriptor.toJavaClassDesc(property.getType()));
+                composer.aconst_null();
+                lastEmittedType = TypeDescriptor.ofUnit();
+            }
             case Expr.ArrayLiteral literal -> {
                 composer.ldc(literal.elements.size());
                 composer.anewarray(ClassDesc.of("java.lang.Object"));
@@ -451,7 +640,9 @@ public final class Compiler {
                 lastEmittedType = binding.type();
             }
             case Expr.Binary binary -> {
-                switch (TypeDescriptor.toJavaClassDesc(binary.getType()).descriptorString()) {
+                if (binary.getType() instanceof BooleanDescriptor) {
+                    emitComparison(composer, binary);
+                } else switch (TypeDescriptor.toJavaClassDesc(binary.getType()).descriptorString()) {
                     case "I" -> {
                         emitExpr(composer, binary.left);
                         emitExpr(composer, binary.right);
@@ -502,13 +693,11 @@ public final class Compiler {
             }
             case Expr.Grouping grouping -> emitExpr(composer, grouping.expression);
             case Expr.Call call -> emitCall(composer, call);
+            case Expr.MemberCall call -> emitMemberCall(composer, call);
             case Expr.Lambda lambda -> {
                 final var functionType = (FunctionDescriptor) lambda.getType();
                 final var captures = lambdaCaptures.getOrDefault(lambda, List.of());
-                final var captureTypes = captures.stream()
-                        .map(this::lookupCapture)
-                        .map(Bind::type)
-                        .toList();
+                final var captureTypes = lambdaCaptureTypes.getOrDefault(lambda, List.of());
                 final var implementationParameters = new ArrayList<>(captureTypes);
                 implementationParameters.addAll(functionType.parameters());
                 for (int i = 0; i < captures.size(); i++) {
@@ -577,9 +766,77 @@ public final class Compiler {
                     default -> throw new IllegalStateException("Unsupported value");
                 }
             }
-            case Expr.Unary unary -> todo("unary: implement resolver");
+            case Expr.Unary unary -> {
+                if (unary.operator.type() != com.maruseron.zeron.scan.TokenType.NOT) {
+                    todo("unary: implement resolver");
+                    break;
+                }
+                emitExpr(composer, unary.right);
+                composer.iconst_1();
+                composer.ixor();
+                lastEmittedType = TypeDescriptor.ofBoolean();
+            }
             case Expr.Variable variable -> emitVariable(composer, variable.name);
             default -> throw new UnsupportedOperationException();
+        }
+    }
+
+    private void emitComparison(final CodeBuilder composer, final Expr.Binary binary) {
+        final var operandDescriptor = TypeDescriptor.toJavaClassDesc(binary.left.getType()).descriptorString();
+        final var matched = composer.newLabel();
+        final var done = composer.newLabel();
+        emitExpr(composer, binary.left);
+        emitExpr(composer, binary.right);
+
+        switch (operandDescriptor) {
+            case "I", "Z" -> branchIntegerComparison(composer, binary.operator.type(), matched);
+            case "D" -> {
+                switch (binary.operator.type()) {
+                    case LESS, LESS_EQUAL -> composer.dcmpg();
+                    default -> composer.dcmpl();
+                }
+                switch (binary.operator.type()) {
+                    case EQUAL_EQUAL -> composer.ifeq(matched);
+                    case BANG_EQUAL -> composer.ifne(matched);
+                    case GREATER -> composer.ifgt(matched);
+                    case GREATER_EQUAL -> composer.ifge(matched);
+                    case LESS -> composer.iflt(matched);
+                    case LESS_EQUAL -> composer.ifle(matched);
+                    default -> throw new IllegalStateException("Unsupported comparison operator.");
+                }
+            }
+            default -> {
+                if (binary.operator.type() != TokenType.EQUAL_EQUAL
+                        && binary.operator.type() != TokenType.BANG_EQUAL) {
+                    throw new IllegalStateException("Relational comparison requires a numeric type.");
+                }
+                composer.invokestatic(ClassDesc.of("java.util.Objects"), "equals",
+                        MethodTypeDesc.of(ConstantDescs.CD_boolean,
+                                ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+                if (binary.operator.type() == TokenType.EQUAL_EQUAL) composer.ifne(matched);
+                else composer.ifeq(matched);
+            }
+        }
+
+        composer.iconst_0();
+        composer.goto_(done);
+        composer.labelBinding(matched);
+        composer.iconst_1();
+        composer.labelBinding(done);
+        lastEmittedType = TypeDescriptor.ofBoolean();
+    }
+
+    private void branchIntegerComparison(final CodeBuilder composer,
+                                        final TokenType operator,
+                                        final Label target) {
+        switch (operator) {
+            case EQUAL_EQUAL -> composer.if_icmpeq(target);
+            case BANG_EQUAL -> composer.if_icmpne(target);
+            case GREATER -> composer.if_icmpgt(target);
+            case GREATER_EQUAL -> composer.if_icmpge(target);
+            case LESS -> composer.if_icmplt(target);
+            case LESS_EQUAL -> composer.if_icmple(target);
+            default -> throw new IllegalStateException("Unsupported comparison operator.");
         }
     }
 
@@ -609,6 +866,68 @@ public final class Compiler {
         lastEmittedType = functionType.returnType();
     }
 
+    private void emitMemberCall(final CodeBuilder composer, final Expr.MemberCall call) {
+        if (call.name.lexeme().equals("new") && call.receiver instanceof Expr.Variable typeName) {
+            final var declaration = resolver.classes().get(typeName.name.lexeme());
+            if (declaration == null) throw new IllegalStateException("Resolved constructor class not found.");
+            final var classDesc = ClassDesc.of(typeName.name.lexeme());
+            final var parameters = declaration.fields().stream()
+                    .map(field -> TypeDescriptor.toJavaClassDesc(field.type()))
+                    .toList();
+            composer.new_(classDesc);
+            composer.dup();
+            for (int i = 0; i < call.arguments.size(); i++) {
+                emitExpr(composer, call.arguments.get(i));
+                emitConversion(composer, lastEmittedType, declaration.fields().get(i).type());
+            }
+            composer.invokespecial(classDesc, "<init>", MethodTypeDesc.of(ConstantDescs.CD_void, parameters));
+            lastEmittedType = new ReferenceDescriptor(TypeDescriptor.of(typeName.name.lexeme()));
+            return;
+        }
+
+        final var ownerName = nominalName(call.receiver.getType());
+        final var classOwner = resolver.classes().get(ownerName);
+        final var classMethod = classOwner == null ? null : classOwner.methods().stream()
+                .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
+                .findFirst()
+                .orElse(null);
+        final var contract = resolver.contracts().get(ownerName);
+        final var contractMethod = contract == null ? null : contract.methods().stream()
+                .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
+                .findFirst()
+                .orElse(null);
+        final var descriptor = classMethod != null
+                ? classMethod.typeDescriptor()
+                : contractMethod.typeDescriptor();
+
+        emitExpr(composer, call.receiver);
+        for (int i = 0; i < call.arguments.size(); i++) {
+            emitExpr(composer, call.arguments.get(i));
+            emitConversion(composer, lastEmittedType, descriptor.parameters().get(i));
+        }
+        if (contractMethod != null) {
+            composer.invokeinterface(ClassDesc.of(ownerName), call.name.lexeme(),
+                    toJavaMethodDescriptor(descriptor));
+        } else if (!classMethod.isPublic()) {
+            composer.invokespecial(ClassDesc.of(ownerName), call.name.lexeme(),
+                toJavaMethodDescriptor(descriptor));
+        } else {
+            composer.invokevirtual(ClassDesc.of(ownerName), call.name.lexeme(),
+                    toJavaMethodDescriptor(descriptor));
+        }
+        lastEmittedType = descriptor.returnType();
+    }
+
+    private String nominalName(final TypeDescriptor type) {
+        final var baseType = type instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : type;
+        if (!(baseType instanceof NominalDescriptor nominal)) {
+            throw new IllegalStateException("Expected a nominal receiver, found " + type);
+        }
+        return nominal.name();
+    }
+
     private void emitLambdaImplementation(final CodeBuilder composer, final Expr.Lambda lambda) {
         if (!(lambda.getType() instanceof FunctionDescriptor functionType)) {
             throw new IllegalStateException("Lambda has no resolved function type");
@@ -616,9 +935,7 @@ public final class Compiler {
 
         final var captures = lambdaCaptures.getOrDefault(lambda, List.of());
         final var allParameters = new ArrayList<TypeDescriptor>();
-        for (final var capture : captures) {
-            allParameters.add(lookupCapture(capture).type());
-        }
+        allParameters.addAll(lambdaCaptureTypes.getOrDefault(lambda, List.of()));
         for (final var parameter : functionType.parameters()) {
             allParameters.add(parameter);
         }
@@ -631,7 +948,8 @@ public final class Compiler {
         currentReturnType = functionType.returnType();
         try {
             for (final var capture : captures) {
-                final var captureType = lookupCapture(capture).type();
+                final var captureType = lambdaCaptureTypes.get(lambda)
+                        .get(captures.indexOf(capture));
                 symbols.declareSymbol(Resolver.SYNTHETIC_VAR, capture, captureType, BindingMutability.IMMUTABLE);
                 symbols.define(capture);
             }
@@ -679,7 +997,15 @@ public final class Compiler {
         for (final var param : lambda.params) {
             locals.add(param.lexeme());
         }
-        collectCapturedVariables(lambda.body, locals, captured, seen);
+        final var previousCaptureTypes = activeCaptureTypes;
+        final var captureTypes = new LinkedHashMap<String, TypeDescriptor>();
+        activeCaptureTypes = captureTypes;
+        try {
+            collectCapturedVariables(lambda.body, locals, captured, seen);
+        } finally {
+            activeCaptureTypes = previousCaptureTypes;
+        }
+        lambdaCaptureTypes.put(lambda, captured.stream().map(token -> captureTypes.get(token.lexeme())).toList());
         return captured;
     }
 
@@ -741,6 +1067,18 @@ public final class Compiler {
                                          final Set<String> seen) {
         if (expr == null) return;
         switch (expr) {
+            case Expr.MemberCall call -> {
+                collectCapturedVariables(call.receiver, localNames, captured, seen);
+                for (final var argument : call.arguments) {
+                    collectCapturedVariables(argument, localNames, captured, seen);
+                }
+            }
+            case Expr.Property property ->
+                    collectCapturedVariables(property.receiver, localNames, captured, seen);
+            case Expr.PropertyAssignment assignment -> {
+                collectCapturedVariables(assignment.property.receiver, localNames, captured, seen);
+                collectCapturedVariables(assignment.value, localNames, captured, seen);
+            }
             case Expr.ArrayLiteral literal -> {
                 for (final var element : literal.elements) collectCapturedVariables(element, localNames, captured, seen);
             }
@@ -789,6 +1127,7 @@ public final class Compiler {
                     && !seen.contains(name)) {
                     seen.add(name);
                     captured.add(variable.name);
+                    activeCaptureTypes.putIfAbsent(name, variable.getType());
                 }
             }
             default -> {}
@@ -869,7 +1208,8 @@ public final class Compiler {
     private void emitConversion(final CodeBuilder composer,
                                 final TypeDescriptor sourceType,
                                 final TypeDescriptor targetType) {
-        if (sourceType.equals(targetType) || sourceType instanceof NullDescriptor && targetType.isNullable()) {
+        if (sourceType.equals(targetType) || sourceType instanceof NullDescriptor && targetType.isNullable()
+            || resolver.isContractProjection(targetType, sourceType)) {
             lastEmittedType = targetType;
             return;
         }

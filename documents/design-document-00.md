@@ -113,8 +113,8 @@ non-nullable type.
 
 #### Type modifiers and compound or structural types
 
-The following is a mix of current syntax, partial representations, and future design sketches; it
-is not a statement that every form is fully implemented.
+The following is a mix of current syntax, partial representations, and future design sketches; it is
+not a statement that every form is fully implemented.
 
 ```text
 Nullable type:       Type?
@@ -128,9 +128,10 @@ Discriminated union: type Type = A | B
 Nullable and function types have working language-level representations. Generic syntax and
 descriptors are partial: type-parameter binding, substitution, and backend lowering are not
 complete. The sample spelling `Array<T>` currently goes through this generic-looking syntax; it
-does not mean arrays are implemented as a collection type. The `Type[]` spelling, mutable-reference
-capability, and discriminated unions remain design proposals. In particular, the parser currently
-does not preserve `&Type` as a resolved type qualifier.
+does not mean arrays are implemented as a collection type. The `Type[]` spelling and discriminated
+unions remain design proposals. Mutable-reference capability (`&Type`) is preserved in resolved
+types and enforced for array-slot writes and mutable-to-read-only projections, including function
+types; enforcement for class members awaits class support.
 
 ---
 
@@ -213,7 +214,7 @@ fn greeting(name: String) {
 }
 ```
 
-#### Syntax
+#### Function declaration grammar
 
 ```text
 FunctionDeclaration ::= "fn" Identifier "(" [ParameterList] ")" [ReturnAnnotation] FunctionBody
@@ -286,28 +287,25 @@ doSomething(number) {
 #### Lambda syntax
 
 ```text
-Full form:
-    "("{OPTIONAL ARGUMENT LIST}")" "->" {FUNCTION BODY}
-    
-Short form:
-    "{" [ {NAME[":" {TYPE} ] } "->" ] {FUNCTION BODY} "}"
-    
-(OPTIONAL ARGUMENT LIST: ARGUMENT LIST | NO ARGUMENT LIST)
-    (ARGUMENT LIST: ARGUMENT separated by commas )
-        (ARGUMENT: {NAME}":" {TYPE} )
-    (NO ARGUMENT LIST: TYPELESS ARGUMENT separated by commas )
-        (TYPELESS ARGUMENT: {NAME} )
-(TYPE: {NAME}{NULL | ARRAY} )
-(FUNCTION BODY: {SHORT BODY} | {LONG BODY})
-    (SHORT BODY: {EXPRESSION} )
-    (LONG BODY: {STATEMENTS} )
+LambdaExpression             ::= SingleParameterLambda | ParenthesizedLambda
+SingleParameterLambda        ::= Identifier "->" LambdaBody
+ParenthesizedLambda          ::= "(" [LambdaParameterList] ")" "->" LambdaBody
+LambdaParameterList          ::= Identifier ("," Identifier)*
+LambdaBody                   ::= Expression | Block
+Block                        ::= "{" Statement* "}"
 ```
+
+Lambda parameters are identifiers without annotations; their types are inferred from the body or
+an expected function type. The bare form is available only for a single parameter. Parentheses are
+required for zero or multiple parameters. An expression body consists of one expression; a block
+body contains statements and uses `return` when it returns a value.
 
 ### Control Flow
 
-In Zeron, there are several control flow mechanisms available.
-For conditional flow, the traditional 'if' statement is
-available:
+An `if` statement evaluates a Boolean condition and executes exactly one branch. Its `else` branch
+is optional. `return` inside a selected branch exits the current function immediately. Names such as
+`isMalformed`, `Response.error`, and `Json.from` in this example are illustrative APIs, not built-in
+language features.
 
 ```zeron
 if (isMalformed(uri)) {
@@ -317,7 +315,9 @@ if (isMalformed(uri)) {
 }
 ```
 
-If is also an expression:
+`if` is also an expression. In this form, each branch produces a value, and the resolver requires
+the branch types to agree. The selected branch supplies the expression's value; nested `else if`
+expressions can represent a multi-way choice.
 
 ```zeron
 let x = if (n < 0) then 0 else n;
@@ -327,7 +327,8 @@ let x =      if (n <  0) then "negative"
         else if (n >  0) then "positive";
 ```
 
-The traditional while loop:
+`while` is a pre-test loop: it checks the condition before each iteration, so the body may run zero
+times. The condition must have type `Boolean`.
 
 ```zeron
 while (iterator.hasNext()) {
@@ -336,8 +337,8 @@ while (iterator.hasNext()) {
 }
 ```
 
-For inverted conditions, the until keyword provides better
-clarity:
+`until` expresses the inverse stopping condition. The body runs while its condition is false and
+stops once that condition becomes true; like `while`, it may run zero times.
 
 ```zeron
 let i = 0;
@@ -347,7 +348,10 @@ until (i == 5) {
 }
 ```
 
-For indefinite iteration, the loop keyword:
+`loop` has no condition and therefore continues indefinitely unless control leaves the loop, for
+example with `break;` or by returning from the function. `break;` exits the innermost enclosing
+`while`, `until`, or `loop`; it cannot escape across a function or lambda boundary. These constructs
+are compiled to JVM control flow, and loop conditions must have type `Boolean`.
 
 ```zeron
 loop {
@@ -356,11 +360,24 @@ loop {
 }
 ```
 
+### Error handling
+
+Zeron defers source-level error handling, including exception handlers and typed result values, until
+its generic and sum-type foundations are established. The syntax and semantics can then be designed
+together with error propagation, cleanup, and behavior across generated-function and Java boundaries.
+
+For now, scanner/parser and resolver failures are compile-time diagnostics that stop code generation.
+Runtime exceptions from generated JVM code propagate to the host caller; Zeron does not catch or
+translate them. This is the current runtime boundary behavior, not a source-level recovery mechanism.
+Nullable values represent absence only when that is the intended meaning, not general errors. Values
+such as `Response.error(...)` remain ordinary API-level values rather than built-in error handling.
+
 ### Ranges and Iterables
 
-By default, two things are iterable in Zeron: Arrays and
-*Ranges*. Ranges are objects that encode a sequence of
-numbers.
+Range literals and arrays are intended to be iterable. Range literals currently have a generic
+descriptor, but array iteration is not integrated with the dedicated `Array<T>` descriptor, and the
+compiler does not yet lower `for` loops. Treat the following as intended syntax rather than a
+runnable example.
 
 #### Range syntax
 
@@ -372,15 +389,17 @@ let oneThroughTen = 1..10;
 
 #### Iterables
 
-In Zeron, ranges, arrays and iterables can participate in
-the iteration constructs provided by the language:
+The intended `for` form binds an immutable name for each value in the iterable:
 
 ```zeron
 let mut accumulator = 0;
-for (i in 1..10) {
+for (let i in 1..10) {
     accumulator += i;
 }
 ```
+
+The parser requires `let` in the loop header. The resolver's iterable handling is still partial,
+and bytecode generation for `for` is not implemented.
 
 #### Making an iterable
 
@@ -411,96 +430,59 @@ implement Iterable for PersonList {
 
 ### Classes
 
-Zeron supports the creation of custom types through the
-class keyword:
+Classes are planned as nominal reference types with object identity. The initial constructor form
+requires every field to be initialized before the instance becomes observable:
 
 ```zeron
 class Person {
     name: String;
-    age: String;
-
-    // the new constructor is reserved: it requires has all
-    // fields in the class as parameters
+    age: Int;
     constructor new;
 }
 
-let p = Person.new("John", 37);
+let person = Person.new("Ada", 37);
 ```
 
-This class has a particular caveat - all fields are private
-in Zeron. This means that trying to access name on our friend
-John will throw an error:
-
-```zeron
-print("This person's name is: " + p.name);
-                                // ^ error: no getter has
-                                //   been defined for 'name'
-```
-
-To expose the fields in John, you can add getters and setters:
-
-```zeron
-class Person {
-    name: String;
-    get -> name;
-    set -> name = it;
-```
-
-The getters we're defining here are just returning and modifying
-the value, respectively. Writing this for every field would be a
-lot of boilerplate, so Zeron lets you opt into default getters
-and setters by adding the `public` keyword in front of it:
-
-```zeron
-class Person {
-    public name: String;
-```
-
-You can even mix and match. The following:
+The initial constructor must initialize each field exactly once; additional constructors,
+delegation, and inheritance are deferred. Fields are private by default, and access to a private
+field outside its permitted scope is a compile-time error. Public fields are intended to expose
+generated accessors, while custom getters and setters may be declared explicitly. Their exact
+grammar and interaction with generated accessors remain to be specified.
 
 ```zeron
 class Person {
     public name: String;
     set -> name = sanitize(it);
-```
-
-Will provide a default getter with a custom setter.
-
-#### Mutability
-
-Since all fields are private by default, they're also freely
-mutable within the context of a class, with one caveat:
-methods that mutate them must declare they do so with `mut`:
-
-```zeron
-class Person {
-    public name: String;
-    public age: String;
-    
-    constructor new;
-    
-    // defining the grow method without mut would be
-    // a semantic error: age cannot be mutated without
-    // outside a mutation context
-    mut grow(): Unit -> age += 1;
 }
 ```
 
-By default, variables of type `Person` do not have access to
-mutable methods (including setters), which means this remains
-an error for our mutable-by-design class Person:
+Contracts describe required member signatures and are checked statically. Start with declaration-site
+conformance and a single contract per class; separate implementation declarations, default methods,
+and multiple conformance are deferred.
 
 ```zeron
-let p = Person.new("John", 37);
-p.grow();
-   // ^ semantic error: mutable method cannot be called
-   //   on an immutable reference
+class PersonList is Iterable { ... }
 ```
 
-To solve this, we must obtain a mutable reference to person:
+#### Mutability
+
+Binding mutability and reference mutation capability are independent. `let mut` allows a name to be
+rebound; it does not grant permission to mutate the referenced object. A plain `T` is a read-only
+view, while `&T` is a mutable view. An immutable binding may hold an `&T`, and a reassignable binding
+may hold a read-only `T`.
+
+Methods that mutate their receiver are marked `mut`; calling them, or a setter that mutates state,
+requires a mutable receiver view. `&T` does not imply exclusive access or borrow checking: aliases may
+observe mutations. How code obtains a mutable view, including from a newly constructed object, remains
+to be specified.
 
 ```zeron
-let p = mut Person.new("John", 37);
-p.grow();
-print(p.age); // 38!
+class Person {
+    age: Int;
+    mut grow(): Unit -> age += 1;
+}
+
+fn growPerson(person: &Person): Unit {
+    person.grow();
+}
 ```

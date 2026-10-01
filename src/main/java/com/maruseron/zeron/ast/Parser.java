@@ -48,6 +48,8 @@ public final class Parser {
         try {
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
+            if (levelMarker == null && match(CLASS)) return classDeclaration();
+            if (levelMarker == null && match(CONTRACT)) return contractDeclaration();
 
             if (levelMarker != null) return statement();
             throw error(peek(), "Expected declaration at top level.");
@@ -119,6 +121,110 @@ public final class Parser {
                 TypeDescriptor.functionOf(name.lexeme(), returnType,
                         parameterTypes.toArray(TypeDescriptor[]::new)),
                 body);
+    }
+
+    private Stmt.ClassDecl classDeclaration() {
+        final var name = consume(IDENTIFIER, "Expect class name.");
+        final var contractName = match(IS) ? consume(IDENTIFIER, "Expect contract name after 'is'.") : null;
+        consume(LEFT_BRACE, "Expect '{' before class members.");
+
+        final var fields = new ArrayList<Stmt.Field>();
+        final var methods = new ArrayList<Stmt.Method>();
+        Stmt.Constructor constructor = null;
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            if (match(PUBLIC, PRIVATE)) {
+                final var isPublic = previous().type() == PUBLIC;
+                if (match(CONSTRUCTOR)) {
+                    if (constructor != null) error(previous(), "A class can declare only one constructor in v1.");
+                    final var constructorName = consume(IDENTIFIER, "Expect 'new' after 'constructor'.");
+                    if (!constructorName.lexeme().equals("new")) error(constructorName, "The canonical constructor must be named 'new'.");
+                    consume(SEMICOLON, "Expect ';' after constructor declaration.");
+                    constructor = new Stmt.Constructor(constructorName, isPublic);
+                } else {
+                    methods.add(classMethod(isPublic));
+                }
+            } else if (match(CONSTRUCTOR)) {
+                error(previous(), "Constructors must declare 'public' or 'private' visibility.");
+            } else {
+                final var fieldName = consume(IDENTIFIER, "Expect field name or explicitly visible method.");
+                consume(COLON, "Expect ':' after field name.");
+                final var fieldType = collectType();
+                consume(SEMICOLON, "Expect ';' after field declaration.");
+                fields.add(new Stmt.Field(fieldName, fieldType));
+            }
+        }
+        consume(RIGHT_BRACE, "Expect '}' after class members.");
+        if (constructor == null) error(name, "A class must declare 'public' or 'private constructor new'.");
+        return new Stmt.ClassDecl(name, contractName, List.copyOf(fields), constructor, List.copyOf(methods));
+    }
+
+    private Stmt.Method classMethod(final boolean isPublic) {
+        final var isMutating = match(MUT);
+        final var name = consume(IDENTIFIER, "Expect method name.");
+        final var signature = methodSignature(name, false);
+        return new Stmt.Method(name, signature.parameters(), signature.typeDescriptor(),
+                isPublic, isMutating, signature.body());
+    }
+
+    private Stmt.ContractDecl contractDeclaration() {
+        final var name = consume(IDENTIFIER, "Expect contract name.");
+        consume(LEFT_BRACE, "Expect '{' before contract members.");
+        final var methods = new ArrayList<Stmt.ContractMethod>();
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            final var isMutating = match(MUT);
+            final var methodName = consume(IDENTIFIER, "Expect contract method name.");
+            final var signature = methodSignature(methodName, true);
+            methods.add(new Stmt.ContractMethod(methodName, signature.parameters(),
+                    signature.typeDescriptor(), isMutating));
+        }
+        consume(RIGHT_BRACE, "Expect '}' after contract members.");
+        return new Stmt.ContractDecl(name, List.copyOf(methods));
+    }
+
+    private record ParsedMethod(List<Token> parameters,
+                                com.maruseron.zeron.domain.FunctionDescriptor typeDescriptor,
+                                List<Stmt> body) {}
+
+    private ParsedMethod methodSignature(final Token name, final boolean isContract) {
+        consume(LEFT_PAREN, "Expect '(' after method name.");
+        final var parameterNames = new ArrayList<Token>();
+        final var parameterTypes = new ArrayList<TypeDescriptor>();
+        if (!check(RIGHT_PAREN)) {
+            do {
+                if (parameterNames.size() >= 254) error(peek(), "Can't have more than 254 parameters.");
+                parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
+                consume(COLON, "Expect ':' after parameter name.");
+                parameterTypes.add(collectType());
+            } while (match(COMMA));
+        }
+        consume(RIGHT_PAREN, "Expect ')' after parameters.");
+
+        final var hasReturnType = match(COLON);
+        final var returnType = hasReturnType ? collectType() : TypeDescriptor.ofUnit();
+        if (!hasReturnType) error(name, "Class and contract methods require an explicit return type.");
+
+        final var descriptor = TypeDescriptor.functionOf(name.lexeme(), returnType,
+                parameterTypes.toArray(TypeDescriptor[]::new));
+        if (isContract) {
+            consume(SEMICOLON, "Expect ';' after contract method signature.");
+            return new ParsedMethod(List.copyOf(parameterNames), descriptor, List.of());
+        }
+
+        levelMarker = new LevelMarker(levelMarker);
+        List<Stmt> body;
+        if (match(EQUAL)) {
+            body = List.of(new Stmt.Return(expression()));
+            consume(SEMICOLON, "Expect ';' after method expression.");
+            levelMarker = levelMarker.enclosing();
+            return new ParsedMethod(List.copyOf(parameterNames),
+                    TypeDescriptor.functionOf(name.lexeme(), returnType,
+                            parameterTypes.toArray(TypeDescriptor[]::new)), body);
+        }
+
+        consume(LEFT_BRACE, "Expect '{' before method body.");
+        body = block();
+        levelMarker = levelMarker.enclosing();
+        return new ParsedMethod(List.copyOf(parameterNames), descriptor, body);
     }
 
     private TypeDescriptor collectType() {
@@ -301,6 +407,11 @@ public final class Parser {
             final var operator = previous();
             final var value = assignment();
 
+            if (expr instanceof Expr.Property property) {
+                if (operator.type() != EQUAL) error(operator, "Field assignment currently supports '=' only.");
+                return new Expr.PropertyAssignment(property, value, TypeDescriptor.ofInfer());
+            }
+
             if (expr instanceof Expr.Index index) {
                 if (operator.type() != EQUAL) error(operator, "Indexed assignment only supports '='.");
                 return new Expr.IndexAssignment(index.array, index.index, value, TypeDescriptor.ofUnit());
@@ -443,17 +554,21 @@ public final class Parser {
         var expr = primary();
 
         while (true) {
-            final var token = previous();
             if (match(LEFT_PAREN)) {
-                expr = finishCall(token);
+                if (expr instanceof Expr.Variable variable) {
+                    expr = finishCall(variable.name);
+                } else if (expr instanceof Expr.Property property) {
+                    expr = finishMemberCall(property);
+                } else {
+                    error(previous(), "Only functions and named methods can be called.");
+                }
             } else if (match(LEFT_BRACKET)) {
                 final var index = expression();
                 consume(RIGHT_BRACKET, "Expect ']' after array index.");
                 expr = new Expr.Index(expr, index, TypeDescriptor.ofInfer());
             } else if (match(DOT)) {
-                final var property = consume(IDENTIFIER, "Expect array property name.");
-                if (!property.lexeme().equals("length")) error(property, "Unknown array property.");
-                expr = new Expr.ArrayLength(expr, TypeDescriptor.ofInt());
+                final var property = consume(IDENTIFIER, "Expect member name after '.'.");
+                expr = new Expr.Property(expr, property, TypeDescriptor.ofInfer());
             } else {
                 break;
             }
@@ -479,6 +594,19 @@ public final class Parser {
         return new Expr.Call(callee, paren, arguments, TypeDescriptor.ofInfer());
     }
 
+    private Expr finishMemberCall(final Expr.Property property) {
+        final var arguments = new ArrayList<Expr>();
+        if (!check(RIGHT_PAREN)) {
+            do {
+                if (arguments.size() >= 254) error(peek(), "Can't have more than 254 arguments.");
+                arguments.add(expression());
+            } while (match(COMMA));
+        }
+        final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
+        return new Expr.MemberCall(property.receiver, property.name, paren, arguments,
+                TypeDescriptor.ofInfer());
+    }
+
     private Expr primary() {
         if (match(LEFT_BRACKET)) {
             final var elements = new ArrayList<Expr>();
@@ -494,6 +622,7 @@ public final class Parser {
         if (match(TRUE))  return new Expr.Literal(true,  TypeDescriptor.ofBoolean());
         if (match(NULL))  return new Expr.Literal(null, TypeDescriptor.ofNull());
         if (match(UNIT))  return new Expr.Literal(new UnitLiteral(), TypeDescriptor.ofUnit());
+        if (match(THIS))  return new Expr.Variable(previous(), TypeDescriptor.ofInfer());
 
         if (match(INT)) {
             final var number = previous();

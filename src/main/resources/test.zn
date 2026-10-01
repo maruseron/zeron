@@ -36,6 +36,25 @@ fn passNullableInt(value: Int?): Int? {
 
 fn firstArrayValue(values: Array<Int>): Int = values[0];
 
+contract TestCounterView {
+    read(): Int;
+}
+
+class TestCounter is TestCounterView {
+    value: Int;
+    public constructor new;
+
+    public read(): Int = this.value;
+
+    public mut increment(): Unit {
+        this.incrementInternal();
+    }
+
+    private mut incrementInternal(): Unit {
+        this.value = this.value + 1;
+    }
+}
+
 fn main() {
     globalCount += 2;
     print(globalCount);
@@ -104,4 +123,32 @@ fn main() {
 
     let nullableSlots: &Array<Int?> = [7, null, 9];
     print(nullableSlots[1]);
+
+    let mut whileCount = 0;
+    while (whileCount < 2) {
+        whileCount += 1;
+    }
+    print(whileCount);
+
+    let mut untilCount = 0;
+    until (untilCount == 2) {
+        untilCount += 1;
+    }
+    print(untilCount);
+
+    let mut loopCount = 0;
+    loop {
+        loopCount += 1;
+        loop {
+            loopCount += 10;
+            break;
+        }
+        break;
+    }
+    print(loopCount);
+
+    let counter = TestCounter.new(40);
+    counter.increment();
+    let counterView: TestCounterView = counter;
+    print(counterView.read());
  }

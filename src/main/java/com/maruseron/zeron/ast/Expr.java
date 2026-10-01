@@ -11,6 +11,55 @@ public sealed interface Expr {
     TypeDescriptor getType();
     void setType(final TypeDescriptor type);
 
+    final class MemberCall implements Expr {
+        public final Expr receiver;
+        public final Token name;
+        public final Token paren;
+        public final List<Expr> arguments;
+        private TypeDescriptor type;
+
+        public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments, TypeDescriptor type) {
+            this.receiver = receiver;
+            this.name = name;
+            this.paren = paren;
+            this.arguments = List.copyOf(arguments);
+            this.type = type;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(TypeDescriptor type) { this.type = type; }
+    }
+
+    final class Property implements Expr {
+        public final Expr receiver;
+        public final Token name;
+        private TypeDescriptor type;
+
+        public Property(Expr receiver, Token name, TypeDescriptor type) {
+            this.receiver = receiver;
+            this.name = name;
+            this.type = type;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(TypeDescriptor type) { this.type = type; }
+    }
+
+    final class PropertyAssignment implements Expr {
+        public final Property property;
+        public final Expr value;
+        private TypeDescriptor type;
+
+        public PropertyAssignment(Property property, Expr value, TypeDescriptor type) {
+            this.property = property;
+            this.value = value;
+            this.type = type;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(TypeDescriptor type) { this.type = type; }
+    }
+
     final class Assignment implements Expr {
         public final Token name;
         public final Expr value;

@@ -13,6 +13,10 @@ public final class Resolver {
     // this table stores every name related to a type to avoid name collisions
     public final SymbolTable symbols = new SymbolTable();
     public final Set<String> types   = new HashSet<>();
+    private final Map<String, Stmt.ClassDecl> classes = new LinkedHashMap<>();
+    private final Map<String, Stmt.ContractDecl> contracts = new LinkedHashMap<>();
+    private int loopDepth;
+    private String currentClassName;
 
     public static final Token SYNTHETIC_IDENTIFIER = new Token(
             TokenType.IDENTIFIER,"<synthetic>", null, -1);
@@ -28,6 +32,7 @@ public final class Resolver {
             List.of());
 
     public void resolve(final List<Stmt> statements) {
+        registerTypes(statements);
         for (final var statement : statements) {
             resolve(statement);
         }
@@ -35,20 +40,158 @@ public final class Resolver {
         System.out.println("resolution finished successfully with symbol table: \n" + symbols);
     }
 
+    public Map<String, Stmt.ClassDecl> classes() {
+        return Collections.unmodifiableMap(classes);
+    }
+
+    public Map<String, Stmt.ContractDecl> contracts() {
+        return Collections.unmodifiableMap(contracts);
+    }
+
+    private void registerTypes(final List<Stmt> statements) {
+        for (final var statement : statements) {
+            if (statement instanceof Stmt.ClassDecl declaration) {
+                registerType(declaration.name(), declaration);
+                classes.put(declaration.name().lexeme(), declaration);
+            } else if (statement instanceof Stmt.ContractDecl declaration) {
+                registerType(declaration.name(), declaration);
+                contracts.put(declaration.name().lexeme(), declaration);
+            }
+        }
+    }
+
+    private void registerType(final Token name, final Stmt declaration) {
+        final var builtin = Set.of("Never", "Unit", "Int", "Float", "Boolean", "String", "Array");
+        if (builtin.contains(name.lexeme()) || !types.add(name.lexeme())) {
+            Zeron.resolutionError(new ResolutionError(name,
+                    "Type name '" + name.lexeme() + "' is already declared."));
+        }
+    }
+
+    private void resolveContract(final Stmt.ContractDecl contract) {
+        final var methodNames = new HashSet<String>();
+        for (final var method : contract.methods()) {
+            if (!methodNames.add(method.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(method.name(), "Duplicate contract method."));
+            }
+            validateFunctionTypes(method.typeDescriptor(), method.name());
+        }
+    }
+
+    private void resolveClass(final Stmt.ClassDecl declaration) {
+        final var fieldNames = new HashSet<String>();
+        for (final var field : declaration.fields()) {
+            if (!fieldNames.add(field.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(field.name(), "Duplicate class member."));
+            }
+            validateType(field.type(), field.name());
+        }
+
+        final var methodNames = new HashSet<String>();
+        for (final var method : declaration.methods()) {
+            if (!fieldNames.add(method.name().lexeme()) || !methodNames.add(method.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(method.name(), "Duplicate class member."));
+            }
+            validateFunctionTypes(method.typeDescriptor(), method.name());
+        }
+
+        if (declaration.contractName() != null
+                && !contracts.containsKey(declaration.contractName().lexeme())) {
+            Zeron.resolutionError(new ResolutionError(declaration.contractName(), "Unknown contract."));
+        }
+
+        final var previousClass = currentClassName;
+        currentClassName = declaration.name().lexeme();
+        try {
+            for (final var method : declaration.methods()) resolveMethod(declaration, method);
+            if (declaration.contractName() != null) {
+                checkConformance(declaration, contracts.get(declaration.contractName().lexeme()));
+            }
+        } finally {
+            currentClassName = previousClass;
+        }
+    }
+
+    private void resolveMethod(final Stmt.ClassDecl owner, final Stmt.Method method) {
+        beginScope();
+        final var thisToken = new Token(TokenType.THIS, "this", null, method.name().line());
+        final TypeDescriptor thisType = method.isMutating()
+                ? new ReferenceDescriptor(TypeDescriptor.of(owner.name().lexeme()))
+                : TypeDescriptor.of(owner.name().lexeme());
+        declare(SYNTHETIC_VAR, thisToken, thisType, BindingMutability.IMMUTABLE);
+        define(thisToken);
+        for (int i = 0; i < method.parameters().size(); i++) {
+            final var parameter = method.parameters().get(i);
+            declare(SYNTHETIC_VAR, parameter, method.typeDescriptor().parameters().get(i), BindingMutability.IMMUTABLE);
+            define(parameter);
+        }
+        try {
+            resolveStmts(method.body());
+            ensureReturns(method.name(), method.typeDescriptor().returnType(), method.body());
+        } finally {
+            endScope();
+        }
+    }
+
+    private void checkConformance(final Stmt.ClassDecl declaration, final Stmt.ContractDecl contract) {
+        for (final var required : contract.methods()) {
+            final var implementation = declaration.methods().stream()
+                    .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
+                    .findFirst()
+                    .orElse(null);
+            if (implementation == null || !implementation.isPublic()
+                    || implementation.isMutating() != required.isMutating()
+                    || !implementation.typeDescriptor().equals(required.typeDescriptor())) {
+                Zeron.resolutionError(new ResolutionError(required.name(),
+                        "Class does not provide a compatible public contract method '"
+                                + required.name().lexeme() + "'."));
+            }
+        }
+    }
+
+    private void validateFunctionTypes(final FunctionDescriptor function, final Token where) {
+        for (final var parameter : function.parameters()) validateType(parameter, where);
+        validateType(function.returnType(), where);
+    }
+
+    private void validateType(final TypeDescriptor type, final Token where) {
+        switch (type) {
+            case NominalDescriptor nominal -> {
+                if (!types.contains(nominal.name())) {
+                    Zeron.resolutionError(new ResolutionError(where, "Unknown type '" + nominal.name() + "'."));
+                }
+            }
+            case ArrayDescriptor array -> validateType(array.elementType(), where);
+            case NullableDescriptor nullable -> validateType(nullable.baseType(), where);
+            case ReferenceDescriptor reference -> validateType(reference.baseType(), where);
+            case FunctionDescriptor function -> validateFunctionTypes(function, where);
+            case GenericDescriptor generic -> {
+                for (final var parameter : generic.typeParameters()) validateType(parameter, where);
+            }
+            default -> {}
+        }
+    }
+
     private void resolve(final Stmt stmt) {
         switch (stmt) {
+            case Stmt.ClassDecl declaration -> resolveClass(declaration);
+            case Stmt.ContractDecl declaration -> resolveContract(declaration);
             case Stmt.Block(List<Stmt> statements) -> {
                 beginScope();
                 resolveStmts(statements);
                 endScope();
             }
             case Stmt.Break(Token keyword) -> {
-
+                if (loopDepth == 0) {
+                    Zeron.resolutionError(new ResolutionError(keyword,
+                            "Can only break inside of a loop."));
+                }
             }
             case Stmt.Expression(Expr expression) -> {
                 resolve(expression);
             }
             case Stmt.Function fn -> {
+                validateFunctionTypes(fn.typeDescriptor(), fn.name());
                 declareFunction(fn, fn.name(), fn.typeDescriptor());
                 resolveFunction(fn);
             }
@@ -62,7 +205,12 @@ public final class Resolver {
                 final var typeParameter = ((GenericDescriptor) iterableType).typeParameters().getFirst();
                 declare(SYNTHETIC_VAR, iterationBind, typeParameter, BindingMutability.IMMUTABLE);
                 define(iterationBind);
-                resolve(body);
+                loopDepth++;
+                try {
+                    resolve(body);
+                } finally {
+                    loopDepth--;
+                }
                 endScope();
             }
             case Stmt.If(Token keyword, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
@@ -80,6 +228,7 @@ public final class Resolver {
             }
             case Stmt.Var var -> {
                 System.out.println("resolving variable " + var.name().lexeme() + " " + var.type());
+                if (!(var.type() instanceof InferDescriptor)) validateType(var.type(), var.name());
 
                 declare(var, var.name(), var.type(), var.mutability());
                 TypeDescriptor resolvedType = var.type();
@@ -123,7 +272,12 @@ public final class Resolver {
             }
             case Stmt.While(Token keyword, Expr condition, Stmt body) -> {
                 ensureBoolean(resolve(condition), keyword);
-                resolve(body);
+                loopDepth++;
+                try {
+                    resolve(body);
+                } finally {
+                    loopDepth--;
+                }
             }
         }
     }
@@ -186,6 +340,15 @@ public final class Resolver {
     private void walkCaptureUsage(final Expr expr, final Set<String> localNames) {
         if (expr == null) return;
         switch (expr) {
+            case Expr.MemberCall call -> {
+                walkCaptureUsage(call.receiver, localNames);
+                for (final var argument : call.arguments) walkCaptureUsage(argument, localNames);
+            }
+            case Expr.Property property -> walkCaptureUsage(property.receiver, localNames);
+            case Expr.PropertyAssignment assignment -> {
+                walkCaptureUsage(assignment.property.receiver, localNames);
+                walkCaptureUsage(assignment.value, localNames);
+            }
             case Expr.ArrayLiteral literal -> {
                 for (final var element : literal.elements) walkCaptureUsage(element, localNames);
             }
@@ -250,6 +413,22 @@ public final class Resolver {
 
     private TypeDescriptor resolve(Expr expr) {
         return switch (expr) {
+            case Expr.MemberCall call -> resolveMemberCall(call);
+            case Expr.PropertyAssignment assignment -> {
+                final var propertyType = resolveProperty(assignment.property);
+                final var receiverType = assignment.property.receiver.getType();
+                final var field = findField(className(receiverType), assignment.property.name);
+                if (!(receiverType instanceof ReferenceDescriptor)) {
+                    Zeron.resolutionError(new ResolutionError(assignment.property.name,
+                            "Field assignment requires a mutable reference."));
+                }
+                ensureAssignable(field.type(), resolve(assignment.value), assignment.property.name);
+                assignment.setType(TypeDescriptor.ofUnit());
+                yield TypeDescriptor.ofUnit();
+            }
+                case Expr.Property property -> {
+                yield resolveProperty(property);
+            }
             case Expr.ArrayLiteral literal -> {
                 final var elementTypes = new ArrayList<TypeDescriptor>();
                 var elementType = (TypeDescriptor) null;
@@ -346,7 +525,20 @@ public final class Resolver {
                         "Nullable operands require a null check before using this operator."));
                 }
                 ensureExact(binary.operator, refinedLeftType, refinedRightType);
-                final var resolvedType = refinedLeftType.orElse(refinedRightType);
+                final var isComparison = switch (binary.operator.type()) {
+                    case EQUAL_EQUAL, BANG_EQUAL, GREATER, GREATER_EQUAL, LESS, LESS_EQUAL -> true;
+                    default -> false;
+                };
+                if ((binary.operator.type() == TokenType.GREATER || binary.operator.type() == TokenType.GREATER_EQUAL
+                    || binary.operator.type() == TokenType.LESS || binary.operator.type() == TokenType.LESS_EQUAL)
+                    && !(refinedLeftType instanceof IntDescriptor
+                    || refinedLeftType instanceof FloatDescriptor)) {
+                    Zeron.resolutionError(new ResolutionError(binary.operator,
+                        "Relational comparisons require numeric operands."));
+                }
+                final var resolvedType = isComparison
+                    ? TypeDescriptor.ofBoolean()
+                    : refinedLeftType.orElse(refinedRightType);
 
                 binary.setType(resolvedType);
                 yield resolvedType;
@@ -436,8 +628,16 @@ public final class Resolver {
                     literal.getType();
             case Expr.Logical _ ->
                     TypeDescriptor.ofBoolean();
-            case Expr.Unary unary ->
-                    resolve(unary.right);
+            case Expr.Unary unary -> {
+                final var operandType = resolve(unary.right);
+                if (unary.operator.type() == TokenType.NOT) {
+                    ensureBoolean(operandType, unary.operator);
+                    unary.setType(TypeDescriptor.ofBoolean());
+                    yield TypeDescriptor.ofBoolean();
+                }
+                unary.setType(operandType);
+                yield operandType;
+            }
             case Expr.Variable variable -> {
                 final var name = variable.name;
                 System.out.print("resolving lookup   " + name.lexeme());
@@ -452,6 +652,118 @@ public final class Resolver {
                 yield resolvedType;
             }
         };
+    }
+
+    private TypeDescriptor resolveProperty(final Expr.Property property) {
+        final var receiverType = resolve(property.receiver);
+        final var baseType = receiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : receiverType;
+        if (property.name.lexeme().equals("length") && baseType instanceof ArrayDescriptor) {
+            property.setType(TypeDescriptor.ofInt());
+            return TypeDescriptor.ofInt();
+        }
+        final var className = className(baseType);
+        final var owner = classes.get(className);
+        if (owner == null) {
+            Zeron.resolutionError(new ResolutionError(property.name, "Unknown property."));
+        }
+        final var field = owner.fields().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
+                .findFirst()
+                .orElse(null);
+        if (field == null) {
+            Zeron.resolutionError(new ResolutionError(property.name, "Unknown field."));
+        }
+        ensureFieldAccessible(property.name, className);
+        property.setType(field.type());
+        return field.type();
+    }
+
+    private TypeDescriptor resolveMemberCall(final Expr.MemberCall call) {
+        if (call.name.lexeme().equals("new") && call.receiver instanceof Expr.Variable typeName
+                && classes.containsKey(typeName.name.lexeme())) {
+            final var declaration = classes.get(typeName.name.lexeme());
+            if (!declaration.constructor().isPublic()
+                    && !Objects.equals(currentClassName, declaration.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(call.name, "Constructor is private."));
+            }
+            if (call.arguments.size() != declaration.fields().size()) {
+                Zeron.resolutionError(new ResolutionError(call.name,
+                        "Expected " + declaration.fields().size() + " constructor arguments, found "
+                                + call.arguments.size() + "."));
+            }
+            for (int i = 0; i < call.arguments.size(); i++) {
+                ensureAssignable(declaration.fields().get(i).type(), resolve(call.arguments.get(i)), call.name);
+            }
+            final var result = new ReferenceDescriptor(TypeDescriptor.of(declaration.name().lexeme()));
+            call.setType(result);
+            return result;
+        }
+
+        final var receiverType = resolve(call.receiver);
+        final var className = className(receiverType);
+        final var owner = classes.get(className);
+        final Stmt.Method classMethod = owner == null ? null : owner.methods().stream()
+                .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
+                .findFirst()
+                .orElse(null);
+        final var contract = contracts.get(className);
+        final Stmt.ContractMethod contractMethod = contract == null ? null : contract.methods().stream()
+                .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
+                .findFirst()
+                .orElse(null);
+        if (classMethod == null && contractMethod == null) {
+            Zeron.resolutionError(new ResolutionError(call.name, "Unknown method."));
+        }
+
+        final var descriptor = classMethod != null
+                ? classMethod.typeDescriptor()
+                : contractMethod.typeDescriptor();
+        final var isMutating = classMethod != null
+                ? classMethod.isMutating()
+                : contractMethod.isMutating();
+        if (classMethod != null && !classMethod.isPublic()
+                && !Objects.equals(currentClassName, className)) {
+            Zeron.resolutionError(new ResolutionError(call.name, "Method is private."));
+        }
+        if (isMutating && !(receiverType instanceof ReferenceDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Mutating method requires a mutable reference."));
+        }
+        if (descriptor.arity() != call.arguments.size()) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Expected " + descriptor.arity() + " arguments, found " + call.arguments.size() + "."));
+        }
+        for (int i = 0; i < call.arguments.size(); i++) {
+            ensureAssignable(descriptor.parameters().get(i), resolve(call.arguments.get(i)), call.name);
+        }
+        call.setType(descriptor.returnType());
+        return descriptor.returnType();
+    }
+
+    private String className(final TypeDescriptor type) {
+        final var baseType = type instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : type;
+        return baseType instanceof NominalDescriptor nominal ? nominal.name() : "";
+    }
+
+    private Stmt.Field findField(final String className, final Token name) {
+        final var owner = classes.get(className);
+        if (owner == null) {
+            Zeron.resolutionError(new ResolutionError(name, "Field receiver is not a class."));
+        }
+        return owner.fields().stream()
+                .filter(field -> field.name().lexeme().equals(name.lexeme()))
+                .findFirst()
+                .orElseThrow(() -> new ResolutionError(name, "Unknown field."));
+    }
+
+    private void ensureFieldAccessible(final Token where, final String owner) {
+        if (!Objects.equals(currentClassName, owner)) {
+            Zeron.resolutionError(new ResolutionError(where, "Field is private."));
+        }
     }
 
     private ArrayDescriptor resolveArrayType(TypeDescriptor type, Token where) {
@@ -498,8 +810,9 @@ public final class Resolver {
         return symbols.getSymbol(name).declaration();
     }
 
-    // TODO: fix
     private FunctionDescriptor inferLambdaType(final Expr.Lambda lambda) {
+        final var enclosingLoopDepth = loopDepth;
+        loopDepth = 0;
         beginScope();
         try {
             for (final var param : lambda.params) {
@@ -530,6 +843,7 @@ public final class Resolver {
                             parameterTypes.toArray(TypeDescriptor[]::new));
         } finally {
             endScope();
+            loopDepth = enclosingLoopDepth;
         }
     }
 
@@ -542,6 +856,8 @@ public final class Resolver {
             return expectedType;
         }
 
+        final var enclosingLoopDepth = loopDepth;
+        loopDepth = 0;
         beginScope();
         try {
             for (int i = 0; i < lambda.params.size(); i++) {
@@ -571,6 +887,7 @@ public final class Resolver {
             return resolvedType;
         } finally {
             endScope();
+            loopDepth = enclosingLoopDepth;
         }
     }
 
@@ -613,23 +930,29 @@ public final class Resolver {
     }
 
     private void resolveFunction(final Stmt.Function function) {
+        final var enclosingLoopDepth = loopDepth;
+        loopDepth = 0;
         beginScope();
-        final var paramNames = function.parameters();
-        final var params = function.typeDescriptor().parameters();
-        for (int i = 0; i < function.parameters().size(); i++) {
-            declare(SYNTHETIC_VAR, paramNames.get(i), params.get(i), BindingMutability.IMMUTABLE);
-            define(paramNames.get(i));
+        try {
+            final var paramNames = function.parameters();
+            final var params = function.typeDescriptor().parameters();
+            for (int i = 0; i < function.parameters().size(); i++) {
+                declare(SYNTHETIC_VAR, paramNames.get(i), params.get(i), BindingMutability.IMMUTABLE);
+                define(paramNames.get(i));
+            }
+            resolveStmts(function.body());
+            final var resolvedType = ensureReturns(
+                    function.name(),
+                    function.typeDescriptor().returnType(),
+                    function.body());
+            if (function.typeDescriptor().returnType() instanceof InferDescriptor) {
+                symbols.setResolvedReturnType(function.name(), resolvedType);
+            }
+            System.out.println(" resolved function " + function.name().lexeme() + " -> " + symbols.getFunction(function.name()).type());
+        } finally {
+            endScope();
+            loopDepth = enclosingLoopDepth;
         }
-        resolveStmts(function.body());
-        final var resolvedType = ensureReturns(
-                function.name(),
-                function.typeDescriptor().returnType(),
-                function.body());
-        if (function.typeDescriptor().returnType() instanceof InferDescriptor) {
-            symbols.setResolvedReturnType(function.name(), resolvedType);
-        }
-        System.out.println(" resolved function " + function.name().lexeme() + " -> " + symbols.getFunction(function.name()).type());
-        endScope();
     }
 
     public TypeDescriptor ensureReturns(final Token where,
@@ -690,6 +1013,7 @@ public final class Resolver {
         if (expectedType.equals(resolvedType)) return expectedType;
         if (resolvedType instanceof ReferenceDescriptor reference
             && expectedType.equals(reference.baseType())) return expectedType;
+        if (isContractProjection(expectedType, resolvedType)) return expectedType;
         if (resolvedType instanceof NullDescriptor && expectedType.isNullable()) return expectedType;
         if (expectedType instanceof NullableDescriptor nullable
             && (nullable.baseType().equals(resolvedType)
@@ -702,6 +1026,25 @@ public final class Resolver {
                 "Expected " + expectedType + ", found " + resolvedType + "."));
         return expectedType;
     }
+
+        public boolean isContractProjection(final TypeDescriptor expectedType,
+                                            final TypeDescriptor resolvedType) {
+        final var expectedMutable = expectedType instanceof ReferenceDescriptor;
+        final var contractType = expectedMutable
+            ? ((ReferenceDescriptor) expectedType).baseType()
+            : expectedType;
+        final var resolvedMutable = resolvedType instanceof ReferenceDescriptor;
+        if (expectedMutable && !resolvedMutable) return false;
+        final var classType = resolvedMutable
+            ? ((ReferenceDescriptor) resolvedType).baseType()
+            : resolvedType;
+        if (!(contractType instanceof NominalDescriptor contract)
+            || !(classType instanceof NominalDescriptor concrete)
+            || !contracts.containsKey(contract.name())) return false;
+        final var declaration = classes.get(concrete.name());
+        return declaration != null && declaration.contractName() != null
+            && declaration.contractName().lexeme().equals(contract.name());
+        }
 
     public void ensureBoolean(TypeDescriptor type) {
         ensureBoolean(type, SYNTHETIC_IDENTIFIER);

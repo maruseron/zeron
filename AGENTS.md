@@ -22,11 +22,11 @@
   java --enable-preview -cp target/classes com.maruseron.zeron.Zeron src/main/resources/test.zn
   ```
 
-  This runs the compiler and emits `ZeronMain.class` in the working directory and generated lambda-shape interfaces under `target/classes`. It does not execute the generated Zeron program.
+  This runs the compiler and emits `dist/test.class` plus generated lambda-shape interfaces directly under `dist/` in the default package. File compilation uses the source filename without its extension for the main class name. It does not execute the generated Zeron program.
 - To exercise the generated sample program, invoke its public zero-argument `main` method through JShell:
 
   ```powershell
-  @('Class.forName("ZeronMain").getMethod("main").invoke(null);', '/exit') | jshell --class-path ".;target/classes" --execution local --feedback concise
+  @('Class.forName("test").getMethod("main").invoke(null);', '/exit') | jshell --class-path dist --execution local --feedback concise
   ```
 
 ## Code Organization
@@ -34,13 +34,13 @@
 - The pipeline is scanner (`scan`) -> parser/AST (`ast`) -> resolver (`analize`) -> bytecode compiler (`compile`). Keep language semantics in the resolver and descriptors; keep JVM representation decisions in the compiler.
 - Type descriptors model Zeron types. Do not make structural function types depend on the generated JVM interface name for semantic equality or resolution.
 - Current lambda lowering emits one SAM interface per function shape, one private static helper per lambda body, and uses `LambdaMetafactory` at `invokedynamic` call sites. See `documents/design-document-03_lambda-lowering.md` before changing this behavior.
-- `target/` and the root `ZeronMain.class` are generated outputs. Do not edit them as source; regenerate them from Java/Zeron sources.
+- `target/` contains Maven build output, and `dist/` contains generated Zeron program artifacts. Do not edit generated class files as source; regenerate them from Java/Zeron sources.
 
 ## Validation
 
 - For compiler or resolver changes, run `mvn test` (or compile all Java sources using the command above when Maven is unavailable).
 - For function-shape identity changes, run the canonical key tests and compile `src/main/resources/test.zn`; inspect generated interface names and method descriptors with `javap` when bytecode identity matters.
-- For lambda-lowering changes, compile `src/main/resources/test.zn`, invoke the generated program, and inspect `ZeronMain` plus generated shape interfaces with `javap` when bytecode shape matters.
+- For lambda-lowering changes, compile `src/main/resources/test.zn`, invoke the generated program, and inspect `test` plus generated shape interfaces with `javap -classpath dist` when bytecode shape matters.
 - Keep changes scoped to the behavior being changed. Do not update Java/Maven versions or generated outputs as incidental cleanup.
 
 ## Design References

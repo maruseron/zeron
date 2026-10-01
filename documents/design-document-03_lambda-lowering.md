@@ -8,7 +8,7 @@ This document records the current JVM lowering for Zeron lambdas, the limits of 
 
 For each distinct function signature used by a lambda, the compiler emits a public functional interface under `com.maruseron.zeron.runtime.lambda`. Its single abstract method is named `invoke` and has the typed JVM parameter and return descriptors for that signature. Examples include `Lambda$IntToInt`, `Lambda$FloatToFloat`, and `Lambda$StringToString`.
 
-Each lambda expression gets a separate private static synthetic helper in `ZeronMain`, such as `$lambda$0`. At the expression's call site, `invokedynamic` links that helper to the signature interface through `java.lang.invoke.LambdaMetafactory`. Calls through function-valued parameters use `invokeinterface`.
+Each lambda expression gets a separate private static synthetic helper in the generated main class, such as `$lambda$0`. For file compilation, the class name comes from the source filename without its extension. At the expression's call site, `invokedynamic` links that helper to the signature interface through `java.lang.invoke.LambdaMetafactory`. Calls through function-valued parameters use `invokeinterface`.
 
 This design has useful properties already:
 
@@ -60,11 +60,11 @@ The JVM method descriptor remains a separate lowering. For example, `String` and
 
 Nominal descriptors currently contain only a type name, not a package/module-qualified symbol identity. The key therefore distinguishes the names the current type model provides, but package-qualified identity must be added when the class/module system defines it. Canonical encoding generic arguments does not imply that generic JVM lowering is implemented.
 
-### Output paths are compiler-specific
+### Output layout
 
-Shape interfaces are currently written directly to `target/classes`, while `ZeronMain.class` is written relative to the process working directory. This works for the current local prototype but couples compilation to one layout and can leave stale generated classes after a source change.
+The compiler writes the source-named main class and all generated lambda-shape interfaces directly under `dist/`. For example, compiling `test.zn` emits `test.class`. All generated artifacts are in the default package, so their binary names match the files at the output root. Prompt or direct compiler use without a source path falls back to `ZeronMain`. Maven's `target/classes` remains the output for the compiler itself, not for generated Zeron programs.
 
-Generated artifacts should eventually use one configured output root and a defined cleanup or incremental-build policy. Consumers should be able to load the main class and all generated interfaces from that output consistently.
+The shared output root removes the previous split between the process working directory and Maven's class output. A cleanup or incremental-build policy for obsolete generated shape interfaces remains future work; current consumers should load the main class and its required generated interfaces from `dist/`.
 
 ## Recommended Direction
 
@@ -78,7 +78,7 @@ Address the remaining work in this order:
 4. **Specify capture semantics before classes: implemented.** Captures are immutable by default: a lambda may close over immutable values, but it must not implicitly capture and mutate stack-scoped locals. Mutation must happen through explicitly shared heap state such as objects or a dedicated cell/reference abstraction.
 5. **Introduce polymorphic lambdas as the long-term model.** Replace deferred, call-site-only inference with a true polymorphic lambda type system in which a lambda can be typed and reasoned about as a generic function value before a specific invocation fixes its argument types. This is the eventual replacement for the current infer-then-context approach.
 6. **Specify and implement capture lowering: implemented prototype.** Immutable captured values are passed through the `invokedynamic` factory descriptor and bound to the runtime function object; static helpers receive captures before the lambda's declared parameters. Explicit shared mutable cells remain future work.
-7. **Decouple artifact output.** Route generated interfaces and the main class through a shared compiler output configuration, and define stale-artifact handling.
+7. **Unify artifact output: implemented baseline.** The main class and generated interfaces are emitted under `dist/` in the default package. Define stale-artifact handling and configurable output directories if incremental or multi-project compilation requires them.
 8. **Expand behavior tests.** Cover same-shape lambdas with different bodies, zero and multiple parameters, primitive and reference types, lambdas stored and returned as values, nested lambdas, immutable captures, explicit shared mutation, and repeated/incremental compilation. Verify both program output and emitted descriptors/call instructions.
 
 ## Acceptance Criteria for Broader Lambda Support

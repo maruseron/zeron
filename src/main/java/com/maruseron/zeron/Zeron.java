@@ -4,7 +4,6 @@ import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.compile.Compiler;
-import com.maruseron.zeron.interpret.RuntimeError;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
@@ -20,7 +19,6 @@ import static java.lang.IO.println;
 
 public class Zeron {
     static boolean hadError = false;
-    static boolean hadRuntimeError = false;
     static boolean hadResolutionError = false;
 
     static void main(final String... args) throws IOException {
@@ -35,12 +33,12 @@ public class Zeron {
     }
 
     private static void runFile(final String path) throws IOException {
-        final var bytes = Files.readAllBytes(Paths.get(path));
+        final var sourcePath = Paths.get(path);
+        final var bytes = Files.readAllBytes(sourcePath);
 
-        run(new String(bytes, Charset.defaultCharset()));
+        run(new String(bytes, Charset.defaultCharset()), sourceClassName(sourcePath));
 
         if (hadError) System.exit(65);
-        if (hadRuntimeError) System.exit(70);
         if (hadResolutionError) System.exit(71);
     }
 
@@ -57,6 +55,10 @@ public class Zeron {
     }
 
     private static void run(final String source) throws IOException {
+        run(source, "ZeronMain");
+    }
+
+    private static void run(final String source, final String outputClassName) throws IOException {
         final var scanner = Scanner.from(source);
         final var tokens = scanner.scanTokens();
         final var parser = Parser.of(tokens);
@@ -64,12 +66,23 @@ public class Zeron {
 
         if (hadError) return;
 
-        final var compiler = new Compiler(stmts);
+        final var compiler = new Compiler(stmts, outputClassName);
         compiler.resolve();
 
         if (hadResolutionError) return;
 
         compiler.compile();
+    }
+
+    private static String sourceClassName(final java.nio.file.Path sourcePath) {
+        final var fileName = sourcePath.getFileName().toString();
+        final var extensionStart = fileName.lastIndexOf('.');
+        final var className = extensionStart > 0 ? fileName.substring(0, extensionStart) : fileName;
+        if (className.isBlank() || className.contains(".")) {
+            throw new IllegalArgumentException(
+                    "Source filename must produce a valid default-package class name: " + fileName);
+        }
+        return className;
     }
 
     public static void error(final int line, final String message) {
@@ -87,11 +100,6 @@ public class Zeron {
         } else {
             report(token.line(), " at '" + token.lexeme() + "'", message);
         }
-    }
-
-    public static void runtimeError(final RuntimeError error) {
-        println(error.getMessage() + "\n[line " + error.token.line() + "]");
-        hadRuntimeError = true;
     }
 
     public static void resolutionError(final ResolutionError error) {

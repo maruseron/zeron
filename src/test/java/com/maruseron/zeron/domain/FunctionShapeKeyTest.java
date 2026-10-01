@@ -13,6 +13,7 @@ import java.lang.constant.MethodTypeDesc;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -25,6 +26,7 @@ public final class FunctionShapeKeyTest {
 
         assertEquals(FunctionShapeKey.of(first), FunctionShapeKey.of(second));
         assertEquals(FunctionShapeNames.interfaceName(first), FunctionShapeNames.interfaceName(second));
+        assertFalse(FunctionShapeNames.interfaceName(first).contains("."));
         assertTrue(FunctionShapeKey.of(first).canonicalEncoding().startsWith("zeron-function-shape-v1;"));
     }
 

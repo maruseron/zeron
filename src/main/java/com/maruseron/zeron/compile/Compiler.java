@@ -19,10 +19,14 @@ import java.lang.classfile.constantpool.MethodRefEntry;
 import java.lang.constant.*;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 
 public final class Compiler {
+    private static final Path OUTPUT_DIRECTORY = Paths.get("dist");
+
     private final ClassFile classFile = ClassFile.of();
     private final Resolver resolver = new Resolver();
     private final List<Stmt> declarations;
@@ -31,7 +35,7 @@ public final class Compiler {
     private final List<Expr.Lambda> lambdaImplementations = new ArrayList<>();
     private final Map<Expr.Lambda, String> lambdaMethodNames = new IdentityHashMap<>();
     private final Map<Expr.Lambda, List<Token>> lambdaCaptures = new IdentityHashMap<>();
-    private final String MAIN_NAME = "ZeronMain";
+    private final String mainClassName;
     private SymbolTable symbols = null;
     private TypeDescriptor lastEmittedType = null;
     private TypeDescriptor currentReturnType = null;
@@ -39,7 +43,12 @@ public final class Compiler {
     private int localSlotOffset;
 
     public Compiler(List<Stmt> declarations) {
+        this(declarations, "ZeronMain");
+    }
+
+    public Compiler(List<Stmt> declarations, String mainClassName) {
         this.declarations = declarations;
+        this.mainClassName = mainClassName;
     }
 
     public void resolve() {
@@ -48,6 +57,7 @@ public final class Compiler {
     }
 
     public void compile() throws IOException {
+        Files.createDirectories(OUTPUT_DIRECTORY);
         collectLambdaShapes(declarations);
         collectLambdaCaptures();
         for (final var shape : lambdaShapes.entrySet()) {
@@ -55,8 +65,8 @@ public final class Compiler {
         }
 
         classFile.buildTo(
-                Paths.get(MAIN_NAME + ".class").toAbsolutePath(),
-                ClassDesc.of(MAIN_NAME),
+            OUTPUT_DIRECTORY.resolve(mainClassName + ".class").toAbsolutePath(),
+                ClassDesc.of(mainClassName),
                 cb -> generateClass(cb, declarations));
     }
 
@@ -68,7 +78,11 @@ public final class Compiler {
 
     private void collectLambdaShapes(final Stmt statement) {
         switch (statement) {
-            case Stmt.Function(Token _, List<Token> _, FunctionDescriptor _, List<Stmt> body) -> collectLambdaShapes(body);
+            case Stmt.Function(Token _, List<Token> _, FunctionDescriptor type, List<Stmt> body) -> {
+                for (final var parameter : type.parameters()) collectFunctionShapes(parameter);
+                collectFunctionShapes(type.returnType());
+                collectLambdaShapes(body);
+            }
             case Stmt.Block(List<Stmt> statements) -> collectLambdaShapes(statements);
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 collectLambdaShapes(condition);
@@ -78,7 +92,10 @@ public final class Compiler {
             case Stmt.Print(Expr expression) -> collectLambdaShapes(expression);
             case Stmt.Return(Expr value) -> { if (value != null) collectLambdaShapes(value); }
             case Stmt.Expression(Expr expression) -> collectLambdaShapes(expression);
-            case Stmt.Var(Token _, TypeDescriptor _, Expr initializer, BindingMutability _) -> { if (initializer != null) collectLambdaShapes(initializer); }
+            case Stmt.Var(Token _, TypeDescriptor type, Expr initializer, BindingMutability _) -> {
+                collectFunctionShapes(type);
+                if (initializer != null) collectLambdaShapes(initializer);
+            }
             case Stmt.While(Token _, Expr condition, Stmt body) -> {
                 collectLambdaShapes(condition);
                 collectLambdaShapes(body);
@@ -91,17 +108,48 @@ public final class Compiler {
         }
     }
 
+    private void collectFunctionShapes(final TypeDescriptor type) {
+        switch (type) {
+            case FunctionDescriptor function -> {
+                final var shapeKey = FunctionShapeKey.of(function);
+                final var interfaceName = FunctionShapeNames.interfaceName(shapeKey);
+                final var previousKey = lambdaShapeNames.putIfAbsent(interfaceName, shapeKey);
+                if (previousKey != null && !previousKey.equals(shapeKey)) {
+                    throw new IllegalStateException("Function shape digest collision for " + interfaceName);
+                }
+                lambdaShapes.putIfAbsent(shapeKey, function);
+                for (final var parameter : function.parameters()) collectFunctionShapes(parameter);
+                collectFunctionShapes(function.returnType());
+            }
+            case ArrayDescriptor array -> collectFunctionShapes(array.elementType());
+            case NullableDescriptor nullable -> collectFunctionShapes(nullable.baseType());
+            case ReferenceDescriptor reference -> collectFunctionShapes(reference.baseType());
+            case GenericDescriptor generic -> {
+                for (final var parameter : generic.typeParameters()) collectFunctionShapes(parameter);
+            }
+            default -> {}
+        }
+    }
+
     private void collectLambdaShapes(final Expr expr) {
+        if (expr != null) collectFunctionShapes(expr.getType());
         switch (expr) {
+            case Expr.ArrayLiteral literal -> {
+                for (final var element : literal.elements) collectLambdaShapes(element);
+            }
+            case Expr.ArrayLength length -> collectLambdaShapes(length.array);
+            case Expr.Index index -> {
+                collectLambdaShapes(index.array);
+                collectLambdaShapes(index.index);
+            }
+            case Expr.IndexAssignment assignment -> {
+                collectLambdaShapes(assignment.array);
+                collectLambdaShapes(assignment.index);
+                collectLambdaShapes(assignment.value);
+            }
             case Expr.Lambda lambda -> {
                 if (lambda.getType() instanceof FunctionDescriptor functionType) {
-                    final var shapeKey = FunctionShapeKey.of(functionType);
-                    final var interfaceName = FunctionShapeNames.interfaceName(shapeKey);
-                    final var previousKey = lambdaShapeNames.putIfAbsent(interfaceName, shapeKey);
-                    if (previousKey != null && !previousKey.equals(shapeKey)) {
-                        throw new IllegalStateException("Function shape digest collision for " + interfaceName);
-                    }
-                    lambdaShapes.putIfAbsent(shapeKey, functionType);
+                    collectFunctionShapes(functionType);
                     if (!lambdaMethodNames.containsKey(lambda)) {
                         lambdaMethodNames.put(lambda, "$lambda$" + lambdaMethodNames.size());
                         lambdaImplementations.add(lambda);
@@ -135,7 +183,7 @@ public final class Compiler {
                                               final FunctionDescriptor type) throws IOException {
         final var className = FunctionShapeNames.interfaceName(shapeKey);
         final var classDesc = ClassDesc.of(className);
-        final var outFile = Paths.get("target/classes/" + className.replace('.', '/') + ".class");
+        final var outFile = OUTPUT_DIRECTORY.resolve(className.replace('.', '/') + ".class");
         final var parent = outFile.getParent();
         if (parent != null) {
             try {
@@ -227,7 +275,7 @@ public final class Compiler {
                     ClassFile.ACC_STATIC,
                     composer -> {
                         composer.invokestatic(composer.constantPool().methodRefEntry(
-                                ClassDesc.of(MAIN_NAME),
+                                ClassDesc.of(mainClassName),
                                 "main",
                                 MethodTypeDesc.of(ConstantDescs.CD_Void)));
                         composer.return_();
@@ -246,7 +294,7 @@ public final class Compiler {
                             final var initializer = pair.initializer();
                             emitExpr(composer, initializer);
                             emitConversion(composer, lastEmittedType, type);
-                            composer.putstatic(ClassDesc.of(MAIN_NAME), name.lexeme(), TypeDescriptor.toJavaClassDesc(type));
+                            composer.putstatic(ClassDesc.of(mainClassName), name.lexeme(), TypeDescriptor.toJavaClassDesc(type));
                         }
                         composer.return_();
                     });
@@ -346,13 +394,54 @@ public final class Compiler {
 
     private void emitExpr(final CodeBuilder composer, final Expr expr) {
         switch (expr) {
+            case Expr.ArrayLiteral literal -> {
+                composer.ldc(literal.elements.size());
+                composer.anewarray(ClassDesc.of("java.lang.Object"));
+                for (int i = 0; i < literal.elements.size(); i++) {
+                    composer.dup();
+                    composer.ldc(i);
+                    final var element = literal.elements.get(i);
+                    emitExpr(composer, element);
+                    emitBox(composer, lastEmittedType);
+                    composer.aastore();
+                }
+                lastEmittedType = literal.getType();
+            }
+            case Expr.ArrayLength length -> {
+                emitExpr(composer, length.array);
+                composer.arraylength();
+                lastEmittedType = TypeDescriptor.ofInt();
+            }
+            case Expr.Index index -> {
+                emitExpr(composer, index.array);
+                composer.dup();
+                composer.arraylength();
+                emitExpr(composer, index.index);
+                emitArrayBoundsCheck(composer);
+                composer.aaload();
+                emitArrayReadConversion(composer, index.getType());
+            }
+            case Expr.IndexAssignment assignment -> {
+                emitExpr(composer, assignment.array);
+                composer.dup();
+                composer.arraylength();
+                emitExpr(composer, assignment.index);
+                emitArrayBoundsCheck(composer);
+                emitExpr(composer, assignment.value);
+                final var arrayType = (ArrayDescriptor)((ReferenceDescriptor)assignment.array.getType()).baseType();
+                emitConversion(composer, lastEmittedType, arrayType.elementType());
+                emitBox(composer, lastEmittedType);
+                composer.aastore();
+                composer.aconst_null();
+                lastEmittedType = TypeDescriptor.ofUnit();
+            }
             case Expr.Assignment assignment -> {
                 final var binding = symbols.getSymbol(assignment.name);
                 emitExpr(composer, assignment.value);
                 emitConversion(composer, lastEmittedType, binding.type());
                 duplicateValue(composer, binding.type());
                 if (binding.lvt() == SymbolTable.GLOBAL) {
-                    composer.putstatic(ClassDesc.of(MAIN_NAME), assignment.name.lexeme(),
+                    composer.putstatic(ClassDesc.of(mainClassName), assignment.name.lexeme(),
                             TypeDescriptor.toJavaClassDesc(binding.type()));
                 } else {
                     composer.storeLocal(
@@ -445,7 +534,7 @@ public final class Compiler {
                     metafactoryType.descriptorString());
                 final var implementation = MethodHandleDesc.of(
                     DirectMethodHandleDesc.Kind.STATIC,
-                    ClassDesc.of(MAIN_NAME),
+                    ClassDesc.of(mainClassName),
                     lambdaMethodNames.get(lambda),
                         implementationType.descriptorString());
                 composer.invokedynamic(DynamicCallSiteDesc.of(
@@ -501,7 +590,7 @@ public final class Compiler {
                 emitExpr(composer, call.arguments.get(i));
                 emitConversion(composer, lastEmittedType, functionType.parameters().get(i));
             }
-            composer.invokestatic(ClassDesc.of(MAIN_NAME), call.callee.lexeme(), toJavaMethodDescriptor(functionType));
+            composer.invokestatic(ClassDesc.of(mainClassName), call.callee.lexeme(), toJavaMethodDescriptor(functionType));
             lastEmittedType = functionType.returnType();
             return;
         }
@@ -652,6 +741,19 @@ public final class Compiler {
                                          final Set<String> seen) {
         if (expr == null) return;
         switch (expr) {
+            case Expr.ArrayLiteral literal -> {
+                for (final var element : literal.elements) collectCapturedVariables(element, localNames, captured, seen);
+            }
+            case Expr.ArrayLength length -> collectCapturedVariables(length.array, localNames, captured, seen);
+            case Expr.Index index -> {
+                collectCapturedVariables(index.array, localNames, captured, seen);
+                collectCapturedVariables(index.index, localNames, captured, seen);
+            }
+            case Expr.IndexAssignment assignment -> {
+                collectCapturedVariables(assignment.array, localNames, captured, seen);
+                collectCapturedVariables(assignment.index, localNames, captured, seen);
+                collectCapturedVariables(assignment.value, localNames, captured, seen);
+            }
             case Expr.Assignment assignment -> collectCapturedVariables(assignment.value, localNames, captured, seen);
             case Expr.Binary binary -> {
                 collectCapturedVariables(binary.left, localNames, captured, seen);
@@ -706,7 +808,7 @@ public final class Compiler {
             if (symbols.containsAnySymbol(name)) {
                 final var binding = symbols.getAnySymbol(name);
                 if (binding.lvt() == SymbolTable.GLOBAL) {
-                    composer.getstatic(ClassDesc.of(MAIN_NAME), name.lexeme(), TypeDescriptor.toJavaClassDesc(binding.type()));
+                    composer.getstatic(ClassDesc.of(mainClassName), name.lexeme(), TypeDescriptor.toJavaClassDesc(binding.type()));
                     lastEmittedType = binding.type();
                     return;
                 }
@@ -721,7 +823,7 @@ public final class Compiler {
             return;
         }
         if (binding.lvt() == SymbolTable.GLOBAL) {
-            composer.getstatic(ClassDesc.of(MAIN_NAME), name.lexeme(), TypeDescriptor.toJavaClassDesc(binding.type()));
+            composer.getstatic(ClassDesc.of(mainClassName), name.lexeme(), TypeDescriptor.toJavaClassDesc(binding.type()));
         } else {
             switch (TypeDescriptor.toJavaClassDesc(binding.type()).descriptorString()) {
                 case "I", "Z" -> composer.iload(binding.lvt() + localSlotOffset);
@@ -771,13 +873,52 @@ public final class Compiler {
             lastEmittedType = targetType;
             return;
         }
+        if (sourceType instanceof ReferenceDescriptor reference
+                && targetType.equals(reference.baseType())) {
+            lastEmittedType = targetType;
+            return;
+        }
         if (targetType instanceof NullableDescriptor nullable
-                && sourceType.equals(nullable.baseType())) {
+                && (sourceType.equals(nullable.baseType())
+                || sourceType instanceof ReferenceDescriptor reference
+                && nullable.baseType().equals(reference.baseType()))) {
             emitBox(composer, sourceType);
             lastEmittedType = targetType;
             return;
         }
         throw new IllegalStateException("Unsupported conversion from " + sourceType + " to " + targetType);
+    }
+
+    private void emitArrayBoundsCheck(final CodeBuilder composer) {
+        composer.swap();
+        composer.invokestatic(
+            ClassDesc.of("java.util.Objects"),
+                "checkIndex",
+            MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_int, ConstantDescs.CD_int));
+    }
+
+    private void emitArrayReadConversion(final CodeBuilder composer, final TypeDescriptor targetType) {
+        final var valueType = targetType instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : targetType;
+        if (targetType instanceof NullableDescriptor) {
+            composer.checkcast(TypeDescriptor.toJavaClassDesc(targetType));
+        } else if (valueType instanceof IntDescriptor) {
+            composer.checkcast(ConstantDescs.CD_Integer);
+            composer.invokevirtual(ClassDesc.of("java.lang.Integer"), "intValue",
+                    MethodTypeDesc.of(ConstantDescs.CD_int));
+        } else if (valueType instanceof FloatDescriptor) {
+            composer.checkcast(ConstantDescs.CD_Double);
+            composer.invokevirtual(ClassDesc.of("java.lang.Double"), "doubleValue",
+                    MethodTypeDesc.of(ConstantDescs.CD_double));
+        } else if (valueType instanceof BooleanDescriptor) {
+            composer.checkcast(ConstantDescs.CD_Boolean);
+            composer.invokevirtual(ClassDesc.of("java.lang.Boolean"), "booleanValue",
+                    MethodTypeDesc.of(ConstantDescs.CD_boolean));
+        } else {
+            composer.checkcast(TypeDescriptor.toJavaClassDesc(targetType));
+        }
+        lastEmittedType = targetType;
     }
 
     private static boolean isConstantFieldValue(final TypeDescriptor type, final ConstantDesc value) {

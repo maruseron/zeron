@@ -34,6 +34,8 @@ fn passNullableInt(value: Int?): Int? {
     return value;
 }
 
+fn firstArrayValue(values: Array<Int>): Int = values[0];
+
 fn main() {
     globalCount += 2;
     print(globalCount);
@@ -88,4 +90,18 @@ fn main() {
     print(emptyText);
     print(passNullableInt(9));
     print(passNullableInt(null));
+
+    let mutableView: &Array<Int> = [11, 22, 33];
+    let readOnlyView: Array<Int> = mutableView;
+    print(firstArrayValue(mutableView));
+    print(readOnlyView.length);
+    mutableView[1] = 44;
+    print(readOnlyView[1]);
+
+    let mut rebindableView: Array<Int> = [1, 2];
+    rebindableView = [3, 4];
+    print(rebindableView[0]);
+
+    let nullableSlots: &Array<Int?> = [7, null, 9];
+    print(nullableSlots[1]);
  }

@@ -96,6 +96,11 @@ public final class Resolver {
                 if (var.initializer() != null) {
                     resolvedType = resolve(var.initializer());
                     resolvedType = ensureAssignable(var.type(), resolvedType, var.name());
+                    if (var.type() instanceof InferDescriptor
+                            && resolvedType instanceof NullDescriptor) {
+                        Zeron.resolutionError(new ResolutionError(var.name(),
+                                "Cannot infer a type from a null value; add an explicit nullable type annotation."));
+                    }
                     // replaces <infer> with resolved type for the symbol
                     if (var.type() instanceof InferDescriptor)
                         symbols.setResolvedType(var.name(), resolvedType);
@@ -181,6 +186,19 @@ public final class Resolver {
     private void walkCaptureUsage(final Expr expr, final Set<String> localNames) {
         if (expr == null) return;
         switch (expr) {
+            case Expr.ArrayLiteral literal -> {
+                for (final var element : literal.elements) walkCaptureUsage(element, localNames);
+            }
+            case Expr.ArrayLength length -> walkCaptureUsage(length.array, localNames);
+            case Expr.Index index -> {
+                walkCaptureUsage(index.array, localNames);
+                walkCaptureUsage(index.index, localNames);
+            }
+            case Expr.IndexAssignment assignment -> {
+                walkCaptureUsage(assignment.array, localNames);
+                walkCaptureUsage(assignment.index, localNames);
+                walkCaptureUsage(assignment.value, localNames);
+            }
             case Expr.Assignment assignment -> walkCaptureUsage(assignment.value, localNames);
             case Expr.Binary binary -> {
                 walkCaptureUsage(binary.left, localNames);
@@ -232,6 +250,63 @@ public final class Resolver {
 
     private TypeDescriptor resolve(Expr expr) {
         return switch (expr) {
+            case Expr.ArrayLiteral literal -> {
+                final var elementTypes = new ArrayList<TypeDescriptor>();
+                var elementType = (TypeDescriptor) null;
+                var hasNullElement = false;
+                for (final var element : literal.elements) {
+                    final var resolvedElement = resolve(element);
+                    elementTypes.add(resolvedElement);
+                    if (resolvedElement instanceof NullDescriptor) {
+                        hasNullElement = true;
+                    } else if (elementType == null) {
+                        elementType = resolvedElement;
+                    } else if (elementType instanceof NullableDescriptor nullable
+                            && nullable.baseType().equals(resolvedElement)) {
+                        continue;
+                    } else if (resolvedElement instanceof NullableDescriptor nullable
+                            && nullable.baseType().equals(elementType)) {
+                        elementType = resolvedElement;
+                    } else {
+                        ensureExact(SYNTHETIC_IDENTIFIER, elementType, resolvedElement);
+                    }
+                }
+                if (elementType == null) {
+                    Zeron.resolutionError(new ResolutionError(SYNTHETIC_IDENTIFIER,
+                            "Cannot infer an array element type from null values."));
+                }
+                if (hasNullElement) elementType = elementType.toNullable();
+                for (final var resolvedElement : elementTypes) {
+                    ensureAssignable(elementType, resolvedElement);
+                }
+                final var arrayType = new ReferenceDescriptor(TypeDescriptor.arrayOf(elementType));
+                literal.setType(arrayType);
+                yield arrayType;
+            }
+            case Expr.ArrayLength length -> {
+                resolveArrayType(resolve(length.array), SYNTHETIC_IDENTIFIER);
+                length.setType(TypeDescriptor.ofInt());
+                yield TypeDescriptor.ofInt();
+            }
+            case Expr.Index index -> {
+                final var arrayType = resolveArrayType(resolve(index.array), SYNTHETIC_IDENTIFIER);
+                ensureExact(SYNTHETIC_IDENTIFIER, TypeDescriptor.ofInt(), resolve(index.index));
+                index.setType(arrayType.elementType());
+                yield arrayType.elementType();
+            }
+            case Expr.IndexAssignment assignment -> {
+                final var receiverType = resolve(assignment.array);
+                if (!(receiverType instanceof ReferenceDescriptor reference)
+                        || !(reference.baseType() instanceof ArrayDescriptor arrayType)) {
+                    Zeron.resolutionError(new ResolutionError(SYNTHETIC_IDENTIFIER,
+                            "Array slot assignment requires a mutable &Array<T> view."));
+                    yield TypeDescriptor.ofUnit();
+                }
+                ensureExact(SYNTHETIC_IDENTIFIER, TypeDescriptor.ofInt(), resolve(assignment.index));
+                ensureAssignable(arrayType.elementType(), resolve(assignment.value));
+                assignment.setType(TypeDescriptor.ofUnit());
+                yield TypeDescriptor.ofUnit();
+            }
             // |> a = expr ::= when
             //               | assignable (typeof a, typeof expr) -> typeof expr
             //               | else                               -> ResolutionError
@@ -331,8 +406,11 @@ public final class Resolver {
             // |> (a) ::= typeof a
             // suggested type for groupings will always be inferred,
             // just unbox and send the expression down the resolution pipeline
-            case Expr.Grouping grouping ->
-                    resolve(grouping.expression);
+            case Expr.Grouping grouping -> {
+                final var resolvedType = resolve(grouping.expression);
+                grouping.setType(resolvedType);
+                yield resolvedType;
+            }
             // suggested type for if expressions will always be inferred,
             // resolve the condition, ensure it is a boolean,
             // resolve each branch, ensure they have a common parent, and
@@ -368,10 +446,19 @@ public final class Resolver {
                             "Can't read local variable in its own initializer."));
                 }
 
-                System.out.println(" -> " + getSymbol(name));
-                yield getSymbol(name);
+                final var resolvedType = getSymbol(name);
+                variable.setType(resolvedType);
+                System.out.println(" -> " + resolvedType);
+                yield resolvedType;
             }
         };
+    }
+
+    private ArrayDescriptor resolveArrayType(TypeDescriptor type, Token where) {
+        if (type instanceof ReferenceDescriptor reference) type = reference.baseType();
+        if (type instanceof ArrayDescriptor arrayType) return arrayType;
+        Zeron.resolutionError(new ResolutionError(where, "Expected a non-null Array<T> value."));
+        throw new IllegalStateException("unreachable");
     }
 
     private void beginScope() {
@@ -601,9 +688,13 @@ public final class Resolver {
                                             Token where) {
         if (expectedType instanceof InferDescriptor) return resolvedType;
         if (expectedType.equals(resolvedType)) return expectedType;
+        if (resolvedType instanceof ReferenceDescriptor reference
+            && expectedType.equals(reference.baseType())) return expectedType;
         if (resolvedType instanceof NullDescriptor && expectedType.isNullable()) return expectedType;
         if (expectedType instanceof NullableDescriptor nullable
-                && nullable.baseType().equals(resolvedType)) {
+            && (nullable.baseType().equals(resolvedType)
+            || resolvedType instanceof ReferenceDescriptor reference
+            && nullable.baseType().equals(reference.baseType()))) {
             return expectedType;
         }
 

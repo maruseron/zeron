@@ -8,8 +8,8 @@ import java.util.*;
 public sealed interface TypeDescriptor
         permits InferDescriptor, NeverDescriptor, UnitDescriptor,
                 IntDescriptor, FloatDescriptor, BooleanDescriptor, StringDescriptor,
-            NominalDescriptor, FunctionDescriptor, GenericDescriptor,
-            NullableDescriptor, NullDescriptor {
+                NominalDescriptor, FunctionDescriptor, GenericDescriptor, ArrayDescriptor,
+                NullableDescriptor, NullDescriptor, ReferenceDescriptor {
 
     // Contract
     String name();
@@ -98,6 +98,10 @@ public sealed interface TypeDescriptor
         return new GenericDescriptor(baseType, typeParams);
     }
 
+    static ArrayDescriptor arrayOf(final TypeDescriptor elementType) {
+        return new ArrayDescriptor(elementType);
+    }
+
     static GenericDescriptor genericOf(final NominalDescriptor baseType,
                                        final TypeDescriptor... typeParameters) {
         return genericOf(baseType, List.of(typeParameters));
@@ -129,6 +133,8 @@ public sealed interface TypeDescriptor
             case StringDescriptor   sd -> ConstantDescs.CD_String;
             case NominalDescriptor  nd -> ClassDesc.of(nd.name());
             case FunctionDescriptor fd -> ClassDesc.of(FunctionShapeNames.interfaceName(fd));
+            case ArrayDescriptor _ -> ConstantDescs.CD_Object.arrayType();
+            case ReferenceDescriptor rd -> toJavaClassDesc(rd.baseType());
             case NullableDescriptor nd -> switch (nd.baseType()) {
                 case IntDescriptor _ -> ConstantDescs.CD_Integer;
                 case FloatDescriptor _ -> ConstantDescs.CD_Double;
@@ -166,6 +172,8 @@ public sealed interface TypeDescriptor
             case FunctionDescriptor fd ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");
+                case ReferenceDescriptor rd -> toJavaWrapper(rd.baseType());
+                case ArrayDescriptor _ -> ConstantDescs.CD_Object.arrayType();
                 case NullableDescriptor nd -> toJavaClassDesc(nd);
                 case NullDescriptor _ -> ConstantDescs.CD_Object;
             case GenericDescriptor  gd ->

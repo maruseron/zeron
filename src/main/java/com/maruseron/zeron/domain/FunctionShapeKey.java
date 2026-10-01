@@ -49,6 +49,15 @@ public final class FunctionShapeKey {
                 encoding.append(')');
             }
             case FunctionDescriptor function -> appendFunction(encoding, function);
+            case ArrayDescriptor array -> {
+                encoding.append("a(");
+                appendType(encoding, array.elementType());
+                encoding.append(')');
+            }
+            case ReferenceDescriptor reference -> {
+                encoding.append('&');
+                appendType(encoding, reference.baseType());
+            }
             case GenericDescriptor generic -> {
                 encoding.append('g').append(generic.typeParameters().size()).append('(');
                 appendNominal(encoding, generic.baseType());

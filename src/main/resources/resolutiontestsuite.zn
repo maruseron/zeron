@@ -22,7 +22,7 @@ let createAdder: (Int) -> (Int) -> Int = a -> b -> a + b;
 //    &printer
 // let p = printer;
 
-let n = null;
+let n: Int? = null;
 
 let s = "hello " + "world";
 

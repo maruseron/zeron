@@ -5,6 +5,7 @@ import com.maruseron.zeron.UnitLiteral;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
+import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
@@ -96,14 +97,14 @@ public final class Parser {
         consume(RIGHT_PAREN, "Expect ')' after parameters.");
 
         TypeDescriptor returnType = TypeDescriptor.ofUnit();
-        if (match(COLON)) {
+        final var hasExplicitReturnType = match(COLON);
+        if (hasExplicitReturnType) {
             returnType = collectType();
         }
 
         List<Stmt> body;
         if (match(EQUAL)) {
-            // if single expression, change return type to infer
-            returnType = TypeDescriptor.ofInfer();
+            if (!hasExplicitReturnType) returnType = TypeDescriptor.ofInfer();
             body = List.of(new Stmt.Return(expression()));
             consume(SEMICOLON, "Expect ';' after expression.");
         } else {
@@ -121,7 +122,9 @@ public final class Parser {
     }
 
     private TypeDescriptor collectType() {
-        // if type starts with a left parenthesis, it's a function type
+        final var isMutable = match(AMPERSAND);
+        TypeDescriptor type;
+
         if (match(LEFT_PAREN)) {
             TypeDescriptor parameter = null;
             if (!check(RIGHT_PAREN)) {
@@ -130,30 +133,33 @@ public final class Parser {
             consume(RIGHT_PAREN, "Expect ')' after lambda parameter types.");
             consume(ARROW, "Expect '->' after ')'.");
             final var returnType = collectType();
-            TypeDescriptor type = TypeDescriptor.lambdaOf(returnType, parameter);
-            if (match(HUH)) type = type.toNullable();
-            return type;
+            type = TypeDescriptor.lambdaOf(returnType, parameter);
+        } else {
+            final var typeName = consume(IDENTIFIER, "Expect bind name.");
+
+            var isGeneric = false;
+            List<TypeDescriptor> inner = null;
+            while (match(LESS)) {
+                isGeneric = true;
+                inner = collectTypeArguments();
+                consume(GREATER, "Expect '>' after type.");
+            }
+
+            type = TypeDescriptor.of(typeName.lexeme());
+            if (isGeneric) {
+                if (type.name().equals("Array")) {
+                    if (inner.size() != 1) error(typeName, "Array expects one element type.");
+                    type = TypeDescriptor.arrayOf(inner.getFirst());
+                } else {
+                    type = TypeDescriptor.genericOf((NominalDescriptor)type, inner);
+                }
+            } else if (type.name().equals("Array")) {
+                error(typeName, "Array requires an element type.");
+            }
         }
 
-        final var isMutable  = match(AMPERSAND);
-        final var typeName   = consume(IDENTIFIER, "Expect bind name.");
-
-        // generic type open bracket e.g &List< ... >
-        var isGeneric = false;
-        List<TypeDescriptor> inner = null;
-        while (match(LESS)) {
-            isGeneric = true;
-            inner = collectTypeArguments();
-            consume(GREATER, "Expect '>' after type.");
-        }
-
-        // match ?
-        var isNullable = match(HUH);
-
-        TypeDescriptor type = TypeDescriptor.of(typeName.lexeme());
-
-        if (isGeneric) type = TypeDescriptor.genericOf((NominalDescriptor)type, inner);
-        if (isNullable) type = type.toNullable();
+        if (isMutable) type = new ReferenceDescriptor(type);
+        if (match(HUH)) type = type.toNullable();
 
         return type;
     }
@@ -295,6 +301,11 @@ public final class Parser {
             final var operator = previous();
             final var value = assignment();
 
+            if (expr instanceof Expr.Index index) {
+                if (operator.type() != EQUAL) error(operator, "Indexed assignment only supports '='.");
+                return new Expr.IndexAssignment(index.array, index.index, value, TypeDescriptor.ofUnit());
+            }
+
             // left assign_op right === left = left op right
             if (expr instanceof Expr.Variable variable) {
                 final var name = variable.name;
@@ -435,6 +446,14 @@ public final class Parser {
             final var token = previous();
             if (match(LEFT_PAREN)) {
                 expr = finishCall(token);
+            } else if (match(LEFT_BRACKET)) {
+                final var index = expression();
+                consume(RIGHT_BRACKET, "Expect ']' after array index.");
+                expr = new Expr.Index(expr, index, TypeDescriptor.ofInfer());
+            } else if (match(DOT)) {
+                final var property = consume(IDENTIFIER, "Expect array property name.");
+                if (!property.lexeme().equals("length")) error(property, "Unknown array property.");
+                expr = new Expr.ArrayLength(expr, TypeDescriptor.ofInt());
             } else {
                 break;
             }
@@ -461,6 +480,16 @@ public final class Parser {
     }
 
     private Expr primary() {
+        if (match(LEFT_BRACKET)) {
+            final var elements = new ArrayList<Expr>();
+            if (check(RIGHT_BRACKET)) error(peek(), "Array literals must initialize at least one element.");
+            do {
+                elements.add(expression());
+            } while (match(COMMA));
+            consume(RIGHT_BRACKET, "Expect ']' after array elements.");
+            return new Expr.ArrayLiteral(elements, TypeDescriptor.ofInfer());
+        }
+
         if (match(FALSE)) return new Expr.Literal(false, TypeDescriptor.ofBoolean());
         if (match(TRUE))  return new Expr.Literal(true,  TypeDescriptor.ofBoolean());
         if (match(NULL))  return new Expr.Literal(null, TypeDescriptor.ofNull());

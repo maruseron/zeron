@@ -50,6 +50,64 @@ public sealed interface Expr {
         }
     }
 
+    final class ArrayLiteral implements Expr {
+        public final List<Expr> elements;
+        private TypeDescriptor type;
+
+        public ArrayLiteral(List<Expr> elements, TypeDescriptor type) {
+            this.elements = List.copyOf(elements);
+            this.type = type;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(TypeDescriptor type) { this.type = type; }
+    }
+
+    final class Index implements Expr {
+        public final Expr array;
+        public final Expr index;
+        private TypeDescriptor type;
+
+        public Index(Expr array, Expr index, TypeDescriptor type) {
+            this.array = array;
+            this.index = index;
+            this.type = type;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(TypeDescriptor type) { this.type = type; }
+    }
+
+    final class IndexAssignment implements Expr {
+        public final Expr array;
+        public final Expr index;
+        public final Expr value;
+        private TypeDescriptor type;
+
+        public IndexAssignment(Expr array, Expr index, Expr value, TypeDescriptor type) {
+            this.array = array;
+            this.index = index;
+            this.value = value;
+            this.type = type;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(TypeDescriptor type) { this.type = type; }
+    }
+
+    final class ArrayLength implements Expr {
+        public final Expr array;
+        private TypeDescriptor type;
+
+        public ArrayLength(Expr array, TypeDescriptor type) {
+            this.array = array;
+            this.type = type;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(TypeDescriptor type) { this.type = type; }
+    }
+
     final class Binary implements Expr {
         public final Expr left;
         public final Token operator;

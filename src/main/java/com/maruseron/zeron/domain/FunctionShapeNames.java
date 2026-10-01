@@ -7,7 +7,7 @@ import java.util.HexFormat;
 
 public final class FunctionShapeNames {
     private static final String INTERFACE_PREFIX =
-            "com.maruseron.zeron.runtime.lambda.Lambda$V1_";
+            "Lambda$V1_";
 
     private FunctionShapeNames() {}
 

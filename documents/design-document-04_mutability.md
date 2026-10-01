@@ -16,9 +16,11 @@ The language overview in `design-document-00.md` already shows both ideas:
 - `let mut accumulator = 0` makes a binding reassignable.
 - `&Person` and a `mut` method/receiver sketch describe permission to mutate an object.
 
-Binding reassignment is implemented as a separate policy. The parser records `let mut` as `BindingMutability.REASSIGNABLE` and ordinary `let` as `BindingMutability.IMMUTABLE`. The resolver rejects writes to immutable bindings, the interpreter retains a runtime guard, and the compiler emits local/global assignment stores. Scoped symbols restore shadowed bindings when a nested scope ends.
+Binding reassignment is implemented as a separate policy. The parser records `let mut` as `BindingMutability.REASSIGNABLE` and ordinary `let` as `BindingMutability.IMMUTABLE`. The resolver rejects writes to immutable bindings, and the compiler emits local/global assignment stores. Scoped symbols restore shadowed bindings when a nested scope ends. Zeron uses the compiler backend; there is no reference interpreter or runtime assignment backstop.
 
-Reference mutation capability is still unimplemented. The type parser consumes `&` into a local variable but does not preserve it in the resulting type.
+Reference-view capability is preserved in resolved types and enforced for array-slot writes and
+mutable-to-read-only projections, including function types. Mutating class members remain
+unimplemented because classes and member dispatch are not yet part of the language.
 
 ## Recommendation A: Binding Reassignment
 
@@ -33,7 +35,7 @@ let mut count = 0;   // binding can be reassigned
 
 Represent this as binding metadata, not as a type modifier. Prefer a positively named concept such as `BindingMutability` with `IMMUTABLE` and `REASSIGNABLE`, rather than storing the inverse `isFinal` boolean throughout the compiler. The declaration AST and resolved binding should carry that policy.
 
-The resolver should reject assignment to an immutable binding. The interpreter should retain the same check as a runtime backstop. The compiler should lower the same policy for local variables and global fields; JVM `final` is useful for fields, but it is not a substitute for source-level validation of every assignment.
+The resolver rejects assignment to an immutable binding. The compiler lowers the same policy for local variables and global fields; JVM `final` is useful for fields, but it is not a substitute for source-level validation of every assignment.
 
 Reassignment should preserve the declared type. For example, `let mut n: Int? = 1; n = null;` changes the binding's value but does not change its static type from `Int?`.
 
@@ -78,11 +80,11 @@ On the JVM, these permissions normally need no new runtime class representation:
 
 ## Recommended Implementation Order
 
-1. **Binding reassignment baseline: implemented.** The AST and bindings now use an explicit policy; resolver, interpreter, and compiler handle reassignment, with sample coverage for local/global writes and shadow restoration. Add dedicated automated tests when a test framework is established.
-2. **Do not implement `&T` as a no-op.** Until the class/member model can express mutating operations, either reject `&` with a clear unsupported-feature diagnostic or leave it only in design documents. Do not consume and discard it during parsing.
+1. **Binding reassignment baseline: implemented.** The AST and bindings use an explicit policy; resolver and compiler handle reassignment, with sample coverage for local/global writes and shadow restoration.
+2. **Preserve `&T` in the type model: implemented.** Reference capability is resolved and enforced for arrays and function-view projection. Class/member mutation semantics remain future work.
 3. **Specify class mutation operations.** Decide which declarations are mutating, how setters and fields participate, and whether methods overload by receiver capability.
-4. **Add mutation capability to resolved types.** Define allowed conversions (`&T` to read-only `T`, not implicit `T` to `&T`) and enforce them at calls, assignments, and member access.
-5. **Add tests around the distinction.** Cover an immutable binding holding a mutable reference, a reassignable binding holding a read-only reference, mutation through a mutable receiver, and rejection through a read-only receiver.
+4. **Extend capability checks to class members.** The type model and one-way projection are implemented; once classes exist, enforce receiver capability at method calls, assignments, and member access.
+5. **Expand tests around the distinction.** Current array and function-view tests cover projection and mutable slot access. Add class-member cases when that feature exists, while keeping binding reassignment independent.
 
 ## Design Decision
 

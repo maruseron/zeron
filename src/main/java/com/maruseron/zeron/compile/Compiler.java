@@ -37,6 +37,8 @@ public final class Compiler {
     private final Map<Expr.Lambda, String> lambdaMethodNames = new IdentityHashMap<>();
     private final Map<Expr.Lambda, List<Token>> lambdaCaptures = new IdentityHashMap<>();
     private final Map<Expr.Lambda, List<TypeDescriptor>> lambdaCaptureTypes = new IdentityHashMap<>();
+    private record FunctionAdapterKey(FunctionDescriptor source, FunctionDescriptor target) {}
+    private final Map<FunctionAdapterKey, String> functionAdapterNames = new LinkedHashMap<>();
     private Map<String, TypeDescriptor> activeCaptureTypes;
     private final String mainClassName;
     private SymbolTable symbols = null;
@@ -130,15 +132,16 @@ public final class Compiler {
     private void collectFunctionShapes(final TypeDescriptor type) {
         switch (type) {
             case FunctionDescriptor function -> {
-                final var shapeKey = FunctionShapeKey.of(function);
+                final var erasedFunction = (FunctionDescriptor) TypeSubstitution.erase(function);
+                final var shapeKey = FunctionShapeKey.of(erasedFunction);
                 final var interfaceName = FunctionShapeNames.interfaceName(shapeKey);
                 final var previousKey = lambdaShapeNames.putIfAbsent(interfaceName, shapeKey);
                 if (previousKey != null && !previousKey.equals(shapeKey)) {
                     throw new IllegalStateException("Function shape digest collision for " + interfaceName);
                 }
-                lambdaShapes.putIfAbsent(shapeKey, function);
-                for (final var parameter : function.parameters()) collectFunctionShapes(parameter);
-                collectFunctionShapes(function.returnType());
+                lambdaShapes.putIfAbsent(shapeKey, erasedFunction);
+                for (final var parameter : erasedFunction.parameters()) collectFunctionShapes(parameter);
+                collectFunctionShapes(erasedFunction.returnType());
             }
             case ArrayDescriptor array -> collectFunctionShapes(array.elementType());
             case NullableDescriptor nullable -> collectFunctionShapes(nullable.baseType());
@@ -165,7 +168,6 @@ public final class Compiler {
             case Expr.ArrayLiteral literal -> {
                 for (final var element : literal.elements) collectLambdaShapes(element);
             }
-            case Expr.ArrayLength length -> collectLambdaShapes(length.array);
             case Expr.Index index -> {
                 collectLambdaShapes(index.array);
                 collectLambdaShapes(index.index);
@@ -190,6 +192,7 @@ public final class Compiler {
                 collectLambdaShapes(binary.right);
             }
             case Expr.Call call -> {
+                collectFunctionAdapters(call);
                 for (final var argument : call.arguments) collectLambdaShapes(argument);
             }
             case Expr.Grouping grouping -> collectLambdaShapes(grouping.expression);
@@ -237,9 +240,8 @@ public final class Compiler {
             if (contractName.equals(mainClassName)) {
                 throw new IllegalStateException("Contract name conflicts with generated program class: " + contractName);
             }
-            final var contractDesc = ClassDesc.of(contractName);
             classFile.buildTo(OUTPUT_DIRECTORY.resolve(contractName + ".class").toAbsolutePath(),
-                    contractDesc,
+                    ClassDesc.of(contractName),
                     builder -> {
                         builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_INTERFACE | ClassFile.ACC_ABSTRACT);
                         for (final var method : contract.methods()) {
@@ -285,8 +287,7 @@ public final class Compiler {
                     for (final var method : declaration.methods()) {
                         final var flags = method.isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE;
                         builder.withMethodBody(method.name().lexeme(),
-                                toJavaMethodDescriptor(method.typeDescriptor()),
-                                flags,
+                                toJavaMethodDescriptor(method.typeDescriptor()), flags,
                                 code -> emitClassMethod(code, declaration, method));
                     }
                 });
@@ -456,6 +457,19 @@ public final class Compiler {
                         ClassFile.ACC_PRIVATE | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                         composer -> emitLambdaImplementation(composer, lambda));
                 }
+
+                for (final var adapter : functionAdapterNames.entrySet()) {
+                    final var sourceType = adapter.getKey().source();
+                    final var targetType = adapter.getKey().target();
+                    final var parameters = new ArrayList<TypeDescriptor>();
+                    parameters.add(sourceType);
+                    parameters.addAll(targetType.parameters());
+                    classBuilder.withMethodBody(
+                        adapter.getValue(),
+                        toJavaMethodDescriptor(targetType, parameters),
+                        ClassFile.ACC_PRIVATE | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                        composer -> emitFunctionAdapterImplementation(composer, sourceType, targetType));
+                }
     }
 
     public void emitStmts(final CodeBuilder builder, final List<Stmt> statements) {
@@ -596,11 +610,6 @@ public final class Compiler {
                 }
                 lastEmittedType = literal.getType();
             }
-            case Expr.ArrayLength length -> {
-                emitExpr(composer, length.array);
-                composer.arraylength();
-                lastEmittedType = TypeDescriptor.ofInt();
-            }
             case Expr.Index index -> {
                 emitExpr(composer, index.array);
                 composer.dup();
@@ -705,7 +714,7 @@ public final class Compiler {
                     emitConversion(composer, lastEmittedType, captureTypes.get(i));
                 }
 
-                final var generatedInterface = ClassDesc.of(FunctionShapeNames.interfaceName(functionType));
+                final var generatedInterface = TypeDescriptor.toJavaClassDesc(functionType);
                 final var samMethodType = toJavaMethodDescriptor(functionType);
                 final var implementationType = toJavaMethodDescriptor(functionType, implementationParameters);
                 final var metafactoryType = MethodTypeDesc.of(
@@ -843,12 +852,21 @@ public final class Compiler {
     private void emitCall(final CodeBuilder composer, final Expr.Call call) {
         if (!symbols.containsSymbol(call.callee)) {
             final var functionType = (FunctionDescriptor) symbols.getFunction(call.callee).type();
+            final var runtimeType = functionType.isGeneric()
+                    ? (FunctionDescriptor) TypeSubstitution.erase(functionType)
+                    : functionType;
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(composer, call.arguments.get(i));
                 emitConversion(composer, lastEmittedType, functionType.parameters().get(i));
             }
-            composer.invokestatic(ClassDesc.of(mainClassName), call.callee.lexeme(), toJavaMethodDescriptor(functionType));
-            lastEmittedType = functionType.returnType();
+            composer.invokestatic(ClassDesc.of(mainClassName), call.callee.lexeme(), toJavaMethodDescriptor(runtimeType));
+            if (functionType.isGeneric()) {
+                final var instantiated = TypeSubstitution.erase(call.getType());
+                emitConversion(composer, runtimeType.returnType(), instantiated);
+                lastEmittedType = instantiated;
+            } else {
+                lastEmittedType = functionType.returnType();
+            }
             return;
         }
 
@@ -910,7 +928,7 @@ public final class Compiler {
                     toJavaMethodDescriptor(descriptor));
         } else if (!classMethod.isPublic()) {
             composer.invokespecial(ClassDesc.of(ownerName), call.name.lexeme(),
-                toJavaMethodDescriptor(descriptor));
+                    toJavaMethodDescriptor(descriptor));
         } else {
             composer.invokevirtual(ClassDesc.of(ownerName), call.name.lexeme(),
                     toJavaMethodDescriptor(descriptor));
@@ -947,9 +965,9 @@ public final class Compiler {
         localSlotOffset = 0;
         currentReturnType = functionType.returnType();
         try {
-            for (final var capture : captures) {
-                final var captureType = lambdaCaptureTypes.get(lambda)
-                        .get(captures.indexOf(capture));
+            for (int i = 0; i < captures.size(); i++) {
+                final var capture = captures.get(i);
+                final var captureType = lambdaCaptureTypes.get(lambda).get(i);
                 symbols.declareSymbol(Resolver.SYNTHETIC_VAR, capture, captureType, BindingMutability.IMMUTABLE);
                 symbols.define(capture);
             }
@@ -1005,7 +1023,9 @@ public final class Compiler {
         } finally {
             activeCaptureTypes = previousCaptureTypes;
         }
-        lambdaCaptureTypes.put(lambda, captured.stream().map(token -> captureTypes.get(token.lexeme())).toList());
+        lambdaCaptureTypes.put(lambda, captured.stream()
+                .map(token -> captureTypes.get(token.lexeme()))
+                .toList());
         return captured;
     }
 
@@ -1082,7 +1102,6 @@ public final class Compiler {
             case Expr.ArrayLiteral literal -> {
                 for (final var element : literal.elements) collectCapturedVariables(element, localNames, captured, seen);
             }
-            case Expr.ArrayLength length -> collectCapturedVariables(length.array, localNames, captured, seen);
             case Expr.Index index -> {
                 collectCapturedVariables(index.array, localNames, captured, seen);
                 collectCapturedVariables(index.index, localNames, captured, seen);
@@ -1140,6 +1159,36 @@ public final class Compiler {
                 .map(TypeDescriptor::toJavaClassDesc)
                 .toList();
         return MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(functionType.returnType()), javaParameters);
+    }
+
+    private void collectFunctionAdapters(final Expr.Call call) {
+        final var genericType = call.genericFunctionType();
+        if (genericType == null) return;
+
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var expected = genericType.parameters().get(i);
+            final var actual = call.arguments.get(i).getType();
+            if (expected instanceof FunctionDescriptor expectedFunction
+                    && TypeSubstitution.containsTypeParameter(expectedFunction)
+                    && actual instanceof FunctionDescriptor actualFunction) {
+                registerFunctionAdapter(actualFunction,
+                        (FunctionDescriptor) TypeSubstitution.erase(expectedFunction));
+            }
+        }
+
+        if (genericType.returnType() instanceof FunctionDescriptor expectedFunction
+                && TypeSubstitution.containsTypeParameter(expectedFunction)
+                && call.getType() instanceof FunctionDescriptor actualFunction) {
+            registerFunctionAdapter(
+                    (FunctionDescriptor) TypeSubstitution.erase(expectedFunction), actualFunction);
+        }
+    }
+
+    private void registerFunctionAdapter(final FunctionDescriptor source,
+                                         final FunctionDescriptor target) {
+        if (TypeDescriptor.toJavaClassDesc(source).equals(TypeDescriptor.toJavaClassDesc(target))) return;
+        functionAdapterNames.computeIfAbsent(new FunctionAdapterKey(source, target),
+                _ -> "$adapter$" + functionAdapterNames.size());
     }
 
     private void emitVariable(final CodeBuilder composer, final Token name) {
@@ -1208,6 +1257,17 @@ public final class Compiler {
     private void emitConversion(final CodeBuilder composer,
                                 final TypeDescriptor sourceType,
                                 final TypeDescriptor targetType) {
+        if (sourceType instanceof FunctionDescriptor sourceFunction
+                && targetType instanceof FunctionDescriptor targetFunction) {
+            final var erasedSource = (FunctionDescriptor) TypeSubstitution.erase(sourceFunction);
+            final var erasedTarget = (FunctionDescriptor) TypeSubstitution.erase(targetFunction);
+            if (!TypeDescriptor.toJavaClassDesc(erasedSource)
+                    .equals(TypeDescriptor.toJavaClassDesc(erasedTarget))) {
+                emitFunctionAdapter(composer, erasedSource, erasedTarget);
+            }
+            lastEmittedType = targetType;
+            return;
+        }
         if (sourceType.equals(targetType) || sourceType instanceof NullDescriptor && targetType.isNullable()
             || resolver.isContractProjection(targetType, sourceType)) {
             lastEmittedType = targetType;
@@ -1226,7 +1286,107 @@ public final class Compiler {
             lastEmittedType = targetType;
             return;
         }
+        final var sourceJavaType = TypeDescriptor.toJavaClassDesc(sourceType);
+        final var targetJavaType = TypeDescriptor.toJavaClassDesc(targetType);
+        if (sourceJavaType.equals(targetJavaType)) {
+            lastEmittedType = targetType;
+            return;
+        }
+        if (targetJavaType.equals(ConstantDescs.CD_Object)) {
+            emitBox(composer, sourceType);
+            lastEmittedType = targetType;
+            return;
+        }
+        if (sourceJavaType.equals(ConstantDescs.CD_Object)) {
+            emitUnboxOrCast(composer, targetType);
+            lastEmittedType = targetType;
+            return;
+        }
         throw new IllegalStateException("Unsupported conversion from " + sourceType + " to " + targetType);
+    }
+
+    private void emitFunctionAdapter(final CodeBuilder composer,
+                                    final FunctionDescriptor sourceType,
+                                    final FunctionDescriptor targetType) {
+        final var sourceInterface = TypeDescriptor.toJavaClassDesc(sourceType);
+        final var targetInterface = TypeDescriptor.toJavaClassDesc(targetType);
+        final var targetMethodType = toJavaMethodDescriptor(targetType);
+        final var adapterName = functionAdapterNames.get(new FunctionAdapterKey(sourceType, targetType));
+        if (adapterName == null) {
+            throw new IllegalStateException("Missing function adapter for " + sourceType + " to " + targetType);
+        }
+        final var implementationParameters = new ArrayList<TypeDescriptor>();
+        implementationParameters.add(sourceType);
+        implementationParameters.addAll(targetType.parameters());
+        final var metafactoryType = MethodTypeDesc.of(
+                ClassDesc.of("java.lang.invoke.CallSite"),
+                ClassDesc.of("java.lang.invoke.MethodHandles$Lookup"),
+                ConstantDescs.CD_String,
+                ClassDesc.of("java.lang.invoke.MethodType"),
+                ClassDesc.of("java.lang.invoke.MethodType"),
+                ClassDesc.of("java.lang.invoke.MethodHandle"),
+                ClassDesc.of("java.lang.invoke.MethodType"));
+        final var metafactory = MethodHandleDesc.of(
+                DirectMethodHandleDesc.Kind.STATIC,
+                ClassDesc.of("java.lang.invoke.LambdaMetafactory"),
+                "metafactory",
+                metafactoryType.descriptorString());
+        final var implementation = MethodHandleDesc.of(
+            DirectMethodHandleDesc.Kind.STATIC,
+            ClassDesc.of(mainClassName),
+            adapterName,
+            toJavaMethodDescriptor(targetType, implementationParameters).descriptorString());
+        composer.invokedynamic(DynamicCallSiteDesc.of(
+                metafactory,
+                "invoke",
+                MethodTypeDesc.of(targetInterface, sourceInterface),
+                targetMethodType,
+                implementation,
+            targetMethodType));
+    }
+
+        private void emitFunctionAdapterImplementation(final CodeBuilder composer,
+                               final FunctionDescriptor sourceType,
+                               final FunctionDescriptor targetType) {
+        composer.aload(0);
+        var slot = 1;
+        for (int i = 0; i < targetType.arity(); i++) {
+            final var targetParameter = targetType.parameters().get(i);
+            loadLocal(composer, slot, targetParameter);
+            emitConversion(composer, targetParameter, sourceType.parameters().get(i));
+            slot += TypeDescriptor.toJavaClassDesc(targetParameter).descriptorString().equals("D") ? 2 : 1;
+        }
+        composer.invokeinterface(TypeDescriptor.toJavaClassDesc(sourceType), "invoke",
+            toJavaMethodDescriptor(sourceType));
+        emitConversion(composer, sourceType.returnType(), targetType.returnType());
+        composer.return_(TypeKind.fromDescriptor(
+            TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));
+    }
+
+    private void emitUnboxOrCast(final CodeBuilder composer, final TypeDescriptor targetType) {
+        final var targetDescriptor = TypeDescriptor.toJavaClassDesc(targetType).descriptorString();
+        switch (targetDescriptor) {
+            case "I" -> {
+                composer.checkcast(ConstantDescs.CD_Integer);
+                composer.invokevirtual(ClassDesc.of("java.lang.Integer"), "intValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_int));
+            }
+            case "D" -> {
+                composer.checkcast(ClassDesc.of("java.lang.Double"));
+                composer.invokevirtual(ClassDesc.of("java.lang.Double"), "doubleValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_double));
+            }
+            case "Z" -> {
+                composer.checkcast(ClassDesc.of("java.lang.Boolean"));
+                composer.invokevirtual(ClassDesc.of("java.lang.Boolean"), "booleanValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_boolean));
+            }
+            default -> composer.checkcast(targetJavaClass(targetType));
+        }
+    }
+
+    private ClassDesc targetJavaClass(final TypeDescriptor targetType) {
+        return TypeDescriptor.toJavaClassDesc(targetType);
     }
 
     private void emitArrayBoundsCheck(final CodeBuilder composer) {

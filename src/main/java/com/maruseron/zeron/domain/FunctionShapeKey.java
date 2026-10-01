@@ -42,6 +42,10 @@ public final class FunctionShapeKey {
             case UnitDescriptor _ -> encoding.append("u;");
             case NeverDescriptor _ -> encoding.append("v;");
             case NullDescriptor _ -> encoding.append("z;");
+            case TypeParameterDescriptor parameter -> {
+                encoding.append('p').append(parameter.scopeId()).append(':');
+                appendNominalName(encoding, parameter.name());
+            }
             case NominalDescriptor nominal -> appendNominal(encoding, nominal);
             case NullableDescriptor nullable -> {
                 encoding.append("q(");
@@ -73,11 +77,16 @@ public final class FunctionShapeKey {
 
     private static void appendNominal(final StringBuilder encoding,
                                      final NominalDescriptor nominal) {
-        final var name = nominal.name().getBytes(StandardCharsets.UTF_8);
+        appendNominalName(encoding, nominal.name());
+    }
+
+    private static void appendNominalName(final StringBuilder encoding,
+                                          final String value) {
+        final var name = value.getBytes(StandardCharsets.UTF_8);
         encoding.append('n').append(name.length).append(':');
-        for (final byte value : name) {
-            encoding.append(Character.forDigit((value >>> 4) & 0x0f, 16));
-            encoding.append(Character.forDigit(value & 0x0f, 16));
+        for (final byte nameByte : name) {
+            encoding.append(Character.forDigit((nameByte >>> 4) & 0x0f, 16));
+            encoding.append(Character.forDigit(nameByte & 0x0f, 16));
         }
         encoding.append(';');
     }

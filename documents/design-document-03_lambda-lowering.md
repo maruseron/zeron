@@ -38,6 +38,20 @@ The design should prefer the following rules:
 
 This avoids a split personality between ordinary methods and lambdas: methods do not implicitly close over mutable locals, so lambdas should not either. If mutation is needed, it should be expressed through an explicitly shared object or a first-class reference/cell construct.
 
+### Generic function callback boundaries
+
+Generic top-level functions have explicit return types and are instantiated at direct call sites by
+inference or explicit type arguments. Type variables are erased to `Object` in the JVM method
+descriptor, with primitive boxing and unboxing at call boundaries. Generic functions are not
+first-class values, and lambdas themselves remain monomorphic.
+
+When a generic signature contains a callback such as `(T) -> R`, its runtime SAM shape uses erased
+parameter and return descriptors. The compiler emits private static bridge helpers at call sites
+that cross between this erased SAM and a concrete lambda shape. These helpers perform the casts,
+boxing, and unboxing explicitly; `LambdaMetafactory` still creates the adapter object. The same
+boundary applies when a generic function returns a callback involving its type variables. Ordinary
+concrete function-shape identities remain unchanged.
+
 ### First-class lambda typing
 
 Lambda resolution is now based on the original expression node, not a detached copy. A standalone lambda can be inferred, bound, and reused as a first-class value while preserving the same resolved `FunctionDescriptor` on both the AST node and the binding.
@@ -56,7 +70,7 @@ The current implementation remains a prototype for deferred contextual inference
 
 The compiler now uses `FunctionShapeKey` as a versioned recursive semantic identity. It encodes arity, parameter order, return type, nested function signatures, nullability, generic arguments, and nominal names without including the source function name. Generated interface names are derived separately from a SHA-256 digest of that key, and the compiler checks that a generated name has not already been associated with a different full key.
 
-The JVM method descriptor remains a separate lowering. For example, `String` and `String?` have different semantic shape keys but currently lower to the same JVM reference descriptor; nullable primitives lower to wrapper descriptors. This separation keeps source type identity from being inferred from the generated interface name or JVM ABI.
+The JVM method descriptor remains a separate lowering. For example, `String` and `String?` have different semantic shape keys but currently lower to the same JVM reference descriptor; nullable primitives lower to wrapper descriptors. Generic function signatures erase type variables and use erased callback shapes, while generic classes/contracts remain unsupported. This separation keeps source type identity from being inferred from the generated interface name or JVM ABI.
 
 Nominal descriptors currently contain only a type name, not a package/module-qualified symbol identity. The key therefore distinguishes the names the current type model provides, but package-qualified identity must be added when the class/module system defines it. Canonical encoding generic arguments does not imply that generic JVM lowering is implemented.
 

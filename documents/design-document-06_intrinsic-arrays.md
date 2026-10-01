@@ -132,8 +132,8 @@ remain visible to the resolver; only its execution is special.
 
 - `ArrayDescriptor` carries the element type and is invariant by descriptor equality.
 - The parser recognizes the built-in `Array` constructor and the `length` property.
-- Reads, writes, literals, and length are distinct AST operations; `ArrayLength` is the current
-  dedicated node for `.length`.
+- Reads, writes, and literals have distinct AST operations. `.length` is represented as a property
+  expression and resolved as the built-in array length operation when its receiver is an array.
 - The resolver checks element compatibility, requires `Int` indexes, and enforces mutable views on
   writes. Compiled operations use `Objects.checkIndex`.
 - The compiler lowers all arrays to boxed `Object[]`.
@@ -142,8 +142,8 @@ remain visible to the resolver; only its execution is special.
 
 ### Target architecture: registered intrinsics
 
-The current parser spelling checks and `ArrayLength` node are a small initial implementation, not
-the intended long-term dispatch model. Avoid spreading more behavior-specific checks across the
+The current parser and resolver spelling checks are a small initial implementation, not the intended
+long-term dispatch model. Avoid spreading more behavior-specific checks across the
 parser, resolver, and compiler. That couples syntax, type identity, and JVM lowering,
 and makes user-defined types with the same name hazardous.
 
@@ -180,16 +180,15 @@ One future direction is a signature-only, class-like declaration (sometimes desc
 those signatures to stable intrinsic IDs and backend implementations. The term and syntax are not
 defined in this repository; an intrinsic contract or catalogue may be a better fit. In either form,
 `.length` should resolve to a generic intrinsic operation such as `array.length`, rather than
-requiring a dedicated `ArrayLength` AST case. The same mechanism could later bind indexed get/set
+  requiring a spelling-specific array check in property resolution. The same mechanism could later bind indexed get/set
 operations and host-provided implementations.
 
-The initial parser represents literals, indexed reads, indexed writes, and `.length` explicitly; the
-resolver records their types and checks capabilities. The compiler lowers them to `Object[]`
+The initial parser represents literals, indexed reads, indexed writes, and properties; the resolver
+recognizes array `.length`, records operation types, and checks capabilities. The compiler lowers them to `Object[]`
 operations and `Objects.checkIndex` bounds checks. As the intrinsic registry is introduced,
 resolution should produce a typed intrinsic operation with a stable ID, and the compiler should
-dispatch on that ID. This would remove the
-dedicated `ArrayLength` AST case and keep operation identity out of parser spelling and backend
-type-checking.
+dispatch on that ID. This would replace spelling-based intrinsic recognition and keep operation
+identity out of parser spelling and backend type-checking.
 
 ### JVM representation choices
 
@@ -215,7 +214,7 @@ representation has its own runtime store checks.
   mutable-to-read-only projection and no implicit reverse conversion. `let mut` remains only a
   binding-reassignment permission.
 4. **Add syntax and typed AST operations.** Implemented for non-empty literals, indexed reads,
-  indexed assignment, and `.length`. `ArrayLength` remains a dedicated transitional node.
+  indexed assignment, and `.length`, represented through the general property expression.
 5. **Add resolver checks and intrinsic identities.** Element and index checks and mutable-write
   enforcement are implemented. Stable intrinsic IDs and signature registration remain future work.
 6. **Compiler execution: implemented.** The compiler backend uses `Object[]`, boxed primitive
@@ -224,9 +223,9 @@ representation has its own runtime store checks.
 7. **Test the contract end to end.** Tests cover projection, invariance, nullable slots, primitive
   boxing/unboxing, aliasing, bounds failures, and generated-code execution. Broader interoperability,
   all reference/function element combinations, and descriptor inspection remain follow-up coverage.
-8. **Replace transitional AST cases.** Design a stable intrinsic registry/catalogue, decide whether
-  intrinsic contracts should have source declarations (possibly an expected-class form), then
-  lower `.length` and indexed operations to generic resolved intrinsic operations.
+8. **Replace spelling-based intrinsic handling.** Design a stable intrinsic registry/catalogue,
+  decide whether intrinsic contracts should have source declarations (possibly an expected-class
+  form), then lower `.length` and indexed operations to generic resolved intrinsic operations.
 
 ## Acceptance Criteria
 

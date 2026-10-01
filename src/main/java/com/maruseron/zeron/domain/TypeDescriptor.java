@@ -9,7 +9,8 @@ public sealed interface TypeDescriptor
         permits InferDescriptor, NeverDescriptor, UnitDescriptor,
                 IntDescriptor, FloatDescriptor, BooleanDescriptor, StringDescriptor,
                 NominalDescriptor, FunctionDescriptor, GenericDescriptor, ArrayDescriptor,
-                NullableDescriptor, NullDescriptor, ReferenceDescriptor {
+                NullableDescriptor, NullDescriptor, ReferenceDescriptor,
+                TypeParameterDescriptor {
 
     // Contract
     String name();
@@ -113,6 +114,13 @@ public sealed interface TypeDescriptor
         return new FunctionDescriptor(name, returnType, List.of(parameterTypes));
     }
 
+    static FunctionDescriptor genericFunctionOf(final String name,
+                                                final TypeDescriptor returnType,
+                                                final List<TypeDescriptor> parameterTypes,
+                                                final List<TypeParameterDescriptor> typeParameters) {
+        return new FunctionDescriptor(name, returnType, parameterTypes, typeParameters);
+    }
+
     static FunctionDescriptor lambdaOf(final TypeDescriptor returnType,
                                        final TypeDescriptor parameterType) {
         return functionOf("", returnType, parameterType == null
@@ -132,7 +140,9 @@ public sealed interface TypeDescriptor
             case BooleanDescriptor  bd -> ConstantDescs.CD_boolean;
             case StringDescriptor   sd -> ConstantDescs.CD_String;
             case NominalDescriptor  nd -> ClassDesc.of(nd.name());
-            case FunctionDescriptor fd -> ClassDesc.of(FunctionShapeNames.interfaceName(fd));
+            case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
+                case FunctionDescriptor fd -> ClassDesc.of(FunctionShapeNames.interfaceName(
+                    (FunctionDescriptor) TypeSubstitution.erase(fd)));
             case ArrayDescriptor _ -> ConstantDescs.CD_Object.arrayType();
             case ReferenceDescriptor rd -> toJavaClassDesc(rd.baseType());
             case NullableDescriptor nd -> switch (nd.baseType()) {
@@ -169,6 +179,7 @@ public sealed interface TypeDescriptor
             case NominalDescriptor  nd ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: NominalDescriptor to java.constant.ClassDesc");
+                case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
             case FunctionDescriptor fd ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");

@@ -1,6 +1,7 @@
 package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.List;
@@ -144,19 +145,6 @@ public sealed interface Expr {
         public void setType(TypeDescriptor type) { this.type = type; }
     }
 
-    final class ArrayLength implements Expr {
-        public final Expr array;
-        private TypeDescriptor type;
-
-        public ArrayLength(Expr array, TypeDescriptor type) {
-            this.array = array;
-            this.type = type;
-        }
-
-        public TypeDescriptor getType() { return type; }
-        public void setType(TypeDescriptor type) { this.type = type; }
-    }
-
     final class Binary implements Expr {
         public final Expr left;
         public final Token operator;
@@ -204,12 +192,16 @@ public sealed interface Expr {
         public final Token callee;
         public final Token paren;
         public final List<Expr> arguments;
+        public final List<TypeDescriptor> explicitTypeArguments;
         private TypeDescriptor type;
+        private FunctionDescriptor genericFunctionType;
 
-        public Call(Token callee, Token paren, List<Expr> arguments, TypeDescriptor type) {
+        public Call(Token callee, Token paren, List<Expr> arguments,
+                    List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
             this.callee = callee;
             this.paren = paren;
             this.arguments = arguments;
+            this.explicitTypeArguments = List.copyOf(explicitTypeArguments);
             this.type = type;
         }
 
@@ -219,6 +211,14 @@ public sealed interface Expr {
 
         public void setType(TypeDescriptor type) {
             this.type = type;
+        }
+
+        public FunctionDescriptor genericFunctionType() {
+            return genericFunctionType;
+        }
+
+        public void setGenericFunctionType(final FunctionDescriptor functionType) {
+            this.genericFunctionType = functionType;
         }
 
         public boolean equals(Object obj) {

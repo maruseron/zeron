@@ -51,16 +51,16 @@ public final class Resolver {
     private void registerTypes(final List<Stmt> statements) {
         for (final var statement : statements) {
             if (statement instanceof Stmt.ClassDecl declaration) {
-                registerType(declaration.name(), declaration);
+                registerType(declaration.name());
                 classes.put(declaration.name().lexeme(), declaration);
             } else if (statement instanceof Stmt.ContractDecl declaration) {
-                registerType(declaration.name(), declaration);
+                registerType(declaration.name());
                 contracts.put(declaration.name().lexeme(), declaration);
             }
         }
     }
 
-    private void registerType(final Token name, final Stmt declaration) {
+    private void registerType(final Token name) {
         final var builtin = Set.of("Never", "Unit", "Int", "Float", "Boolean", "String", "Array");
         if (builtin.contains(name.lexeme()) || !types.add(name.lexeme())) {
             Zeron.resolutionError(new ResolutionError(name,
@@ -352,7 +352,6 @@ public final class Resolver {
             case Expr.ArrayLiteral literal -> {
                 for (final var element : literal.elements) walkCaptureUsage(element, localNames);
             }
-            case Expr.ArrayLength length -> walkCaptureUsage(length.array, localNames);
             case Expr.Index index -> {
                 walkCaptureUsage(index.array, localNames);
                 walkCaptureUsage(index.index, localNames);
@@ -415,7 +414,7 @@ public final class Resolver {
         return switch (expr) {
             case Expr.MemberCall call -> resolveMemberCall(call);
             case Expr.PropertyAssignment assignment -> {
-                final var propertyType = resolveProperty(assignment.property);
+                resolveProperty(assignment.property);
                 final var receiverType = assignment.property.receiver.getType();
                 final var field = findField(className(receiverType), assignment.property.name);
                 if (!(receiverType instanceof ReferenceDescriptor)) {
@@ -426,9 +425,7 @@ public final class Resolver {
                 assignment.setType(TypeDescriptor.ofUnit());
                 yield TypeDescriptor.ofUnit();
             }
-                case Expr.Property property -> {
-                yield resolveProperty(property);
-            }
+            case Expr.Property property -> resolveProperty(property);
             case Expr.ArrayLiteral literal -> {
                 final var elementTypes = new ArrayList<TypeDescriptor>();
                 var elementType = (TypeDescriptor) null;
@@ -461,11 +458,6 @@ public final class Resolver {
                 final var arrayType = new ReferenceDescriptor(TypeDescriptor.arrayOf(elementType));
                 literal.setType(arrayType);
                 yield arrayType;
-            }
-            case Expr.ArrayLength length -> {
-                resolveArrayType(resolve(length.array), SYNTHETIC_IDENTIFIER);
-                length.setType(TypeDescriptor.ofInt());
-                yield TypeDescriptor.ofInt();
             }
             case Expr.Index index -> {
                 final var arrayType = resolveArrayType(resolve(index.array), SYNTHETIC_IDENTIFIER);
@@ -519,6 +511,11 @@ public final class Resolver {
                 final var refinedLeftType = refineInferredType(binary.left, leftType, rightType);
                 final var refinedRightType = refineInferredType(binary.right, rightType, leftType);
                 System.out.println("resolving binary   " + refinedLeftType + " " + binary.operator.lexeme() + " " + refinedRightType);
+                if (TypeSubstitution.containsTypeParameter(refinedLeftType)
+                    || TypeSubstitution.containsTypeParameter(refinedRightType)) {
+                    Zeron.resolutionError(new ResolutionError(binary.operator,
+                        "Operators on generic type parameters require constraints, which are not supported."));
+                }
                 if (refinedLeftType.isNullable() || refinedRightType.isNullable()
                     || refinedLeftType instanceof NullDescriptor || refinedRightType instanceof NullDescriptor) {
                     Zeron.resolutionError(new ResolutionError(binary.operator,
@@ -565,6 +562,14 @@ public final class Resolver {
                     }
                 } else {
                     descriptor = getFunction(call.callee);
+                }
+                if (descriptor.isGeneric()) {
+                    yield resolveGenericCall(call, descriptor);
+                }
+
+                if (!call.explicitTypeArguments.isEmpty()) {
+                    Zeron.resolutionError(new ResolutionError(call.callee,
+                            "This function does not declare type parameters."));
                 }
                 var parameters = descriptor.parameters();
                 System.out.print("resolving call     " + call.callee.lexeme() + parameters);
@@ -630,6 +635,10 @@ public final class Resolver {
                     TypeDescriptor.ofBoolean();
             case Expr.Unary unary -> {
                 final var operandType = resolve(unary.right);
+                if (TypeSubstitution.containsTypeParameter(operandType)) {
+                    Zeron.resolutionError(new ResolutionError(unary.operator,
+                            "Unary operators on generic type parameters require constraints, which are not supported."));
+                }
                 if (unary.operator.type() == TokenType.NOT) {
                     ensureBoolean(operandType, unary.operator);
                     unary.setType(TypeDescriptor.ofBoolean());
@@ -663,8 +672,8 @@ public final class Resolver {
             property.setType(TypeDescriptor.ofInt());
             return TypeDescriptor.ofInt();
         }
-        final var className = className(baseType);
-        final var owner = classes.get(className);
+        final var ownerName = className(baseType);
+        final var owner = classes.get(ownerName);
         if (owner == null) {
             Zeron.resolutionError(new ResolutionError(property.name, "Unknown property."));
         }
@@ -675,7 +684,7 @@ public final class Resolver {
         if (field == null) {
             Zeron.resolutionError(new ResolutionError(property.name, "Unknown field."));
         }
-        ensureFieldAccessible(property.name, className);
+        ensureFieldAccessible(property.name, ownerName);
         property.setType(field.type());
         return field.type();
     }
@@ -702,14 +711,14 @@ public final class Resolver {
         }
 
         final var receiverType = resolve(call.receiver);
-        final var className = className(receiverType);
-        final var owner = classes.get(className);
-        final Stmt.Method classMethod = owner == null ? null : owner.methods().stream()
+        final var ownerName = className(receiverType);
+        final var owner = classes.get(ownerName);
+        final var classMethod = owner == null ? null : owner.methods().stream()
                 .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
                 .findFirst()
                 .orElse(null);
-        final var contract = contracts.get(className);
-        final Stmt.ContractMethod contractMethod = contract == null ? null : contract.methods().stream()
+        final var contract = contracts.get(ownerName);
+        final var contractMethod = contract == null ? null : contract.methods().stream()
                 .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
                 .findFirst()
                 .orElse(null);
@@ -724,7 +733,7 @@ public final class Resolver {
                 ? classMethod.isMutating()
                 : contractMethod.isMutating();
         if (classMethod != null && !classMethod.isPublic()
-                && !Objects.equals(currentClassName, className)) {
+                && !Objects.equals(currentClassName, ownerName)) {
             Zeron.resolutionError(new ResolutionError(call.name, "Method is private."));
         }
         if (isMutating && !(receiverType instanceof ReferenceDescriptor)) {
@@ -810,6 +819,7 @@ public final class Resolver {
         return symbols.getSymbol(name).declaration();
     }
 
+    // TODO: fix
     private FunctionDescriptor inferLambdaType(final Expr.Lambda lambda) {
         final var enclosingLoopDepth = loopDepth;
         loopDepth = 0;
@@ -876,11 +886,12 @@ public final class Resolver {
                 }
             }
 
-            if (!(expectedType.returnType() instanceof InferDescriptor)) {
+            final var unresolvedReturn = TypeSubstitution.containsTypeParameter(expectedType.returnType());
+            if (!(expectedType.returnType() instanceof InferDescriptor) && !unresolvedReturn) {
                 ensureAssignable(expectedType.returnType(), returnType, lambda.arrow);
             }
 
-            final var resolvedType = expectedType.returnType() instanceof InferDescriptor
+            final var resolvedType = expectedType.returnType() instanceof InferDescriptor || unresolvedReturn
                     ? expectedType.toReturnType(returnType)
                     : expectedType;
             lambda.setType(resolvedType);
@@ -888,6 +899,131 @@ public final class Resolver {
         } finally {
             endScope();
             loopDepth = enclosingLoopDepth;
+        }
+    }
+
+    private TypeDescriptor resolveGenericCall(final Expr.Call call,
+                                              final FunctionDescriptor genericType) {
+        call.setGenericFunctionType(genericType);
+        final var typeParameters = genericType.typeParameters();
+        if (!call.explicitTypeArguments.isEmpty()
+                && call.explicitTypeArguments.size() != typeParameters.size()) {
+            Zeron.resolutionError(new ResolutionError(call.callee,
+                    "Expected " + typeParameters.size() + " type arguments, found "
+                            + call.explicitTypeArguments.size() + "."));
+        }
+        if (genericType.arity() != call.arguments.size()) {
+            Zeron.resolutionError(new ResolutionError(call.callee,
+                    "Expected " + genericType.arity() + " arguments, found " + call.arguments.size()));
+        }
+
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
+            final var explicitType = call.explicitTypeArguments.get(i);
+            validateType(explicitType, call.callee);
+            substitutions.put(typeParameters.get(i), explicitType);
+        }
+
+        final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var argument = call.arguments.get(i);
+            if (argument instanceof Expr.Lambda) continue;
+            resolvedArguments[i] = resolve(argument);
+            unifyType(genericType.parameters().get(i), resolvedArguments[i], substitutions, call.callee);
+        }
+
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var argument = call.arguments.get(i);
+            if (!(argument instanceof Expr.Lambda lambda)) continue;
+            final var expected = TypeSubstitution.substitute(genericType.parameters().get(i), substitutions);
+            if (!(expected instanceof FunctionDescriptor functionType)) {
+                Zeron.resolutionError(new ResolutionError(call.callee,
+                        "A lambda argument requires a function parameter type."));
+            }
+            resolvedArguments[i] = resolveLambda(lambda, (FunctionDescriptor) expected);
+            unifyType(genericType.parameters().get(i), resolvedArguments[i], substitutions, call.callee);
+        }
+
+        for (final var parameter : typeParameters) {
+            if (!substitutions.containsKey(parameter)) {
+                Zeron.resolutionError(new ResolutionError(call.callee,
+                        "Cannot infer type parameter '" + parameter.name()
+                                + "'; provide an explicit type argument."));
+            }
+        }
+
+        final var instantiatedParameters = genericType.parameters().stream()
+                .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
+                .toList();
+        for (int i = 0; i < resolvedArguments.length; i++) {
+            ensureAssignable(instantiatedParameters.get(i), resolvedArguments[i], call.callee);
+        }
+        final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
+        call.setType(instantiatedReturn);
+        return instantiatedReturn;
+    }
+
+    private void unifyType(final TypeDescriptor pattern,
+                           TypeDescriptor actual,
+                           final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                           final Token where) {
+        if (pattern.equals(actual)) return;
+        if (pattern instanceof TypeParameterDescriptor parameter) {
+            final var previous = substitutions.putIfAbsent(parameter, actual);
+            if (previous != null && !previous.equals(actual)) {
+                Zeron.resolutionError(new ResolutionError(where,
+                        "Conflicting type inferences for '" + parameter.name() + "': "
+                                + previous + " and " + actual + "."));
+            }
+            return;
+        }
+        if (pattern instanceof NullableDescriptor nullablePattern) {
+            final var actualBase = actual instanceof NullableDescriptor nullableActual
+                    ? nullableActual.baseType()
+                    : actual;
+            unifyType(nullablePattern.baseType(), actualBase, substitutions, where);
+            return;
+        }
+        if (pattern instanceof ReferenceDescriptor referencePattern) {
+            final var actualBase = actual instanceof ReferenceDescriptor referenceActual
+                    ? referenceActual.baseType()
+                    : actual;
+            unifyType(referencePattern.baseType(), actualBase, substitutions, where);
+            return;
+        }
+        if (pattern instanceof ArrayDescriptor && actual instanceof ReferenceDescriptor reference
+            && reference.baseType() instanceof ArrayDescriptor) {
+            actual = reference.baseType();
+        }
+        if (pattern instanceof ArrayDescriptor arrayPattern
+                && actual instanceof ArrayDescriptor arrayActual) {
+            unifyType(arrayPattern.elementType(), arrayActual.elementType(), substitutions, where);
+            return;
+        }
+        if (pattern instanceof GenericDescriptor genericPattern
+                && actual instanceof GenericDescriptor genericActual
+                && genericPattern.baseType().equals(genericActual.baseType())
+                && genericPattern.typeParameters().size() == genericActual.typeParameters().size()) {
+            for (int i = 0; i < genericPattern.typeParameters().size(); i++) {
+                unifyType(genericPattern.typeParameters().get(i),
+                        genericActual.typeParameters().get(i), substitutions, where);
+            }
+            return;
+        }
+        if (pattern instanceof FunctionDescriptor functionPattern
+                && actual instanceof FunctionDescriptor functionActual
+                && functionPattern.arity() == functionActual.arity()) {
+            for (int i = 0; i < functionPattern.arity(); i++) {
+                unifyType(functionPattern.parameters().get(i), functionActual.parameters().get(i),
+                        substitutions, where);
+            }
+            unifyType(functionPattern.returnType(), functionActual.returnType(), substitutions, where);
+            return;
+        }
+        if (!pattern.equals(actual)
+                && !(actual instanceof ReferenceDescriptor reference && pattern.equals(reference.baseType()))) {
+            Zeron.resolutionError(new ResolutionError(where,
+                    "Expected " + pattern + ", found " + actual + "."));
         }
     }
 
@@ -961,7 +1097,10 @@ public final class Resolver {
         var currentType = expectedType;
         for (final var statement : statements) {
             if (statement instanceof Stmt.Return(Expr value)) {
-                var returnType = resolve(value);
+                final var returnType = value instanceof Expr.Lambda lambda
+                        && expectedType instanceof FunctionDescriptor functionType
+                        ? resolveLambda(lambda, functionType)
+                        : resolve(value);
                 if (currentType instanceof InferDescriptor)
                     currentType = returnType;
                 else
@@ -1028,7 +1167,7 @@ public final class Resolver {
     }
 
         public boolean isContractProjection(final TypeDescriptor expectedType,
-                                            final TypeDescriptor resolvedType) {
+                        final TypeDescriptor resolvedType) {
         final var expectedMutable = expectedType instanceof ReferenceDescriptor;
         final var contractType = expectedMutable
             ? ((ReferenceDescriptor) expectedType).baseType()

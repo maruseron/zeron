@@ -6,12 +6,18 @@ import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
+import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.maruseron.zeron.scan.TokenType.*;
 
@@ -20,6 +26,8 @@ public final class Parser {
 
     private final List<Token> tokens;
     private int current = 0;
+    private static final AtomicInteger TYPE_PARAMETER_SCOPES = new AtomicInteger();
+    private Map<String, TypeParameterDescriptor> activeTypeParameters = Map.of();
 
     private record LoopMarker(LoopMarker enclosing) {}
     private record LevelMarker(LevelMarker enclosing) {}
@@ -81,46 +89,79 @@ public final class Parser {
 
     private Stmt.Function fnDeclaration() {
         final var name = consume(IDENTIFIER, "Expect function name.");
+        final var typeParameters = typeParameterDeclaration(name);
+        final var enclosingTypeParameters = activeTypeParameters;
+        activeTypeParameters = typeParameters;
+        try {
+            return parseFunctionDeclaration(name, typeParameters);
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
+        }
+    }
+
+    private Stmt.Function parseFunctionDeclaration(
+            final Token name,
+            final Map<String, TypeParameterDescriptor> typeParameters) {
         consume(LEFT_PAREN, "Expect '(' after function name.");
+        final var enclosingLevelMarker = levelMarker;
         levelMarker = new LevelMarker(levelMarker);
 
-        final var parameterNames = new ArrayList<Token>();
-        final var parameterTypes = new ArrayList<TypeDescriptor>();
-        if (!check(RIGHT_PAREN)) {
-            do {
-                if (parameterNames.size() >= 254) {
-                    error(peek(), "Can't have more than 254 parameters.");
-                }
-                parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
-                consume(COLON, "Expect ':' after parameter name.");
-                parameterTypes.add(collectType());
-            } while (match(COMMA));
-        }
-        consume(RIGHT_PAREN, "Expect ')' after parameters.");
+        try {
+            final var parameterNames = new ArrayList<Token>();
+            final var parameterTypes = new ArrayList<TypeDescriptor>();
+            if (!check(RIGHT_PAREN)) {
+                do {
+                    if (parameterNames.size() >= 254) {
+                        error(peek(), "Can't have more than 254 parameters.");
+                    }
+                    parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
+                    consume(COLON, "Expect ':' after parameter name.");
+                    parameterTypes.add(collectType());
+                } while (match(COMMA));
+            }
+            consume(RIGHT_PAREN, "Expect ')' after parameters.");
 
-        TypeDescriptor returnType = TypeDescriptor.ofUnit();
-        final var hasExplicitReturnType = match(COLON);
-        if (hasExplicitReturnType) {
-            returnType = collectType();
-        }
+            TypeDescriptor returnType = TypeDescriptor.ofUnit();
+            final var hasExplicitReturnType = match(COLON);
+            if (hasExplicitReturnType) {
+                returnType = collectType();
+            }
+            if (!typeParameters.isEmpty() && !hasExplicitReturnType) {
+                error(name, "Generic functions require an explicit return type.");
+            }
 
-        List<Stmt> body;
-        if (match(EQUAL)) {
-            if (!hasExplicitReturnType) returnType = TypeDescriptor.ofInfer();
-            body = List.of(new Stmt.Return(expression()));
-            consume(SEMICOLON, "Expect ';' after expression.");
-        } else {
-            consume(LEFT_BRACE, "Expect '{' before function body.");
-            body = block();
-        }
+            final List<Stmt> body;
+            if (match(EQUAL)) {
+                if (!hasExplicitReturnType) returnType = TypeDescriptor.ofInfer();
+                body = List.of(new Stmt.Return(expression()));
+                consume(SEMICOLON, "Expect ';' after expression.");
+            } else {
+                consume(LEFT_BRACE, "Expect '{' before function body.");
+                body = block();
+            }
 
-        levelMarker = levelMarker.enclosing();
-        return new Stmt.Function(
-                name,
-                parameterNames,
-                TypeDescriptor.functionOf(name.lexeme(), returnType,
-                        parameterTypes.toArray(TypeDescriptor[]::new)),
-                body);
+            return new Stmt.Function(name, parameterNames,
+                    TypeDescriptor.genericFunctionOf(name.lexeme(), returnType, parameterTypes,
+                            List.copyOf(typeParameters.values())), body);
+        } finally {
+            levelMarker = enclosingLevelMarker;
+        }
+    }
+
+    private Map<String, TypeParameterDescriptor> typeParameterDeclaration(final Token functionName) {
+        if (!match(LESS)) return Map.of();
+        final var scopeId = TYPE_PARAMETER_SCOPES.incrementAndGet();
+        final var parameters = new LinkedHashMap<String, TypeParameterDescriptor>();
+        do {
+            final var parameter = consume(IDENTIFIER, "Expect type parameter name.");
+            if (parameters.putIfAbsent(parameter.lexeme(),
+                    new TypeParameterDescriptor(scopeId, parameter.lexeme())) != null) {
+                error(parameter, "Duplicate type parameter.");
+            }
+        } while (match(COMMA));
+        consume(GREATER, "Expect '>' after type parameters.");
+        if (parameters.isEmpty()) error(functionName, "A generic function must declare a type parameter.");
+        return parameters;
     }
 
     private Stmt.ClassDecl classDeclaration() {
@@ -232,14 +273,17 @@ public final class Parser {
         TypeDescriptor type;
 
         if (match(LEFT_PAREN)) {
-            TypeDescriptor parameter = null;
+            final var parameters = new ArrayList<TypeDescriptor>();
             if (!check(RIGHT_PAREN)) {
-                parameter = collectType();
+                do {
+                    parameters.add(collectType());
+                } while (match(COMMA));
             }
             consume(RIGHT_PAREN, "Expect ')' after lambda parameter types.");
             consume(ARROW, "Expect '->' after ')'.");
             final var returnType = collectType();
-            type = TypeDescriptor.lambdaOf(returnType, parameter);
+            type = TypeDescriptor.functionOf("", returnType,
+                    parameters.toArray(TypeDescriptor[]::new));
         } else {
             final var typeName = consume(IDENTIFIER, "Expect bind name.");
 
@@ -251,13 +295,16 @@ public final class Parser {
                 consume(GREATER, "Expect '>' after type.");
             }
 
-            type = TypeDescriptor.of(typeName.lexeme());
+            type = activeTypeParameters.get(typeName.lexeme());
+            if (type == null) type = TypeDescriptor.of(typeName.lexeme());
             if (isGeneric) {
                 if (type.name().equals("Array")) {
                     if (inner.size() != 1) error(typeName, "Array expects one element type.");
                     type = TypeDescriptor.arrayOf(inner.getFirst());
+                } else if (type instanceof NominalDescriptor nominal) {
+                    type = TypeDescriptor.genericOf(nominal, inner);
                 } else {
-                    type = TypeDescriptor.genericOf((NominalDescriptor)type, inner);
+                    error(typeName, "Only nominal types can have type arguments.");
                 }
             } else if (type.name().equals("Array")) {
                 error(typeName, "Array requires an element type.");
@@ -554,7 +601,14 @@ public final class Parser {
         var expr = primary();
 
         while (true) {
-            if (match(LEFT_PAREN)) {
+            if (expr instanceof Expr.Variable variable && check(LESS)
+                    && looksLikeTypeArgumentsCall()) {
+                advance();
+                final var typeArguments = collectTypeArguments();
+                consume(GREATER, "Expect '>' after type arguments.");
+                consume(LEFT_PAREN, "Expect '(' after type arguments.");
+                expr = finishCall(variable.name, typeArguments);
+            } else if (match(LEFT_PAREN)) {
                 if (expr instanceof Expr.Variable variable) {
                     expr = finishCall(variable.name);
                 } else if (expr instanceof Expr.Property property) {
@@ -578,6 +632,10 @@ public final class Parser {
     }
 
     private Expr finishCall(final Token callee) {
+        return finishCall(callee, List.of());
+    }
+
+    private Expr finishCall(final Token callee, final List<TypeDescriptor> typeArguments) {
         final var arguments = new ArrayList<Expr>();
         if (!check(RIGHT_PAREN)) {
             do {
@@ -591,7 +649,19 @@ public final class Parser {
 
         final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
 
-        return new Expr.Call(callee, paren, arguments, TypeDescriptor.ofInfer());
+        return new Expr.Call(callee, paren, arguments, typeArguments, TypeDescriptor.ofInfer());
+    }
+
+    private boolean looksLikeTypeArgumentsCall() {
+        var depth = 0;
+        for (var index = current; index < tokens.size(); index++) {
+            final var type = tokens.get(index).type();
+            if (type == LESS) depth++;
+            else if (type == GREATER && --depth == 0) {
+                return index + 1 < tokens.size() && tokens.get(index + 1).type() == LEFT_PAREN;
+            }
+        }
+        return false;
     }
 
     private Expr finishMemberCall(final Expr.Property property) {

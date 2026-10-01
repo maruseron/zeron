@@ -5,6 +5,7 @@
 - [Types](#types)
 - [Variables](#variables)
 - [Functions](#functions)
+- [Generic functions](#generic-functions-first-slice)
 - [Simplest program](#sidetrack-simplest-zeron-program)
 - [Higher order functions and Lambdas](#higher-order-functions-and-lambdas)
 - [Control flow](#control-flow)
@@ -21,6 +22,10 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 
 - Core scalar types, `Unit`, function declarations, and type inference for ordinary bindings and
     function results.
+- Generic top-level functions with explicit return types, call-site type inference or explicit type
+    arguments, recursive substitution, and erased JVM lowering.
+- Generic functions accept and return callback values involving type parameters; generated bridge
+    methods adapt concrete lambda shapes to and from erased callback interfaces.
 - Higher-order function calls and lambda values, including zero- and multi-parameter lambdas.
 - Binding reassignment as a declaration property: `let` bindings are immutable and `let mut`
     bindings may be reassigned.
@@ -37,8 +42,8 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     but are not yet general first-class function values.
 - Nullable descriptors and the basic `T`/`T?` assignments exist. Null-check flow refinement and
     nullable collection support do not.
-- Generic-looking type syntax and descriptors exist, but generic substitution, type checking, and
-    JVM lowering are incomplete.
+- Generic classes and contracts, bounds, variance, overloads, and first-class generic function
+    references remain unsupported. Generic function values are not polymorphic lambdas.
 - Range and `for` syntax exist, but iterable validation and general iteration semantics remain
     incomplete.
 
@@ -51,7 +56,7 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     forwarding form, not as a function-reference value or a change to `=` expression bodies; syntax,
     generic substitution, overload resolution, and receiver mutability rules remain to be designed.
 - Intrinsic arrays with read-only and mutable views ([design](design-document-06_intrinsic-arrays.md));
-    fully supported generics, algebraic data types, discriminated unions, and structural or
+    generic classes and contracts, algebraic data types, discriminated unions, and structural or
     nominal tuples.
 - Immutable collection types, list comprehensions, and explicit resource management.
 - Reference mutation capability (`&T`) and extension methods.
@@ -125,11 +130,12 @@ Mutable reference:   &Type
 Discriminated union: type Type = A | B
 ```
 
-Nullable and function types have working language-level representations. Generic syntax and
-descriptors are partial: type-parameter binding, substitution, and backend lowering are not
-complete. The sample spelling `Array<T>` currently goes through this generic-looking syntax; it
-does not mean arrays are implemented as a collection type. The `Type[]` spelling and discriminated
-unions remain design proposals. Mutable-reference capability (`&Type`) is preserved in resolved
+Nullable and function types have working language-level representations. Generic functions support
+type parameters in signatures, call-site substitution, and erased `Object` lowering, including
+callback adapters. Generic class/contract declarations and their lowering remain unimplemented.
+`Array<T>` is a built-in invariant type constructor with its own descriptor, not a user-defined
+generic class. The `Type[]` spelling and discriminated unions remain design proposals.
+Mutable-reference capability (`&Type`) is preserved in resolved
 types and enforced for array-slot writes and mutable-to-read-only projections, including function
 types; enforcement for class members awaits class support.
 
@@ -230,6 +236,34 @@ body without one infers its return type, while a block body without one has type
 return annotation is present, the resolver checks an expression body against that type. The `=`
 form is the single-expression body syntax; `->` is used in function types and lambdas, not as an
 alternative named-function body delimiter.
+
+#### Generic functions (first slice)
+
+See the [generic-function implementation note and roadmap](design-document-07_generic-functions.md) for
+the current resolver and JVM lowering details.
+
+Generic functions declare type parameters after the name and require an explicit return type:
+
+```zeron
+fn identity<T>(value: T): T = value;
+fn apply<T, R>(value: T, transform: (T) -> R): R = transform(value);
+
+identity(42);                  // infer T as Int
+identity<String>("zeron");    // explicit type argument
+```
+
+Type parameters are scoped to the declaration and may appear recursively in parameter, return,
+array, nullable, reference, and function types. Direct calls infer substitutions from arguments;
+explicit type arguments are available when inference is underconstrained. Lambdas receive their
+contextual parameter types after known substitutions are applied, and their body results can infer
+remaining type variables. Generic functions require annotated returns so their schemes are known
+before body resolution.
+
+Type parameters are opaque in function bodies: they can be passed, stored, and returned, but
+operators and member access requiring type-specific behavior need a future constraint system.
+Lambdas remain monomorphic, and generic function names are not first-class values. At runtime,
+type parameters erase to `Object`; callback values crossing between erased and concrete function
+shapes use generated bridge helpers. Generic classes/contracts, bounds, and variance are deferred.
 
 ---
 

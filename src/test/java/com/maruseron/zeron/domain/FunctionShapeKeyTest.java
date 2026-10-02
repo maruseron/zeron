@@ -85,6 +85,14 @@ public final class FunctionShapeKeyTest {
     }
 
     @Test
+    public void distinguishesAnyFromNominalTypeWithSameName() {
+        final var any = function("any", TypeDescriptor.ofAny(), TypeDescriptor.ofAny());
+        final var nominal = function("nominal", TypeDescriptor.ofName("Any"), TypeDescriptor.ofName("Any"));
+
+        assertNotEquals(FunctionShapeKey.of(any), FunctionShapeKey.of(nominal));
+    }
+
+    @Test
     public void resolvesStandaloneLambdaTypeOnOriginalNode() {
         final var resolver = new Resolver();
         final var statements = Parser.of(Scanner.from("let f = x -> x + 1;").scanTokens()).parse();

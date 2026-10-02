@@ -33,8 +33,9 @@ roadmap in [design-document-05_classes-and-contracts.md](design-document-05_clas
 - `&T` is preserved as a resolved reference-view qualifier, including when it qualifies a function
   type. Mutable views project implicitly to their read-only base type; the reverse conversion is
   rejected. This does not imply exclusive ownership or borrow checking.
-- `GenericDescriptor` can record a nominal type and type arguments, but generic substitution and
-  JVM lowering are incomplete. `TypeDescriptor.toJavaClassDesc` currently rejects generic types.
+- Invariant generic classes and contracts support member substitution and raw JVM lowering, including
+  callback adaptation across erased nominal boundaries. The broader adapter-shape matrix remains
+  follow-up coverage; see [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md).
 - `Array<T>` has a dedicated invariant descriptor, and indexed reads, writes, and length are
   represented by explicit AST operations lowered by the compiler.
 
@@ -115,7 +116,8 @@ The implemented first slice settles the basic collection contract as follows:
 - Non-empty literals initialize every slot before exposing the array. Allocation by length and
   uninitialized slots are unavailable.
 - Each literal allocates a distinct array. Structural equality, slicing, multidimensional syntax,
-  and iteration integration remain deferred.
+  and custom iterator integration remain deferred. `for` loops over arrays are implemented with
+  dedicated index-based lowering and do not require the intrinsic registry or an iterator protocol.
 
 Empty literals and contextual element typing remain open. Allocation by length alone must not
 expose JVM zero-initialization as if it were a language guarantee.
@@ -205,9 +207,9 @@ representation has its own runtime store checks.
 ## Implementation Roadmap
 
 1. **Freeze the implemented contract.** Non-empty literals, fixed length, `.length`, zero-based
-  indexing, checked bounds, initialized slots, and fresh-array identity are the current choices.
-  Empty literals, allocation by length, resizing, slicing, structural equality, and iteration remain
-  deferred.
+  indexing, checked bounds, initialized slots, fresh-array identity, and specialized `for` iteration
+  are the current choices. Empty literals, allocation by length, resizing, slicing, structural
+  equality, and custom iterator integration remain deferred.
 2. **Represent `Array<T>`.** Implemented with a dedicated element-aware descriptor, invariant
   equality, and composition with nullability, reference views, and function types.
 3. **Represent reference capability.** Implemented as `&T`, including function types, with

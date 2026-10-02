@@ -20,16 +20,28 @@ import static java.lang.IO.println;
 public class Zeron {
     static boolean hadError = false;
     static boolean hadResolutionError = false;
+    private static boolean debugEnabled;
 
     static void main(final String... args) throws IOException {
-        if (args.length > 1) {
-            println("Usage: zeron [script]");
-            System.exit(64);
-        } else if (args.length == 1) {
-            runFile(args[0]);
-        } else {
-            runPrompt();
+        debugEnabled = false;
+        String scriptPath = null;
+        for (final var argument : args) {
+            if (argument.equals("--debug") || argument.equals("-d")) {
+                debugEnabled = true;
+            } else if (scriptPath == null) {
+                scriptPath = argument;
+            } else {
+                println("Usage: zeron [--debug] [script]");
+                System.exit(64);
+                return;
+            }
         }
+        if (scriptPath == null) runPrompt();
+        else runFile(scriptPath);
+    }
+
+    public static void debug(final String message) {
+        if (debugEnabled) System.err.println(message);
     }
 
     private static void runFile(final String path) throws IOException {

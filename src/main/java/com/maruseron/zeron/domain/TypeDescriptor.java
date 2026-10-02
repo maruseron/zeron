@@ -8,7 +8,7 @@ import java.util.*;
 public sealed interface TypeDescriptor
         permits InferDescriptor, NeverDescriptor, UnitDescriptor,
                 IntDescriptor, FloatDescriptor, BooleanDescriptor, StringDescriptor,
-                NominalDescriptor, FunctionDescriptor, GenericDescriptor, ArrayDescriptor,
+            AnyDescriptor, NominalDescriptor, FunctionDescriptor, GenericDescriptor, ArrayDescriptor,
                 NullableDescriptor, NullDescriptor, ReferenceDescriptor,
                 TypeParameterDescriptor {
 
@@ -48,6 +48,7 @@ public sealed interface TypeDescriptor
     static TypeDescriptor of(String typeName) {
         return switch (typeName) {
             case "Never"   -> ofNever();
+            case "Any"     -> ofAny();
             case "Infer"   -> ofInfer();
             case "Unit"    -> ofUnit();
             case "Int"     -> ofInt();
@@ -60,6 +61,10 @@ public sealed interface TypeDescriptor
 
     static NominalDescriptor ofName(String name) {
         return new NominalDescriptor(name);
+    }
+
+    static AnyDescriptor ofAny() {
+        return AnyDescriptor.ANY;
     }
 
     static InferDescriptor ofInfer() {
@@ -134,7 +139,8 @@ public sealed interface TypeDescriptor
                     throw new IllegalArgumentException(
                             "Infer is not a valid concrete type");
             case NeverDescriptor    nd -> ConstantDescs.CD_void;
-            case UnitDescriptor     ud -> ConstantDescs.CD_Void;
+            case UnitDescriptor     ud -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+            case AnyDescriptor      ad -> ConstantDescs.CD_Object;
             case IntDescriptor      id -> ConstantDescs.CD_int;
             case FloatDescriptor    fd -> ConstantDescs.CD_double;
             case BooleanDescriptor  bd -> ConstantDescs.CD_boolean;
@@ -146,6 +152,7 @@ public sealed interface TypeDescriptor
             case ArrayDescriptor _ -> ConstantDescs.CD_Object.arrayType();
             case ReferenceDescriptor rd -> toJavaClassDesc(rd.baseType());
             case NullableDescriptor nd -> switch (nd.baseType()) {
+                case UnitDescriptor _ -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
                 case IntDescriptor _ -> ConstantDescs.CD_Integer;
                 case FloatDescriptor _ -> ConstantDescs.CD_Double;
                 case BooleanDescriptor _ -> ConstantDescs.CD_Boolean;
@@ -153,9 +160,7 @@ public sealed interface TypeDescriptor
                 default -> toJavaClassDesc(nd.baseType());
             };
             case NullDescriptor _ -> ConstantDescs.CD_Object;
-            case GenericDescriptor  gd ->
-                    throw new UnsupportedOperationException(
-                            "Generic descriptors to be implemented");
+                case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
         };
     }
 
@@ -167,9 +172,8 @@ public sealed interface TypeDescriptor
             case NeverDescriptor    nd ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: NeverDescriptor to java.constant.ClassDesc");
-            case UnitDescriptor     ud ->
-                    throw new IllegalArgumentException(
-                            "Illegal conversion: UnitDescriptor to java.constant.ClassDesc");
+                case UnitDescriptor     ud -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+                case AnyDescriptor      ad -> ConstantDescs.CD_Object;
             case IntDescriptor      id -> ConstantDescs.CD_Integer;
             case FloatDescriptor    fd -> ConstantDescs.CD_Double;
             case BooleanDescriptor  bd -> ConstantDescs.CD_Boolean;
@@ -187,9 +191,7 @@ public sealed interface TypeDescriptor
                 case ArrayDescriptor _ -> ConstantDescs.CD_Object.arrayType();
                 case NullableDescriptor nd -> toJavaClassDesc(nd);
                 case NullDescriptor _ -> ConstantDescs.CD_Object;
-            case GenericDescriptor  gd ->
-                    throw new UnsupportedOperationException(
-                            "Generic descriptors to be implemented");
+                case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
         };
     }
 }

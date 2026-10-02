@@ -4,11 +4,15 @@
 
 Zeron has an implemented first slice of generic named functions. Calls support inference and
 explicit type arguments, generic signatures are substituted during resolution, and the compiler
-erases type variables to JVM reference types. Direct callback parameters and callback return values
-in generic signatures are supported through generated bridge helpers.
+erases type variables to JVM reference types. Callback parameters and callback return values,
+including nested callbacks, nullable callback values, and mutable function views, are adapted through
+generated bridge helpers.
 
-This is not a complete generic type system. Generic classes and contracts, bounds, variance,
-overloads, and first-class generic function values remain deferred.
+Invariant generic classes/contracts and callback adaptation across their erased nominal boundaries
+are also implemented; see [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md)
+and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). Bounds, variance,
+overloads, and first-class generic function values remain deferred, so this is not a complete generic
+type system.
 
 ## Language Contract
 
@@ -50,9 +54,9 @@ parameters do not compare equal merely because they share a spelling.
 
 `FunctionDescriptor` retains the generic parameter list. `TypeSubstitution` recursively substitutes
 and erases type variables through nullable, reference, array, generic-descriptor, and function
-descriptors. `Array<T>` has its existing dedicated invariant descriptor and lowers to `Object[]`;
-this does not implement user-defined generic classes. Generic nominal descriptors still lack JVM
-lowering.
+descriptors. `Array<T>` has its existing dedicated invariant descriptor and lowers to `Object[]`.
+User-defined invariant generic classes and contracts retain parameterized source identities and erase
+to their raw JVM class or interface; see [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md).
 
 ### Resolution
 
@@ -82,27 +86,32 @@ private static bridge method in the generated program class. The bridge performs
 casts, boxing, and unboxing; `LambdaMetafactory` creates the adapter object. Concrete function
 shapes and ordinary non-generic lambda lowering remain unchanged.
 
-The implemented adapter discovery covers direct function-typed parameters and results in generic
-signatures. Nullable callbacks and recursively nested callback shapes are not yet a completed
-boundary contract and should not be assumed to work. Generic function references are also outside
-this implementation.
+Adapter discovery recursively follows function parameters and results through nullable and
+reference-view wrappers. Nested adapters are registered in the direction required by the outer
+bridge, and nullable callback values pass through a null-preserving helper before a non-null adapter
+is created. Generic function references are still outside this implementation. The primitive and
+reference shape matrix and adapter reuse need broader tests before this boundary should be treated
+as fully characterized.
 
 ## Implementation Roadmap
 
 1. **Stabilize the direct-call slice.** Keep inference, explicit arguments, return annotations,
    opaque type-variable behavior, arrays, primitive boxing, and direct callback parameter/result
    bridges covered by resolver and generated-code tests.
-2. **Complete callback-shape adaptation.** Support and test nullable callback values, nested
-   callback parameters/results, mutable function views, all primitive/reference combinations, and
-   bridge reuse without changing source-level function-shape identity.
+2. **Callback-shape adaptation: implemented baseline.** Nullable callback values, nested callback
+  parameters/results, and mutable function views are adapted recursively without changing
+  source-level function-shape identity. Expand tests across all primitive/reference combinations
+  and bridge reuse.
 3. **Design generic function values.** Define explicit specialization or expected-function-type
    instantiation for passing generic named functions as values. Resolve capture and overload
    interactions before implementation.
-4. **Add constraints only with a coherent member model.** Specify constraint declarations, checking,
-   dispatch, and how constrained operations lower before permitting operators or members on `T`.
-5. **Design generic classes and contracts separately.** Define nominal identity, constructor and
-   member substitution, contract conformance, variance, and JVM erasure before exposing user-defined
-   parameterized nominal types.
+4. **Invariant generic classes and contracts implemented.** Constructor and member substitution,
+   declaration-site conformance, invariant identity, raw JVM erasure, nominal callback adapters, and
+   erased contract bridges are covered. Broader shape combinations and adapter reuse remain follow-up
+   coverage.
+5. **Add constraints only with a coherent member model.** Specify constraint declarations, checking,
+  dispatch, and how constrained operations lower before permitting operators or members on `T`.
+  Bounds, variance, overloads, and broader inference remain deferred.
 
 ## Acceptance Criteria for the Current Slice
 
@@ -112,8 +121,9 @@ this implementation.
   diagnose conflicts or unresolved parameters.
 - Type-specific operations on unconstrained type variables fail during resolution rather than
   producing invalid bytecode.
-- Erased method descriptors, primitive boxing/unboxing, generic array access, and direct callback
-  bridges agree with runtime behavior for inline, stored, and returned lambdas.
+- Erased method descriptors, primitive boxing/unboxing, generic array access, and recursive callback
+  bridges agree with runtime behavior for inline, stored, returned, nested, nullable, and mutable-view
+  callbacks.
 - Generic lowering does not change canonical identities for ordinary concrete function shapes.
 
 Update this note whenever parser, resolver, or backend support changes the accepted generic-function contract.

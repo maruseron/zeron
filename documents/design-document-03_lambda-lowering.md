@@ -46,11 +46,24 @@ descriptor, with primitive boxing and unboxing at call boundaries. Generic funct
 first-class values, and lambdas themselves remain monomorphic.
 
 When a generic signature contains a callback such as `(T) -> R`, its runtime SAM shape uses erased
-parameter and return descriptors. The compiler emits private static bridge helpers at call sites
+parameter and return descriptors. The compiler emits public static synthetic adapter helpers at call sites
 that cross between this erased SAM and a concrete lambda shape. These helpers perform the casts,
 boxing, and unboxing explicitly; `LambdaMetafactory` still creates the adapter object. The same
 boundary applies when a generic function returns a callback involving its type variables. Ordinary
 concrete function-shape identities remain unchanged.
+
+### Generic nominal callback boundaries
+
+Generic classes and contracts are supported and erase their type variables and parameterized nominal
+types as described in [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md).
+Callback adaptation across erased nominal boundaries is implemented for generic class/contract
+constructors, callback-valued fields and member parameters/results, and erased contract bridges.
+Lambdas are contextually resolved against the substituted nominal signature, and adapter discovery
+registers the conversion before code generation. Public synthetic static adapter helpers let
+generated nominal bridge methods call back into the generated program class. Runtime and ABI tests
+cover primitive/reference shapes, callback arguments/results, field reads/writes, contract bridges,
+nested callbacks, nullable callbacks, and mutable function views. Broader shape combinations and
+adapter reuse remain test coverage work; this does not add generic function values or bounds.
 
 ### First-class lambda typing
 
@@ -70,9 +83,9 @@ The current implementation remains a prototype for deferred contextual inference
 
 The compiler now uses `FunctionShapeKey` as a versioned recursive semantic identity. It encodes arity, parameter order, return type, nested function signatures, nullability, generic arguments, and nominal names without including the source function name. Generated interface names are derived separately from a SHA-256 digest of that key, and the compiler checks that a generated name has not already been associated with a different full key.
 
-The JVM method descriptor remains a separate lowering. For example, `String` and `String?` have different semantic shape keys but currently lower to the same JVM reference descriptor; nullable primitives lower to wrapper descriptors. Generic function signatures erase type variables and use erased callback shapes, while generic classes/contracts remain unsupported. This separation keeps source type identity from being inferred from the generated interface name or JVM ABI.
+The JVM method descriptor remains a separate lowering. For example, `String` and `String?` have different semantic shape keys but currently lower to the same JVM reference descriptor; nullable primitives lower to wrapper descriptors. Generic function signatures use erased callback shapes, and generic classes/contracts erase to raw JVM classes and interfaces. This separation keeps source type identity from being inferred from the generated interface name or JVM ABI.
 
-Nominal descriptors currently contain only a type name, not a package/module-qualified symbol identity. The key therefore distinguishes the names the current type model provides, but package-qualified identity must be added when the class/module system defines it. Canonical encoding generic arguments does not imply that generic JVM lowering is implemented.
+Nominal descriptors currently contain only a type name, not a package/module-qualified symbol identity. The key therefore distinguishes the names the current type model provides, but package-qualified identity must be added when the class/module system defines it. Canonical encoding generic arguments is separate from nominal JVM erasure and callback adaptation.
 
 ### Output layout
 

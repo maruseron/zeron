@@ -36,6 +36,43 @@ fn passNullableInt(value: Int?): Int? {
 
 fn firstArrayValue(values: Array<Int>): Int = values[0];
 
+fn identity<T>(value: T): T = value;
+fn echoAny(value: Any): Any = value;
+
+fn applyGeneric<T, R>(value: T, transform: (T) -> R): R = transform(value);
+
+class TestBox<T> {
+    value: T;
+    public constructor new;
+
+    public readValue(): T = this.value;
+}
+
+contract TestEcho<T> {
+    echo(value: T): T;
+}
+
+class TestIntEcho is TestEcho<Int> {
+    public constructor new;
+
+    public echo(value: Int): Int = value;
+}
+
+class TestFactoryCounter {
+    count: Int;
+    private constructor new;
+
+    public constructor fromCount(count: Int) = TestFactoryCounter.new(count);
+
+    public constructor incremented(count: Int) {
+        let counter = TestFactoryCounter.new(count);
+        counter.count = counter.count + 1;
+        return counter;
+    }
+
+    public readCount(): Int = this.count;
+}
+
 contract TestCounterView {
     read(): Int;
 }
@@ -54,6 +91,44 @@ class TestCounter is TestCounterView {
         this.value = this.value + 1;
     }
 }
+
+contract TestNamed {
+    name(): String;
+}
+
+class TestFirstName is TestNamed {
+    value: String;
+    public constructor new;
+
+    public name(): String = this.value;
+}
+
+class TestSecondName is TestNamed {
+    value: String;
+    public constructor new;
+
+    public name(): String = this.value;
+}
+
+fn nameOrUnknown(value: Any?): String {
+    if (value is TestFirstName or value is TestSecondName) {
+        return value.name();
+    }
+    return "unknown";
+}
+
+fn testGenericBox(): Int {
+    let box = TestBox<Int>.new(40);
+    return box.readValue();
+}
+
+fn testGenericContract(): Int {
+    let echo: TestEcho<Int> = TestIntEcho.new();
+    return echo.echo(42);
+}
+
+fn testNamedExpressionFactory(): Int = TestFactoryCounter.fromCount(20).readCount();
+fn testNamedBlockFactory(): Int = TestFactoryCounter.incremented(30).readCount();
 
 fn main() {
     globalCount += 2;
@@ -95,6 +170,21 @@ fn main() {
     print(apply(21, y -> y * 2));
     print(applyFloat(2.5, number -> number * 2.0));
     print(applyString("zeron", text -> text + "!"));
+    print(identity(42));
+    print(identity<String>("generic"));
+    print(echoAny(42));
+    let unitAsAny: Any = unit;
+    let nullAsAny: Any? = null;
+    print(unitAsAny);
+    print(nullAsAny);
+    print(nameOrUnknown(TestFirstName.new("Ada")));
+    print(nameOrUnknown(TestSecondName.new("Grace")));
+    print(nameOrUnknown(42));
+    print(applyGeneric(6, value -> value * 3));
+    print(testGenericBox());
+    print(testGenericContract());
+    print(testNamedExpressionFactory());
+    print(testNamedBlockFactory());
     let localMaybe: Int? = 3;
     let localNull: Int? = null;
     let localDefault: Int?;
@@ -123,6 +213,25 @@ fn main() {
 
     let nullableSlots: &Array<Int?> = [7, null, 9];
     print(nullableSlots[1]);
+
+    let values: Array<Int> = [2, 3, 5];
+    let mut arrayTotal = 0;
+    for (let value in values) {
+        arrayTotal += value;
+    }
+    print(arrayTotal);
+
+    let mut ascendingTotal = 0;
+    for (let value in 1..4) {
+        ascendingTotal += value;
+    }
+    print(ascendingTotal);
+
+    let mut descendingTotal = 0;
+    for (let value in 4..1) {
+        descendingTotal += value;
+    }
+    print(descendingTotal);
 
     let mut whileCount = 0;
     while (whileCount < 2) {

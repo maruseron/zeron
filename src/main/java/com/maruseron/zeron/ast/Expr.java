@@ -17,18 +17,24 @@ public sealed interface Expr {
         public final Token name;
         public final Token paren;
         public final List<Expr> arguments;
+        public final List<TypeDescriptor> explicitTypeArguments;
         private TypeDescriptor type;
+        private FunctionDescriptor resolvedDescriptor;
 
-        public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments, TypeDescriptor type) {
+        public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
+                          List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
             this.receiver = receiver;
             this.name = name;
             this.paren = paren;
             this.arguments = List.copyOf(arguments);
+            this.explicitTypeArguments = List.copyOf(explicitTypeArguments);
             this.type = type;
         }
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+        public FunctionDescriptor resolvedDescriptor() { return resolvedDescriptor; }
+        public void setResolvedDescriptor(FunctionDescriptor descriptor) { resolvedDescriptor = descriptor; }
     }
 
     final class Property implements Expr {
@@ -185,6 +191,51 @@ public sealed interface Expr {
                     "operator=" + operator + ", " +
                     "right=" + right + ", " +
                     "type=" + type + ']';
+        }
+    }
+
+    final class TypeTest implements Expr {
+        public final Expr value;
+        public final Token operator;
+        public final TypeDescriptor targetType;
+        private TypeDescriptor type = TypeDescriptor.ofBoolean();
+
+        public TypeTest(final Expr value, final Token operator, final TypeDescriptor targetType) {
+            this.value = value;
+            this.operator = operator;
+            this.targetType = targetType;
+        }
+
+        public TypeDescriptor getType() {
+            return type;
+        }
+
+        public void setType(final TypeDescriptor type) {
+            this.type = type;
+        }
+    }
+
+    final class Cast implements Expr {
+        public final Expr value;
+        public final Token operator;
+        public final TypeDescriptor targetType;
+        public final boolean safe;
+        private TypeDescriptor type;
+
+        public Cast(final Expr value, final Token operator,
+                    final TypeDescriptor targetType, final boolean safe) {
+            this.value = value;
+            this.operator = operator;
+            this.targetType = targetType;
+            this.safe = safe;
+        }
+
+        public TypeDescriptor getType() {
+            return type;
+        }
+
+        public void setType(final TypeDescriptor type) {
+            this.type = type;
         }
     }
 

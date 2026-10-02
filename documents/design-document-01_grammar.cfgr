@@ -1,72 +1,114 @@
 module ZeronGrammar;
 
-import TypeGrammar.Type as type;
-import TypeGrammar.Identifier as IDENTIFIER;
+# IDENTIFIER, INT, DOUBLE, and STRING denote scanner token kinds.
+# `type` below is source syntax; design-document-02 describes encoded descriptors.
 
-program         : { declaration } EOF ;
+program                 : { topLevelDeclaration } EOF ;
 
-declaration     : varDecl | funDecl ; # statement
+topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl ;
+declaration             : varDecl | funDecl | statement ;
 
-varDecl         : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
-# full example  : let mut employees: &List<Person?> = expression;
-funDecl         : "fn" IDENTIFIER "(" parameters ")" [":" type ]
-                ( "=" exprStmt | block ) ;
-# full example  : fn adder(a: Int, b: Int): Int = a + b;
-# full example  : let filterNonNull<T>(list: List<T?>): List<T> {
-#                     return list.filter { it != null };
-#                 }
-#                 TODO: add generics rule
+varDecl                 : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
+funDecl                 : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type]
+                          ("=" expression ";" | block) ;
+typeParameters          : "<" IDENTIFIER {"," IDENTIFIER} ">" ;
+parameters              : [parameter {"," parameter}] ;
+parameter               : IDENTIFIER ":" type ;
 
-parameters      : {0> IDENTIFIER ":" type $ "," <254} ;
+classDecl               : "class" IDENTIFIER [typeParameters]
+                          ["is" contractUse {"," contractUse}]
+                          "{" classMember* "}" ;
+contractUse             : IDENTIFIER [typeArguments] ;
+classMember             : fieldDecl | constructorDecl | namedConstructorDecl | methodDecl ;
+fieldDecl               : IDENTIFIER ":" type ";" ;
+constructorDecl         : visibility "constructor" "new" ";" ;
+namedConstructorDecl    : visibility "constructor" IDENTIFIER "(" parameters ")"
+                          ("=" expression ";" | block) ;
+methodDecl              : visibility ["mut"] IDENTIFIER "(" parameters ")" ":" type
+                          ("=" expression ";" | block) ;
+contractDecl            : "contract" IDENTIFIER [typeParameters] "{" contractMethod* "}" ;
+contractMethod          : ["mut"] IDENTIFIER "(" parameters ")" ":" type ";" ;
+visibility              : "public" | "private" ;
 
-statement       : exprStmt
-                | forStmt
-                | ifStmt
-                | printStmt
-                | returnStmt
-                | unboundLoopStmt
-                | block ;
+statement               : exprStmt
+                        | breakStmt
+                        | continueStmt
+                        | forStmt
+                        | ifStmt
+                        | printStmt
+                        | returnStmt
+                        | loopStmt
+                        | whileStmt
+                        | untilStmt
+                        | block ;
+exprStmt                : expression ";" ;
+breakStmt               : "break" ";" ;
+continueStmt            : "continue" ";" ;
+forStmt                 : "for" "(" "let" IDENTIFIER "in" expression ")" statement ;
+ifStmt                  : "if" "(" expression ")" statement ["else" statement] ;
+printStmt               : "print" "(" expression ")" ";" ;
+returnStmt              : "return" [expression] ";" ;
+loopStmt                : "loop" statement ;
+whileStmt               : "while" "(" expression ")" statement ;
+untilStmt               : "until" "(" expression ")" statement ;
+block                   : "{" { declaration } "}" ;
 
-exprStmt        : expression ";" ;
-forStmt         : "for" "(" VARIABLE_BIND "in" expression ")" statement ;
-ifStmt          : "if" "(" expression ")" statement [ "else" statement ] ;
-printStmt       : "print" "(" expression ")" ";" ;
-returnStmt      : "return" [ expression ] ";" ;
-unboundLoopStmt : loopStmt
-                | whileStmt
-                | untilStmt ;
+expression              : assignment ;
+assignment              : logicOr [assignmentOperator assignment] ;
+assignmentOperator      : "=" | "+=" | "-=" | "*=" | "/=" ;
+logicOr                 : logicAnd {"or" logicAnd} ;
+logicAnd                : equality {"and" equality} ;
+equality                : typeTest {("!=" | "==") typeTest} ;
+typeTest                : comparison ["is" ["not"] type] ;
+comparison              : term {(">" | ">=" | "<" | "<=") term} ;
+term                    : factor {("-" | "+") factor} ;
+factor                  : unary {("/" | "*") unary} ;
+unary                   : ("not" | "-" | "+" | "typeof") unary
+                        | cast ;
+cast                    : call {"as" ["?"] type} ;
+call                    : (genericFunctionCall | genericClassFactoryCall | primary) {callSuffix} ;
+callSuffix              : arguments | "[" expression "]" | "." IDENTIFIER ;
+genericFunctionCall     : IDENTIFIER typeArguments arguments ;
+genericClassFactoryCall : IDENTIFIER typeArguments "." IDENTIFIER arguments ;
+arguments               : "(" [expression {"," expression}] ")" ;
+typeArguments           : "<" type {"," type} ">" ;
+type                    : ["&"] typeAtom ["?"] ;
+typeAtom                : IDENTIFIER ["<" typeArgumentsBody ">"]
+                        | "(" ")" "->" type
+                        | "(" type ")" ["->" type]
+                        | "(" type "," type {"," type} ")" "->" type ;
+typeArgumentsBody       : type {"," type} ;
 
-loopStmt        : "loop" statement ;
-whileStmt       : "while" "(" condition ")" statement ;
-untilStmt       : "until" "(" condition ")" statement ;
-block           : "{" {0> declaration } "}" ;
+primary                 : INT
+                        | DOUBLE
+                        | STRING
+                        | IDENTIFIER
+                        | arrayLiteral
+                        | lambda
+                        | "true" | "false" | "null" | "unit" | "this"
+                        | ifExpr
+                        | "(" expression ")"
+                        | range ;
+arrayLiteral            : "[" expression {"," expression} "]" ;
+ifExpr                  : "if" "(" expression ")" "then" expression "else" expression ;
+lambda                  : IDENTIFIER "->" lambdaBody
+                        | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
+lambdaBody              : expression | block ;
+range                   : INT ".." INT ;
 
-expression      : assignment ;
-assignment      : IDENTIFIER "=" assignment
-                | logic_or ;
-
-logic_or        : { logic_and  $ "or"                        } ;
-logic_and       : { equality   $ "and"                       } ;
-equality        : { comparison $ ( "!=" | "==" )             } ;
-comparison      : { term       $ ( ">" | ">=" | "<" | "<=" ) } ;
-term            : { factor     $ ( "-" | "+" )               } ;
-factor          : { unary      $ ( "/" | "*" )               } ;
-unary           : ( "not" | "-" | "+" ) unary | call ;
-call            : primary { "(" arguments ")" } ;
-arguments       : {0> expression $ "," } ;
-primary         : Integer
-                | Float
-                | String
-                | IDENTIFIER
-                | lambda
-                | "true" | "false" | "null" | "unit"
-                | ifExpr
-                | "(" expression ")"
-                | range ;
-
-ifExpr          : "if" "(" expression ")" "then" expression "else" expression ;
-lambda          : "(" identifier ")" "->" statement ;
-#                 NOTE: this grammar forces type inference. oh well!
-# small example : x -> x
-# full example  : (a, b) -> { return something; }
-range           : Integer ".." Integer ;
+# Semantic/parser constraints:
+# - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
+# - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
+#   An explicit `private constructor new;` makes canonical construction private.
+# - Named constructors are static factories with explicit visibility and either expression or block
+#   bodies. Their result type is implicitly `&Class`, they have no `this`, and every reachable normal
+#   path in a block must return an `&Class` value. Allocation still uses the canonical `Class.new`.
+# - A generic function must have an explicit return type. Generic method declarations are not supported.
+# - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
+# - `for` accepts arrays and integer ranges; arbitrary user-defined iterators are not supported.
+# - Assignment targets are variables, properties, or array indices. Compound assignment is supported
+#   only for variables; property and index assignment accept '=' only.
+# - Array literals are non-empty. A valueless `return` has type Unit and is rejected in non-Unit functions.
+#   Type argument arity is checked by resolution.
+# Parser productions describe syntax; declaration, type-argument, and return-flow constraints are
+# enforced by resolution.

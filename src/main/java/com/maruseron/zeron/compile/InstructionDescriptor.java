@@ -36,15 +36,16 @@ public record InstructionDescriptor(Instruction instruction, Opcode.Kind kind, i
                         zeronType = TypeDescriptor.ofFloat();
                     case ALOAD, ALOAD_0, ALOAD_1, ALOAD_2, ALOAD_3, ALOAD_W ->
                         zeronType = null;
-                    default -> throw new IllegalStateException();
+                    default -> {}
                 }
             }
             case OPERATOR -> {
                 switch (instruction.opcode()) {
-                    case IADD, ISUB, IMUL, IDIV, INEG ->
+                    case IADD, ISUB, IMUL, IDIV, INEG, IXOR, ARRAYLENGTH ->
                         zeronType = TypeDescriptor.ofInt();
                     case DADD, DSUB, DMUL, DDIV, DNEG ->
                         zeronType = TypeDescriptor.ofFloat();
+                    default -> {}
                 }
             }
             case CONSTANT -> {
@@ -60,10 +61,13 @@ public record InstructionDescriptor(Instruction instruction, Opcode.Kind kind, i
                         switch (constInstruction.typeKind()) {
                             case INT -> zeronType = TypeDescriptor.ofInt();
                             case DOUBLE -> zeronType = TypeDescriptor.ofFloat();
+                            default -> {}
                         }
                     }
+                    default -> {}
                 }
             }
+            default -> {}
         }
         if (zeronType != null) {
             javaType  = TypeDescriptor.toJavaClassDesc(zeronType);

@@ -2,7 +2,7 @@ module TypeDescriptorGrammar;
 
 Identifier      : { 'a'-'z' | 'A'-'Z' | '0'-'9' } ;
 Type            : Primitive | Wrapper | Function | Generic ;
-Primitive       : "Never" | "Unit" | "Int" | "Float" | "Boolean" | "String" ;
+Primitive       : "Never" | "Any" | "Unit" | "Int" | "Float" | "Boolean" | "String" ;
 Wrapper         : [ { ArraySpec | NullabilitySpec | MutabilitySpec } ":" ] Type ;
 ArraySpec       : "a" ;
 MutabilitySpec  : "m" ;

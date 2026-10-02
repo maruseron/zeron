@@ -18,11 +18,13 @@ public final class Scanner {
     private int line = 1;
 
     private static final Map<String, TokenType> keywords = Map.ofEntries(
+            entry("as",          AS),
             entry("and",         AND),
             entry("break",       BREAK),
             entry("class",       CLASS),
             entry("contract",    CONTRACT),
             entry("constructor", CONSTRUCTOR),
+            entry("continue",    CONTINUE),
             entry("else",        ELSE),
             entry("false",       FALSE),
             entry("fn",          FN),

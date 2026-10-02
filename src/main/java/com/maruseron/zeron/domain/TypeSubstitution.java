@@ -38,8 +38,7 @@ public final class TypeSubstitution {
             case NullableDescriptor nullable -> erase(nullable.baseType()).toNullable();
             case ReferenceDescriptor reference -> new ReferenceDescriptor(erase(reference.baseType()));
             case ArrayDescriptor array -> TypeDescriptor.arrayOf(erase(array.elementType()));
-            case GenericDescriptor generic -> TypeDescriptor.genericOf(generic.baseType(),
-                    generic.typeParameters().stream().map(TypeSubstitution::erase).toList());
+            case GenericDescriptor generic -> generic.baseType();
             case FunctionDescriptor function -> TypeDescriptor.functionOf(
                     function.name(), erase(function.returnType()),
                     function.parameters().stream().map(TypeSubstitution::erase)

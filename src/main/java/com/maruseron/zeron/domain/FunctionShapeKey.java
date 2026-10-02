@@ -35,6 +35,7 @@ public final class FunctionShapeKey {
 
     private static void appendType(final StringBuilder encoding, final TypeDescriptor type) {
         switch (type) {
+            case AnyDescriptor _ -> encoding.append("y;");
             case IntDescriptor _ -> encoding.append("i;");
             case FloatDescriptor _ -> encoding.append("d;");
             case BooleanDescriptor _ -> encoding.append("b;");

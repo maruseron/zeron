@@ -11,24 +11,36 @@
 - [Control flow](#control-flow)
 - [Ranges and Iterables](#ranges-and-iterables)
 - [Classes](#classes)
+- [Names, Packages, and Imports](#names-packages-and-imports)
 
 ## Languages to review for alternatives
 
 Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript (see until!), F#
 
-### Wishlist for this bitch ass language
+### Wishlist
 
 #### Implemented foundations
 
 - Core scalar types, `Unit`, function declarations, and type inference for ordinary bindings and
     function results.
+- Built-in `Any` as a non-null top type: non-null values widen to `Any`, nullable values and `null`
+    widen to `Any?`; supported type tests and checked/safe casts are implemented.
 - Generic top-level functions with explicit return types, call-site type inference or explicit type
     arguments, recursive substitution, and erased JVM lowering.
 - Generic functions accept and return callback values involving type parameters; generated bridge
     methods adapt concrete lambda shapes to and from erased callback interfaces.
 - Higher-order function calls and lambda values, including zero- and multi-parameter lambdas.
+- Nominal classes and contracts with private fields, canonical construction, methods, static
+    conformance checking, and contract dispatch.
+- Invariant generic classes and contracts with explicit construction arguments, member substitution,
+    declaration-site conformance, raw JVM erasure, erased-signature bridges, and callback adaptation
+    across erased nominal fields and members.
+- Fixed-size `Array<T>` values with non-empty literals, indexed reads and writes, and a `length`
+    property; writes require a mutable reference view.
 - Binding reassignment as a declaration property: `let` bindings are immutable and `let mut`
     bindings may be reassigned.
+- Reference mutation capability (`&T`) is distinct from binding reassignment and is enforced for
+    arrays, functions, and class/contract views.
 - Basic nullable types: a non-null value can be widened to `T?`, and `null` can initialize an
     explicitly nullable binding or parameter.
 - Single-expression function bodies and range-literal syntax.
@@ -38,31 +50,44 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Lambda parameter inference is deferred and contextual: unresolved parameters can be fixed by a
     later call or expected function type. This is an implementation prototype, not polymorphic
     lambda typing.
-- Lambdas lower to generated function-shape interfaces. Named function declarations can be called,
-    but are not yet general first-class function values.
-- Nullable descriptors and the basic `T`/`T?` assignments exist. Null-check flow refinement and
-    nullable collection support do not.
-- Generic classes and contracts, bounds, variance, overloads, and first-class generic function
-    references remain unsupported. Generic function values are not polymorphic lambdas.
-- Range and `for` syntax exist, but iterable validation and general iteration semantics remain
-    incomplete.
+- Lambdas are reusable first-class values and lower to generated function-shape interfaces; named
+    function declarations are callable but are not general first-class function values. Lambdas
+    capture immutable bindings by value, but cannot implicitly capture and mutate reassignable
+    local bindings.
+- Nullable descriptors and basic `T`/`T?` assignments exist. Flow refinement for direct local and
+    parameter null/type tests in statement branches and `if` expressions is implemented, including short-circuit Boolean
+    conditions. Checked and safe casts are implemented for supported targets. Loop exits join
+    condition-false and `break` paths; loop-written bindings are conservatively invalidated, and
+    `for` retains its zero-iteration path. Fixed-point refinement across backedges remains deferred.
+    See
+    [design-document-08](design-document-08_flow-typing-type-tests-and-casts.md).
+    Arrays support nullable element types, while broader nullable collection behavior remains limited.
+- Bounds, variance, overloads, and first-class generic function references remain unsupported.
+    Generic function values are not polymorphic lambdas. Callback adaptation through generic nominal
+    fields and members is not yet reliable.
+- `for` loops are implemented for arrays and inline integer range literals. Stored ranges and
+    user-defined iterable types are not supported.
 
 #### Planned language features
 
-- Nominal classes and contracts, including private fields, construction, accessors, and receiver
-    mutation rules. Inheritance and contract composition need separate design decisions.
 - Method delegation: allow a wrapper method to forward its parameters and result to a receiver method
     reference, such as `get(index: Int): T` delegating to `contents::get`. Define this as a distinct
     forwarding form, not as a function-reference value or a change to `=` expression bodies; syntax,
     generic substitution, overload resolution, and receiver mutability rules remain to be designed.
-- Intrinsic arrays with read-only and mutable views ([design](design-document-06_intrinsic-arrays.md));
-    generic classes and contracts, algebraic data types, discriminated unions, and structural or
-    nominal tuples.
+- A stable intrinsic registry for array operations ([design](design-document-06_intrinsic-arrays.md));
+    algebraic data types, discriminated unions, and structural or nominal tuples.
 - Immutable collection types, list comprehensions, and explicit resource management.
-- Reference mutation capability (`&T`) and extension methods.
+- Extension methods.
 - First-class effect handling and any monadic syntax; the semantics and surface syntax are open.
 
 ---
+
+### Names, Packages, and Imports
+
+Package-qualified names, explicit imports, cross-package visibility, and multi-file compilation are
+proposed but not implemented. Packages are source namespaces; imports are compile-time name
+bindings, not runtime loading. JVM modules remain a separate future layer. See the
+[namespaces, packages, and imports proposal](design-document-09_namespaces-packages-and-imports.md).
 
 ### Types
 
@@ -76,7 +101,8 @@ be written as ordinary declared types.
 | Type | Meaning | Current status |
 | --- | --- | --- |
 | `Never` | Bottom type: an expression that does not produce a value or return normally. | Descriptor exists; throw expressions and complete control-flow integration are not implemented. |
-| `Unit` | The single unit value, used when a computation has no useful result. | Supported as a type and literal. It is distinct from `Never`. |
+| `Any` | Top type for all non-null values. | Implicit widening is implemented; it lowers to JVM `Object`. `Any?` also accepts nullable values and `null`. `is`-based narrowing and checked/safe casts are implemented for supported targets. |
+| `Unit` | The single unit value, used when a computation has no useful result. | Supported as a type and literal. It is distinct from `Never` and has a shared non-null runtime singleton. |
 | `Int` | Integer values. | Supported. |
 | `Float` | Floating-point values. | Supported. |
 | `Boolean` | Truth values. | Supported. |
@@ -88,8 +114,8 @@ be written as ordinary declared types.
 - `Null` is the internal type of the `null` literal, not a type users can declare. It is assignable
   to a nullable type, but a binding initialized only with `null` needs an explicit nullable
   annotation, such as `let value: Int? = null;`.
-- A nominal descriptor currently stores a type name. Class declarations and full nominal type
-  resolution are future work, so a name descriptor alone does not imply that a usable class exists.
+- Class and contract declarations resolve to nominal types in the current single-program type
+    namespace. Package- and module-qualified identity remain future work.
 
 #### Function types
 
@@ -101,20 +127,34 @@ Function types are structural signatures consisting of an ordered parameter list
 ```
 
 The function's source name is not part of its structural shape. Lambdas can be stored in bindings
-and passed to functions; parameter inference is currently contextual and remains a prototype. The
-compiler lowers function shapes to generated JVM interfaces, but those generated names are not the
-language-level type identity.
+and passed to or returned from functions; parameter inference is currently contextual and remains a
+prototype. Lambdas may capture immutable bindings by value, including references to shared heap
+objects, but may not implicitly capture reassignable local bindings. The compiler lowers function
+shapes to generated JVM interfaces, but those generated names are not the language-level type
+identity.
 
 #### Nullable types
 
 `T?` describes values of `T` together with `null`. Nullability wraps one non-nullable base type;
 applying `?` to an already-nullable type or to the internal `Null` type is not allowed.
 
-The current assignment rules allow `T` to widen to `T?`, and allow `null` to initialize `T?`. They
-do not allow a nullable value to flow to `T` without a check. Nullable operands cannot be used with
-ordinary operators until null-check flow refinement is designed and implemented. Nullable primitive
-types have boxed JVM representations, while their source-level identity remains distinct from the
-non-nullable type.
+The current assignment rules allow `T` to widen to `T?`, and allow `null` to initialize `T?`. A
+nullable local or parameter can be used as non-null after a proven null check; an `Any` value can be
+refined by a supported `is` test in statement branches and `if` expressions. Refinement does not
+apply to properties, array slots, or globals, and facts after an `if` expression reflect the join of
+both branches. Nullable operands still require proof before ordinary use; see
+the [flow-typing, type-test, and cast design](design-document-08_flow-typing-type-tests-and-casts.md).
+Nullable primitive types have boxed JVM representations, while their source-level identity remains
+distinct from the non-nullable type.
+
+`Any` is the non-null top type and accepts implicit widening from every non-null source type,
+including `Unit`; scalar values are boxed as needed. `Any?` accepts all source types, including
+nullable types and `null`, while `Any?` cannot implicitly narrow to `Any` or another specific type.
+All Unit values use a shared generated `UnitValue` singleton, so widening Unit to `Any` preserves the
+non-null distinction from `null`. Conditional `is` tests are implemented for supported runtime
+types. `as T` performs a checked cast whose failure propagates as a JVM runtime exception; `as? T`
+returns null on mismatch or null. Casts to erased generic, array-element, and function-shape types
+are not supported.
 
 #### Type modifiers and compound or structural types
 
@@ -125,19 +165,20 @@ not a statement that every form is fully implemented.
 Nullable type:       Type?
 Function type:       (Type, ...) -> Type
 Generic type:        Type<Argument, ...>
-Array type:          Type[]
+Array type:          Array<Type>
 Mutable reference:   &Type
 Discriminated union: type Type = A | B
 ```
 
-Nullable and function types have working language-level representations. Generic functions support
-type parameters in signatures, call-site substitution, and erased `Object` lowering, including
-callback adapters. Generic class/contract declarations and their lowering remain unimplemented.
-`Array<T>` is a built-in invariant type constructor with its own descriptor, not a user-defined
-generic class. The `Type[]` spelling and discriminated unions remain design proposals.
+Nullable and function types have working language-level representations. Generic functions and
+invariant generic classes/contracts support type parameters, substitution, and erased JVM lowering.
+Generic top-level function callbacks have bridge adaptation; callback values crossing generic nominal
+member boundaries remain an implementation gap. `Array<T>` is an implemented built-in invariant type
+constructor with its own descriptor, not a user-defined generic class; non-empty literals, indexing,
+and `.length` are supported. The `Type[]` spelling and discriminated unions remain design proposals.
 Mutable-reference capability (`&Type`) is preserved in resolved
-types and enforced for array-slot writes and mutable-to-read-only projections, including function
-types; enforcement for class members awaits class support.
+types and enforced for array-slot writes, function-view projection, class member mutation, and
+mutable-to-read-only projections.
 
 ---
 
@@ -262,8 +303,11 @@ before body resolution.
 Type parameters are opaque in function bodies: they can be passed, stored, and returned, but
 operators and member access requiring type-specific behavior need a future constraint system.
 Lambdas remain monomorphic, and generic function names are not first-class values. At runtime,
-type parameters erase to `Object`; callback values crossing between erased and concrete function
-shapes use generated bridge helpers. Generic classes/contracts, bounds, and variance are deferred.
+type parameters erase to `Object`; direct callback parameters and results crossing between erased
+and concrete function shapes use generated bridge helpers. Nested callbacks, nullable callback
+values, and mutable function views are adapted recursively; broader primitive/reference combination
+and bridge-reuse coverage remains. Invariant generic classes/contracts and callback adaptation across
+their erased member boundaries are implemented. Bounds and variance are deferred.
 
 ---
 
@@ -332,7 +376,9 @@ Block                        ::= "{" Statement* "}"
 Lambda parameters are identifiers without annotations; their types are inferred from the body or
 an expected function type. The bare form is available only for a single parameter. Parentheses are
 required for zero or multiple parameters. An expression body consists of one expression; a block
-body contains statements and uses `return` when it returns a value.
+body contains statements and uses `return` when it returns a value. Lambdas can be stored and
+returned as values and capture immutable bindings by value; capturing a reassignable local binding
+is rejected. Shared mutation can be performed through a captured mutable reference to a heap object.
 
 ### Control Flow
 
@@ -384,8 +430,10 @@ until (i == 5) {
 
 `loop` has no condition and therefore continues indefinitely unless control leaves the loop, for
 example with `break;` or by returning from the function. `break;` exits the innermost enclosing
-`while`, `until`, or `loop`; it cannot escape across a function or lambda boundary. These constructs
-are compiled to JVM control flow, and loop conditions must have type `Boolean`.
+loop. `continue;` starts the next iteration of the innermost loop: it rechecks the condition for
+`while`, `until`, and `loop`, or advances the element/range before checking again for `for`. Neither
+statement can cross a function or lambda boundary. These constructs are compiled to JVM control
+flow, and loop conditions must have type `Boolean`.
 
 ```zeron
 loop {
@@ -408,10 +456,12 @@ such as `Response.error(...)` remain ordinary API-level values rather than built
 
 ### Ranges and Iterables
 
-Range literals and arrays are intended to be iterable. Range literals currently have a generic
-descriptor, but array iteration is not integrated with the dedicated `Array<T>` descriptor, and the
-compiler does not yet lower `for` loops. Treat the following as intended syntax rather than a
-runnable example.
+`for` currently supports `Array<T>` values and inline integer range literals. The loop evaluates
+its iterable expression once, binds an immutable element name, and supports `break` and `continue`. Array iteration
+reads elements in index order; range literals are inclusive and count by one toward the endpoint,
+ascending or descending. Range endpoints are integer literals in this slice, and the final endpoint
+is checked before incrementing to avoid integer overflow. Lowering uses dedicated JVM loops rather
+than a general iterator protocol.
 
 #### Range syntax
 
@@ -423,7 +473,7 @@ let oneThroughTen = 1..10;
 
 #### Iterables
 
-The intended `for` form binds an immutable name for each value in the iterable:
+The `for` form binds an immutable name for each value:
 
 ```zeron
 let mut accumulator = 0;
@@ -432,67 +482,60 @@ for (let i in 1..10) {
 }
 ```
 
-The parser requires `let` in the loop header. The resolver's iterable handling is still partial,
-and bytecode generation for `for` is not implemented.
+The parser requires `let` in the loop header. Arrays must currently be non-empty because empty array
+literals are not implemented. A range literal can be iterated directly, but storing a range value
+and iterating it is not supported because ranges do not yet have a runtime representation.
 
 #### Making an iterable
 
-In Zeron, any custom type is eligible to become an iterable
-by implementing the Iterable contract:
+Contracts and declaration-site class conformance are implemented, but custom iterable types are not
+supported. This sketches a possible contract for a future iterator protocol; arrays and ranges
+currently use specialized lowering and do not implement it:
 
 ```zeron
 contract Iterable {
     iterator(): Iterator;
 }
 
-// declaration site
 class PersonList is Iterable {
-    array: Person[];
-    
-    iterator(): Iterator { ... }
-}
-
-//use site
-class PersonList {
-    array: Person[];
-}
-
-implement Iterable for PersonList {
-    iterator(): Iterator { ... }
+    array: Array<Person>;
+    public constructor new;
+    public iterator(): Iterator = ...;
 }
 ```
 
 ### Classes
 
-Classes are planned as nominal reference types with object identity. The initial constructor form
-requires every field to be initialized before the instance becomes observable:
+Classes are nominal reference types with object identity. A class has private fields, one canonical
+constructor that initializes every field in declaration order, and methods with explicit visibility
+and return types. The canonical constructor is public by default; an explicit private declaration
+can restrict direct construction. Implemented named constructors are static factory methods with
+expression or block bodies and an implicit `&Class` result:
 
 ```zeron
 class Person {
     name: String;
     age: Int;
-    constructor new;
+    private constructor new;
+    public readAge(): Int = this.age;
+    public constructor fromName(name: String) = Person.new(name, 0);
+    public mut birthday(): Unit {
+        this.age = this.age + 1;
+    }
 }
 
-let person = Person.new("Ada", 37);
+let person = Person.fromName("Ada");
 ```
 
-The initial constructor must initialize each field exactly once; additional constructors,
-delegation, and inheritance are deferred. Fields are private by default, and access to a private
-field outside its permitted scope is a compile-time error. Public fields are intended to expose
-generated accessors, while custom getters and setters may be declared explicitly. Their exact
-grammar and interaction with generated accessors remain to be specified.
-
-```zeron
-class Person {
-    public name: String;
-    set -> name = sanitize(it);
-}
-```
-
-Contracts describe required member signatures and are checked statically. Start with declaration-site
-conformance and a single contract per class; separate implementation declarations, default methods,
-and multiple conformance are deferred.
+Construction initializes every field exactly once. Omitting a canonical declaration synthesizes a
+public constructor; `private constructor new;` restricts direct construction. Fields are private and
+there are no public fields, generated accessors, properties, or user-written canonical-constructor
+bodies. Named factories have no `this`; block bodies must return `&Class` on every normal path, and
+all object allocation still goes through canonical `new`. Methods provide the class API. Contracts declare required method signatures; the
+source design permits multiple declaration-site conformances, checked statically, and calls through
+contract-typed references use interface dispatch, including when a class conforms to multiple
+contracts. Separate `implement` declarations, default methods, contract inheritance, and class
+inheritance remain deferred.
 
 ```zeron
 class PersonList is Iterable { ... }
@@ -506,9 +549,9 @@ view, while `&T` is a mutable view. An immutable binding may hold an `&T`, and a
 may hold a read-only `T`.
 
 Methods that mutate their receiver are marked `mut`; calling them, or a setter that mutates state,
-requires a mutable receiver view. `&T` does not imply exclusive access or borrow checking: aliases may
-observe mutations. How code obtains a mutable view, including from a newly constructed object, remains
-to be specified.
+requires a mutable receiver view. A newly constructed object has a mutable reference view (`&T`),
+which may be projected to read-only `T`; the reverse conversion is not implicit. `&T` does not imply
+exclusive access or borrow checking: aliases may observe mutations.
 
 ```zeron
 class Person {

@@ -219,16 +219,16 @@ public final class ClassContractTest {
         final var thirdFile = Path.of("dist", thirdContract + ".class");
         final var programFile = Path.of("dist", programName + ".class");
         final var source = """
-                contract %s {
+                public contract %s {
                     name(): String;
                 }
-                contract %s {
+                public contract %s {
                     name(): String;
                 }
-                contract %s {
+                public contract %s {
                     description(): String;
                 }
-                class %s is %s, %s, %s {
+                public class %s is %s, %s, %s {
                     value: String;
                     details: String;
                     public constructor new;

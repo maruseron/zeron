@@ -1,0 +1,10 @@
+package zeron.collections;
+
+public contract Iterator<T> {
+    hasNext(): Boolean;
+    mut next(): T;
+}
+
+public contract Iterable<T> {
+    iterator(): &Iterator<T>;
+}

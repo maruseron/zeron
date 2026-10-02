@@ -28,8 +28,9 @@ first-class union types. Flow typing is static type checking, not general error 
   resolution and lowering are implemented for supported runtime-testable types.
 - `if` expressions have parser, resolver, flow, and value-producing JVM lowering. Each branch is
   resolved under its condition facts; outgoing facts join across both branches. Loop flow tracks
-  condition and `break` exits, treats `continue` as a backedge, and invalidates loop-written facts;
-  fixed-point refinement across backedges remains deferred.
+  condition and `break` exits, treats `continue` as a backedge, and computes loop-header facts to a
+  fixed point over preheader, fallthrough, and continue edges. Break states join with normal exits;
+  `for` retains its zero-iteration path.
 - Zeron has no source-level exception handling. Runtime exceptions from generated code propagate to
   the host caller; this is documented as a runtime boundary, not a recovery mechanism, in
   [design-document-00.md](design-document-00.md).
@@ -182,14 +183,13 @@ type in the branch. No declared union type is created.
   calls may change the value.
 - Do not carry facts into a lambda body in the first version. The body may run later; closure-specific
   refinement can be designed separately.
-- `while`/`until` normal exits use the condition-false facts and join reachable `break` states.
-  `continue` contributes only a backedge, and nested loop transfers target the innermost loop.
-  `for` includes a zero-iteration exit. At loop headers, incoming refinements for syntactically
-  assigned bindings are discarded so facts from an earlier iteration cannot be reused; the loop
-  condition can establish fresh facts. Those bindings lose refinements again at loop exits. Infinite
-  `loop` statements have no normal exit unless a reachable `break` exists.
-- Loop flow is a conservative single-pass analysis, not a fixed-point solver. Facts established only
-  by later iterations are not inferred; loop-edge refinement can become more precise in a later step.
+- `while`/`until` normal exits use condition-false facts joined across the fixed-point loop header and
+  reachable `break` states. `continue` and normal body completion contribute backedges; nested loop
+  transfers target the innermost loop. `for` includes a zero-iteration exit and joins reachable
+  breaks. Infinite `loop` statements have no normal exit unless a reachable `break` exists.
+- Loop facts converge over the finite nullability/type-alternative domain. Assignments kill facts at
+  the assignment point; facts are not blanket-invalidated merely because a binding is written in a
+  loop.
 - At lexical scope exit, discard facts for bindings declared in that scope.
 
 ## Exception Boundary
@@ -209,9 +209,10 @@ error-handling feature rather than quietly making casts catchable.
 2. **Checked and safe casts: implemented.** `as T` emits a checked JVM cast with host-propagating
   failure; `as? T` returns null on mismatch or null. Nullable checked sources require prior flow
   proof, and casts do not persistently refine their source binding.
-3. **Extend control-flow coverage.** Add fixed-point refinement across loop backedges and broader
-  closure-flow behavior. Mutable globals, properties, and array slots remain conservative unless
-  their stability can be established.
+3. **Loop fixed-point refinement: implemented.** Loop headers join preheader and reachable backedge
+  states until stable; exits join condition-false and reachable breaks, with `for` preserving its
+  zero-iteration edge. Broader closure-flow behavior remains deferred. Mutable globals, properties,
+  and array slots remain conservative unless their stability can be established.
 
 ## Acceptance Criteria
 
@@ -231,6 +232,8 @@ error-handling feature rather than quietly making casts catchable.
 
 ### Remaining Cast Coverage
 
-- Expand runtime coverage across class, contract, Unit, and all primitive checked/safe cast pairs.
-- Keep erased generic element/type arguments rejected unless a sound runtime check exists.
+- Runtime coverage across Unit, all primitive checked/safe cast pairs, classes, contracts, nulls, and
+  checked failure propagation is implemented.
+- Keep erased generic, array-element, and function-shape targets rejected unless a sound runtime check
+  exists.
 - Consider redundant `checkcast` elimination as an optimization, not a semantic requirement.

@@ -37,6 +37,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     across erased nominal fields and members.
 - Fixed-size `Array<T>` values with non-empty literals, indexed reads and writes, and a `length`
     property; writes require a mutable reference view.
+- `for` loops over arrays, inline integer ranges, and user-defined types conforming to the bundled
+    `Iterable<T>` and `Iterator<T>` contracts. Arrays retain specialized lowering; ranges are
+    ordinary `zeron.ranges.IntRange` values and use protocol dispatch.
 - Binding reassignment as a declaration property: `let` bindings are immutable and `let mut`
     bindings may be reassigned.
 - Reference mutation capability (`&T`) is distinct from binding reassignment and is enforced for
@@ -55,18 +58,17 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     capture immutable bindings by value, but cannot implicitly capture and mutate reassignable
     local bindings.
 - Nullable descriptors and basic `T`/`T?` assignments exist. Flow refinement for direct local and
-    parameter null/type tests in statement branches and `if` expressions is implemented, including short-circuit Boolean
-    conditions. Checked and safe casts are implemented for supported targets. Loop exits join
-    condition-false and `break` paths; loop-written bindings are conservatively invalidated, and
-    `for` retains its zero-iteration path. Fixed-point refinement across backedges remains deferred.
-    See
+    parameter null/type tests in statement branches and `if` expressions is implemented, including
+    short-circuit Boolean conditions. Checked and safe casts are implemented for supported targets.
+    Loop exits join condition-false and `break` paths; loop-written bindings are conservatively
+    invalidated at assignments, and loop-header facts converge across backedges; `for` retains its
+    zero-iteration path. See
     [design-document-08](design-document-08_flow-typing-type-tests-and-casts.md).
     Arrays support nullable element types, while broader nullable collection behavior remains limited.
-- Bounds, variance, overloads, and first-class generic function references remain unsupported.
-    Generic function values are not polymorphic lambdas. Callback adaptation through generic nominal
-    fields and members is not yet reliable.
-- `for` loops are implemented for arrays and inline integer range literals. Stored ranges and
-    user-defined iterable types are not supported.
+- Generic functions support one contract bound per type parameter. Variance, overloads, generic
+    class/contract bounds, and first-class generic function references remain unsupported.
+    Generic function values are not polymorphic lambdas. Generic callback adaptation works across
+    top-level functions and nominal members, though broader shape coverage and adapter reuse remain.
 
 #### Planned language features
 
@@ -84,9 +86,10 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 
 ### Names, Packages, and Imports
 
-Package-qualified names, explicit imports, cross-package visibility, and multi-file compilation are
-proposed but not implemented. Packages are source namespaces; imports are compile-time name
-bindings, not runtime loading. JVM modules remain a separate future layer. See the
+Package headers, qualified nominal identities, project source roots, per-unit function holders, and
+selective imports of public classes, contracts, and functions are implemented. Cross-unit top-level
+values and compiled-library discovery remain future work. Packages are source namespaces; imports are
+compile-time name bindings, not runtime loading. JVM modules remain a separate future layer. See the
 [namespaces, packages, and imports proposal](design-document-09_namespaces-packages-and-imports.md).
 
 ### Types
@@ -172,8 +175,9 @@ Discriminated union: type Type = A | B
 
 Nullable and function types have working language-level representations. Generic functions and
 invariant generic classes/contracts support type parameters, substitution, and erased JVM lowering.
-Generic top-level function callbacks have bridge adaptation; callback values crossing generic nominal
-member boundaries remain an implementation gap. `Array<T>` is an implemented built-in invariant type
+Generic top-level function callbacks have bridge adaptation. Callback values crossing generic nominal
+member boundaries are also adapted through generated helpers and erased contract bridges; broader
+shape coverage remains follow-up work. `Array<T>` is an implemented built-in invariant type
 constructor with its own descriptor, not a user-defined generic class; non-empty literals, indexing,
 and `.length` are supported. The `Type[]` spelling and discriminated unions remain design proposals.
 Mutable-reference capability (`&Type`) is preserved in resolved
@@ -300,14 +304,15 @@ contextual parameter types after known substitutions are applied, and their body
 remaining type variables. Generic functions require annotated returns so their schemes are known
 before body resolution.
 
-Type parameters are opaque in function bodies: they can be passed, stored, and returned, but
-operators and member access requiring type-specific behavior need a future constraint system.
-Lambdas remain monomorphic, and generic function names are not first-class values. At runtime,
+Unbounded type parameters are opaque in function bodies. A contract-bounded parameter can call that
+contract's non-mutating methods; operators and other type-specific operations still need future
+constraints. Lambdas remain monomorphic, and generic function names are not first-class values. At runtime,
 type parameters erase to `Object`; direct callback parameters and results crossing between erased
 and concrete function shapes use generated bridge helpers. Nested callbacks, nullable callback
 values, and mutable function views are adapted recursively; broader primitive/reference combination
 and bridge-reuse coverage remains. Invariant generic classes/contracts and callback adaptation across
-their erased member boundaries are implemented. Bounds and variance are deferred.
+their erased member boundaries are implemented. Single contract bounds on generic functions are
+implemented; variance and generic class/contract bounds remain deferred.
 
 ---
 
@@ -456,12 +461,12 @@ such as `Response.error(...)` remain ordinary API-level values rather than built
 
 ### Ranges and Iterables
 
-`for` currently supports `Array<T>` values and inline integer range literals. The loop evaluates
-its iterable expression once, binds an immutable element name, and supports `break` and `continue`. Array iteration
-reads elements in index order; range literals are inclusive and count by one toward the endpoint,
-ascending or descending. Range endpoints are integer literals in this slice, and the final endpoint
-is checked before incrementing to avoid integer overflow. Lowering uses dedicated JVM loops rather
-than a general iterator protocol.
+`for` supports `Array<T>` values, `zeron.ranges.IntRange` values, and values conforming to the bundled
+`Iterable<T>` contract. The loop evaluates its iterable expression once, binds an immutable element
+name, and supports `break` and `continue`. Arrays use dedicated index-based lowering. Integer range
+literals construct ordinary `IntRange` values, whose `iterator()`, `hasNext()`, and `next()` methods
+use contract dispatch. Ranges are inclusive, choose an ascending or descending unit step from their
+endpoints, and do not increment after yielding the final endpoint, avoiding integer overflow.
 
 #### Range syntax
 
@@ -483,24 +488,24 @@ for (let i in 1..10) {
 ```
 
 The parser requires `let` in the loop header. Arrays must currently be non-empty because empty array
-literals are not implemented. A range literal can be iterated directly, but storing a range value
-and iterating it is not supported because ranges do not yet have a runtime representation.
+literals are not implemented. Range values can be stored and iterated later like any other iterable.
 
 #### Making an iterable
 
-Contracts and declaration-site class conformance are implemented, but custom iterable types are not
-supported. This sketches a possible contract for a future iterator protocol; arrays and ranges
-currently use specialized lowering and do not implement it:
+`Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`,
+defined in `src/main/resources/stdlib/iteration.zn`. The CLI loads this file as a separate source
+unit. A custom iterable imports and implements these public contracts through ordinary class
+conformance; arrays retain specialized lowering and ranges use ordinary protocol dispatch.
 
 ```zeron
-contract Iterable {
-    iterator(): Iterator;
-}
+package geometry;
 
-class PersonList is Iterable {
-    array: Array<Person>;
+import zeron.collections.Iterable;
+
+public class PersonList is Iterable<Person> {
+    people: Array<Person>;
     public constructor new;
-    public iterator(): Iterator = ...;
+    public iterator(): &Iterator<Person> = ...;
 }
 ```
 
@@ -538,7 +543,7 @@ contracts. Separate `implement` declarations, default methods, contract inherita
 inheritance remain deferred.
 
 ```zeron
-class PersonList is Iterable { ... }
+class PersonList is Iterable<Person> { ... }
 ```
 
 #### Mutability

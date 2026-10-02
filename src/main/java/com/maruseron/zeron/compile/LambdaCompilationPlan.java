@@ -112,7 +112,7 @@ final class LambdaCompilationPlan {
                     collectFunctionShapes(method.typeDescriptor().returnType());
                 }
             }
-            case Stmt.Function(Token _, List<Token> _, FunctionDescriptor type, List<Stmt> body) -> {
+            case Stmt.Function(Token _, List<Token> _, FunctionDescriptor type, List<Stmt> body, boolean _) -> {
                 for (final var parameter : type.parameters()) collectFunctionShapes(parameter);
                 collectFunctionShapes(type.returnType());
                 collectLambdaShapes(body);
@@ -299,7 +299,7 @@ final class LambdaCompilationPlan {
                 collectCapturedVariables(condition, localNames, captured, seen);
                 collectCapturedVariables(body, new HashSet<>(localNames), captured, seen);
             }
-            case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body) -> {
+            case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body, boolean _) -> {
                 final var nestedNames = new HashSet<>(localNames);
                 for (final var param : parameters) nestedNames.add(param.lexeme());
                 collectCapturedVariables(body, nestedNames, captured, seen);

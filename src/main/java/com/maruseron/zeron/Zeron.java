@@ -2,7 +2,9 @@ package com.maruseron.zeron;
 
 import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.analize.Resolver;
+import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.compile.Compiler;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
@@ -13,7 +15,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 
 import static java.lang.IO.println;
 
@@ -24,32 +29,113 @@ public class Zeron {
 
     static void main(final String... args) throws IOException {
         debugEnabled = false;
-        String scriptPath = null;
-        for (final var argument : args) {
+        final var scriptPaths = new ArrayList<String>();
+        final var sourceRoots = new ArrayList<Path>();
+        Path entry = null;
+        for (var index = 0; index < args.length; index++) {
+            final var argument = args[index];
             if (argument.equals("--debug") || argument.equals("-d")) {
                 debugEnabled = true;
-            } else if (scriptPath == null) {
-                scriptPath = argument;
+            } else if (argument.equals("--root")) {
+                if (++index >= args.length) throw new IllegalArgumentException("--root requires a directory.");
+                sourceRoots.add(Paths.get(args[index]));
+            } else if (argument.equals("--entry")) {
+                if (++index >= args.length) throw new IllegalArgumentException("--entry requires a source file.");
+                entry = Paths.get(args[index]);
             } else {
-                println("Usage: zeron [--debug] [script]");
-                System.exit(64);
-                return;
+                scriptPaths.add(argument);
             }
         }
-        if (scriptPath == null) runPrompt();
-        else runFile(scriptPath);
+        if (entry != null || !sourceRoots.isEmpty()) {
+            if (entry == null || sourceRoots.isEmpty()) {
+                throw new IllegalArgumentException("Project compilation requires both --root and --entry.");
+            }
+            runProject(sourceRoots, entry);
+        } else if (scriptPaths.isEmpty()) runPrompt();
+        else runFiles(scriptPaths);
     }
 
     public static void debug(final String message) {
         if (debugEnabled) System.err.println(message);
     }
 
-    private static void runFile(final String path) throws IOException {
-        final var sourcePath = Paths.get(path);
-        final var bytes = Files.readAllBytes(sourcePath);
+    private static void runFiles(final List<String> paths) throws IOException {
+        final var units = new ArrayList<CompilationUnit>();
+        for (final var path : paths) {
+            final var sourcePath = Paths.get(path);
+            final var bytes = Files.readAllBytes(sourcePath);
+            units.add(Parser.of(Scanner.from(new String(bytes, Charset.defaultCharset())).scanTokens())
+                    .parseCompilationUnit(sourcePath.toString()));
+        }
+        if (hadError) {
+            System.exit(65);
+            return;
+        }
+        final var packageName = units.getFirst().packageName();
+        for (final var unit : units) {
+            if (unit.packageName().equals(packageName)) continue;
+            final var hasTopLevelValues = unit.declarations().stream()
+                    .anyMatch(Stmt.Var.class::isInstance);
+            if (hasTopLevelValues) {
+                error(1, "Cross-package top-level values are deferred until initialization order is specified.");
+                System.exit(65);
+                return;
+            }
+        }
+        units.add(StandardLibrary.iterationUnit());
+        final var programName = packageName.isEmpty()
+                ? sourceClassName(Paths.get(paths.getFirst()))
+                : packageName + "." + sourceClassName(Paths.get(paths.getFirst()));
+        runUnits(units, programName, packageName);
+        if (hadError) System.exit(65);
+        if (hadResolutionError) System.exit(71);
+    }
 
-        run(new String(bytes, Charset.defaultCharset()), sourceClassName(sourcePath));
+    private static void runProject(final List<Path> roots, final Path entry) throws IOException {
+        final var absoluteRoots = roots.stream().map(path -> path.toAbsolutePath().normalize()).toList();
+        final var absoluteEntry = entry.isAbsolute()
+                ? entry.normalize()
+                : absoluteRoots.getFirst().resolve(entry).normalize();
+        if (!Files.isRegularFile(absoluteEntry)
+                || absoluteRoots.stream().noneMatch(absoluteEntry::startsWith)) {
+            throw new IllegalArgumentException("Entry source must exist under a configured --root: " + entry);
+        }
 
+        final var sourcePaths = new java.util.TreeSet<Path>();
+        for (final var root : absoluteRoots) {
+            if (!Files.isDirectory(root)) throw new IllegalArgumentException("Source root is not a directory: " + root);
+            try (final var paths = Files.walk(root)) {
+                paths.filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString().endsWith(".zn"))
+                        .map(path -> path.toAbsolutePath().normalize())
+                        .forEach(sourcePaths::add);
+            }
+        }
+        if (!sourcePaths.contains(absoluteEntry)) {
+            throw new IllegalArgumentException("Entry source was not discovered under configured roots: " + entry);
+        }
+
+        final var orderedSources = new ArrayList<Path>();
+        orderedSources.add(absoluteEntry);
+        sourcePaths.stream().filter(path -> !path.equals(absoluteEntry)).forEach(orderedSources::add);
+        final var units = new ArrayList<CompilationUnit>();
+        for (final var sourcePath : orderedSources) {
+            final var sourceRootIndex = absoluteRoots.stream().filter(sourcePath::startsWith)
+                .mapToInt(absoluteRoots::indexOf).findFirst().orElse(0);
+            final var relativePath = "root" + sourceRootIndex + "/"
+                + absoluteRoots.get(sourceRootIndex).relativize(sourcePath).toString().replace('\\', '/');
+            units.add(Parser.of(Scanner.from(Files.readString(sourcePath)).scanTokens())
+                .parseCompilationUnit(relativePath));
+        }
+        if (hadError) {
+            System.exit(65);
+            return;
+        }
+        final var entryUnit = units.getFirst();
+        final var programName = entryUnit.packageName().isEmpty()
+                ? sourceClassName(absoluteEntry)
+                : entryUnit.packageName() + "." + sourceClassName(absoluteEntry);
+        runUnits(units, programName, entryUnit.packageName());
         if (hadError) System.exit(65);
         if (hadResolutionError) System.exit(71);
     }
@@ -74,11 +160,19 @@ public class Zeron {
         final var scanner = Scanner.from(source);
         final var tokens = scanner.scanTokens();
         final var parser = Parser.of(tokens);
-        final var stmts = parser.parse();
+        final var unit = parser.parseCompilationUnit(null);
 
         if (hadError) return;
 
-        final var compiler = new Compiler(stmts, outputClassName);
+        runUnits(List.of(unit, StandardLibrary.iterationUnit()),
+            unit.packageName().isEmpty() ? outputClassName : unit.packageName() + "." + outputClassName,
+            unit.packageName());
+    }
+
+        private static void runUnits(final List<CompilationUnit> units,
+                     final String outputClassName,
+                     final String packageName) throws IOException {
+        final var compiler = Compiler.forCompilationUnits(units, outputClassName, packageName);
         compiler.resolve();
 
         if (hadResolutionError) return;

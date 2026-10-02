@@ -10,16 +10,21 @@ generated bridge helpers.
 
 Invariant generic classes/contracts and callback adaptation across their erased nominal boundaries
 are also implemented; see [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md)
-and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). Bounds, variance,
-overloads, and first-class generic function values remain deferred, so this is not a complete generic
-type system.
+and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). A first slice of
+single contract bounds on generic function type parameters is implemented. Variance, overloads, and
+first-class generic function values remain deferred, so this is not a complete generic type system.
 
 ## Language Contract
 
 A generic function declares its type parameters after its name and must state its return type:
 
 ```zeron
+contract Named {
+  name(): String;
+}
+
 fn identity<T>(value: T): T = value;
+fn display<T: Named>(value: T): String = value.name();
 
 fn apply<T, R>(value: T, transform: (T) -> R): R = transform(value);
 
@@ -27,9 +32,13 @@ identity(42);                  // infer T as Int
 identity<String>("zeron");    // explicit type argument
 ```
 
-Type parameters are scoped to one declaration. The current syntax permits them recursively in
-parameters, results, function signatures, nullable and reference types, and the built-in
-`Array<T>` descriptor. Function type annotations accept zero or multiple parameters.
+Type parameters are scoped to one declaration. Generic functions may give each parameter one
+contract bound, such as `T: Named`. The bound exposes that contract's non-mutating methods in the
+generic body and is checked against inferred or explicit type arguments. Multiple bounds, class
+bounds, bounds on generic classes/contracts, and mutating bound methods remain unsupported. Type
+parameters may appear recursively in parameters, results, function signatures, nullable and
+reference types, and the built-in `Array<T>` descriptor. Function type annotations accept zero or
+multiple parameters.
 
 At a direct generic call, the resolver seeds substitutions from explicit type arguments, if given,
 then resolves non-lambda arguments and structurally matches their types against the generic
@@ -38,16 +47,17 @@ body is resolved; its result may supply remaining substitutions. Every declared 
 be resolved or the call reports that an explicit type argument is required. Conflicting inferences
 are rejected. The resulting arguments are checked against the fully substituted signature.
 
-Type variables are opaque inside a generic body. Values can be passed, stored, returned, and used in
-supported structural positions, but unary and binary operators are rejected when they require
-constraints. There is no bounds or trait/contract constraint syntax. Lambdas remain monomorphic;
-generic function values and implicit specialization of a function name are not supported.
+Unbounded type variables remain opaque inside a generic body. Values can be passed, stored, returned,
+and used in supported structural positions, but unary and binary operators are rejected when they
+require constraints. A bounded type variable exposes only its bound contract's non-mutating methods.
+Lambdas remain monomorphic; generic function values and implicit specialization of a function name
+are not supported.
 
 ## Implementation Details
 
 ### Parsing and type identity
 
-The parser recognizes `fn name<T, R>(...)` and `name<Int>(...)`. A generic declaration without an
+The parser recognizes `fn name<T, R>(...)`, `fn display<T: Named>(...)`, and `name<Int>(...)`. A generic declaration without an
 explicit return annotation is rejected. Call type arguments are retained on the call AST node for
 resolution. Type-parameter descriptors include a declaration-scope identity so unrelated `T`
 parameters do not compare equal merely because they share a spelling.
@@ -63,8 +73,9 @@ to their raw JVM class or interface; see [design-document-05_classes-and-contrac
 Generic call inference is structural and intentionally bounded. It handles direct type variables,
 function signatures, arrays (including a mutable array literal projected to a read-only parameter),
 nullable/reference wrappers, and existing generic descriptors. It is not a general subtype solver:
-there are no constraints, variance rules, overload selection, or inference from a desired result
-type alone. If a type parameter appears only in an unconstrained lambda parameter, the caller must
+there are no variance rules, overload selection, or inference from a desired result type alone. A
+single contract bound may authorize readonly contract methods on a generic function type parameter.
+If a type parameter appears only in an unconstrained lambda parameter, the caller must
 provide enough information elsewhere or pass an explicit type argument.
 
 Lambdas passed as arguments are resolved against the partially substituted function signature.
@@ -74,7 +85,9 @@ The lambda itself does not acquire the enclosing function's polymorphism.
 ### JVM lowering
 
 Generic functions compile once; the compiler does not specialize a method for every type argument.
-Type variables map to `java.lang.Object` in method descriptors. Primitive values are boxed when
+Type variables, including contract-bounded variables, map to `java.lang.Object` in method
+descriptors. A bounded member call casts the erased receiver to its bound contract and invokes the
+contract interface; bounds do not change the function descriptor. Primitive values are boxed when
 passed through an erased parameter and cast/unboxed when returned to a concrete call-site type.
 Reference values are cast at the corresponding boundary. Source-level type checking remains based
 on descriptors, not these JVM representations.
@@ -109,9 +122,11 @@ as fully characterized.
    declaration-site conformance, invariant identity, raw JVM erasure, nominal callback adapters, and
    erased contract bridges are covered. Broader shape combinations and adapter reuse remain follow-up
    coverage.
-5. **Add constraints only with a coherent member model.** Specify constraint declarations, checking,
-  dispatch, and how constrained operations lower before permitting operators or members on `T`.
-  Bounds, variance, overloads, and broader inference remain deferred.
+5. **Single contract bound on generic functions: first slice implemented.** Each function type
+  parameter may have one contract bound. Call sites validate inferred and explicit type arguments;
+  generic bodies may call the bound's non-mutating methods through a cast and interface dispatch.
+  Bounds on generic classes/contracts, multiple or class bounds, mutating methods, operators, variance,
+  overloads, and broader inference remain deferred.
 
 ## Acceptance Criteria for the Current Slice
 
@@ -119,6 +134,8 @@ as fully characterized.
   declaration.
 - Calls infer consistently from values and contextual lambdas, accept explicit type arguments, and
   diagnose conflicts or unresolved parameters.
+- Contract-bounded generic function calls validate inferred and explicit type arguments; only
+  readonly methods declared by the bound are callable on `T`.
 - Type-specific operations on unconstrained type variables fail during resolution rather than
   producing invalid bytecode.
 - Erased method descriptors, primitive boxing/unboxing, generic array access, and recursive callback

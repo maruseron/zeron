@@ -16,7 +16,7 @@ public sealed interface Stmt {
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                      List<ContractUse> contractUses, List<Field> fields,
                      Constructor constructor, List<NamedConstructor> namedConstructors,
-                     List<Method> methods) implements Stmt, Decl {
+                     List<Method> methods, boolean isPublic) implements Stmt, Decl {
         public List<Token> contractNames() {
             return contractUses.stream().map(ContractUse::name).toList();
         }
@@ -35,7 +35,7 @@ public sealed interface Stmt {
                             List<Stmt> body) {}
 
     record ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
-                        List<ContractMethod> methods) implements Stmt, Decl {}
+                        List<ContractMethod> methods, boolean isPublic) implements Stmt, Decl {}
 
     record ContractMethod(Token name, List<Token> parameters,
                           FunctionDescriptor typeDescriptor, boolean isMutating) {}
@@ -50,7 +50,8 @@ public sealed interface Stmt {
     record For(Token iterationBind, Token in, Expr iterable, Stmt body) implements Stmt {}
 
     record Function(Token name, List<Token> parameters,
-                    FunctionDescriptor typeDescriptor, List<Stmt> body) implements Stmt, Decl {}
+                    FunctionDescriptor typeDescriptor, List<Stmt> body,
+                    boolean isPublic) implements Stmt, Decl {}
 
     record Method(Token name, List<Token> parameters,
                   FunctionDescriptor typeDescriptor, boolean isPublic,

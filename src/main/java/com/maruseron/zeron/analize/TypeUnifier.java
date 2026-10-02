@@ -17,7 +17,9 @@ final class TypeUnifier {
         if (pattern instanceof TypeParameterDescriptor parameter) {
             final var previous = substitutions.putIfAbsent(parameter, actual);
             if (previous != null && !previous.equals(actual)
-                && !acceptsAny(previous, actual)) {
+                && !acceptsAny(previous, actual)
+                && !(actual instanceof ReferenceDescriptor reference
+                    && previous.equals(reference.baseType()))) {
                 Zeron.resolutionError(new ResolutionError(where,
                         "Conflicting type inferences for '" + parameter.name() + "': "
                                 + previous + " and " + actual + "."));

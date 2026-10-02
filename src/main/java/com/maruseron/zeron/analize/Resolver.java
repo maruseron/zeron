@@ -1,7 +1,7 @@
 package com.maruseron.zeron.analize;
 
-import com.maruseron.zeron.IntRangeLiteral;
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
@@ -11,6 +11,8 @@ import com.maruseron.zeron.scan.TokenType;
 import java.util.*;
 
 public final class Resolver {
+    public record IterationProtocol(String iterableName, String iteratorName) {}
+
     private record FlowFact(boolean mayBeNull, Set<TypeDescriptor> nonNullAlternatives) {
         FlowFact {
             if (nonNullAlternatives != null) nonNullAlternatives = Set.copyOf(nonNullAlternatives);
@@ -74,12 +76,21 @@ public final class Resolver {
             }
             return joined;
         }
+
+        boolean sameAs(final FlowState other) {
+            if (reachable != other.reachable || facts.size() != other.facts.size()) return false;
+            for (final var entry : facts.entrySet()) {
+                if (!Objects.equals(entry.getValue(), other.facts.get(entry.getKey()))) return false;
+            }
+            return true;
+        }
     }
 
     private record ConditionFlows(FlowState whenTrue, FlowState whenFalse) {}
 
     private static final class LoopFlow {
         private final List<FlowState> breakStates = new ArrayList<>();
+        private final List<FlowState> continueStates = new ArrayList<>();
     }
 
     // this table stores every name related to a type to avoid name collisions
@@ -87,13 +98,29 @@ public final class Resolver {
     public final Set<String> types   = new HashSet<>();
     private final Map<String, Stmt.ClassDecl> classes = new LinkedHashMap<>();
     private final Map<String, Stmt.ContractDecl> contracts = new LinkedHashMap<>();
+    private final Map<String, Stmt.Function> functions = new LinkedHashMap<>();
+    private final Map<String, Token> functionSymbolTokens = new LinkedHashMap<>();
+    private final IdentityHashMap<Token, String> functionNamesByDeclaration = new IdentityHashMap<>();
+    private final Map<Token, TypeDescriptor> iterationElementTypes = new IdentityHashMap<>();
+    private final Map<Token, IterationProtocol> iterationProtocols = new IdentityHashMap<>();
     private final TypeCompatibility typeCompatibility = new TypeCompatibility(classes, contracts);
+    private String packageName;
+    private Map<String, String> currentTypeImports = Map.of();
+    private Map<String, String> currentFunctionImports = Map.of();
     private final Deque<Set<Token>> flowWriteScopes = new ArrayDeque<>();
     private final Deque<LoopFlow> loopFlows = new ArrayDeque<>();
     private final Deque<TypeDescriptor> expectedReturnTypes = new ArrayDeque<>();
     private FlowState flowState = new FlowState();
     private int loopDepth;
     private String currentClassName;
+
+    public Resolver() {
+        this("");
+    }
+
+    public Resolver(final String packageName) {
+        this.packageName = packageName == null ? "" : packageName;
+    }
 
     public static final Token SYNTHETIC_IDENTIFIER = new Token(
             TokenType.IDENTIFIER,"<synthetic>", null, -1);
@@ -106,15 +133,137 @@ public final class Resolver {
             SYNTHETIC_IDENTIFIER,
             List.of(),
             TypeDescriptor.functionOf("<synthetic>", TypeDescriptor.ofUnit()),
-            List.of());
+            List.of(),
+            false);
 
     public void resolve(final List<Stmt> statements) {
-        registerTypes(statements);
-        for (final var statement : statements) {
-            resolve(statement);
-        }
+        resolveUnits(List.of(new CompilationUnit(null, packageName, statements)));
+    }
 
+    public void resolveUnits(final List<CompilationUnit> units) {
+        final var statements = units.stream().flatMap(unit -> unit.declarations().stream()).toList();
+        registerTypes(statements);
+        for (var unitIndex = 0; unitIndex < units.size(); unitIndex++) {
+            final var unit = units.get(unitIndex);
+            for (final var declaration : unit.declarations()) {
+                if (unitIndex > 0 && declaration instanceof Stmt.Var variable) {
+                    Zeron.resolutionError(new ResolutionError(variable.name(),
+                            "Top-level values outside the entry source unit are deferred until initialization order is specified."));
+                }
+                if (!(declaration instanceof Stmt.Function function)) continue;
+                if (unitIndex > 0 && function.typeDescriptor().returnType() instanceof InferDescriptor) {
+                    Zeron.resolutionError(new ResolutionError(function.name(),
+                            "Non-entry compilation-unit functions require an explicit return type."));
+                }
+                if (!(function.typeDescriptor().returnType() instanceof InferDescriptor)) {
+                    registerFunction(unit.packageName(), function);
+                }
+            }
+        }
+        for (final var unit : units) {
+            packageName = unit.packageName();
+            final var imports = validateImports(unit);
+            currentTypeImports = imports.types();
+            currentFunctionImports = imports.functions();
+            for (final var statement : unit.declarations()) resolve(statement);
+        }
         Zeron.debug("resolution finished successfully with symbol table: \n" + symbols);
+    }
+
+    private record ImportEnvironment(Map<String, String> types, Map<String, String> functions) {}
+
+    private ImportEnvironment validateImports(final CompilationUnit unit) {
+        final var importedTypes = new LinkedHashMap<String, String>();
+        final var importedFunctions = new LinkedHashMap<String, String>();
+        final var localTypeNames = new HashSet<String>();
+        final var localValueNames = new HashSet<String>();
+        classes.keySet().stream().filter(name -> packageOf(name).equals(unit.packageName()))
+                .map(Resolver::simpleName).forEach(localTypeNames::add);
+        contracts.keySet().stream().filter(name -> packageOf(name).equals(unit.packageName()))
+                .map(Resolver::simpleName).forEach(localTypeNames::add);
+        functions.keySet().stream().filter(name -> packageOf(name).equals(unit.packageName()))
+            .map(Resolver::simpleName).forEach(localValueNames::add);
+        unit.declarations().stream().filter(Stmt.Var.class::isInstance).map(Stmt.Var.class::cast)
+            .map(variable -> variable.name().lexeme()).forEach(localValueNames::add);
+
+        for (final var importDeclaration : unit.imports()) {
+            final var target = importDeclaration.qualifiedName();
+            final var classDeclaration = classes.get(target);
+            final var contractDeclaration = contracts.get(target);
+                final var functionDeclaration = functions.get(target);
+                if (classDeclaration == null && contractDeclaration == null && functionDeclaration == null) {
+                Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                    "Unknown import target '"
+                                + target + "'."));
+            }
+            if (packageOf(target).isEmpty() && !unit.packageName().isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                        "Default-package types cannot be imported into a named package."));
+            }
+                final var isPublic = classDeclaration != null ? classDeclaration.isPublic()
+                    : contractDeclaration != null ? contractDeclaration.isPublic()
+                    : functionDeclaration.isPublic();
+            if (!packageOf(target).equals(unit.packageName()) && !isPublic) {
+                Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                        "Type '" + target + "' is not public."));
+            }
+            if (classDeclaration != null || contractDeclaration != null) {
+                if (Set.of("Never", "Any", "Infer", "Unit", "Int", "Float", "Boolean", "String", "Array")
+                        .contains(importDeclaration.localName())) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Type import alias cannot shadow a built-in type."));
+                }
+                if (localTypeNames.contains(importDeclaration.localName())) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Import alias conflicts with a type in the current package."));
+                }
+                if (importedTypes.putIfAbsent(importDeclaration.localName(), target) != null) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Duplicate or ambiguous type import '" + importDeclaration.localName() + "'."));
+                }
+            } else {
+                if (localValueNames.contains(importDeclaration.localName())) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Import alias conflicts with a value in the current package."));
+                }
+                if (importedFunctions.putIfAbsent(importDeclaration.localName(), target) != null) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Duplicate or ambiguous function import '" + importDeclaration.localName() + "'."));
+                }
+            }
+        }
+        return new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions));
+    }
+
+    private void registerFunction(final String ownerPackage, final Stmt.Function function) {
+        final var qualifiedName = qualify(ownerPackage, function.name().lexeme());
+        if (functions.containsKey(qualifiedName)) {
+            Zeron.resolutionError(new ResolutionError(function.name(),
+                    "Function '" + qualifiedName + "' is already declared."));
+        }
+        final var symbolToken = new Token(function.name().type(), qualifiedName,
+                function.name().literal(), function.name().line());
+        functions.put(qualifiedName, function);
+        functionSymbolTokens.put(qualifiedName, symbolToken);
+        functionNamesByDeclaration.put(function.name(), qualifiedName);
+        symbols.declareFunction(function, symbolToken, function.typeDescriptor());
+    }
+
+    private static String qualify(final String ownerPackage, final String simpleName) {
+        return ownerPackage == null || ownerPackage.isEmpty() ? simpleName : ownerPackage + "." + simpleName;
+    }
+
+    public String functionName(final Token declarationName) {
+        return functionNamesByDeclaration.getOrDefault(declarationName,
+                qualify(packageName, declarationName.lexeme()));
+    }
+
+    public Token functionSymbolToken(final Token declarationName) {
+        return functionSymbolTokens.getOrDefault(functionName(declarationName), declarationName);
+    }
+
+    public Token functionSymbolToken(final String qualifiedName) {
+        return functionSymbolTokens.get(qualifiedName);
     }
 
     public Map<String, Stmt.ClassDecl> classes() {
@@ -123,6 +272,14 @@ public final class Resolver {
 
     public Map<String, Stmt.ContractDecl> contracts() {
         return Collections.unmodifiableMap(contracts);
+    }
+
+    public TypeDescriptor iterationElementType(final Token iterationBind) {
+        return iterationElementTypes.get(iterationBind);
+    }
+
+    public IterationProtocol iterationProtocol(final Token iterationBind) {
+        return iterationProtocols.get(iterationBind);
     }
 
     private void registerTypes(final List<Stmt> statements) {
@@ -182,6 +339,7 @@ public final class Resolver {
             if (contract == null) {
                 Zeron.resolutionError(new ResolutionError(contractName, "Unknown contract."));
             }
+            ensureTypeAccessible(contractName.lexeme(), contractName, contract.isPublic());
             if (contract.typeParameters().size() != contractUse.typeArguments().size()) {
                 Zeron.resolutionError(new ResolutionError(contractName,
                         "Expected " + contract.typeParameters().size() + " contract type arguments, found "
@@ -288,6 +446,21 @@ public final class Resolver {
         validateType(function.returnType(), where);
     }
 
+    private void validateTypeParameterBound(final TypeParameterDescriptor parameter, final Token where) {
+        if (parameter.bound() == null) return;
+        if (!(parameter.bound() instanceof NominalDescriptor || parameter.bound() instanceof GenericDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(where, "A generic function bound must be a contract type."));
+        }
+        final var boundName = className(parameter.bound());
+        final var contract = contracts.get(boundName);
+        if (contract == null) {
+            Zeron.resolutionError(new ResolutionError(where,
+                    "Type parameter bound '" + boundName + "' is not a contract."));
+        }
+        ensureTypeAccessible(boundName, where, contract.isPublic());
+        validateType(parameter.bound(), where);
+    }
+
     private void validateType(final TypeDescriptor type, final Token where) {
         switch (type) {
             case NominalDescriptor nominal -> {
@@ -296,6 +469,12 @@ public final class Resolver {
                 }
                 final var classDeclaration = classes.get(nominal.name());
                 final var contractDeclaration = contracts.get(nominal.name());
+                if (classDeclaration != null) {
+                    ensureTypeAccessible(nominal.name(), where, classDeclaration.isPublic());
+                }
+                if (contractDeclaration != null) {
+                    ensureTypeAccessible(nominal.name(), where, contractDeclaration.isPublic());
+                }
                 final var arity = classDeclaration != null ? classDeclaration.typeParameters().size()
                         : contractDeclaration != null ? contractDeclaration.typeParameters().size() : 0;
                 if (arity != 0) {
@@ -313,6 +492,12 @@ public final class Resolver {
                 final var contractDeclaration = contracts.get(name);
                 if (classDeclaration == null && contractDeclaration == null) {
                     Zeron.resolutionError(new ResolutionError(where, "Unknown generic type '" + name + "'."));
+                }
+                if (classDeclaration != null) {
+                    ensureTypeAccessible(name, where, classDeclaration.isPublic());
+                }
+                if (contractDeclaration != null) {
+                    ensureTypeAccessible(name, where, contractDeclaration.isPublic());
                 }
                 final var arity = classDeclaration != null ? classDeclaration.typeParameters().size()
                         : contractDeclaration.typeParameters().size();
@@ -369,6 +554,7 @@ public final class Resolver {
                     Zeron.resolutionError(new ResolutionError(keyword,
                             "Can only continue inside of a loop."));
                 }
+                if (flowState.isReachable()) loopFlows.peek().continueStates.add(flowState.copy());
                 flowState.markUnreachable();
             }
             case Stmt.Expression(Expr expression) -> {
@@ -376,43 +562,49 @@ public final class Resolver {
             }
             case Stmt.Function fn -> {
                 validateFunctionTypes(fn.typeDescriptor(), fn.name());
-                declareFunction(fn, fn.name(), fn.typeDescriptor());
+                fn.typeDescriptor().typeParameters().forEach(
+                        parameter -> validateTypeParameterBound(parameter, fn.name()));
+                if (!functionNamesByDeclaration.containsKey(fn.name())) registerFunction(packageName, fn);
                 resolveFunction(fn);
             }
             case Stmt.For(Token iterationBind, Token _, Expr iterable, Stmt body) -> {
                 beginScope();
                 final var iterableType = resolve(iterable);
-                final var elementType = iterable instanceof Expr.Literal literal
-                        && literal.value instanceof IntRangeLiteral
-                        ? TypeDescriptor.ofInt()
-                        : ensureIterable(iterableType, iterationBind);
+                final var elementType = ensureIterable(iterableType, iterationBind);
+                iterationElementTypes.put(iterationBind, elementType);
                 declare(SYNTHETIC_VAR, iterationBind, elementType, BindingMutability.IMMUTABLE);
                 define(iterationBind);
                 final var incoming = flowState.copy();
-                final var loopWriteNames = new HashSet<String>();
-                final var shadowedNames = new HashSet<String>();
-                shadowedNames.add(iterationBind.lexeme());
-                collectLoopWrites(body, loopWriteNames, shadowedNames);
-                final var loopWrites = resolveLoopWriteBindings(loopWriteNames);
-                final var headerState = incoming.copy();
-                discardLoopWriteFacts(headerState, loopWrites);
-                final var loopFlow = new LoopFlow();
-                loopFlows.push(loopFlow);
-                loopDepth++;
-                try {
-                    flowState = headerState;
-                    resolve(body);
-                } finally {
-                    loopDepth--;
-                    loopFlows.pop();
+                var headerState = incoming.copy();
+                LoopFlow stableLoopFlow;
+                while (true) {
+                    final var loopFlow = new LoopFlow();
+                    loopFlows.push(loopFlow);
+                    loopDepth++;
+                    try {
+                        flowState = headerState.copy();
+                        resolve(body);
+                    } finally {
+                        loopDepth--;
+                        loopFlows.pop();
+                    }
+                    final var backEdges = new ArrayList<>(loopFlow.continueStates);
+                    if (flowState.isReachable()) backEdges.add(flowState.copy());
+                    var nextHeader = incoming.copy();
+                    for (final var backEdge : backEdges) {
+                        nextHeader = FlowState.join(nextHeader, backEdge);
+                    }
+                    if (nextHeader.sameAs(headerState)) {
+                        stableLoopFlow = loopFlow;
+                        break;
+                    }
+                    headerState = nextHeader;
                 }
                 final var exits = incoming.copy();
-                discardLoopWriteFacts(exits, loopWrites);
                 exits.remove(iterationBind);
                 var exitState = exits;
-                for (final var breakState : loopFlow.breakStates) {
+                for (final var breakState : stableLoopFlow.breakStates) {
                     final var reachableBreak = breakState.copy();
-                    discardLoopWriteFacts(reachableBreak, loopWrites);
                     reachableBreak.remove(iterationBind);
                     exitState = FlowState.join(exitState, reachableBreak);
                 }
@@ -500,30 +692,37 @@ public final class Resolver {
             }
             case Stmt.While(Token keyword, Expr condition, Stmt body) -> {
                 final var incoming = flowState.copy();
-                final var loopWriteNames = new HashSet<String>();
-                collectLoopWrites(condition, loopWriteNames, new HashSet<>());
-                collectLoopWrites(body, loopWriteNames, new HashSet<>());
-                final var loopWrites = resolveLoopWriteBindings(loopWriteNames);
-                final var headerState = incoming.copy();
-                discardLoopWriteFacts(headerState, loopWrites);
-                final var loopFlow = new LoopFlow();
-                loopFlows.push(loopFlow);
-                loopDepth++;
-                final ConditionFlows conditionFlows;
-                try {
-                    conditionFlows = resolveCondition(condition, headerState, keyword);
-                    flowState = conditionFlows.whenTrue().copy();
-                    resolve(body);
-                } finally {
-                    loopDepth--;
-                    loopFlows.pop();
+                var headerState = incoming.copy();
+                ConditionFlows conditionFlows;
+                LoopFlow stableLoopFlow;
+                while (true) {
+                    final var loopFlow = new LoopFlow();
+                    loopFlows.push(loopFlow);
+                    loopDepth++;
+                    try {
+                        conditionFlows = resolveCondition(condition, headerState, keyword);
+                        flowState = conditionFlows.whenTrue().copy();
+                        resolve(body);
+                    } finally {
+                        loopDepth--;
+                        loopFlows.pop();
+                    }
+                    final var backEdges = new ArrayList<>(loopFlow.continueStates);
+                    if (flowState.isReachable()) backEdges.add(flowState.copy());
+                    var nextHeader = incoming.copy();
+                    for (final var backEdge : backEdges) {
+                        nextHeader = FlowState.join(nextHeader, backEdge);
+                    }
+                    if (nextHeader.sameAs(headerState)) {
+                        stableLoopFlow = loopFlow;
+                        break;
+                    }
+                    headerState = nextHeader;
                 }
                 final var normalExit = conditionFlows.whenFalse().copy();
-                discardLoopWriteFacts(normalExit, loopWrites);
                 var exitState = normalExit;
-                for (final var breakState : loopFlow.breakStates) {
+                for (final var breakState : stableLoopFlow.breakStates) {
                     final var reachableBreak = breakState.copy();
-                    discardLoopWriteFacts(reachableBreak, loopWrites);
                     exitState = FlowState.join(exitState, reachableBreak);
                 }
                 flowState = exitState;
@@ -721,7 +920,14 @@ public final class Resolver {
                         yield null;
                     }
                 } else {
-                    descriptor = getFunction(call.callee);
+                    final var functionName = resolveFunctionName(call.callee.lexeme());
+                    final var functionToken = functionName == null ? null : functionSymbolTokens.get(functionName);
+                    if (functionToken == null) {
+                        Zeron.resolutionError(new ResolutionError(call.callee,
+                                "Unknown function '" + call.callee.lexeme() + "'."));
+                    }
+                    call.setResolvedFunctionName(functionName);
+                    descriptor = (FunctionDescriptor) symbols.getFunction(functionToken).type();
                 }
                 if (descriptor.isGeneric()) {
                     yield resolveGenericCall(call, descriptor);
@@ -1059,123 +1265,6 @@ public final class Resolver {
                 || baseType instanceof BooleanDescriptor;
     }
 
-    private Set<Token> resolveLoopWriteBindings(final Set<String> writtenNames) {
-        final var writtenBindings = Collections.newSetFromMap(new IdentityHashMap<Token, Boolean>());
-        for (final var writtenName : writtenNames) {
-            final var lookup = new Token(TokenType.IDENTIFIER, writtenName, null, -1);
-            if (symbols.containsSymbol(lookup)) writtenBindings.add(symbols.getSymbol(lookup).name());
-        }
-        return writtenBindings;
-    }
-
-    private void discardLoopWriteFacts(final FlowState state, final Set<Token> writtenBindings) {
-        for (final var bindingName : new ArrayList<>(state.facts.keySet())) {
-            if (writtenBindings.contains(bindingName)) state.remove(bindingName);
-        }
-    }
-
-    private void collectLoopWrites(final Stmt statement,
-                                   final Set<String> writtenNames,
-                                   final Set<String> shadowedNames) {
-        switch (statement) {
-            case Stmt.Block(List<Stmt> statements) -> {
-                final var localNames = new HashSet<>(shadowedNames);
-                for (final var nested : statements) {
-                    if (nested instanceof Stmt.Var variable) {
-                        if (variable.initializer() != null) {
-                            collectLoopWrites(variable.initializer(), writtenNames, localNames);
-                        }
-                        localNames.add(variable.name().lexeme());
-                    } else {
-                        collectLoopWrites(nested, writtenNames, localNames);
-                    }
-                }
-            }
-            case Stmt.Expression(Expr expression) -> collectLoopWrites(expression, writtenNames, shadowedNames);
-            case Stmt.Print(Expr expression) -> collectLoopWrites(expression, writtenNames, shadowedNames);
-            case Stmt.Return(Expr value) -> {
-                if (value != null) collectLoopWrites(value, writtenNames, shadowedNames);
-            }
-            case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
-                collectLoopWrites(condition, writtenNames, shadowedNames);
-                collectLoopWrites(thenBranch, writtenNames, shadowedNames);
-                if (elseBranch != null) collectLoopWrites(elseBranch, writtenNames, shadowedNames);
-            }
-            case Stmt.For(Token iterationBind, Token _, Expr iterable, Stmt body) -> {
-                collectLoopWrites(iterable, writtenNames, shadowedNames);
-                final var nestedNames = new HashSet<>(shadowedNames);
-                nestedNames.add(iterationBind.lexeme());
-                collectLoopWrites(body, writtenNames, nestedNames);
-            }
-            case Stmt.While(Token _, Expr condition, Stmt body) -> {
-                collectLoopWrites(condition, writtenNames, shadowedNames);
-                collectLoopWrites(body, writtenNames, shadowedNames);
-            }
-            case Stmt.Var(Token _, TypeDescriptor _, Expr initializer, BindingMutability _) -> {
-                if (initializer != null) collectLoopWrites(initializer, writtenNames, shadowedNames);
-            }
-            default -> {}
-        }
-    }
-
-    private void collectLoopWrites(final Expr expression,
-                                   final Set<String> writtenNames,
-                                   final Set<String> shadowedNames) {
-        switch (expression) {
-            case Expr.Assignment assignment -> {
-                if (!shadowedNames.contains(assignment.name.lexeme())) {
-                    writtenNames.add(assignment.name.lexeme());
-                }
-                collectLoopWrites(assignment.value, writtenNames, shadowedNames);
-            }
-            case Expr.Property property ->
-                    collectLoopWrites(property.receiver, writtenNames, shadowedNames);
-            case Expr.PropertyAssignment assignment -> {
-                collectLoopWrites(assignment.property.receiver, writtenNames, shadowedNames);
-                collectLoopWrites(assignment.value, writtenNames, shadowedNames);
-            }
-            case Expr.MemberCall call -> {
-                collectLoopWrites(call.receiver, writtenNames, shadowedNames);
-                call.arguments.forEach(argument -> collectLoopWrites(argument, writtenNames, shadowedNames));
-            }
-            case Expr.Call call ->
-                    call.arguments.forEach(argument -> collectLoopWrites(argument, writtenNames, shadowedNames));
-            case Expr.Binary binary -> {
-                collectLoopWrites(binary.left, writtenNames, shadowedNames);
-                collectLoopWrites(binary.right, writtenNames, shadowedNames);
-            }
-            case Expr.Logical logical -> {
-                collectLoopWrites(logical.left, writtenNames, shadowedNames);
-                collectLoopWrites(logical.right, writtenNames, shadowedNames);
-            }
-            case Expr.Grouping grouping ->
-                    collectLoopWrites(grouping.expression, writtenNames, shadowedNames);
-            case Expr.If iff -> {
-                collectLoopWrites(iff.condition, writtenNames, shadowedNames);
-                collectLoopWrites(iff.thenExpr, writtenNames, shadowedNames);
-                collectLoopWrites(iff.elseExpr, writtenNames, shadowedNames);
-            }
-            case Expr.Unary unary ->
-                    collectLoopWrites(unary.right, writtenNames, shadowedNames);
-            case Expr.TypeTest test ->
-                    collectLoopWrites(test.value, writtenNames, shadowedNames);
-            case Expr.Cast cast ->
-                    collectLoopWrites(cast.value, writtenNames, shadowedNames);
-            case Expr.ArrayLiteral literal ->
-                    literal.elements.forEach(element -> collectLoopWrites(element, writtenNames, shadowedNames));
-            case Expr.Index index -> {
-                collectLoopWrites(index.array, writtenNames, shadowedNames);
-                collectLoopWrites(index.index, writtenNames, shadowedNames);
-            }
-            case Expr.IndexAssignment assignment -> {
-                collectLoopWrites(assignment.array, writtenNames, shadowedNames);
-                collectLoopWrites(assignment.index, writtenNames, shadowedNames);
-                collectLoopWrites(assignment.value, writtenNames, shadowedNames);
-            }
-            case Expr.Lambda _, Expr.Literal _, Expr.Variable _ -> {}
-        }
-    }
-
     private TypeDescriptor resolveProperty(final Expr.Property property) {
         final var receiverType = resolve(property.receiver);
         final var baseType = receiverType instanceof ReferenceDescriptor reference
@@ -1205,9 +1294,12 @@ public final class Resolver {
     }
 
     private TypeDescriptor resolveMemberCall(final Expr.MemberCall call) {
-        if (call.receiver instanceof Expr.Variable typeName
-                && classes.containsKey(typeName.name.lexeme())) {
-            final var declaration = classes.get(typeName.name.lexeme());
+        final var classOwnerName = call.receiver instanceof Expr.Variable typeName
+            ? resolveClassName(typeName.name.lexeme())
+            : null;
+        if (classOwnerName != null) {
+            final var declaration = classes.get(classOwnerName);
+            call.setResolvedClassName(classOwnerName);
             if (declaration.typeParameters().size() != call.explicitTypeArguments.size()) {
                 Zeron.resolutionError(new ResolutionError(call.name,
                         "Expected " + declaration.typeParameters().size() + " class type arguments, found "
@@ -1272,6 +1364,9 @@ public final class Resolver {
         }
 
         final var receiverType = resolve(call.receiver);
+        if (receiverType instanceof TypeParameterDescriptor parameter) {
+            return resolveBoundedMemberCall(call, parameter);
+        }
         final var ownerName = className(receiverType);
         final var owner = classes.get(ownerName);
         final var classMethod = owner == null ? null : owner.methods().stream()
@@ -1321,6 +1416,69 @@ public final class Resolver {
         return instantiatedDescriptor.returnType();
     }
 
+    private TypeDescriptor resolveBoundedMemberCall(final Expr.MemberCall call,
+                                                    final TypeParameterDescriptor parameter) {
+        if (parameter.bound() == null) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Member access on an unconstrained type parameter is not allowed."));
+        }
+        final var bound = parameter.bound();
+        final var ownerName = className(bound);
+        final var contract = contracts.get(ownerName);
+        final var method = contract == null ? null : contract.methods().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
+                .findFirst().orElse(null);
+        if (method == null) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Method is not provided by the type parameter's contract bound."));
+        }
+        if (method.isMutating()) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Mutating methods are not available through a generic contract bound."));
+        }
+
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        final var boundBase = bound instanceof ReferenceDescriptor reference ? reference.baseType() : bound;
+        if (boundBase instanceof GenericDescriptor genericBound) {
+            if (genericBound.typeParameters().size() != contract.typeParameters().size()) {
+                Zeron.resolutionError(new ResolutionError(call.name,
+                        "Invalid generic contract bound '" + bound + "'."));
+            }
+            for (int index = 0; index < contract.typeParameters().size(); index++) {
+                substitutions.put(contract.typeParameters().get(index), genericBound.typeParameters().get(index));
+            }
+        }
+        final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                method.typeDescriptor(), substitutions);
+        if (descriptor.arity() != call.arguments.size()) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Expected " + descriptor.arity() + " arguments, found " + call.arguments.size() + "."));
+        }
+        for (int index = 0; index < call.arguments.size(); index++) {
+            final var expected = descriptor.parameters().get(index);
+            ensureAssignable(expected, resolveArgument(call.arguments.get(index), expected), call.name);
+        }
+        call.setResolvedOwnerName(ownerName);
+        call.setReceiverRequiresCast(true);
+        call.setResolvedDescriptor(descriptor);
+        call.setType(descriptor.returnType());
+        return descriptor.returnType();
+    }
+
+    private String resolveClassName(final String name) {
+        if (classes.containsKey(name)) return name;
+        final var importedName = currentTypeImports.get(name);
+        if (importedName != null && classes.containsKey(importedName)) return importedName;
+        final var qualifiedName = packageName.isEmpty() ? name : packageName + "." + name;
+        return classes.containsKey(qualifiedName) ? qualifiedName : null;
+    }
+
+    private String resolveFunctionName(final String name) {
+        final var localName = qualify(packageName, name);
+        if (functions.containsKey(localName)) return localName;
+        return currentFunctionImports.get(name);
+    }
+
     private TypeDescriptor resolveArgument(final Expr argument,
                                            final TypeDescriptor expectedType) {
         if (argument instanceof Expr.Lambda lambda) {
@@ -1343,6 +1501,25 @@ public final class Resolver {
         var baseType = type instanceof ReferenceDescriptor reference ? reference.baseType() : type;
         if (baseType instanceof GenericDescriptor generic) baseType = generic.baseType();
         return baseType instanceof NominalDescriptor nominal ? nominal.name() : "";
+    }
+
+    private void ensureTypeAccessible(final String name,
+                                      final Token where,
+                                      final boolean isPublic) {
+        if (!packageOf(name).equals(packageName) && !isPublic
+                && !currentTypeImports.containsValue(name)) {
+            Zeron.resolutionError(new ResolutionError(where, "Type '" + name + "' is not public."));
+        }
+    }
+
+    private static String packageOf(final String qualifiedName) {
+        final var separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? "" : qualifiedName.substring(0, separator);
+    }
+
+    private static String simpleName(final String qualifiedName) {
+        final var separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
     }
 
     private Stmt.Field findField(final String className, final Token name) {
@@ -1543,6 +1720,10 @@ public final class Resolver {
                         "Cannot infer type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument."));
             }
+            if (parameter.bound() != null) {
+                final var requiredBound = TypeSubstitution.substitute(parameter.bound(), substitutions);
+                ensureAssignable(requiredBound, substitutions.get(parameter), call.callee);
+            }
         }
 
         final var instantiatedParameters = genericType.parameters().stream()
@@ -1614,10 +1795,10 @@ public final class Resolver {
                     function.typeDescriptor().returnType(),
                     function.body());
             if (function.typeDescriptor().returnType() instanceof InferDescriptor) {
-                symbols.setResolvedReturnType(function.name(), resolvedType);
+                symbols.setResolvedReturnType(functionSymbolToken(function.name()), resolvedType);
             }
                 Zeron.debug(" resolved function " + function.name().lexeme()
-                    + " -> " + symbols.getFunction(function.name()).type());
+                    + " -> " + symbols.getFunction(functionSymbolToken(function.name())).type());
         } finally {
             expectedReturnTypes.pop();
             endScope();
@@ -1691,8 +1872,52 @@ public final class Resolver {
                 ? reference.baseType()
                 : type;
         if (arrayType instanceof ArrayDescriptor array) return array.elementType();
+        final var baseName = className(arrayType);
+        final var iterableNames = new LinkedHashSet<String>();
+        iterableNames.add("zeron.collections.Iterable");
+        iterableNames.add(packageName.isEmpty() ? "Iterable" : packageName + ".Iterable");
+        for (final var iterableName : iterableNames) {
+            if (baseName.equals(iterableName) && arrayType instanceof GenericDescriptor generic
+                    && generic.typeParameters().size() == 1) {
+                recordIterationProtocol(where, iterableName);
+                return generic.typeParameters().getFirst();
+            }
+        }
+        final var declaration = classes.get(baseName);
+        if (declaration != null) {
+            final var substitutions = substitutionsFor(declaration.typeParameters(), arrayType);
+            for (final var contractUse : declaration.contractUses()) {
+                if (!iterableNames.contains(contractUse.name().lexeme())
+                        || contractUse.typeArguments().size() != 1) continue;
+                recordIterationProtocol(where, contractUse.name().lexeme());
+                return TypeSubstitution.substitute(contractUse.typeArguments().getFirst(), substitutions);
+            }
+        }
         Zeron.resolutionError(new ResolutionError(where,
-                "For loops support Array<T> values and integer range literals."));
+                "For loops require Array<T>, an integer range literal, or a type conforming to Iterable<T>."));
         return TypeDescriptor.ofInfer();
+    }
+
+    private void recordIterationProtocol(final Token iterationBind, final String iterableName) {
+        final var iterable = contracts.get(iterableName);
+        if (iterable == null) {
+            Zeron.resolutionError(new ResolutionError(iterationBind,
+                    "Missing iterator protocol contract '" + iterableName + "'."));
+        }
+        final var iteratorMethod = iterable.methods().stream()
+                .filter(method -> method.name().lexeme().equals("iterator"))
+                .findFirst()
+                .orElseThrow(() -> new ResolutionError(iterationBind,
+                        "Iterable contract must declare iterator()."));
+        var iteratorType = iteratorMethod.typeDescriptor().returnType();
+        if (iteratorType instanceof ReferenceDescriptor reference) iteratorType = reference.baseType();
+        final String iteratorName = iteratorType instanceof GenericDescriptor generic
+                ? generic.baseType().name()
+                : iteratorType instanceof NominalDescriptor nominal ? nominal.name() : null;
+        if (iteratorName == null) {
+            Zeron.resolutionError(new ResolutionError(iterationBind,
+                    "Iterable.iterator() must return an Iterator<T> reference."));
+        }
+        iterationProtocols.put(iterationBind, new IterationProtocol(iterableName, iteratorName));
     }
 }

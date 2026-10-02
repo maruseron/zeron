@@ -3,22 +3,30 @@ module ZeronGrammar;
 # IDENTIFIER, INT, DOUBLE, and STRING denote scanner token kinds.
 # `type` below is source syntax; design-document-02 describes encoded descriptors.
 
-program                 : { topLevelDeclaration } EOF ;
+program                 : [packageDeclaration] {importDeclaration} {topLevelDeclaration} EOF ;
+packageDeclaration      : "package" qualifiedName ";" ;
+qualifiedName           : IDENTIFIER {"." IDENTIFIER} ;
+importDeclaration       : "import" qualifiedName ["as" IDENTIFIER] ";" ;
 
-topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl ;
+topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl
+                        | publicFunDecl | publicClassDecl | publicContractDecl ;
+publicFunDecl           : "public" funDecl ;
+publicClassDecl         : "public" classDecl ;
+publicContractDecl      : "public" contractDecl ;
 declaration             : varDecl | funDecl | statement ;
 
 varDecl                 : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
 funDecl                 : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type]
                           ("=" expression ";" | block) ;
-typeParameters          : "<" IDENTIFIER {"," IDENTIFIER} ">" ;
+typeParameters          : "<" typeParameter {"," typeParameter} ">" ;
+typeParameter           : IDENTIFIER [":" type] ;
 parameters              : [parameter {"," parameter}] ;
 parameter               : IDENTIFIER ":" type ;
 
 classDecl               : "class" IDENTIFIER [typeParameters]
                           ["is" contractUse {"," contractUse}]
                           "{" classMember* "}" ;
-contractUse             : IDENTIFIER [typeArguments] ;
+contractUse             : qualifiedName [typeArguments] ;
 classMember             : fieldDecl | constructorDecl | namedConstructorDecl | methodDecl ;
 fieldDecl               : IDENTIFIER ":" type ";" ;
 constructorDecl         : visibility "constructor" "new" ";" ;
@@ -73,7 +81,7 @@ genericClassFactoryCall : IDENTIFIER typeArguments "." IDENTIFIER arguments ;
 arguments               : "(" [expression {"," expression}] ")" ;
 typeArguments           : "<" type {"," type} ">" ;
 type                    : ["&"] typeAtom ["?"] ;
-typeAtom                : IDENTIFIER ["<" typeArgumentsBody ">"]
+typeAtom                : qualifiedName ["<" typeArgumentsBody ">"]
                         | "(" ")" "->" type
                         | "(" type ")" ["->" type]
                         | "(" type "," type {"," type} ")" "->" type ;
@@ -104,8 +112,15 @@ range                   : INT ".." INT ;
 #   bodies. Their result type is implicitly `&Class`, they have no `this`, and every reachable normal
 #   path in a block must return an `&Class` value. Allocation still uses the canonical `Class.new`.
 # - A generic function must have an explicit return type. Generic method declarations are not supported.
+# - Generic functions may constrain a type parameter with one contract bound (`T: Contract`). Class
+#   and contract type-parameter bounds, multiple bounds, and mutating bound methods remain unsupported.
 # - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
-# - `for` accepts arrays and integer ranges; arbitrary user-defined iterators are not supported.
+# - Project compilation uses explicit source roots and an entry file. Cross-package source units may
+#   declare classes, contracts, and functions; cross-package top-level values are deferred.
+#   Selective class/contract/function imports may use `as` aliases and require public declarations.
+# - Non-entry functions require explicit return annotations so signatures are available up front.
+# - `..` constructs an inclusive `zeron.ranges.IntRange`; `for` accepts arrays and values conforming
+#   to the bundled Iterable<T> contract.
 # - Assignment targets are variables, properties, or array indices. Compound assignment is supported
 #   only for variables; property and index assignment accept '=' only.
 # - Array literals are non-empty. A valueless `return` has type Unit and is rejected in non-Unit functions.

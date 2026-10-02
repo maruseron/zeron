@@ -15,6 +15,9 @@ The goal is to establish useful object semantics before adding inheritance or ad
 - Classes and contracts support invariant type parameters. Fields, methods, construction, and declaration-site conformance are checked after substitution.
 - Parameterized nominal types retain source-level identity but erase to one raw JVM class or interface per declaration. Generic contract bridges adapt differing erased signatures.
 - Named constructors are static factories with expression or block bodies and an implicit mutable class-reference result. Omitted canonical declarations synthesize public construction; `private constructor new;` restricts it.
+- `Iterator<T>` and `Iterable<T>` are ordinary bundled contracts. `zeron.ranges.IntRange` implements
+    `Iterable<Int>` and range loops invoke its methods through interface dispatch; arrays retain
+    specialized lowering.
 
 ## Recommended Semantic Model
 

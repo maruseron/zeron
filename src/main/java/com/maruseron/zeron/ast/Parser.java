@@ -1,7 +1,6 @@
 package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.Zeron;
-import com.maruseron.zeron.IntRangeLiteral;
 import com.maruseron.zeron.UnitLiteral;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.domain.NominalDescriptor;
@@ -27,6 +26,9 @@ public final class Parser {
 
     private final List<Token> tokens;
     private int current = 0;
+    private String packageName = "";
+    private final List<ImportDeclaration> imports = new ArrayList<>();
+    private final Map<String, String> importedTypes = new LinkedHashMap<>();
     private static final AtomicInteger TYPE_PARAMETER_SCOPES = new AtomicInteger();
     private Map<String, TypeParameterDescriptor> activeTypeParameters = Map.of();
 
@@ -45,20 +47,56 @@ public final class Parser {
     }
 
     public List<Stmt> parse() {
+        return parseCompilationUnit(null).declarations();
+    }
+
+    public CompilationUnit parseCompilationUnit(final String sourcePath) {
+        return parseCompilationUnit(sourcePath, "");
+    }
+
+    public CompilationUnit parseCompilationUnit(final String sourcePath,
+                                                final String inheritedPackageName) {
+        packageName = inheritedPackageName == null ? "" : inheritedPackageName;
+        if (match(PACKAGE)) {
+            if (!packageName.isEmpty()) error(previous(), "Bundled declarations cannot override their package.");
+            packageName = parseQualifiedName("Expect package name.");
+            consume(SEMICOLON, "Expect ';' after package declaration.");
+        }
+            while (match(IMPORT)) {
+                final var target = advance();
+                if (target.type() != IDENTIFIER) error(target, "Expect qualified import name.");
+                final var qualifiedName = new StringBuilder(target.lexeme());
+                while (match(DOT)) qualifiedName.append('.').append(
+                    consume(IDENTIFIER, "Expect name after '.'.").lexeme());
+                final var localName = match(AS)
+                    ? consume(IDENTIFIER, "Expect import alias.").lexeme()
+                    : qualifiedName.substring(qualifiedName.lastIndexOf(".") + 1);
+                consume(SEMICOLON, "Expect ';' after import.");
+                final var imported = new ImportDeclaration(qualifiedName.toString(), localName, target);
+                imports.add(imported);
+                importedTypes.putIfAbsent(localName, qualifiedName.toString());
+            }
         final var statements = new ArrayList<Stmt>();
         while (!isAtEnd()) {
             statements.add(declaration());
         }
+        statements.removeIf(statement -> statement == null);
 
-        return statements;
+        return new CompilationUnit(sourcePath, packageName, imports, statements);
     }
 
     private Stmt declaration() {
         try {
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
-            if (levelMarker == null && match(CLASS)) return classDeclaration();
-            if (levelMarker == null && match(CONTRACT)) return contractDeclaration();
+            if (levelMarker == null && match(PUBLIC)) {
+                if (match(CLASS)) return classDeclaration(true);
+                if (match(CONTRACT)) return contractDeclaration(true);
+                if (match(FN)) return fnDeclaration(true);
+                throw error(previous(), "Only functions, classes, and contracts may be public.");
+            }
+            if (levelMarker == null && match(CLASS)) return classDeclaration(false);
+            if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
 
             if (levelMarker != null) return statement();
             throw error(peek(), "Expected declaration at top level.");
@@ -89,12 +127,16 @@ public final class Parser {
     }
 
     private Stmt.Function fnDeclaration() {
+        return fnDeclaration(false);
+    }
+
+    private Stmt.Function fnDeclaration(final boolean isPublic) {
         final var name = consume(IDENTIFIER, "Expect function name.");
-        final var typeParameters = typeParameterDeclaration(name);
+        final var typeParameters = typeParameterDeclaration(name, true);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
-            return parseFunctionDeclaration(name, typeParameters);
+            return parseFunctionDeclaration(name, typeParameters, isPublic);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -102,7 +144,8 @@ public final class Parser {
 
     private Stmt.Function parseFunctionDeclaration(
             final Token name,
-            final Map<String, TypeParameterDescriptor> typeParameters) {
+            final Map<String, TypeParameterDescriptor> typeParameters,
+            final boolean isPublic) {
         consume(LEFT_PAREN, "Expect '(' after function name.");
         final var enclosingLevelMarker = levelMarker;
         levelMarker = new LevelMarker(levelMarker);
@@ -143,21 +186,32 @@ public final class Parser {
 
             return new Stmt.Function(name, parameterNames,
                     TypeDescriptor.genericFunctionOf(name.lexeme(), returnType, parameterTypes,
-                            List.copyOf(typeParameters.values())), body);
+                        List.copyOf(typeParameters.values())), body, isPublic);
         } finally {
             levelMarker = enclosingLevelMarker;
         }
     }
 
-    private Map<String, TypeParameterDescriptor> typeParameterDeclaration(final Token declarationName) {
+    private Map<String, TypeParameterDescriptor> typeParameterDeclaration(final Token declarationName,
+                                                                          final boolean allowBounds) {
         if (!match(LESS)) return Map.of();
         final var scopeId = TYPE_PARAMETER_SCOPES.incrementAndGet();
         final var parameters = new LinkedHashMap<String, TypeParameterDescriptor>();
         do {
             final var parameter = consume(IDENTIFIER, "Expect type parameter name.");
-            if (parameters.putIfAbsent(parameter.lexeme(),
-                    new TypeParameterDescriptor(scopeId, parameter.lexeme())) != null) {
+            if (parameters.containsKey(parameter.lexeme())) {
                 error(parameter, "Duplicate type parameter.");
+            }
+            var descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme());
+            parameters.put(parameter.lexeme(), descriptor);
+            if (match(COLON)) {
+                if (!allowBounds) error(parameter, "Bounds are currently supported only on generic functions.");
+                final var enclosingTypeParameters = activeTypeParameters;
+                activeTypeParameters = new LinkedHashMap<>(parameters);
+                final var bound = collectType();
+                activeTypeParameters = enclosingTypeParameters;
+                descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bound);
+                parameters.put(parameter.lexeme(), descriptor);
             }
         } while (match(COMMA));
         consume(GREATER, "Expect '>' after type parameters.");
@@ -165,16 +219,17 @@ public final class Parser {
         return parameters;
     }
 
-    private Stmt.ClassDecl classDeclaration() {
-        final var name = consume(IDENTIFIER, "Expect class name.");
-        final var typeParameters = typeParameterDeclaration(name);
+    private Stmt.ClassDecl classDeclaration(final boolean isTopLevelPublic) {
+        final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect class name."));
+        final var typeParameters = typeParameterDeclaration(name, false);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
             final var contractUses = new ArrayList<Stmt.ContractUse>();
             if (match(IS)) {
                 do {
-                    final var contractName = consume(IDENTIFIER, "Expect contract name after 'is'.");
+                        final var contractName = qualifyTypeToken(
+                            consume(IDENTIFIER, "Expect contract name after 'is'."));
                     final var hasTypeArguments = match(LESS);
                     final var typeArguments = hasTypeArguments
                             ? collectTypeArguments()
@@ -221,7 +276,8 @@ public final class Parser {
                 constructor = new Stmt.Constructor(canonicalName, true);
                 }
             return new Stmt.ClassDecl(name, List.copyOf(typeParameters.values()), List.copyOf(contractUses),
-                    List.copyOf(fields), constructor, List.copyOf(namedConstructors), List.copyOf(methods));
+                    List.copyOf(fields), constructor, List.copyOf(namedConstructors), List.copyOf(methods),
+                    isTopLevelPublic);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -281,9 +337,9 @@ public final class Parser {
                 classTypeParameters.stream().map(parameter -> (TypeDescriptor) parameter).toList());
     }
 
-    private Stmt.ContractDecl contractDeclaration() {
-        final var name = consume(IDENTIFIER, "Expect contract name.");
-        final var typeParameters = typeParameterDeclaration(name);
+    private Stmt.ContractDecl contractDeclaration(final boolean isTopLevelPublic) {
+        final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect contract name."));
+        final var typeParameters = typeParameterDeclaration(name, false);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
@@ -297,7 +353,8 @@ public final class Parser {
                         signature.typeDescriptor(), isMutating));
             }
             consume(RIGHT_BRACE, "Expect '}' after contract members.");
-            return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()), List.copyOf(methods));
+                return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()), List.copyOf(methods),
+                    isTopLevelPublic);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -372,7 +429,8 @@ public final class Parser {
                 type = TypeDescriptor.ofInfer();
             }
         } else {
-            final var typeName = consume(IDENTIFIER, "Expect bind name.");
+            final var firstTypeName = consume(IDENTIFIER, "Expect bind name.");
+            final var qualifiedTypeName = qualifyTypeToken(firstTypeName);
 
             var isGeneric = false;
             List<TypeDescriptor> inner = null;
@@ -382,19 +440,21 @@ public final class Parser {
                 consume(GREATER, "Expect '>' after type.");
             }
 
-            type = activeTypeParameters.get(typeName.lexeme());
-            if (type == null) type = TypeDescriptor.of(typeName.lexeme());
+                type = qualifiedTypeName.lexeme().indexOf('.') < 0
+                    ? activeTypeParameters.get(qualifiedTypeName.lexeme())
+                    : null;
+                if (type == null) type = TypeDescriptor.of(qualifiedTypeName.lexeme());
             if (isGeneric) {
                 if (type.name().equals("Array")) {
-                    if (inner.size() != 1) error(typeName, "Array expects one element type.");
+                    if (inner.size() != 1) error(firstTypeName, "Array expects one element type.");
                     type = TypeDescriptor.arrayOf(inner.getFirst());
                 } else if (type instanceof NominalDescriptor nominal) {
                     type = TypeDescriptor.genericOf(nominal, inner);
                 } else {
-                    error(typeName, "Only nominal types can have type arguments.");
+                    error(firstTypeName, "Only nominal types can have type arguments.");
                 }
             } else if (type.name().equals("Array")) {
-                error(typeName, "Array requires an element type.");
+                error(firstTypeName, "Array requires an element type.");
             }
         }
 
@@ -410,6 +470,35 @@ public final class Parser {
             typeArgs.add(collectType());
         } while (match(COMMA));
         return typeArgs;
+    }
+
+    private String parseQualifiedName(final String message) {
+        final var name = new StringBuilder(consume(IDENTIFIER, message).lexeme());
+        while (match(DOT)) name.append('.').append(consume(IDENTIFIER, "Expect name after '.'.").lexeme());
+        return name.toString();
+    }
+
+    private Token qualifyDeclaredType(final Token token) {
+        return withLexeme(token, qualifyTypeName(token.lexeme()));
+    }
+
+    private Token qualifyTypeToken(final Token token) {
+        final var name = new StringBuilder(token.lexeme());
+        while (match(DOT)) name.append('.').append(consume(IDENTIFIER, "Expect name after '.'.").lexeme());
+        return withLexeme(token, qualifyTypeName(name.toString()));
+    }
+
+    private String qualifyTypeName(final String name) {
+        if (name.indexOf('.') >= 0 || packageName.isEmpty()
+            || Set.of("Never", "Any", "Infer", "Unit", "Int", "Float", "Boolean", "String", "Array")
+                .contains(name)
+            || activeTypeParameters.containsKey(name)) return name;
+        if (importedTypes.containsKey(name)) return importedTypes.get(name);
+        return packageName + "." + name;
+    }
+
+    private Token withLexeme(final Token token, final String lexeme) {
+        return new Token(token.type(), lexeme, token.literal(), token.line());
     }
 
     private Stmt statement() {
@@ -838,15 +927,17 @@ public final class Parser {
 
         if (match(INT)) {
             final var number = previous();
-            // check if it's a range
             if (match(DOT_DOT)) {
-                return new Expr.Literal(new IntRangeLiteral(
-                        (Integer)number.literal(),
-                        previous(),
-                        (Integer)consume(INT, "Expect Integer after range operator").literal()),
-                        TypeDescriptor.genericOf(
-                                TypeDescriptor.ofName("Range"),
-                                TypeDescriptor.ofInt()));
+            final var operator = previous();
+            final var end = consume(INT, "Expect Integer after range operator");
+            final var className = new Token(IDENTIFIER, "zeron.ranges.IntRange", null, number.line());
+            final var factoryName = new Token(IDENTIFIER, "closed", null, operator.line());
+            final var receiver = new Expr.Variable(className, TypeDescriptor.ofInfer());
+            final var arguments = List.<Expr>of(
+                new Expr.Literal(number.literal(), TypeDescriptor.ofInt()),
+                new Expr.Literal(end.literal(), TypeDescriptor.ofInt()));
+            return new Expr.MemberCall(receiver, factoryName, end, arguments,
+                List.of(), TypeDescriptor.ofInfer());
             }
             return new Expr.Literal(number.literal(), TypeDescriptor.ofInt());
         }

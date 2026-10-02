@@ -117,6 +117,14 @@ public final class ControlFlowTest {
                     }
                     return total;
                 }
+                fn storedRangeSum(): Int {
+                    let values = 1..3;
+                    let mut total = 0;
+                    for (let value in values) {
+                        total += value;
+                    }
+                    return total;
+                }
                 fn maxEndpointCount(): Int {
                     let mut count = 0;
                     for (let value in 2147483646..2147483647) {
@@ -147,6 +155,7 @@ public final class ControlFlowTest {
                 assertEquals(6, generated.getMethod("ascendingSum").invoke(null));
                 assertEquals(6, generated.getMethod("descendingSum").invoke(null));
                 assertEquals(7, generated.getMethod("singletonSum").invoke(null));
+                assertEquals(6, generated.getMethod("storedRangeSum").invoke(null));
                 assertEquals(2, generated.getMethod("maxEndpointCount").invoke(null));
                 assertEquals(3, generated.getMethod("breaksFor").invoke(null));
             }
@@ -156,11 +165,126 @@ public final class ControlFlowTest {
     }
 
     @Test
-    public void rejectsNonArrayAndStoredRangeForIterables() {
-        for (final var source : List.of(
-                "fn invalid() { for (let value in 1) {} }",
-                "fn invalid() { let values = 1..3; for (let value in values) {} }")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+    public void rejectsNonIterableForSources() {
+        assertThrows(ResolutionError.class,
+                () -> new Resolver().resolve(parse("fn invalid() { for (let value in 1) {} }")));
+    }
+
+    @Test
+    public void resolvesForOverAUserDefinedIterable() {
+        final var source = parse("""
+                contract Iterator<T> {
+                    hasNext(): Boolean;
+                    mut next(): T;
+                }
+                contract Iterable<T> {
+                    iterator(): &Iterator<T>;
+                }
+                class CounterIterator is Iterator<Int> {
+                    index: Int;
+                    public constructor new;
+                    public hasNext(): Boolean = this.index < 3;
+                    public mut next(): Int {
+                        let value = this.index;
+                        this.index = this.index + 1;
+                        return value;
+                    }
+                }
+                class Counter is Iterable<Int> {
+                    public constructor new;
+                    public iterator(): &Iterator<Int> = CounterIterator.new(0);
+                }
+                fn sum(): Int {
+                    let mut result = 0;
+                    for (let value in Counter.new()) {
+                        result += value;
+                    }
+                    return result;
+                }
+                """);
+
+        new Resolver().resolve(source);
+    }
+
+    @Test
+    public void compilesForUserDefinedIterableWithBreakContinueAndSingleEvaluation() throws Exception {
+        final var className = "IterableForGenerated" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var declarations = parse("""
+                contract Iterator<T> {
+                    hasNext(): Boolean;
+                    mut next(): T;
+                }
+                contract Iterable<T> {
+                    iterator(): &Iterator<T>;
+                }
+                class CounterIterator is Iterator<Int> {
+                    index: Int;
+                    public constructor new;
+                    public hasNext(): Boolean = this.index < 5;
+                    public mut next(): Int {
+                        let value = this.index;
+                        this.index = this.index + 1;
+                        return value;
+                    }
+                }
+                class Counter is Iterable<Int> {
+                    public constructor new;
+                    public iterator(): &Iterator<Int> = CounterIterator.new(0);
+                }
+                class SingleIterator<T> is Iterator<T> {
+                    value: T;
+                    ready: Boolean;
+                    public constructor new;
+                    public hasNext(): Boolean = this.ready;
+                    public mut next(): T {
+                        this.ready = false;
+                        return this.value;
+                    }
+                }
+                class Single<T> is Iterable<T> {
+                    value: T;
+                    public constructor new;
+                    public iterator(): &Iterator<T> = SingleIterator<T>.new(this.value, true);
+                }
+                let mut sourceCalls = 0;
+                fn makeCounter(): Iterable<Int> {
+                    sourceCalls += 1;
+                    return Counter.new();
+                }
+                fn sum(): Int {
+                    let mut result = 0;
+                    for (let value in makeCounter()) {
+                        if (value == 1) continue;
+                        if (value == 4) break;
+                        result += value;
+                    }
+                    return result;
+                }
+                fn genericSum(): Int {
+                    let mut result = 0;
+                    for (let value in Single<Int>.new(7)) {
+                        result += value;
+                    }
+                    return result;
+                }
+                fn getSourceCalls(): Int = sourceCalls;
+                """);
+
+        try {
+            final var compiler = new Compiler(declarations, className);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(5, generated.getMethod("sum").invoke(null));
+                assertEquals(7, generated.getMethod("genericSum").invoke(null));
+                assertEquals(1, generated.getMethod("getSourceCalls").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
         }
     }
 

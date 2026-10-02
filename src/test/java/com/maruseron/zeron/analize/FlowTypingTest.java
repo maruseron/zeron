@@ -200,11 +200,38 @@ public final class FlowTypingTest {
             "fn invalid(flag: Boolean): Unit { let mut current: Any? = 1; "
                 + "if (current is Int) { while (flag) { let next = current + 1; "
                 + "current = \"text\"; } } }",
-                "fn invalid(value: Int?): Int { let mut current: Int? = value; "
-                        + "while (current == null) { current = 1; } return current + 1; }",
                 "fn invalid(values: Array<Int>): Int { let mut current: Int? = null; "
                         + "for (let value in values) { current = value; } return current + 1; }")) {
             assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        }
+    }
+
+    @Test
+    public void fixedPointRefinesLoopExitAfterEstablishingNonNullValue() throws Exception {
+        final var className = "LoopFixedPoint" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                fn increment(value: Int?): Int {
+                    let mut current: Int? = value;
+                    while (current == null) {
+                        current = 1;
+                    }
+                    return current + 1;
+                }
+                """);
+
+        try {
+            final var compiler = new Compiler(statements, className);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(2, generated.getMethod("increment", Integer.class).invoke(null, new Object[]{null}));
+                assertEquals(5, generated.getMethod("increment", Integer.class).invoke(null, 4));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
         }
     }
 
@@ -217,15 +244,15 @@ public final class FlowTypingTest {
         final var secondFile = Path.of("dist", "SecondNamed" + suffix + ".class");
         final var contractFile = Path.of("dist", "FlowNamed" + suffix + ".class");
         final var statements = parse("""
-                contract FlowNamed%s {
+                public contract FlowNamed%s {
                     name(): String;
                 }
-                class FirstNamed%s is FlowNamed%s {
+                public class FirstNamed%s is FlowNamed%s {
                     value: String;
                     public constructor new;
                     public name(): String = this.value;
                 }
-                class SecondNamed%s is FlowNamed%s {
+                public class SecondNamed%s is FlowNamed%s {
                     value: String;
                     public constructor new;
                     public name(): String = this.value;
@@ -281,7 +308,14 @@ public final class FlowTypingTest {
         final var classFile = Path.of("dist", className + ".class");
         final var statements = parse("""
                 fn checkedInt(value: Any): Int = value as Int;
+            fn checkedFloat(value: Any): Float = value as Float;
+            fn checkedBoolean(value: Any): Boolean = value as Boolean;
+            fn checkedString(value: Any): String = value as String;
+            fn checkedUnit(value: Any): Unit = value as Unit;
                 fn safeInt(value: Any?): Int? = value as? Int;
+            fn safeFloat(value: Any?): Float? = value as? Float;
+            fn safeBoolean(value: Any?): Boolean? = value as? Boolean;
+            fn safeString(value: Any?): String? = value as? String;
                 fn checkedAfterTest(value: Any?): Int {
                     if (value is Int) return value as Int;
                     return 0;
@@ -297,21 +331,31 @@ public final class FlowTypingTest {
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 final var generated = loader.loadClass(className);
-                assertEquals(42, generated.getMethod("checkedInt", Object.class).invoke(null, 42));
-                assertEquals(42, generated.getMethod("safeInt", Object.class).invoke(null, 42));
-                assertNull(generated.getMethod("safeInt", Object.class).invoke(null, "text"));
-                assertNull(generated.getMethod("safeInt", Object.class).invoke(null, new Object[]{null}));
-                assertEquals(42, generated.getMethod("checkedAfterTest", Object.class).invoke(null, 42));
-                assertEquals(0, generated.getMethod("checkedAfterTest", Object.class).invoke(null, "text"));
-
-                final var castFailure = assertThrows(InvocationTargetException.class,
-                        () -> generated.getMethod("checkedInt", Object.class).invoke(null, "text"));
-                assertEquals(ClassCastException.class, castFailure.getCause().getClass());
-
                 final var unitValueClass = loader.loadClass("com.maruseron.zeron.runtime.UnitValue");
                 final var unitValue = unitValueClass.getField("INSTANCE").get(null);
+                final var targetNames = List.of("Int", "Float", "Boolean", "String", "Unit");
+                final Object[] runtimeValues = {42, 2.5d, true, "text", unitValue};
+                for (int target = 0; target < targetNames.size(); target++) {
+                    final var targetName = targetNames.get(target);
+                    final var checked = generated.getMethod("checked" + targetName, Object.class);
+                    final var safe = generated.getMethod("safe" + targetName, Object.class);
+                    for (int source = 0; source < runtimeValues.length; source++) {
+                        final var sourceIndex = source;
+                        if (source == target) {
+                            assertEquals(runtimeValues[target], checked.invoke(null, runtimeValues[source]));
+                            assertEquals(runtimeValues[target], safe.invoke(null, runtimeValues[source]));
+                        } else {
+                            final var castFailure = assertThrows(InvocationTargetException.class,
+                                    () -> checked.invoke(null, runtimeValues[sourceIndex]));
+                            assertEquals(ClassCastException.class, castFailure.getCause().getClass());
+                            assertNull(safe.invoke(null, runtimeValues[source]));
+                        }
+                    }
+                    assertNull(safe.invoke(null, new Object[]{null}));
+                }
+                assertEquals(42, generated.getMethod("checkedAfterTest", Object.class).invoke(null, 42));
+                assertEquals(0, generated.getMethod("checkedAfterTest", Object.class).invoke(null, "text"));
                 assertSame(unitValue, generated.getMethod("safeUnit", Object.class).invoke(null, unitValue));
-                assertNull(generated.getMethod("safeUnit", Object.class).invoke(null, "text"));
             }
         } finally {
             Files.deleteIfExists(classFile);
@@ -324,6 +368,79 @@ public final class FlowTypingTest {
                 "fn invalid(value: Int?): Int = value as Int;",
                 "fn invalid(value: Int?): Int { let converted = value as? Int; return value + 1; }")) {
             assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        }
+    }
+
+    @Test
+    public void rejectsCastsToNonReifiableTypes() {
+        for (final var source : List.of(
+                "fn invalid(value: Any): Array<Int> = value as Array<Int>;",
+                "class Box<T> { value: T; } fn invalid(value: Any): Box<Int> = value as Box<Int>;",
+                "fn invalid(value: Any): (Int) -> Int = value as (Int) -> Int;",
+                "fn invalid<T>(value: Any): T = value as T;")) {
+            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        }
+    }
+
+    @Test
+    public void checksClassAndContractCastPairsAtRuntime() throws Exception {
+        final var className = "FlowNominalCasts" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var personFile = Path.of("dist", "Person.class");
+        final var contractFile = Path.of("dist", "Named.class");
+        final var statements = parse("""
+                public contract Named {
+                    name(): String;
+                }
+                public class Person is Named {
+                    value: String;
+                    public constructor new;
+                    public name(): String = this.value;
+                }
+                fn makePerson(): Person = Person.new("Ada");
+                fn checkedPerson(value: Any): Person = value as Person;
+                fn safePerson(value: Any?): Person? = value as? Person;
+                fn checkedNamed(value: Any): Named = value as Named;
+                fn safeNamed(value: Any?): Named? = value as? Named;
+                fn personFromNamed(value: Named): Person = value as Person;
+                fn nameOrFallback(value: Any?): String {
+                    let named = value as? Named;
+                    if (named != null) return named.name();
+                    return "fallback";
+                }
+                """);
+
+        try {
+            final var compiler = new Compiler(statements, className);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                final var person = generated.getMethod("makePerson").invoke(null);
+                assertSame(person, generated.getMethod("checkedPerson", Object.class).invoke(null, person));
+                assertSame(person, generated.getMethod("safePerson", Object.class).invoke(null, person));
+                assertNull(generated.getMethod("safePerson", Object.class).invoke(null, "text"));
+                assertNull(generated.getMethod("safePerson", Object.class).invoke(null, new Object[]{null}));
+                assertSame(person, generated.getMethod("checkedNamed", Object.class).invoke(null, person));
+                final var named = generated.getMethod("safeNamed", Object.class).invoke(null, person);
+                assertSame(person, generated.getMethod("personFromNamed", named.getClass().getInterfaces()[0])
+                        .invoke(null, named));
+                assertNull(generated.getMethod("safeNamed", Object.class).invoke(null, "text"));
+                assertEquals("Ada", generated.getMethod("nameOrFallback", Object.class).invoke(null, person));
+                assertEquals("fallback", generated.getMethod("nameOrFallback", Object.class).invoke(null, "text"));
+
+                for (final var methodName : List.of("checkedPerson", "checkedNamed")) {
+                    final var failure = assertThrows(InvocationTargetException.class,
+                            () -> generated.getMethod(methodName, Object.class).invoke(null, "text"));
+                    assertEquals(ClassCastException.class, failure.getCause().getClass());
+                }
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(personFile);
+            Files.deleteIfExists(contractFile);
         }
     }
 

@@ -116,8 +116,9 @@ The implemented first slice settles the basic collection contract as follows:
 - Non-empty literals initialize every slot before exposing the array. Allocation by length and
   uninitialized slots are unavailable.
 - Each literal allocates a distinct array. Structural equality, slicing, multidimensional syntax,
-  and custom iterator integration remain deferred. `for` loops over arrays are implemented with
-  dedicated index-based lowering and do not require the intrinsic registry or an iterator protocol.
+  and integration with the user-defined iterator protocol remain deferred. `for` loops over arrays
+  are implemented with dedicated index-based lowering and do not require the intrinsic registry or
+  an iterator protocol.
 
 Empty literals and contextual element typing remain open. Allocation by length alone must not
 expose JVM zero-initialization as if it were a language guarantee.
@@ -245,7 +246,8 @@ representation has its own runtime store checks.
 - Should `Array<T>` interoperate directly with Java arrays, or should an intrinsic runtime wrapper
   mediate Java's covariant array behavior?
 - Should support be extended beyond non-empty literals to fixed-size allocation with an initializer?
-- Should iteration be an intrinsic array operation or a later standard `Iterable` implementation?
+- Should arrays later conform to the standard `Iterable<T>` contract, or continue to use only their
+  dedicated index-based loop lowering?
 - If first-class element-slot references are eventually added, what lifetime and escape rules govern
   them without exclusive borrowing?
 - Should the intrinsic registry remain compiler-internal, or become a general source-level extension

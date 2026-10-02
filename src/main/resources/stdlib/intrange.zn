@@ -1,0 +1,58 @@
+package zeron.ranges;
+
+import zeron.collections.Iterator;
+import zeron.collections.Iterable;
+
+public class IntIterator is Iterator<Int> {
+    current: Int;
+    end: Int;
+    step: Int;
+    done: Boolean;
+
+    private constructor new;
+
+    public constructor ascending(current: Int, end: Int) =
+        IntIterator.new(current, end, 1, false);
+
+    public constructor descending(current: Int, end: Int) =
+        IntIterator.new(current, end, -1, false);
+
+    public hasNext(): Boolean = not this.done and (if (this.step > 0)
+        then this.current <= this.end
+        else this.current >= this.end);
+    
+    public mut next(): Int {
+        let temp = this.current;
+        if (this.current == this.end) {
+            this.done = true;
+        } else {
+            this.current = this.current + this.step;
+        }
+        return temp;
+    }
+}
+
+public class IntRange is Iterable<Int> {
+    start: Int;
+    end: Int;
+    step: Int;
+
+    private constructor new;
+
+    public constructor ascending(start: Int, end: Int) =
+        IntRange.new(start, end, 1);
+
+    public constructor descending(start: Int, end: Int) =
+        IntRange.new(start, end, -1);
+
+    public constructor closed(start: Int, end: Int) =
+        IntRange.new(start, end, if (start <= end) then 1 else -1);
+
+    public iterator(): &Iterator<Int> {
+        if (this.step > 0) {
+            return IntIterator.ascending(this.start, this.end);
+        } else {
+            return IntIterator.descending(this.start, this.end);
+        }
+    }
+}

@@ -20,6 +20,9 @@ public sealed interface Expr {
         public final List<TypeDescriptor> explicitTypeArguments;
         private TypeDescriptor type;
         private FunctionDescriptor resolvedDescriptor;
+        private String resolvedClassName;
+        private String resolvedOwnerName;
+        private boolean receiverRequiresCast;
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -35,6 +38,12 @@ public sealed interface Expr {
         public void setType(TypeDescriptor type) { this.type = type; }
         public FunctionDescriptor resolvedDescriptor() { return resolvedDescriptor; }
         public void setResolvedDescriptor(FunctionDescriptor descriptor) { resolvedDescriptor = descriptor; }
+        public String resolvedClassName() { return resolvedClassName; }
+        public void setResolvedClassName(String className) { resolvedClassName = className; }
+        public String resolvedOwnerName() { return resolvedOwnerName; }
+        public void setResolvedOwnerName(String name) { resolvedOwnerName = name; }
+        public boolean receiverRequiresCast() { return receiverRequiresCast; }
+        public void setReceiverRequiresCast(boolean value) { receiverRequiresCast = value; }
     }
 
     final class Property implements Expr {
@@ -246,6 +255,7 @@ public sealed interface Expr {
         public final List<TypeDescriptor> explicitTypeArguments;
         private TypeDescriptor type;
         private FunctionDescriptor genericFunctionType;
+        private String resolvedFunctionName;
 
         public Call(Token callee, Token paren, List<Expr> arguments,
                     List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -267,6 +277,9 @@ public sealed interface Expr {
         public FunctionDescriptor genericFunctionType() {
             return genericFunctionType;
         }
+
+        public String resolvedFunctionName() { return resolvedFunctionName; }
+        public void setResolvedFunctionName(final String name) { resolvedFunctionName = name; }
 
         public void setGenericFunctionType(final FunctionDescriptor functionType) {
             this.genericFunctionType = functionType;

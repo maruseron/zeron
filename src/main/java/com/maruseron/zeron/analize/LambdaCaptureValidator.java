@@ -62,7 +62,7 @@ final class LambdaCaptureValidator {
                 walkCaptureUsage(iterable, localNames);
                 walkCaptureUsage(body, localNames);
             }
-            case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body) -> {
+            case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body, boolean _) -> {
                 final var nestedNames = new HashSet<>(localNames);
                 for (final var parameter : parameters) {
                     nestedNames.add(parameter.lexeme());

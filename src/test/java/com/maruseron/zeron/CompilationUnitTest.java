@@ -1,0 +1,196 @@
+package com.maruseron.zeron;
+
+import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.analize.ResolutionError;
+import com.maruseron.zeron.analize.Resolver;
+import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.scan.Scanner;
+import org.junit.Test;
+
+import java.net.URLClassLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
+
+public final class CompilationUnitTest {
+    @Test
+    public void parserRecoveryReportsErrorsWithoutNullDeclarations() {
+        final var previousError = Zeron.hadError;
+        Zeron.hadError = false;
+        try {
+            final var unit = Parser.of(Scanner.from("fn broken() = 1").scanTokens())
+                    .parseCompilationUnit("broken.zn");
+            assertTrue(Zeron.hadError);
+            assertTrue(unit.declarations().isEmpty());
+        } finally {
+            Zeron.hadError = previousError;
+        }
+    }
+
+    @Test
+    public void nominalTypeIdentityIncludesPackage() {
+        assertNotEquals(TypeDescriptor.of("geometry.Point"), TypeDescriptor.of("graphics.Point"));
+    }
+
+    @Test
+    public void compilesMultipleFilesWithQualifiedNominalIdentity() throws Exception {
+        final var mainName = "fixture.PackageMain";
+        final var itemPath = Path.of("dist", "fixture", "Item.class");
+        final var boxPath = Path.of("dist", "fixture", "Box.class");
+        final var mainPath = Path.of("dist", "fixture", "PackageMain.class");
+        final var firstUnit = parse("item.zn", """
+                package fixture;
+                class Item {
+                    value: Int;
+                    public constructor new;
+                    public constructor with(value: Int) = Item.new(value);
+                    public read(): Int = this.value;
+                }
+                fn result(): Int = Box.new(Item.with(41)).read();
+                """);
+        final var secondUnit = parse("box.zn", """
+                package fixture;
+                class Box {
+                    item: Item;
+                    public constructor new;
+                    public read(): Int = this.item.read();
+                }
+                """);
+
+        assertEquals("fixture", firstUnit.packageName());
+        assertEquals(firstUnit.packageName(), secondUnit.packageName());
+        final var units = List.of(firstUnit, secondUnit);
+
+        try {
+            final var compiler = Compiler.forCompilationUnits(units, mainName, "fixture");
+            compiler.resolve();
+            compiler.compile();
+
+            assertTrue(Files.exists(itemPath));
+            assertTrue(Files.exists(boxPath));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(41, loader.loadClass(mainName).getMethod("result").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(itemPath);
+            Files.deleteIfExists(boxPath);
+            Files.deleteIfExists(mainPath);
+        }
+    }
+
+    @Test
+    public void compilesAliasedPublicTypeImportAcrossPackages() throws Exception {
+        final var className = "app.ImportMain";
+        final var mainPath = Path.of("dist", "app", "ImportMain.class");
+        final var pointPath = Path.of("dist", "geometry", "Point.class");
+        final var provider = parse("Point.zn", """
+                package geometry;
+                public class Point {
+                    value: Int;
+                    public constructor new;
+                    public read(): Int = this.value;
+                }
+                """);
+        final var consumer = parse("Main.zn", """
+                package app;
+                import geometry.Point as Dot;
+                fn result(): Int = Dot.new(42).read();
+                """);
+
+        try {
+            final var compiler = Compiler.forCompilationUnits(List.of(consumer, provider), className, "app");
+            compiler.resolve();
+            compiler.compile();
+
+            assertTrue(Files.exists(pointPath));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(className).getMethod("result").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(mainPath);
+            Files.deleteIfExists(pointPath);
+        }
+    }
+
+    @Test
+    public void rejectsImportOfPackagePrivateType() {
+        final var provider = parse("Hidden.zn", """
+                package geometry;
+                class Hidden {}
+                """);
+        final var consumer = parse("Main.zn", """
+                package app;
+                import geometry.Hidden;
+                fn result(): Hidden = unit;
+                """);
+
+        assertThrows(ResolutionError.class,
+                () -> new Resolver().resolveUnits(List.of(provider, consumer)));
+    }
+
+    @Test
+    public void rejectsAmbiguousTypeImports() {
+        final var first = parse("First.zn", "package one; public class Item {}");
+        final var second = parse("Second.zn", "package two; public class Item {}");
+        final var consumer = parse("Main.zn", """
+                package app;
+                import one.Item;
+                import two.Item;
+                """);
+
+        assertThrows(ResolutionError.class,
+                () -> new Resolver().resolveUnits(List.of(first, second, consumer)));
+    }
+
+        @Test
+        public void rejectsImportAliasesThatShadowBuiltInTypes() {
+        final var provider = parse("Number.zn", "package geometry; public class Number {}");
+        final var consumer = parse("Main.zn", """
+            package app;
+            import geometry.Number as Int;
+            fn result(): Int = 1;
+            """);
+
+        assertThrows(ResolutionError.class,
+            () -> new Resolver().resolveUnits(List.of(provider, consumer)));
+        }
+
+        @Test
+        public void rejectsImportOfPackagePrivateFunction() {
+        final var provider = parse("Math.zn", """
+            package arithmetic;
+            fn add(left: Int, right: Int): Int = left + right;
+            """);
+        final var consumer = parse("Main.zn", """
+            package app;
+            import arithmetic.add as sum;
+            fn result(): Int = sum(2, 3);
+            """);
+
+        assertThrows(ResolutionError.class,
+            () -> new Resolver().resolveUnits(List.of(consumer, provider)));
+        }
+
+        @Test
+        public void rejectsNonEntryTopLevelValuesUntilInitializationIsSpecified() {
+        final var entry = parse("Main.zn", "package app; fn main(): Unit = unit;");
+        final var library = parse("State.zn", "package app; let state = 1;");
+
+        assertThrows(ResolutionError.class,
+            () -> new Resolver().resolveUnits(List.of(entry, library)));
+        }
+
+    private static CompilationUnit parse(final String sourcePath, final String source) {
+        return Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit(sourcePath);
+    }
+}

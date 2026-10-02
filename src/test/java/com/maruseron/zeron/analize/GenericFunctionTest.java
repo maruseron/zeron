@@ -58,6 +58,62 @@ public final class GenericFunctionTest {
     }
 
     @Test
+    public void rejectsOperationsWithoutAValidReadonlyContractBound() {
+        for (final var source : List.of(
+                "contract Named { name(): String; } "
+                        + "fn invalid<T>(value: T): String = value.name();",
+                "contract Named { name(): String; } "
+                        + "fn display<T: Named>(value: T): String = value.name(); "
+                        + "fn invalid(): String = display(42);",
+                "contract Mutable { mut update(): Unit; } "
+                        + "fn invalid<T: Mutable>(value: T): Unit = value.update();",
+                "class NotAContract {} fn invalid<T: NotAContract>(value: T): Unit = unit;")) {
+            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        }
+    }
+
+    @Test
+    public void resolvesAndExecutesReadonlyContractBounds() throws Exception {
+        final var className = "GenericContractBounds" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var personFile = Path.of("dist", "Person.class");
+        final var contractFile = Path.of("dist", "Named.class");
+        final var source = parse("""
+                public contract Named {
+                    name(): String;
+                }
+                public class Person is Named {
+                    value: String;
+                    public constructor new;
+                    public name(): String = this.value;
+                }
+                fn readName(value: Named): String = value.name();
+                fn display<T: Named>(value: T): String = value.name();
+                fn inferred(): String = display(Person.new("Ada"));
+                fn explicit(): String = display<Person>(Person.new("Grace"));
+                fn passesBound<T: Named>(value: T): String = readName(value);
+                fn passThrough(): String = passesBound(Person.new("Lin"));
+                """);
+        final var compiler = new Compiler(source, className);
+        compiler.resolve();
+
+        try {
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals("Ada", generated.getMethod("inferred").invoke(null));
+                assertEquals("Grace", generated.getMethod("explicit").invoke(null));
+                assertEquals("Lin", generated.getMethod("passThrough").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(personFile);
+            Files.deleteIfExists(contractFile);
+        }
+    }
+
+    @Test
     public void erasesGenericValuesAndAdaptsCallbacksAtBothBoundaries() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var className = "GenericFunctions" + suffix;

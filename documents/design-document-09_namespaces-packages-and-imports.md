@@ -2,7 +2,10 @@
 
 ## Status
 
-Proposed. Zeron currently has a single-program, flat namespace and compiles one source file per CLI invocation. This note proposes a staged path for package-qualified names and imports. It does not define JVM module integration or Java interop.
+Package headers, package-qualified nominal identities, project source roots, per-unit top-level
+function holders, and selective type/function imports are implemented. Cross-package top-level
+values remain deferred pending an initialization policy. This note does not define JVM module
+integration or Java interop.
 
 ## Purpose
 
@@ -17,11 +20,18 @@ Keep these layers separate. In particular, do not make a source package declarat
 
 ## Current Boundary
 
-- `Resolver` collects class and contract declarations before resolving the program, but keys them by simple `String` names.
-- `NominalDescriptor` stores one name string. `FunctionShapeKey` uses the nominal name supplied by the type model.
+- `Resolver` collects class and contract declarations before resolving the program, keyed by their
+    package-qualified nominal names.
+- `NominalDescriptor` stores a structured `QualifiedName`. `FunctionShapeKey` uses its canonical
+    binary-name spelling as the nominal component.
 - `SymbolTable` keys functions and values by source spelling; class and contract types live in separate resolver maps.
-- A CLI compilation accepts one source file. The generated program class uses the source filename, and generated program, class, and contract files are emitted under `dist/` in the default package.
-- JVM `ClassDesc` already accepts binary names such as `geometry.Point`; source identity and emitted binary name are currently the same simple spelling for nominal classes.
+- The CLI accepts `--root` and `--entry`; it discovers `.zn` files under each root and uses the
+    entry source filename for the entry holder. Explicit source-file lists remain supported.
+- Package-qualified classes and contracts are emitted below `dist/` using package paths. Top-level
+    functions are emitted into deterministic package-local holders, one per source unit. Cross-package
+    top-level values cannot yet be declared.
+- The bundled iteration contracts and `zeron.ranges.IntRange` are loaded as canonical source units,
+  rather than being copied into each consumer package. The `..` syntax lowers to the range factory.
 
 These facts favor introducing a structured source-level qualified name before changing JVM output paths.
 
@@ -56,7 +66,11 @@ Non-goals for the first package slice:
 
 ## Proposed Source Model
 
-A source file is one compilation unit and has at most one package header, before its imports and declarations. Package membership is declared in source; directory layout is a project convention, not the definition of identity. The default package remains available for existing standalone scripts. A default-package declaration cannot be imported into a named package.
+A source file is one compilation unit and has at most one package header before its declarations.
+Package membership is declared in source; directory layout is a project convention, not the
+definition of identity. The default package remains available for existing standalone scripts.
+Imports currently resolve public class, contract, and function declarations. Top-level value imports
+remain deferred.
 
 Initial proposed syntax:
 
@@ -65,9 +79,14 @@ CompilationUnit       ::= [PackageDeclaration] ImportDeclaration* TopLevelDeclar
 PackageDeclaration    ::= "package" QualifiedName ";"
 ImportDeclaration     ::= "import" QualifiedName ["as" Identifier] ";"
 QualifiedName         ::= Identifier {"." Identifier}
-TopLevelDeclaration  ::= ["public"] (VariableDeclaration | FunctionDeclaration
+TopLevelDeclaration  ::= VariableDeclaration | FunctionDeclaration | ClassDeclaration
+                         | ContractDeclaration | "public" (FunctionDeclaration
                          | ClassDeclaration | ContractDeclaration)
 ```
+
+Imports resolve class, contract, and function targets. Non-entry functions require explicit return
+types so their signatures are available before bodies are resolved. Non-entry top-level values
+remain unsupported until initialization order is specified.
 
 Example producer:
 
@@ -80,8 +99,6 @@ public class Point {
     public constructor new;
     public readX(): Int = this.x;
 }
-
-public fn origin(): Point = Point.new(0, 0);
 ```
 
 Example consumer:
@@ -89,16 +106,19 @@ Example consumer:
 ```zeron
 package app;
 
-import geometry.Point;
-import geometry.origin as makeOrigin;
+import geometry.Point as GeoPoint;
+import math.add as sum;
 
-public fn main(): Unit {
-    let point: Point = makeOrigin();
-    print(point.readX());
+fn main(): Unit {
+    let point: GeoPoint = GeoPoint.new(0, 0);
+    print(sum(point.readX(), 1));
 }
 ```
 
-Imports are file-scoped and name declarations, not expressions. In the initial version, imported/current-package names are used unqualified in expression position; type annotations and import paths may use fully qualified names. Dot remains the receiver-member operator. A separate fully qualified value-expression syntax can be added later if needed.
+Imports are file-scoped and name declarations, not expressions. The implemented first slice imports
+classes and contracts, whose aliases are available in type positions and class-factory expressions.
+Dot remains the receiver-member operator. Function/value imports and fully qualified value
+expressions remain deferred.
 
 ## Namespaces and Resolution
 
@@ -118,22 +138,33 @@ For unqualified lookup:
 
 An import does not silently shadow a different declaration in the current package. Two imported declarations with the same local name in the same namespace are an ambiguity error; use `as` to disambiguate. Type and value imports resolve in their respective syntactic contexts. Fully qualified type names bypass imports.
 
-Top-level declarations marked `public` are visible to other packages. Unmarked declarations are package-visible. The initial design has no top-level `private` or `internal` modifier; package-private defaults avoid accidentally exporting a package's implementation. Existing default-package scripts remain mutually visible as before.
+For classes, contracts, and functions, declarations marked `public` are importable from other
+packages. Unmarked declarations are package-visible. The initial design has no top-level `private`
+or `internal` modifier; package-private defaults avoid accidentally exporting a package's
+implementation. Existing default-package scripts remain mutually visible as before.
 
-Imports target individual declarations, including classes, contracts, functions, and values. Initial syntax requires selective imports and allows aliases; wildcard imports and re-exports are deferred. Built-in types remain implicitly available, but there is no implicit wildcard import of a standard library or `java.lang`.
+Imports target individual classes, contracts, and functions, with aliases. Wildcard imports,
+re-exports, and value imports remain deferred. Built-in types remain implicitly available, but there
+is no implicit wildcard import of a standard library or `java.lang`. The CLI compiles the bundled
+`zeron.collections` and `zeron.ranges` source units as ordinary units.
 
 ## Compilation and Discovery
 
 Package support requires a compilation set, not independent file compilation:
 
-1. Read all source units selected by the project/CLI source roots.
+1. Read explicit source paths or discover `.zn` units under configured source roots, with one entry unit.
 2. Collect package headers and all top-level declarations before resolving signatures or bodies. This permits cross-file references and cyclic type-signature references.
 3. Validate duplicate qualified names and imports, then resolve each file using its package and import environment.
-4. Compile all units to one output root.
+4. Compile all units to one output root. Each source unit with top-level functions receives a
+    deterministic holder; top-level values outside the entry unit remain rejected.
 
 Package directory layout should conventionally mirror package components (for example, `src/main/zeron/geometry/Point.zn` for `package geometry;`), but the declared package remains authoritative. The build tool may warn when paths disagree.
 
-Top-level functions and values need a JVM owner because the JVM has no package-level methods or fields. A recommended lowering is a deterministic synthetic holder per source unit, with generated names reserved from user declarations; symbol resolution keeps the source qualified name and records the generated owner separately. Top-level initialization order and cross-unit initialization cycles must be specified before global initializers are allowed to depend on imports. This design does not yet select an initialization-cycle policy.
+Top-level functions and values need a JVM owner because the JVM has no package-level methods or
+fields. Top-level functions use a deterministic synthetic holder per source unit, with names derived
+from root-relative source paths. Symbol resolution keeps the source qualified name and records the
+generated owner separately. Top-level values in non-entry units are currently rejected; define
+initialization order and cycle diagnostics before relaxing that restriction.
 
 Nominal classes and contracts lower to qualified binary names. For example, `geometry.Point` becomes `ClassDesc.of("geometry.Point")` and is emitted at `dist/geometry/Point.class`. The runtime classpath root remains `dist`; the generated main class's binary name includes its package when declared. Lambda shape identities must use qualified nominal source identities without depending on generated interface names.
 
@@ -147,12 +178,20 @@ Later, compiled Zeron libraries can be discovered from class directories or JARs
 
 ## Implementation Roadmap
 
-1. **Qualified identity and package headers.** Add structured package/type names to declarations and descriptors, preserve the default package, collect declarations across compilation units, and encode qualified nominal identities in canonical function-shape keys.
-2. **Imports, aliases, and visibility.** Add file-level selective imports, `as` aliases, public/package-visible top-level declarations, deterministic lookup precedence, ambiguity diagnostics, and cross-package resolver tests.
-3. **Project discovery and JVM output.** Define a source-root/project input, emit nominal files in package paths, map top-level declarations to generated holder classes, and specify top-level initialization order. Verify loading and dispatch across packages.
+1. **Qualified identity and package headers: implemented.** Parse package headers, preserve
+    structured nominal identity, compile explicit multi-package source sets, and emit package-path
+    class files.
+2. **Selective imports and visibility: type/function slice implemented.** Imports and aliases resolve
+    public classes, contracts, and functions; package-private declarations are not importable.
+3. **Project discovery and JVM output: first slice implemented.** `--root` and `--entry` discover
+    units, nominal files use package paths, and top-level functions use deterministic per-unit holders.
+    Specify top-level value initialization before supporting cross-unit values.
 4. **Compiled libraries and JVM interop.** Add Zeron symbol metadata for class directories/JARs, then design Java class-file imports and JPMS module-path integration as separate follow-on work.
 
 ## Acceptance Criteria
+
+The following are end-state criteria for package/import support; current support covers project source
+discovery and type/function imports, but not imported values or compiled-library metadata.
 
 - Same-simple-name classes/contracts in different packages have distinct source identities and generated binary names.
 - Same-package declarations are available without imports; only public declarations are imported across packages.

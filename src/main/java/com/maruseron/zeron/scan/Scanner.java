@@ -26,6 +26,7 @@ public final class Scanner {
             entry("constructor", CONSTRUCTOR),
             entry("continue",    CONTINUE),
             entry("else",        ELSE),
+            entry("external",    EXTERNAL),
             entry("false",       FALSE),
             entry("fn",          FN),
             entry("for",         FOR),
@@ -44,7 +45,6 @@ public final class Scanner {
             entry("or",          OR),
             entry("package",     PACKAGE),
             entry("public",      PUBLIC),
-            entry("print",       PRINT),
             entry("private",     PRIVATE),
             entry("return",      RETURN),
             entry("set",         SET),
@@ -87,8 +87,10 @@ public final class Scanner {
             case ']' -> addToken(RIGHT_BRACKET);
             case ',' -> addToken(COMMA);
             case ';' -> addToken(SEMICOLON);
-            case '|' -> addToken(PIPE);
-            case '&' -> addToken(AMPERSAND);
+            case '|' -> addToken(match('=') ? PIPE_EQUAL : PIPE);
+            case '&' -> addToken(match('=') ? AMPERSAND_EQUAL : AMPERSAND);
+            case '^' -> addToken(match('=') ? CARET_EQUAL : CARET);
+            case '~' -> addToken(TILDE);
 
             // multiple
             case '.' -> addToken(match('.') ? DOT_DOT : DOT);
@@ -97,6 +99,7 @@ public final class Scanner {
                     match('=') ? MINUS_EQUAL :
                     match('>') ? ARROW       : MINUS);
             case '+' -> addToken(match('=') ? PLUS_EQUAL : PLUS);
+            case '%' -> addToken(match('=') ? PERCENT_EQUAL : PERCENT);
             case '/' -> {
                 // single line comment
                 if (match('/')) {
@@ -118,8 +121,24 @@ public final class Scanner {
             case '!' -> addToken(match('=') ? BANG_EQUAL : BANG);
             case '?' -> addToken(match('.') ? HUH_DOT : HUH);
             case '=' -> addToken(match('=') ? EQUAL_EQUAL : EQUAL);
-            case '>' -> addToken(match('=') ? GREATER_EQUAL : GREATER);
-            case '<' -> addToken(match('=') ? LESS_EQUAL : LESS);
+            case '>' -> {
+                if (source.startsWith(">>=", current)) {
+                    advance();
+                    advance();
+                    advance();
+                    addToken(UNSIGNED_SHIFT_RIGHT_EQUAL);
+                } else if (source.startsWith(">=", current)) {
+                    advance();
+                    advance();
+                    addToken(SHIFT_RIGHT_EQUAL);
+                } else {
+                    addToken(match('=') ? GREATER_EQUAL : GREATER);
+                }
+            }
+            case '<' -> {
+                if (match('<')) addToken(match('=') ? SHIFT_LEFT_EQUAL : SHIFT_LEFT);
+                else addToken(match('=') ? LESS_EQUAL : LESS);
+            }
 
             // whitespace
             case ' ', '\r', '\t' -> {}
@@ -218,10 +237,6 @@ public final class Scanner {
 
     private char advance() {
         return source.charAt(current++);
-    }
-
-    private void addNewline() {
-        tokens.add(new Token(NEWLINE, "", null, line));
     }
 
     private void addToken(final TokenType type) {

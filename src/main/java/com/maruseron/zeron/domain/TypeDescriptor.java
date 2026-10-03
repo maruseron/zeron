@@ -1,7 +1,6 @@
 package com.maruseron.zeron.domain;
 
 import java.lang.constant.ClassDesc;
-import java.lang.constant.ConstantDesc;
 import java.lang.constant.ConstantDescs;
 import java.util.*;
 
@@ -135,63 +134,63 @@ public sealed interface TypeDescriptor
 
     static ClassDesc toJavaClassDesc(final TypeDescriptor td) {
         return switch (td) {
-            case InferDescriptor    id ->
+            case InferDescriptor         _ ->
                     throw new IllegalArgumentException(
                             "Infer is not a valid concrete type");
-            case NeverDescriptor    nd -> ConstantDescs.CD_void;
-            case UnitDescriptor     ud -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
-            case AnyDescriptor      ad -> ConstantDescs.CD_Object;
-            case IntDescriptor      id -> ConstantDescs.CD_int;
-            case FloatDescriptor    fd -> ConstantDescs.CD_double;
-            case BooleanDescriptor  bd -> ConstantDescs.CD_boolean;
-            case StringDescriptor   sd -> ConstantDescs.CD_String;
-            case NominalDescriptor  nd -> ClassDesc.of(nd.name());
+            case NeverDescriptor         _ -> ConstantDescs.CD_void;
+            case UnitDescriptor          _ -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+            case AnyDescriptor           _ -> ConstantDescs.CD_Object;
+            case IntDescriptor           _ -> ConstantDescs.CD_int;
+            case FloatDescriptor         _ -> ConstantDescs.CD_double;
+            case BooleanDescriptor       _ -> ConstantDescs.CD_boolean;
+            case StringDescriptor        _ -> ConstantDescs.CD_String;
+            case NominalDescriptor      nd -> ClassDesc.of(nd.name());
             case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
-                case FunctionDescriptor fd -> ClassDesc.of(FunctionShapeNames.interfaceName(
+            case FunctionDescriptor     fd -> ClassDesc.of(FunctionShapeNames.interfaceName(
                     (FunctionDescriptor) TypeSubstitution.erase(fd)));
-            case ArrayDescriptor _ -> ConstantDescs.CD_Object.arrayType();
-            case ReferenceDescriptor rd -> toJavaClassDesc(rd.baseType());
-            case NullableDescriptor nd -> switch (nd.baseType()) {
-                case UnitDescriptor _ -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
-                case IntDescriptor _ -> ConstantDescs.CD_Integer;
-                case FloatDescriptor _ -> ConstantDescs.CD_Double;
+            case ArrayDescriptor         _ -> ConstantDescs.CD_Object.arrayType();
+            case ReferenceDescriptor    rd -> toJavaClassDesc(rd.baseType());
+            case NullableDescriptor     nd -> switch (nd.baseType()) {
+                case UnitDescriptor    _ -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+                case IntDescriptor     _ -> ConstantDescs.CD_Integer;
+                case FloatDescriptor   _ -> ConstantDescs.CD_Double;
                 case BooleanDescriptor _ -> ConstantDescs.CD_Boolean;
-                case NeverDescriptor _ -> ConstantDescs.CD_Object;
+                case NeverDescriptor   _ -> ConstantDescs.CD_Object;
                 default -> toJavaClassDesc(nd.baseType());
             };
             case NullDescriptor _ -> ConstantDescs.CD_Object;
-                case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
+            case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
         };
     }
 
     static ClassDesc toJavaWrapper(final TypeDescriptor td) {
         return switch (td) {
-            case InferDescriptor    id ->
+            case InferDescriptor         _ ->
                     throw new IllegalArgumentException(
                             "Infer is not a valid concrete type");
-            case NeverDescriptor    nd ->
+            case NeverDescriptor         _ ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: NeverDescriptor to java.constant.ClassDesc");
-                case UnitDescriptor     ud -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
-                case AnyDescriptor      ad -> ConstantDescs.CD_Object;
-            case IntDescriptor      id -> ConstantDescs.CD_Integer;
-            case FloatDescriptor    fd -> ConstantDescs.CD_Double;
-            case BooleanDescriptor  bd -> ConstantDescs.CD_Boolean;
-            case StringDescriptor   sd ->
+            case UnitDescriptor          _ -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+            case AnyDescriptor           _ -> ConstantDescs.CD_Object;
+            case IntDescriptor           _ -> ConstantDescs.CD_Integer;
+            case FloatDescriptor         _ -> ConstantDescs.CD_Double;
+            case BooleanDescriptor       _ -> ConstantDescs.CD_Boolean;
+            case StringDescriptor        _ ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: StringDescriptor to java.constant.ClassDesc");
-            case NominalDescriptor  nd ->
+            case NominalDescriptor       _ ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: NominalDescriptor to java.constant.ClassDesc");
-                case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
-            case FunctionDescriptor fd ->
+            case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
+            case FunctionDescriptor      _ ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");
-                case ReferenceDescriptor rd -> toJavaWrapper(rd.baseType());
-                case ArrayDescriptor _ -> ConstantDescs.CD_Object.arrayType();
-                case NullableDescriptor nd -> toJavaClassDesc(nd);
-                case NullDescriptor _ -> ConstantDescs.CD_Object;
-                case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
+            case ReferenceDescriptor    rd -> toJavaWrapper(rd.baseType());
+            case ArrayDescriptor         _ -> ConstantDescs.CD_Object.arrayType();
+            case NullableDescriptor     nd -> toJavaClassDesc(nd);
+            case NullDescriptor          _ -> ConstantDescs.CD_Object;
+            case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
         };
     }
 }

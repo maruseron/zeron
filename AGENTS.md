@@ -22,8 +22,13 @@
   java --enable-preview -cp target/classes com.maruseron.zeron.Zeron src/main/resources/test.zn
   ```
 
-  This runs the compiler and emits `dist/test.class` plus generated lambda-shape interfaces directly under `dist/` in the default package. File compilation uses the source filename without its extension for the main class name. It does not execute the generated Zeron program.
+  This runs the compiler and emits `dist/test.class`, generated lambda-shape interfaces, and the versioned public API index at `dist/META-INF/zeron/api-v2.bin`. File compilation uses the source filename without its extension for the main class name. It does not execute the generated Zeron program.
+- Before every compilation of Zeron source (including tests that generate Zeron programs), remove the existing `dist/` directory so stale generated classes and interfaces do not accumulate. The compiler recreates it as needed; do not remove Maven's `target/` directory for this cleanup.
 - Pass `--debug` (or `-d`) to print parser, resolver, and compiler traces to stderr; normal compilation is quiet.
+- Pass one or more `--library <class-directory>` arguments with source files or project options to load compiled Zeron APIs from `META-INF/zeron/api-v2.bin`. JAR loading is not implemented yet; generated programs using an external library also need that library directory on their runtime classpath.
+- Pass one or more `--java-classpath <class-directory>` arguments with source files or project options to resolve the initial Java interop subset. Expanded Java varargs calls are supported when their component type is supported; signature-only top-level `external fn` declarations use compiler-configured typed bindings. Prepacked/ordinary Java arrays, JARs, Java generics, fields, inherited members, JDK module discovery, and SAM conversions are not implemented. Generated programs also need those class directories on their runtime classpath.
+- Build the bundled standard library as a separate class directory with `java --enable-preview -cp target/classes com.maruseron.zeron.Zeron --build-stdlib target/zeron-stdlib`. Consumers can opt in with `--stdlib compiled --library target/zeron-stdlib`; the default remains bundled source mode. Keep this output separate from `dist/` so normal Zeron-source cleanup does not remove it.
+- Inspect a library API index file or class directory with `java --enable-preview -cp target/classes com.maruseron.zeron.ZeronLibraryIndexDump target/zeron-stdlib` (or pass `target/zeron-stdlib/META-INF/zeron/api-v2.bin` directly).
 - To exercise the generated sample program, invoke its public zero-argument `main` method through JShell:
 
   ```powershell
@@ -55,4 +60,7 @@
 - `documents/design-document-06_intrinsic-arrays.md`: intrinsic array types and operations.
 - `documents/design-document-07_generic-functions.md`: generic functions.
 - `documents/design-document-08_flow-typing-type-tests-and-casts.md`: flow typing, type tests, and casts.
-- `documents/design-document-09_namespaces-packages-and-imports.md`: proposed namespaces, packages, imports, and staged JVM integration.
+- `documents/design-document-09_namespaces-packages-and-imports.md`: source-level names, packages, imports, and visibility.
+- `documents/design-document-10_small-miscelaneous.md`: low-priority null and equality feature discussion.
+- `documents/design-document-11_compilation-libraries-and-host-integration.md`: project compilation, libraries, and Java interop.
+- `documents/design-document-12_intrinsics-and-external-bindings.md`: compiler intrinsic registry and external declaration design.

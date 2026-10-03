@@ -1,3 +1,5 @@
+import zeron.io.println;
+
 let s = "hello " + "world";
 
 let i = 5 + 1;
@@ -31,6 +33,7 @@ fn applyString(value: String, operation: (String) -> String): String {
 }
 
 fn passNullableInt(value: Int?): Int? {
+    let polymorphicIdentity = value -> value;
     return value;
 }
 
@@ -132,27 +135,27 @@ fn testNamedBlockFactory(): Int = TestFactoryCounter.incremented(30).readCount()
 
 fn main() {
     globalCount += 2;
-    print(globalCount);
+    println(globalCount);
 
     let mut localCount = 4;
     localCount = localCount + 3;
-    print(localCount);
+    println(localCount);
     {
         let mut localCount = 20;
         localCount += 2;
-        print(localCount);
+        println(localCount);
     }
     localCount += 1;
-    print(localCount);
+    println(localCount);
     let assignmentValue = localCount = 9;
-    print(assignmentValue);
-    print(localCount);
+    println(assignmentValue);
+    println(localCount);
 
     let inner = 5;
     if (bool) {
-        print(inner);
+        println(inner);
     } else {
-        print("hello world");
+        println("hello world");
     }
     let addOne = x -> x + 1;
     let combine = (left, right) -> left + right;
@@ -160,90 +163,112 @@ fn main() {
     let addBase = value -> value + base;
     let greeting = "hello";
     let decorate = text -> greeting + " " + text;
-    print(addBase(5));
-    print(decorate("world"));
+    println(addBase(5));
+    println(decorate("world"));
     let noParam = () -> 99;
-    print(addOne(10));
-    print(combine(3, 7));
-    print(noParam());
-    print(apply(41, addOne));
-    print(apply(21, y -> y * 2));
-    print(applyFloat(2.5, number -> number * 2.0));
-    print(applyString("zeron", text -> text + "!"));
-    print(identity(42));
-    print(identity<String>("generic"));
-    print(echoAny(42));
+    println(addOne(10));
+    println(combine(3, 7));
+    println(noParam());
+    let polymorphicIdentity = value -> value;
+    println(polymorphicIdentity(12));
+    println(polymorphicIdentity("polymorphic"));
+    println(apply(41, addOne));
+    println(apply(21, y -> y * 2));
+    println(applyFloat(2.5, number -> number * 2.0));
+    println(applyString("zeron", text -> text + "!"));
+    println(identity(42));
+    println(identity<String>("generic"));
+    println(17 % 5);
+    println(12 & 10);
+    println(1 << 3);
+    println(-8 >>> 1);
+    let mut operatorValue = 42;
+    operatorValue %= 5;
+    operatorValue |= 8;
+    operatorValue ^= 3;
+    operatorValue &= 7;
+    operatorValue <<= 3;
+    operatorValue >>= 1;
+    operatorValue >>>= 1;
+    println(operatorValue);
+    let explicitIdentity: (Int) -> Int = identity::<Int>;
+    let expectedIdentity: (String) -> String = identity;
+    println(explicitIdentity(17));
+    println(expectedIdentity("expected"));
+    println(applyGeneric(23, identity));
+    println(identity::<Int>(24));
+    println(echoAny(42));
     let unitAsAny: Any = unit;
     let nullAsAny: Any? = null;
-    print(unitAsAny);
-    print(nullAsAny);
-    print(nameOrUnknown(TestFirstName.new("Ada")));
-    print(nameOrUnknown(TestSecondName.new("Grace")));
-    print(nameOrUnknown(42));
-    print(applyGeneric(6, value -> value * 3));
-    print(testGenericBox());
-    print(testGenericContract());
-    print(testNamedExpressionFactory());
-    print(testNamedBlockFactory());
+    println(unitAsAny);
+    println(nullAsAny);
+    println(nameOrUnknown(TestFirstName.new("Ada")));
+    println(nameOrUnknown(TestSecondName.new("Grace")));
+    println(nameOrUnknown(42));
+    println(applyGeneric(6, value -> value * 3));
+    println(testGenericBox());
+    println(testGenericContract());
+    println(testNamedExpressionFactory());
+    println(testNamedBlockFactory());
     let localMaybe: Int? = 3;
     let localNull: Int? = null;
     let localDefault: Int?;
-    print(localMaybe);
-    print(localNull);
-    print(localDefault);
-    print(maybeInt);
-    print(emptyInt);
-    print(maybeFloat);
-    print(maybeBool);
-    print(maybeText);
-    print(emptyText);
-    print(passNullableInt(9));
-    print(passNullableInt(null));
+    println(localMaybe);
+    println(localNull);
+    println(localDefault);
+    println(maybeInt);
+    println(emptyInt);
+    println(maybeFloat);
+    println(maybeBool);
+    println(maybeText);
+    println(emptyText);
+    println(passNullableInt(9));
+    println(passNullableInt(null));
 
     let mutableView: &Array<Int> = [11, 22, 33];
     let readOnlyView: Array<Int> = mutableView;
-    print(firstArrayValue(mutableView));
-    print(readOnlyView.length);
+    println(firstArrayValue(mutableView));
+    println(readOnlyView.length);
     mutableView[1] = 44;
-    print(readOnlyView[1]);
+    println(readOnlyView[1]);
 
     let mut rebindableView: Array<Int> = [1, 2];
     rebindableView = [3, 4];
-    print(rebindableView[0]);
+    println(rebindableView[0]);
 
     let nullableSlots: &Array<Int?> = [7, null, 9];
-    print(nullableSlots[1]);
+    println(nullableSlots[1]);
 
     let values: Array<Int> = [2, 3, 5];
     let mut arrayTotal = 0;
     for (let value in values) {
         arrayTotal += value;
     }
-    print(arrayTotal);
+    println(arrayTotal);
 
     let mut ascendingTotal = 0;
     for (let value in 1..4) {
         ascendingTotal += value;
     }
-    print(ascendingTotal);
+    println(ascendingTotal);
 
     let mut descendingTotal = 0;
     for (let value in 4..1) {
         descendingTotal += value;
     }
-    print(descendingTotal);
+    println(descendingTotal);
 
     let mut whileCount = 0;
     while (whileCount < 2) {
         whileCount += 1;
     }
-    print(whileCount);
+    println(whileCount);
 
     let mut untilCount = 0;
     until (untilCount == 2) {
         untilCount += 1;
     }
-    print(untilCount);
+    println(untilCount);
 
     let mut loopCount = 0;
     loop {
@@ -254,10 +279,10 @@ fn main() {
         }
         break;
     }
-    print(loopCount);
+    println(loopCount);
 
     let counter = TestCounter.new(40);
     counter.increment();
     let counterView: TestCounterView = counter;
-    print(counterView.read());
+    println(counterView.read());
  }

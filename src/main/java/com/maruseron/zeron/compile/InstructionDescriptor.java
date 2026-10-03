@@ -7,19 +7,19 @@ import java.lang.classfile.instruction.ConstantInstruction;
 import java.lang.constant.ClassDesc;
 
 /* examples:
+    import zeron.io.println;
+
   let a = 5;
   let b = 7;
-  print(a + b);
+    println(a + b);
 
   { iconst_5,                                    push, 1, Int,  I,                j.l.Integer  }
   { istore_1,                                    pop,  1, Unit, V,                null         }
   { bipush 7,                                    push, 1, Int,  I,                j.l.Integer  }
   { istore_2,                                    pop,  1, Unit, V,                null         }
-  { getstatic System.out,                        push, 1, null, j.io.PrintStream, null         }
   { iload_1,                                     push, 1, Int,  I,                j.l.Integer  }
   { iload_2,                                     push, 1, Int,  I,                j.l.Integer  }
   { iadd,                                        rplc, 2, Int,  I,                j.l.Integer  }
-  { invokevirtual println(Ljava/lang/Object;)V,  pop,  2, Unit, V,                null         }
   { return,                                      none, 0, Unit, V,                null         }
  */
 public record InstructionDescriptor(Instruction instruction, Opcode.Kind kind, int size,

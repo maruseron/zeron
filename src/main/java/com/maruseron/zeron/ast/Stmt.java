@@ -11,6 +11,14 @@ import java.util.List;
 public sealed interface Stmt {
     sealed interface Decl {}
 
+    sealed interface FunctionDeclaration extends Stmt, Decl
+            permits Function, ExternalFunction {
+        Token name();
+        List<Token> parameters();
+        FunctionDescriptor typeDescriptor();
+        boolean isPublic();
+    }
+
     record Block(List<Stmt> statements) implements Stmt {}
 
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -51,15 +59,16 @@ public sealed interface Stmt {
 
     record Function(Token name, List<Token> parameters,
                     FunctionDescriptor typeDescriptor, List<Stmt> body,
-                    boolean isPublic) implements Stmt, Decl {}
+                    boolean isPublic) implements FunctionDeclaration {}
+
+    record ExternalFunction(Token name, List<Token> parameters,
+                            FunctionDescriptor typeDescriptor, boolean isPublic) implements FunctionDeclaration {}
 
     record Method(Token name, List<Token> parameters,
                   FunctionDescriptor typeDescriptor, boolean isPublic,
                   boolean isMutating, List<Stmt> body) {}
 
     record If(Token paren, Expr condition, Stmt thenBranch, Stmt elseBranch) implements Stmt {}
-
-    record Print(Expr expression) implements Stmt {}
 
     record Return(Expr value) implements Stmt {}
 

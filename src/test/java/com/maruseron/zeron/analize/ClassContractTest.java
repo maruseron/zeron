@@ -571,7 +571,9 @@ public final class ClassContractTest {
 
     private static void compileCanonicalSample() throws Exception {
         final var source = Files.readString(Path.of("src/main/resources/test.zn"));
-        final var compiler = new Compiler(parse(source), "test");
+        final var unit = Parser.of(Scanner.from(source).scanTokens())
+            .parseCompilationUnit("src/main/resources/test.zn");
+        final var compiler = Compiler.forCompilationUnits(List.of(unit), "test", "");
         compiler.resolve();
         compiler.compile();
     }

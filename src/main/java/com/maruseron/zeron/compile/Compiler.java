@@ -13,15 +13,11 @@ import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.io.IOException;
-import java.io.PrintStream;
 import java.lang.classfile.*;
 import java.lang.classfile.attribute.ConstantValueAttribute;
 import java.lang.classfile.constantpool.ConstantPoolBuilder;
-import java.lang.classfile.constantpool.FieldRefEntry;
 import java.lang.classfile.constantpool.MethodRefEntry;
 import java.lang.constant.*;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.MethodType;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -31,15 +27,21 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 
 public final class Compiler {
-    private static final Path OUTPUT_DIRECTORY = Paths.get("dist");
+    private static final Path DEFAULT_OUTPUT_DIRECTORY = Paths.get("dist");
     private static final ClassDesc UNIT_VALUE_CLASS = ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
 
     private final ClassFile classFile = ClassFile.of();
     private final Resolver resolver;
     private final List<Stmt> declarations;
     private final List<CompilationUnit> compilationUnits;
+    private final Path outputDirectory;
+    private final boolean includeBundledSourcesInIndex;
+    private final boolean libraryBuild;
     private final IdentityHashMap<Stmt, String> declarationOwners = new IdentityHashMap<>();
     private final Map<String, String> functionOwners = new HashMap<>();
+    private final Set<String> metadataTypeNames = new HashSet<>();
+    private final List<Path> javaClassPathRoots;
+    private final FunctionBindingRegistry functionBindings;
     private LambdaCompilationPlan lambdaPlan;
     private final String mainClassName;
     private final String packageName;
@@ -63,25 +65,105 @@ public final class Compiler {
 
     public Compiler(List<Stmt> declarations, String mainClassName, String packageName) {
         this(StandardLibrary.withBundledUnits(List.of(new CompilationUnit(null, packageName, declarations))),
-            mainClassName, packageName, true);
+            mainClassName, packageName, true, List.of(), DEFAULT_OUTPUT_DIRECTORY, false, false, List.of(),
+                FunctionBindingRegistry.standard());
     }
 
     public static Compiler forCompilationUnits(final List<CompilationUnit> units,
                                                final String mainClassName,
                                                final String packageName) {
-        return new Compiler(StandardLibrary.withBundledUnits(units), mainClassName, packageName, true);
+        return forCompilationUnits(units, mainClassName, packageName, List.of());
     }
+
+    public static Compiler forCompilationUnits(final List<CompilationUnit> units,
+                                               final String mainClassName,
+                                               final String packageName,
+                                               final List<ZeronLibraryIndex> libraries) {
+        return forCompilationUnits(units, mainClassName, packageName, libraries, true);
+    }
+
+    public static Compiler forCompilationUnits(final List<CompilationUnit> units,
+                                               final String mainClassName,
+                                               final String packageName,
+                                               final List<ZeronLibraryIndex> libraries,
+                                               final boolean bundleStandardLibrarySources) {
+                            return forCompilationUnits(units, mainClassName, packageName, libraries,
+                                bundleStandardLibrarySources, List.of());
+                            }
+
+                            public static Compiler forCompilationUnits(final List<CompilationUnit> units,
+                                                   final String mainClassName,
+                                                   final String packageName,
+                                                   final List<ZeronLibraryIndex> libraries,
+                                                   final boolean bundleStandardLibrarySources,
+                                                   final List<Path> javaClassPathRoots) {
+                                return forCompilationUnits(units, mainClassName, packageName, libraries,
+                                    bundleStandardLibrarySources, javaClassPathRoots, FunctionBindingRegistry.standard());
+                                }
+
+                                public static Compiler forCompilationUnits(final List<CompilationUnit> units,
+                                                       final String mainClassName,
+                                                       final String packageName,
+                                                       final List<ZeronLibraryIndex> libraries,
+                                                       final boolean bundleStandardLibrarySources,
+                                                       final List<Path> javaClassPathRoots,
+                                                       final FunctionBindingRegistry functionBindings) {
+        final var combinedUnits = new ArrayList<>(units);
+        for (int i = 0; i < libraries.size(); i++) {
+            combinedUnits.addAll(libraries.get(i).toCompilationUnits("library-index-" + i));
+        }
+        final var compilationUnits = bundleStandardLibrarySources
+                ? StandardLibrary.withBundledUnits(combinedUnits)
+                : List.copyOf(combinedUnits);
+        return new Compiler(compilationUnits, mainClassName,
+            packageName, true, libraries, DEFAULT_OUTPUT_DIRECTORY, false, false, javaClassPathRoots,
+            functionBindings);
+    }
+
+        public static Compiler forStandardLibrary(final Path outputDirectory) {
+        return new Compiler(StandardLibrary.bundledUnits(), "zeron.$StandardLibrary", "zeron",
+            true, List.of(), outputDirectory, true, true, List.of(), FunctionBindingRegistry.standard());
+        }
 
     private Compiler(final List<CompilationUnit> units,
                      final String mainClassName,
                      final String packageName,
-                     final boolean compilationUnits) {
+                     final boolean compilationUnits,
+                 final List<ZeronLibraryIndex> libraries,
+                 final Path outputDirectory,
+                 final boolean includeBundledSourcesInIndex,
+                     final boolean libraryBuild,
+                     final List<Path> javaClassPathRoots,
+                     final FunctionBindingRegistry functionBindings) {
         this.compilationUnits = List.copyOf(units);
-        declarations = this.compilationUnits.stream().flatMap(unit -> unit.declarations().stream()).toList();
+        this.outputDirectory = outputDirectory;
+        this.includeBundledSourcesInIndex = includeBundledSourcesInIndex;
+        this.libraryBuild = libraryBuild;
+        this.javaClassPathRoots = List.copyOf(javaClassPathRoots);
+        this.functionBindings = Objects.requireNonNull(functionBindings);
+        declarations = this.compilationUnits.stream().filter(unit -> !unit.metadataOnly())
+            .flatMap(unit -> unit.declarations().stream()).toList();
         this.packageName = packageName == null ? "" : packageName;
         this.mainClassName = mainClassName;
-        resolver = new Resolver();
+        resolver = new Resolver("", this.javaClassPathRoots, this.functionBindings);
+        for (final var unit : this.compilationUnits) {
+            if (!unit.metadataOnly()) continue;
+            for (final var declaration : unit.declarations()) {
+                if (declaration instanceof Stmt.ClassDecl classDeclaration) {
+                    metadataTypeNames.add(classDeclaration.name().lexeme());
+                } else if (declaration instanceof Stmt.ContractDecl contractDeclaration) {
+                    metadataTypeNames.add(contractDeclaration.name().lexeme());
+                }
+            }
+        }
         indexDeclarationOwners();
+        for (final var library : libraries) {
+            for (final var declaration : library.declarations()) {
+                if (declaration instanceof ZeronLibraryIndex.FunctionExport function) {
+                    functionOwners.putIfAbsent(function.qualifiedName(), function.jvmOwner());
+                }
+            }
+        }
     }
 
     public void resolve() {
@@ -90,7 +172,7 @@ public final class Compiler {
     }
 
     public void compile() throws IOException {
-        Files.createDirectories(OUTPUT_DIRECTORY);
+        Files.createDirectories(outputDirectory);
         generateUnitValueClass();
         lambdaPlan = new LambdaCompilationPlan(declarations, symbols);
         for (final var shape : lambdaPlan.functionShapes().entrySet()) {
@@ -99,12 +181,14 @@ public final class Compiler {
 
         for (var unitIndex = 0; unitIndex < compilationUnits.size(); unitIndex++) {
             final var unit = compilationUnits.get(unitIndex);
+            if (unit.metadataOnly()) continue;
             final var isEntryHolder = unitIndex == 0;
             final var holderName = isEntryHolder ? mainClassName : holderNameFor(unit, unitIndex);
             final var unitDeclarations = unit.declarations();
             final var hasTopLevelStorage = unitDeclarations.stream()
-                    .anyMatch(declaration -> declaration instanceof Stmt.Function || declaration instanceof Stmt.Var);
-            if (unitIndex != 0 && !hasTopLevelStorage) continue;
+                    .anyMatch(declaration -> declaration instanceof Stmt.FunctionDeclaration
+                        || declaration instanceof Stmt.Var);
+            if ((unitIndex != 0 || libraryBuild) && !hasTopLevelStorage) continue;
             final var holderPath = outputPath(holderName);
             Files.createDirectories(holderPath.getParent());
             currentHolderName = holderName;
@@ -114,14 +198,18 @@ public final class Compiler {
             });
         }
         generateNominalTypes();
+        final var libraryIndex = ZeronLibraryIndex.fromCompilation(compilationUnits, functionOwners,
+                name -> symbols.getFunctionType(resolver.functionSymbolToken(name)), includeBundledSourcesInIndex);
+        libraryIndex.writeTo(outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v2.bin")));
     }
 
     private void indexDeclarationOwners() {
         for (var unitIndex = 0; unitIndex < compilationUnits.size(); unitIndex++) {
             final var unit = compilationUnits.get(unitIndex);
+            if (unit.metadataOnly()) continue;
             final var owner = unitIndex == 0 ? mainClassName : holderNameFor(unit, unitIndex);
             for (final var declaration : unit.declarations()) {
-                if (declaration instanceof Stmt.Function function) {
+                if (declaration instanceof Stmt.FunctionDeclaration function) {
                     declarationOwners.put(declaration, owner);
                     functionOwners.put(resolverQualifiedName(unit.packageName(), function.name().lexeme()), owner);
                 } else if (declaration instanceof Stmt.Var) {
@@ -154,7 +242,7 @@ public final class Compiler {
     }
 
     private void generateUnitValueClass() throws IOException {
-        final var output = OUTPUT_DIRECTORY.resolve(Path.of("com", "maruseron", "zeron", "runtime", "UnitValue.class"));
+        final var output = outputDirectory.resolve(Path.of("com", "maruseron", "zeron", "runtime", "UnitValue.class"));
         Files.createDirectories(output.getParent());
         ClassFile.of().buildTo(output, UNIT_VALUE_CLASS, builder -> {
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
@@ -184,7 +272,7 @@ public final class Compiler {
                                               final FunctionDescriptor type) throws IOException {
         final var className = FunctionShapeNames.interfaceName(shapeKey);
         final var classDesc = ClassDesc.of(className);
-        final var outFile = OUTPUT_DIRECTORY.resolve(className.replace('.', '/') + ".class");
+        final var outFile = outputDirectory.resolve(className.replace('.', '/') + ".class");
         final var parent = outFile.getParent();
         if (parent != null) {
             try {
@@ -206,6 +294,7 @@ public final class Compiler {
 
     private void generateNominalTypes() throws IOException {
         for (final var contract : resolver.contracts().values()) {
+            if (metadataTypeNames.contains(contract.name().lexeme())) continue;
             final var contractName = contract.name().lexeme();
             if (contractName.equals(mainClassName)) {
                 throw new IllegalStateException("Contract name conflicts with generated program class: " + contractName);
@@ -227,6 +316,7 @@ public final class Compiler {
         }
 
         for (final var declaration : resolver.classes().values()) {
+            if (metadataTypeNames.contains(declaration.name().lexeme())) continue;
             final var className = declaration.name().lexeme();
             if (className.equals(mainClassName)) {
                 throw new IllegalStateException("Class name conflicts with generated program class: " + className);
@@ -434,8 +524,14 @@ public final class Compiler {
                                 }
                             });
                 }
-                case Stmt.Function(Token name, List<Token> parameters,
-                                   FunctionDescriptor typeDescriptor, List<Stmt> body, boolean _) -> {
+                case Stmt.FunctionDeclaration function -> {
+                    final var name = function.name();
+                    final var parameters = function.parameters();
+                    final var typeDescriptor = function.typeDescriptor();
+                    final var sourceFunction = function instanceof Stmt.Function source ? source : null;
+                    final var externalFunction = function instanceof Stmt.ExternalFunction external
+                            ? external
+                            : null;
                     if (entryHolder && name.lexeme().equals("main")) hasMain = true;
                     final var functionToken = resolver.functionSymbolToken(name);
                     final var functionType = symbols.getFunctionType(functionToken);
@@ -453,6 +549,9 @@ public final class Compiler {
                                     symbols.define(parameters.get(i));
                                 }
                                 currentFunction = new FunctionModel(name.lexeme(), functionType);
+                                final var binding = externalFunction == null
+                                    ? null
+                                    : resolver.externalFunctionBinding(externalFunction);
                                 composer.transforming(
                                         (builder, element) -> {
                                             if (element instanceof Instruction i) {
@@ -460,9 +559,16 @@ public final class Compiler {
                                             }
                                             builder.with(element);
                                         },
-                                        builder -> emitStmts(builder, body));
-                                if (functionType.returnType() instanceof UnitDescriptor) {
-                                            emitUnitValue(composer);
+                                        builder -> {
+                                            if (externalFunction != null) {
+                                                emitExternalFunction(builder, externalFunction.typeDescriptor(), binding);
+                                            } else {
+                                                emitStmts(builder, sourceFunction.body());
+                                            }
+                                        });
+                                if (externalFunction == null
+                                        && functionType.returnType() instanceof UnitDescriptor) {
+                                    emitUnitValue(composer);
                                     composer.areturn();
                                 }
                                 endScope();
@@ -545,6 +651,14 @@ public final class Compiler {
                             composer -> emitNullableFunctionAdapterImplementation(
                                 composer, sourceType, targetType));
                     }
+
+                    if (entryHolder) for (final var reference : lambdaPlan.functionReferences()) {
+                        classBuilder.withMethodBody(
+                                reference.helperName(),
+                                toJavaMethodDescriptor(reference.targetType()),
+                                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                                composer -> emitFunctionReferenceImplementation(composer, reference));
+                    }
     }
 
     public void emitStmts(final CodeBuilder builder, final List<Stmt> statements) {
@@ -608,17 +722,11 @@ public final class Compiler {
             }
             case Stmt.For(Token iterationBind, Token _, Expr iterable, Stmt body) ->
                     emitFor(composer, iterationBind, iterable, body);
-            case Stmt.Print(Expr expression) -> {
-                composer.getstatic(getStdOut(composer.constantPool()));
-                emitExpr(composer, expression);
-                emitBox(composer, lastEmittedType);
-                composer.invokevirtual(getPrintln(composer.constantPool()));
-            }
             case Stmt.Expression(Expr expression) -> {
                 if (expression instanceof Expr.PropertyAssignment assignment) {
                     emitPropertyAssignment(composer, assignment, false);
                 } else if (expression instanceof Expr.IndexAssignment assignment) {
-                    emitIndexAssignment(composer, assignment, false);
+                    emitIntrinsicOperation(composer, assignment, false);
                 } else {
                     emitExpr(composer, expression);
                     emitPop(composer, lastEmittedType);
@@ -797,7 +905,7 @@ public final class Compiler {
     }
 
     private Path outputPath(final String binaryName) {
-        return OUTPUT_DIRECTORY.resolve(binaryName.replace('.', '/') + ".class");
+        return outputDirectory.resolve(binaryName.replace('.', '/') + ".class");
     }
 
     private void emitPropertyAssignment(final CodeBuilder composer,
@@ -816,31 +924,87 @@ public final class Compiler {
         lastEmittedType = TypeDescriptor.ofUnit();
     }
 
-    private void emitIndexAssignment(final CodeBuilder composer,
-                                    final Expr.IndexAssignment assignment,
-                                    final boolean retainResult) {
+    private void emitIntrinsicOperation(final CodeBuilder composer,
+                                        final Expr expression,
+                                        final boolean retainResult) {
+        final var operation = switch (expression) {
+            case Expr.ArrayLiteral literal -> literal.intrinsicOperation();
+            case Expr.Property property -> property.intrinsicOperation();
+            case Expr.Index index -> index.intrinsicOperation();
+            case Expr.IndexAssignment assignment -> assignment.intrinsicOperation();
+            default -> null;
+        };
+        if (operation == null) {
+            throw new IllegalStateException("Attempted to emit an unresolved intrinsic operation.");
+        }
+
+        switch (operation.id()) {
+            case ARRAY_LITERAL -> emitArrayLiteral(composer, (Expr.ArrayLiteral) expression, operation);
+            case ARRAY_LENGTH -> {
+                final var property = (Expr.Property) expression;
+                emitExpr(composer, property.receiver);
+                composer.arraylength();
+                lastEmittedType = operation.resultType();
+            }
+            case ARRAY_READ -> emitArrayRead(composer, (Expr.Index) expression, operation);
+            case ARRAY_WRITE -> emitArrayWrite(composer,
+                    (Expr.IndexAssignment) expression, operation, retainResult);
+        }
+    }
+
+    private void emitArrayLiteral(final CodeBuilder composer,
+                                  final Expr.ArrayLiteral literal,
+                                  final ResolvedIntrinsicOperation operation) {
+        final var elementType = operation.parameterTypes().getFirst();
+        composer.ldc(literal.elements.size());
+        composer.anewarray(ClassDesc.of("java.lang.Object"));
+        for (int i = 0; i < literal.elements.size(); i++) {
+            composer.dup();
+            composer.ldc(i);
+            final var element = literal.elements.get(i);
+            emitExpr(composer, element);
+            emitConversion(composer, lastEmittedType, elementType);
+            emitBox(composer, lastEmittedType);
+            composer.aastore();
+        }
+        lastEmittedType = operation.resultType();
+    }
+
+    private void emitArrayRead(final CodeBuilder composer,
+                               final Expr.Index index,
+                               final ResolvedIntrinsicOperation operation) {
+        emitExpr(composer, index.array);
+        composer.dup();
+        composer.arraylength();
+        emitExpr(composer, index.index);
+        emitArrayBoundsCheck(composer);
+        composer.aaload();
+        emitArrayReadConversion(composer, operation.resultType());
+    }
+
+    private void emitArrayWrite(final CodeBuilder composer,
+                                final Expr.IndexAssignment assignment,
+                                final ResolvedIntrinsicOperation operation,
+                                final boolean retainResult) {
         emitExpr(composer, assignment.array);
         composer.dup();
         composer.arraylength();
         emitExpr(composer, assignment.index);
         emitArrayBoundsCheck(composer);
         emitExpr(composer, assignment.value);
-        final var arrayType = (ArrayDescriptor)((ReferenceDescriptor)assignment.array.getType()).baseType();
-        emitConversion(composer, lastEmittedType, arrayType.elementType());
+        final var elementType = operation.parameterTypes().get(2);
+        emitConversion(composer, lastEmittedType, elementType);
         emitBox(composer, lastEmittedType);
         composer.aastore();
         if (retainResult) emitUnitValue(composer);
-        lastEmittedType = TypeDescriptor.ofUnit();
+        lastEmittedType = operation.resultType();
     }
 
     private void emitExpr(final CodeBuilder composer, final Expr expr) {
         switch (expr) {
             case Expr.Property property -> {
-                if (property.name.lexeme().equals("length")
-                        && property.getType() instanceof IntDescriptor) {
-                    emitExpr(composer, property.receiver);
-                    composer.arraylength();
-                    lastEmittedType = TypeDescriptor.ofInt();
+                if (property.intrinsicOperation() != null) {
+                    emitIntrinsicOperation(composer, property, true);
                 } else {
                     final var owner = nominalName(property.receiver.getType());
                     final var fieldType = declarationFieldType(owner, property.name.lexeme());
@@ -852,29 +1016,9 @@ public final class Compiler {
                 }
             }
             case Expr.PropertyAssignment assignment -> emitPropertyAssignment(composer, assignment, true);
-            case Expr.ArrayLiteral literal -> {
-                composer.ldc(literal.elements.size());
-                composer.anewarray(ClassDesc.of("java.lang.Object"));
-                for (int i = 0; i < literal.elements.size(); i++) {
-                    composer.dup();
-                    composer.ldc(i);
-                    final var element = literal.elements.get(i);
-                    emitExpr(composer, element);
-                    emitBox(composer, lastEmittedType);
-                    composer.aastore();
-                }
-                lastEmittedType = literal.getType();
-            }
-            case Expr.Index index -> {
-                emitExpr(composer, index.array);
-                composer.dup();
-                composer.arraylength();
-                emitExpr(composer, index.index);
-                emitArrayBoundsCheck(composer);
-                composer.aaload();
-                emitArrayReadConversion(composer, index.getType());
-            }
-            case Expr.IndexAssignment assignment -> emitIndexAssignment(composer, assignment, true);
+            case Expr.ArrayLiteral literal -> emitIntrinsicOperation(composer, literal, true);
+            case Expr.Index index -> emitIntrinsicOperation(composer, index, true);
+            case Expr.IndexAssignment assignment -> emitIntrinsicOperation(composer, assignment, true);
             case Expr.Assignment assignment -> {
                 final var binding = symbols.getSymbol(assignment.name);
                 emitExpr(composer, assignment.value);
@@ -902,6 +1046,13 @@ public final class Compiler {
                             case MINUS -> composer.isub();
                             case STAR -> composer.imul();
                             case SLASH -> composer.idiv();
+                            case PERCENT -> composer.irem();
+                            case AMPERSAND -> composer.iand();
+                            case PIPE -> composer.ior();
+                            case CARET -> composer.ixor();
+                            case SHIFT_LEFT -> composer.ishl();
+                            case SHIFT_RIGHT -> composer.ishr();
+                            case UNSIGNED_SHIFT_RIGHT -> composer.iushr();
                             default -> throw new IllegalStateException();
                         }
                         lastEmittedType = TypeDescriptor.ofInt();
@@ -914,6 +1065,7 @@ public final class Compiler {
                             case MINUS -> composer.dsub();
                             case STAR -> composer.dmul();
                             case SLASH -> composer.ddiv();
+                            case PERCENT -> composer.drem();
                             default -> throw new IllegalStateException();
                         }
                         lastEmittedType = TypeDescriptor.ofFloat();
@@ -1027,6 +1179,11 @@ public final class Compiler {
                     composer.iconst_1();
                     composer.ixor();
                     lastEmittedType = TypeDescriptor.ofBoolean();
+                } else if (unary.operator.type() == TokenType.TILDE) {
+                    emitExpr(composer, unary.right);
+                    composer.iconst_m1();
+                    composer.ixor();
+                    lastEmittedType = TypeDescriptor.ofInt();
                 } else {
                     emitExpr(composer, unary.right);
                     final var opcode = TypeDescriptor.toJavaClassDesc(unary.getType()).descriptorString();
@@ -1041,10 +1198,14 @@ public final class Compiler {
                 }
             }
             case Expr.Variable variable -> {
-                emitVariable(composer, variable.name);
-                if (!(variable.getType() instanceof InferDescriptor)
-                        && !lastEmittedType.equals(variable.getType())) {
-                    emitConversion(composer, lastEmittedType, variable.getType());
+                if (variable.resolvedFunctionName() != null) {
+                    emitFunctionReference(composer, variable);
+                } else {
+                    emitVariable(composer, variable.name);
+                    if (!(variable.getType() instanceof InferDescriptor)
+                            && !lastEmittedType.equals(variable.getType())) {
+                        emitConversion(composer, lastEmittedType, variable.getType());
+                    }
                 }
             }
             default -> throw new UnsupportedOperationException();
@@ -1222,16 +1383,90 @@ public final class Compiler {
             throw new IllegalStateException("Resolved call target is not a function");
         }
 
+        final var runtimeType = functionType.isGeneric()
+                ? (FunctionDescriptor) TypeSubstitution.erase(functionType)
+                : functionType;
         emitVariable(composer, call.callee);
         for (int i = 0; i < call.arguments.size(); i++) {
             emitExpr(composer, call.arguments.get(i));
-            emitConversion(composer, lastEmittedType, functionType.parameters().get(i));
+            emitConversion(composer, lastEmittedType, runtimeType.parameters().get(i));
         }
-        composer.invokeinterface(TypeDescriptor.toJavaClassDesc(functionType), "invoke", toJavaMethodDescriptor(functionType));
-        lastEmittedType = functionType.returnType();
+        composer.invokeinterface(TypeDescriptor.toJavaClassDesc(runtimeType), "invoke",
+                toJavaMethodDescriptor(runtimeType));
+        if (functionType.isGeneric()) {
+            final var instantiatedReturn = TypeSubstitution.erase(call.getType());
+            emitConversion(composer, runtimeType.returnType(), instantiatedReturn);
+            lastEmittedType = call.getType();
+        } else {
+            lastEmittedType = functionType.returnType();
+        }
     }
 
+        private void emitFunctionReference(final CodeBuilder composer, final Expr.Variable reference) {
+        final var functionType = reference.specializedFunctionType();
+        final var generatedInterface = TypeDescriptor.toJavaClassDesc(functionType);
+        final var samMethodType = toJavaMethodDescriptor(functionType);
+        final var helper = lambdaPlan.functionReference(reference);
+        if (helper == null) {
+            throw new IllegalStateException("Missing specialization bridge for "
+                + reference.resolvedFunctionName());
+        }
+        final var metafactoryType = MethodTypeDesc.of(
+            ClassDesc.of("java.lang.invoke.CallSite"),
+            ClassDesc.of("java.lang.invoke.MethodHandles$Lookup"),
+            ConstantDescs.CD_String,
+            ClassDesc.of("java.lang.invoke.MethodType"),
+            ClassDesc.of("java.lang.invoke.MethodType"),
+            ClassDesc.of("java.lang.invoke.MethodHandle"),
+            ClassDesc.of("java.lang.invoke.MethodType"));
+        final var metafactory = MethodHandleDesc.of(
+            DirectMethodHandleDesc.Kind.STATIC,
+            ClassDesc.of("java.lang.invoke.LambdaMetafactory"),
+            "metafactory",
+            metafactoryType.descriptorString());
+        final var implementation = MethodHandleDesc.of(
+            DirectMethodHandleDesc.Kind.STATIC,
+            ClassDesc.of(mainClassName),
+            helper.helperName(),
+            toJavaMethodDescriptor(helper.targetType()).descriptorString());
+        composer.invokedynamic(DynamicCallSiteDesc.of(
+            metafactory,
+            "invoke",
+            MethodTypeDesc.of(generatedInterface),
+            samMethodType,
+            implementation,
+            samMethodType));
+        lastEmittedType = functionType;
+        }
+
+        private void emitFunctionReferenceImplementation(final CodeBuilder composer,
+                                 final LambdaCompilationPlan.FunctionReference reference) {
+        final var sourceType = reference.sourceType();
+        final var targetType = reference.targetType();
+        var slot = 0;
+        for (int i = 0; i < targetType.arity(); i++) {
+            final var parameterType = targetType.parameters().get(i);
+            loadLocal(composer, slot, parameterType);
+            emitConversion(composer, parameterType, sourceType.parameters().get(i));
+            slot += TypeDescriptor.toJavaClassDesc(parameterType).descriptorString().equals("D") ? 2 : 1;
+        }
+        final var owner = functionOwners.get(reference.functionName());
+        if (owner == null) {
+            throw new IllegalStateException("Missing JVM owner for " + reference.functionName());
+        }
+        composer.invokestatic(ClassDesc.of(owner),
+            reference.functionName().substring(reference.functionName().lastIndexOf('.') + 1),
+            toJavaMethodDescriptor(sourceType));
+        emitConversion(composer, sourceType.returnType(), targetType.returnType());
+        composer.return_(TypeKind.fromDescriptor(
+            TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));
+        }
+
     private void emitMemberCall(final CodeBuilder composer, final Expr.MemberCall call) {
+        if (call.javaCallTarget() != null) {
+            emitJavaMemberCall(composer, call);
+            return;
+        }
         if (call.name.lexeme().equals("new") && call.resolvedClassName() != null) {
             final var declaration = resolver.classes().get(call.resolvedClassName());
             if (declaration == null) throw new IllegalStateException("Resolved constructor class not found.");
@@ -1314,6 +1549,104 @@ public final class Compiler {
         final var erasedReturnType = TypeSubstitution.erase(descriptor.returnType());
         emitConversion(composer, erasedReturnType, resolvedDescriptor.returnType());
         lastEmittedType = resolvedDescriptor.returnType();
+    }
+
+    private void emitJavaMemberCall(final CodeBuilder composer, final Expr.MemberCall call) {
+        final var target = call.javaCallTarget();
+        final var owner = ClassDesc.of(target.owner());
+        final var descriptor = MethodTypeDesc.ofDescriptor(target.descriptor());
+        if (target.kind() == JavaCallTarget.InvocationKind.CONSTRUCTOR) {
+            composer.new_(owner);
+            composer.dup();
+        } else if (target.kind() != JavaCallTarget.InvocationKind.STATIC) {
+            emitExpr(composer, call.receiver);
+        }
+        final var fixedParameterCount = target.varArgs()
+                ? descriptor.parameterCount() - 1
+                : descriptor.parameterCount();
+        for (int i = 0; i < fixedParameterCount; i++) {
+            emitExpr(composer, call.arguments.get(i));
+            emitConversion(composer, lastEmittedType, call.resolvedDescriptor().parameters().get(i));
+        }
+        if (target.varArgs()) {
+            emitJavaVarargsArray(composer, call, fixedParameterCount,
+                    descriptor.parameterType(fixedParameterCount).componentType());
+        }
+        switch (target.kind()) {
+            case CONSTRUCTOR -> composer.invokespecial(owner, "<init>", descriptor);
+            case STATIC -> composer.invokestatic(owner, target.name(), descriptor);
+            case INTERFACE -> composer.invokeinterface(owner, target.name(), descriptor);
+            case VIRTUAL -> composer.invokevirtual(owner, target.name(), descriptor);
+        }
+        if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
+            && descriptor.returnType().equals(ConstantDescs.CD_void)) {
+            emitUnitValue(composer);
+        }
+        lastEmittedType = call.getType();
+    }
+
+    private void emitJavaVarargsArray(final CodeBuilder composer,
+                                      final Expr.MemberCall call,
+                                      final int fixedParameterCount,
+                                      final ClassDesc componentType) {
+        final var componentDescriptor = componentType.descriptorString();
+        final var varargCount = call.arguments.size() - fixedParameterCount;
+        composer.ldc(varargCount);
+        switch (componentDescriptor) {
+            case "I" -> composer.newarray(TypeKind.INT);
+            case "D" -> composer.newarray(TypeKind.DOUBLE);
+            case "Z" -> composer.newarray(TypeKind.BOOLEAN);
+            default -> composer.anewarray(componentType);
+        }
+        for (int index = 0; index < varargCount; index++) {
+            final var argumentIndex = fixedParameterCount + index;
+            composer.dup();
+            composer.ldc(index);
+            emitExpr(composer, call.arguments.get(argumentIndex));
+            emitConversion(composer, lastEmittedType,
+                    call.resolvedDescriptor().parameters().get(argumentIndex));
+            switch (componentDescriptor) {
+                case "I" -> composer.iastore();
+                case "D" -> composer.dastore();
+                case "Z" -> composer.bastore();
+                default -> composer.aastore();
+            }
+        }
+    }
+
+    private void emitExternalFunction(final CodeBuilder composer,
+                                      final FunctionDescriptor signature,
+                                      final FunctionBindingRegistry.Binding binding) {
+        final var target = binding.target();
+        final MethodTypeDesc methodDescriptor;
+        if (target instanceof FunctionBindingRegistry.StaticMethod staticMethod) {
+            methodDescriptor = staticMethod.descriptor();
+            emitExternalFunctionArguments(composer, signature);
+            composer.invokestatic(staticMethod.owner(), staticMethod.methodName(), methodDescriptor);
+        } else if (target instanceof FunctionBindingRegistry.StaticFieldInstanceMethod fieldMethod) {
+            methodDescriptor = fieldMethod.methodDescriptor();
+            composer.getstatic(fieldMethod.fieldOwner(), fieldMethod.fieldName(), fieldMethod.fieldType());
+            emitExternalFunctionArguments(composer, signature);
+            composer.invokevirtual(fieldMethod.methodOwner(), fieldMethod.methodName(), methodDescriptor);
+        } else {
+            throw new IllegalStateException("Unsupported external function binding target.");
+        }
+        if (methodDescriptor.returnType().equals(ConstantDescs.CD_void)) {
+            emitUnitValue(composer);
+            composer.areturn();
+        } else {
+            composer.return_(TypeKind.fromDescriptor(methodDescriptor.returnType().descriptorString()));
+        }
+        lastEmittedType = signature.returnType();
+    }
+
+    private void emitExternalFunctionArguments(final CodeBuilder composer,
+                                               final FunctionDescriptor signature) {
+        var slot = 0;
+        for (final var parameter : signature.parameters()) {
+            loadLocal(composer, slot, parameter);
+            slot += TypeDescriptor.toJavaClassDesc(parameter).descriptorString().equals("D") ? 2 : 1;
+        }
     }
 
     private String nominalName(final TypeDescriptor type) {
@@ -1712,14 +2045,6 @@ public final class Compiler {
             case "B" -> cpb.methodRefEntry(Boolean.class.describeConstable().orElseThrow(), "valueOf", MethodTypeDesc.ofDescriptor("(Z)Ljava/lang/Boolean;"));
             default -> throw new IllegalArgumentException("Autoboxing not supported.");
         };
-    }
-
-    private static FieldRefEntry getStdOut(final ConstantPoolBuilder cpb) {
-        return cpb.fieldRefEntry(ClassDesc.ofDescriptor(System.class.descriptorString()), "out", ClassDesc.ofDescriptor("Ljava/io/PrintStream;"));
-    }
-
-    private static MethodRefEntry getPrintln(final ConstantPoolBuilder cpb) {
-        return cpb.methodRefEntry(ClassDesc.ofDescriptor(PrintStream.class.descriptorString()), "println", MethodType.methodType(void.class, Object.class).describeConstable().orElseThrow());
     }
 
     private static MethodTypeDesc emptyVoidMethod() {

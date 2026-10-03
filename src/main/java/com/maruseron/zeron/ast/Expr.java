@@ -2,6 +2,8 @@ package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.FunctionDescriptor;
+import com.maruseron.zeron.domain.JavaCallTarget;
+import com.maruseron.zeron.domain.ResolvedIntrinsicOperation;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.List;
@@ -23,6 +25,7 @@ public sealed interface Expr {
         private String resolvedClassName;
         private String resolvedOwnerName;
         private boolean receiverRequiresCast;
+        private JavaCallTarget javaCallTarget;
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -44,12 +47,15 @@ public sealed interface Expr {
         public void setResolvedOwnerName(String name) { resolvedOwnerName = name; }
         public boolean receiverRequiresCast() { return receiverRequiresCast; }
         public void setReceiverRequiresCast(boolean value) { receiverRequiresCast = value; }
+        public JavaCallTarget javaCallTarget() { return javaCallTarget; }
+        public void setJavaCallTarget(final JavaCallTarget target) { javaCallTarget = target; }
     }
 
     final class Property implements Expr {
         public final Expr receiver;
         public final Token name;
         private TypeDescriptor type;
+        private ResolvedIntrinsicOperation intrinsicOperation;
 
         public Property(Expr receiver, Token name, TypeDescriptor type) {
             this.receiver = receiver;
@@ -59,6 +65,8 @@ public sealed interface Expr {
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+        public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }
+        public void setIntrinsicOperation(ResolvedIntrinsicOperation operation) { intrinsicOperation = operation; }
     }
 
     final class PropertyAssignment implements Expr {
@@ -118,6 +126,7 @@ public sealed interface Expr {
     final class ArrayLiteral implements Expr {
         public final List<Expr> elements;
         private TypeDescriptor type;
+        private ResolvedIntrinsicOperation intrinsicOperation;
 
         public ArrayLiteral(List<Expr> elements, TypeDescriptor type) {
             this.elements = List.copyOf(elements);
@@ -126,12 +135,15 @@ public sealed interface Expr {
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+        public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }
+        public void setIntrinsicOperation(ResolvedIntrinsicOperation operation) { intrinsicOperation = operation; }
     }
 
     final class Index implements Expr {
         public final Expr array;
         public final Expr index;
         private TypeDescriptor type;
+        private ResolvedIntrinsicOperation intrinsicOperation;
 
         public Index(Expr array, Expr index, TypeDescriptor type) {
             this.array = array;
@@ -141,6 +153,8 @@ public sealed interface Expr {
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+        public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }
+        public void setIntrinsicOperation(ResolvedIntrinsicOperation operation) { intrinsicOperation = operation; }
     }
 
     final class IndexAssignment implements Expr {
@@ -148,6 +162,7 @@ public sealed interface Expr {
         public final Expr index;
         public final Expr value;
         private TypeDescriptor type;
+        private ResolvedIntrinsicOperation intrinsicOperation;
 
         public IndexAssignment(Expr array, Expr index, Expr value, TypeDescriptor type) {
             this.array = array;
@@ -158,6 +173,8 @@ public sealed interface Expr {
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+        public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }
+        public void setIntrinsicOperation(ResolvedIntrinsicOperation operation) { intrinsicOperation = operation; }
     }
 
     final class Binary implements Expr {
@@ -552,11 +569,21 @@ public sealed interface Expr {
 
     final class Variable implements Expr {
         public final Token name;
+        public final List<TypeDescriptor> explicitFunctionTypeArguments;
         private TypeDescriptor type;
+        private String resolvedFunctionName;
+        private FunctionDescriptor sourceFunctionType;
+        private FunctionDescriptor specializedFunctionType;
+        private FunctionDescriptor storedFunctionType;
 
         public Variable(Token name, TypeDescriptor type) {
+            this(name, type, List.of());
+        }
+
+        public Variable(Token name, TypeDescriptor type, List<TypeDescriptor> explicitFunctionTypeArguments) {
             this.name = name;
             this.type = type;
+            this.explicitFunctionTypeArguments = List.copyOf(explicitFunctionTypeArguments);
         }
 
         public TypeDescriptor getType() {
@@ -566,6 +593,15 @@ public sealed interface Expr {
         public void setType(TypeDescriptor type) {
             this.type = type;
         }
+
+        public String resolvedFunctionName() { return resolvedFunctionName; }
+        public void setResolvedFunctionName(final String name) { resolvedFunctionName = name; }
+        public FunctionDescriptor sourceFunctionType() { return sourceFunctionType; }
+        public void setSourceFunctionType(final FunctionDescriptor type) { sourceFunctionType = type; }
+        public FunctionDescriptor specializedFunctionType() { return specializedFunctionType; }
+        public void setSpecializedFunctionType(final FunctionDescriptor type) { specializedFunctionType = type; }
+        public FunctionDescriptor storedFunctionType() { return storedFunctionType; }
+        public void setStoredFunctionType(final FunctionDescriptor type) { storedFunctionType = type; }
 
         public boolean equals(Object obj) {
             if (obj == this) return true;

@@ -25,7 +25,7 @@ The goal is to establish useful object semantics before adding inheritance or ad
 
 A class declaration introduces a nominal type. Equality and assignability are based on the language-level type identity, not on a JVM binary name or generated artifact path. Keep this identity separate from the compiler's JVM representation, just as function-shape identity is separate from generated SAM interface names.
 
-For the initial single-program compiler, class names can be unique within the program's type namespace. The type identity representation should be extendable to include module and package identity when those features exist. Do not make generated names part of semantic equality.
+Class and contract identities are package-qualified across the current compilation set. Module identity may extend this representation if modules are introduced; generated JVM names remain separate from semantic equality.
 
 ### Objects, fields, and construction
 
@@ -224,10 +224,19 @@ The initial class-and-contract milestone is complete when:
 
 ## Explicitly Deferred
 
-The current roadmap defers class inheritance, abstract classes, bounds, variance,
-overload resolution, broader inference, default contract methods, contract-to-contract inheritance,
-intersection types, extension methods, package/module loading, serialization, public fields, generated
-accessors, and ownership/borrow checking. Each deferred feature adds semantic rules that should build
+Intrinsic or expected classes are also deferred. This possible signature-only declaration form could
+describe the types and members promised by a compiler- or runtime-provided implementation, with
+those declarations bound to registered intrinsic identities. Its relationship to ordinary contracts,
+conformance, visibility, and backend binding remains undecided; no source syntax is selected. The
+internal array intrinsic registry does not introduce this language feature. See
+[design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md)
+for the current distinction between intrinsic IDs and future external/expected declarations.
+
+Class inheritance, abstract classes, bounds, variance, source-level overload resolution, broader
+inference, default contract methods, contract-to-contract inheritance, intersection types, extension
+methods, JPMS integration, serialization, public fields, generated accessors, and ownership/borrow
+checking remain deferred. Class-directory compiled-library discovery and the initial Java interop
+slice are implemented; JAR discovery and broader Java platform integration remain future work. Each deferred feature adds semantic rules that should build
 on tested nominal identity, construction, access control, and receiver capability rather than being
 inferred from JVM behavior.
 

@@ -10,9 +10,11 @@ generated bridge helpers.
 
 Invariant generic classes/contracts and callback adaptation across their erased nominal boundaries
 are also implemented; see [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md)
-and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). A first slice of
-single contract bounds on generic function type parameters is implemented. Variance, overloads, and
-first-class generic function values remain deferred, so this is not a complete generic type system.
+and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). Generic named
+functions can be specialized as monomorphic function values. Immutable let-bound lambdas support a
+limited rank-1 scheme slice. A first slice of single contract bounds on generic function type
+parameters is implemented. Variance, overloads, nested schemes, explicit `forall`, and polymorphic
+values stored in mutable bindings remain deferred. This is not a complete generic type system.
 
 ## Language Contract
 
@@ -30,6 +32,8 @@ fn apply<T, R>(value: T, transform: (T) -> R): R = transform(value);
 
 identity(42);                  // infer T as Int
 identity<String>("zeron");    // explicit type argument
+let intIdentity: (Int) -> Int = identity::<Int>;
+let stringIdentity: (String) -> String = identity;
 ```
 
 Type parameters are scoped to one declaration. Generic functions may give each parameter one
@@ -50,17 +54,22 @@ are rejected. The resulting arguments are checked against the fully substituted 
 Unbounded type variables remain opaque inside a generic body. Values can be passed, stored, returned,
 and used in supported structural positions, but unary and binary operators are rejected when they
 require constraints. A bounded type variable exposes only its bound contract's non-mutating methods.
-Lambdas remain monomorphic; generic function values and implicit specialization of a function name
-are not supported.
+Lambdas with an expected function type remain monomorphic. An immutable let-bound lambda with safe
+unresolved parameters may generalize them into a rank-1 scheme, instantiated freshly at each use.
+The first slice handles direct parameter identity and constant results. Mutable bindings, nested
+schemes, explicit `forall`, and unresolved types used by operators are not generalized. Generic
+function names still require full explicit specialization (`name::<T>`) or an expected function type;
+those named-function references are monomorphic values.
 
 ## Implementation Details
 
 ### Parsing and type identity
 
-The parser recognizes `fn name<T, R>(...)`, `fn display<T: Named>(...)`, and `name<Int>(...)`. A generic declaration without an
-explicit return annotation is rejected. Call type arguments are retained on the call AST node for
-resolution. Type-parameter descriptors include a declaration-scope identity so unrelated `T`
-parameters do not compare equal merely because they share a spelling.
+The parser recognizes `fn name<T, R>(...)`, `fn display<T: Named>(...)`, direct calls such as
+`name<Int>(...)`, and function values such as `name::<Int>`. A generic declaration without an
+explicit return annotation is rejected. Type arguments are retained on the call or function-value
+AST node for resolution. Type-parameter descriptors include a declaration-scope identity so
+unrelated `T` parameters do not compare equal merely because they share a spelling.
 
 `FunctionDescriptor` retains the generic parameter list. `TypeSubstitution` recursively substitutes
 and erases type variables through nullable, reference, array, generic-descriptor, and function
@@ -78,9 +87,12 @@ single contract bound may authorize readonly contract methods on a generic funct
 If a type parameter appears only in an unconstrained lambda parameter, the caller must
 provide enough information elsewhere or pass an explicit type argument.
 
-Lambdas passed as arguments are resolved against the partially substituted function signature.
-Lambdas returned from a function are resolved against that function's declared return signature.
-The lambda itself does not acquire the enclosing function's polymorphism.
+Lambdas and bare function names passed as arguments are resolved against the partially substituted
+function signature. Immutable let-bound lambda schemes instantiate freshly at calls and expected
+function types; the binding's scheme is not mutated by an individual use. Operator-constrained lambda
+parameters remain monomorphic and may use later call context. Generic function references validate
+bounds and expected function types after specialization. Neither a scheme nor a lambda acquires the
+enclosing function's polymorphism.
 
 ### JVM lowering
 
@@ -100,11 +112,14 @@ casts, boxing, and unboxing; `LambdaMetafactory` creates the adapter object. Con
 shapes and ordinary non-generic lambda lowering remain unchanged.
 
 Adapter discovery recursively follows function parameters and results through nullable and
-reference-view wrappers. Nested adapters are registered in the direction required by the outer
-bridge, and nullable callback values pass through a null-preserving helper before a non-null adapter
-is created. Generic function references are still outside this implementation. The primitive and
-reference shape matrix and adapter reuse need broader tests before this boundary should be treated
-as fully characterized.
+reference-view wrappers. Generalized lambda values use the erased SAM shape as their runtime
+representation; calls box or unbox at that boundary, and a concrete callback view uses the existing
+adapter mechanism. A specialized generic function value is a zero-capture SAM instance backed
+by a generated static bridge. The bridge adapts its concrete callback arguments to the generic
+function's erased callback shapes, invokes the original owner, then adapts callback results back to
+the specialized shape. Bridge helpers are deduplicated by qualified function identity and erased
+specialized shape. Nullable callback values retain null-preserving adapters. The primitive/reference
+shape matrix and broader adapter reuse still need coverage.
 
 ## Implementation Roadmap
 
@@ -115,9 +130,11 @@ as fully characterized.
   parameters/results, and mutable function views are adapted recursively without changing
   source-level function-shape identity. Expand tests across all primitive/reference combinations
   and bridge reuse.
-3. **Design generic function values.** Define explicit specialization or expected-function-type
-   instantiation for passing generic named functions as values. Resolve capture and overload
-   interactions before implementation.
+3. **Generic function values: implemented first slice.** `name::<T>` explicitly specializes a
+  generic function value; an expected function type can infer the specialization when it determines
+  every type parameter. Specialized values lower through deduplicated static bridges and
+  `LambdaMetafactory`. Polymorphic function values, partial type-argument lists, and overload
+  interactions remain deferred.
 4. **Invariant generic classes and contracts implemented.** Constructor and member substitution,
    declaration-site conformance, invariant identity, raw JVM erasure, nominal callback adapters, and
    erased contract bridges are covered. Broader shape combinations and adapter reuse remain follow-up
@@ -127,6 +144,9 @@ as fully characterized.
   generic bodies may call the bound's non-mutating methods through a cast and interface dispatch.
   Bounds on generic classes/contracts, multiple or class bounds, mutating methods, operators, variance,
   overloads, and broader inference remain deferred.
+6. **Let-bound polymorphic lambdas: implemented first slice.** Immutable identity and constant-result
+    lambdas generalize unresolved parameters into rank-1 schemes; each use instantiates independently.
+    Mutable bindings, nested schemes, and operator constraints remain deferred.
 
 ## Acceptance Criteria for the Current Slice
 
@@ -134,6 +154,8 @@ as fully characterized.
   declaration.
 - Calls infer consistently from values and contextual lambdas, accept explicit type arguments, and
   diagnose conflicts or unresolved parameters.
+- Generic function values accept full explicit specialization or expected-type inference, validate
+  bounds and signature compatibility, and reject unresolved specializations.
 - Contract-bounded generic function calls validate inferred and explicit type arguments; only
   readonly methods declared by the bound are callable on `T`.
 - Type-specific operations on unconstrained type variables fail during resolution rather than
@@ -141,6 +163,8 @@ as fully characterized.
 - Erased method descriptors, primitive boxing/unboxing, generic array access, and recursive callback
   bridges agree with runtime behavior for inline, stored, returned, nested, nullable, and mutable-view
   callbacks.
+- Specialized generic function values invoke the original erased static function through generated
+  bridges, adapting callback parameters/results across the concrete and erased SAM shapes.
 - Generic lowering does not change canonical identities for ordinary concrete function shapes.
 
 Update this note whenever parser, resolver, or backend support changes the accepted generic-function contract.

@@ -2,10 +2,11 @@
 
 ## Status
 
-The initial reference-view and fixed-size array slice is implemented. It uses a dedicated invariant
+The reference-view and fixed-size array slice is implemented. It uses a dedicated invariant
 `Array<T>` descriptor, preserves `&T` in resolved types, and supports non-empty array literals,
-indexed reads and writes, and `.length` through the compiler backend. It is an explicit-AST
-implementation, not yet the intrinsic registry described below.
+indexed reads and writes, and `.length` through the compiler backend. Array operations carry resolved
+intrinsic IDs and signatures. The shared registry and function-binding model is specified in
+[design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md).
 
 The construction syntax is a non-empty literal, `[value, ...]`. Every element is initialized before
 the literal produces a value; `null` combines with a single concrete element type to infer a nullable
@@ -39,9 +40,9 @@ roadmap in [design-document-05_classes-and-contracts.md](design-document-05_clas
 - `Array<T>` has a dedicated invariant descriptor, and indexed reads, writes, and length are
   represented by explicit AST operations lowered by the compiler.
 
-The first array slice implements these type checks and operations directly. The registry and
-declaration model below remain future work; they are intended to replace the current built-in
-special cases, not prerequisites for the slice already in use.
+The resolver and compiler use the intrinsic registry for array operations. This document owns their
+array-specific source typing and runtime behavior; shared registration and lowering rules belong in
+doc 12.
 
 ## Recommended Model
 
@@ -123,75 +124,14 @@ The implemented first slice settles the basic collection contract as follows:
 Empty literals and contextual element typing remain open. Allocation by length alone must not
 expose JVM zero-initialization as if it were a language guarantee.
 
-## Intrinsic Implementation
+## Compiler Intrinsic Integration
 
-An intrinsic is a source-level operation or type whose implementation is supplied by the compiler
-or runtime rather than by an ordinary Zeron class body. Its source signature and type rules should
-remain visible to the resolver; only its execution is special.
-
-### Avoid scattered special cases
-
-### Current implementation boundary
-
-- `ArrayDescriptor` carries the element type and is invariant by descriptor equality.
-- The parser recognizes the built-in `Array` constructor and the `length` property.
-- Reads, writes, and literals have distinct AST operations. `.length` is represented as a property
-  expression and resolved as the built-in array length operation when its receiver is an array.
-- The resolver checks element compatibility, requires `Int` indexes, and enforces mutable views on
-  writes. Compiled operations use `Objects.checkIndex`.
-- The compiler lowers all arrays to boxed `Object[]`.
-- There is not yet a registry of stable intrinsic IDs or a source declaration form for intrinsic
-  signatures.
-
-### Target architecture: registered intrinsics
-
-The current parser and resolver spelling checks are a small initial implementation, not the intended
-long-term dispatch model. Avoid spreading more behavior-specific checks across the
-parser, resolver, and compiler. That couples syntax, type identity, and JVM lowering,
-and makes user-defined types with the same name hazardous.
-
-Instead, introduce a small intrinsic registry with stable internal identifiers and declared
-signatures. A conceptual catalogue might contain:
-
-```text
-array.allocate<T>(length: Int) -> Array<T>
-array.length<T>(array: Array<T>) -> Int
-array.read<T>(array: Array<T>, index: Int) -> T
-array.write<T>(array: &Array<T>, index: Int, value: T) -> Unit
-```
-
-This is an implementation sketch, not proposed callable source syntax. The source language may
-expose length as a property and reads/writes as indexing. The resolver must still check element
-types, index types, and mutable capability before lowering an operation.
-
-### Registry responsibilities
-
-- Give each intrinsic a stable identity independent of a user-visible spelling.
-- Associate it with a source-level signature and any required type-parameter substitution.
-- Let resolution produce a typed intrinsic operation or another explicit resolved representation.
-- Let each execution backend implement that identity without redoing type checking.
-- Reject duplicate or conflicting intrinsic registrations during compiler initialization.
-
-Begin with an internal registry or built-in catalogue; do not add an `intrinsic` keyword to user
-syntax solely for arrays. If external or standard-library intrinsic declarations become useful,
-design a source annotation that binds a declaration to a registered intrinsic identity. Keep the
-declaration's type signature as the authority for checking calls; never dispatch solely on a
-stringly typed method name.
-
-One future direction is a signature-only, class-like declaration (sometimes described as an
-"expected class") that states which members an intrinsic type promises, with the registry binding
-those signatures to stable intrinsic IDs and backend implementations. The term and syntax are not
-defined in this repository; an intrinsic contract or catalogue may be a better fit. In either form,
-`.length` should resolve to a generic intrinsic operation such as `array.length`, rather than
-  requiring a spelling-specific array check in property resolution. The same mechanism could later bind indexed get/set
-operations and host-provided implementations.
-
-The initial parser represents literals, indexed reads, indexed writes, and properties; the resolver
-recognizes array `.length`, records operation types, and checks capabilities. The compiler lowers them to `Object[]`
-operations and `Objects.checkIndex` bounds checks. As the intrinsic registry is introduced,
-resolution should produce a typed intrinsic operation with a stable ID, and the compiler should
-dispatch on that ID. This would replace spelling-based intrinsic recognition and keep operation
-identity out of parser spelling and backend type-checking.
+Array literals, indexed reads, indexed writes, and `.length` are represented as distinct AST
+operations. Resolution checks element and index types and mutable-write capability, then attaches a
+stable intrinsic ID and instantiated signature. The compiler lowers those resolved operations to
+boxed `Object[]` operations with `Objects.checkIndex` bounds checks. The shared registry contract,
+function-intrinsic path, and future external declaration options are documented in
+[design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md).
 
 ### JVM representation choices
 
@@ -201,9 +141,9 @@ future optimization, but must preserve the current source-level invariance and n
 
 Keep source type equality independent of this layout. Centralize the element-to-array descriptor
 mapping in the type-lowering layer; do not let JVM descriptors define variance or source-level
-assignability. Decide how Java array covariance and Java-originated values are handled before
-interoperability is exposed. A source-level invariant type check is required even if the JVM array
-representation has its own runtime store checks.
+assignability. Decide how Java array covariance and Java-originated array values are handled before
+ordinary Java array signatures are supported. A source-level invariant type check is required even
+if the JVM array representation has its own runtime store checks.
 
 ## Implementation Roadmap
 
@@ -218,17 +158,18 @@ representation has its own runtime store checks.
   binding-reassignment permission.
 4. **Add syntax and typed AST operations.** Implemented for non-empty literals, indexed reads,
   indexed assignment, and `.length`, represented through the general property expression.
-5. **Add resolver checks and intrinsic identities.** Element and index checks and mutable-write
-  enforcement are implemented. Stable intrinsic IDs and signature registration remain future work.
+5. **Add resolver checks and intrinsic identities: implemented baseline.** Element and index checks,
+  mutable-write enforcement, stable IDs, generic signature substitution, and resolved operation
+  annotations are implemented. User-declared intrinsic signatures remain deferred.
 6. **Compiler execution: implemented.** The compiler backend uses `Object[]`, boxed primitive
-  elements, and `Objects.checkIndex`. A reference interpreter was removed; specialized layouts and
-  Java interoperability remain future work.
+  elements, and `Objects.checkIndex`. Java class-directory interop is implemented separately;
+  ordinary Java array signatures and specialized Zeron array layouts remain future work.
 7. **Test the contract end to end.** Tests cover projection, invariance, nullable slots, primitive
   boxing/unboxing, aliasing, bounds failures, and generated-code execution. Broader interoperability,
   all reference/function element combinations, and descriptor inspection remain follow-up coverage.
-8. **Replace spelling-based intrinsic handling.** Design a stable intrinsic registry/catalogue,
-  decide whether intrinsic contracts should have source declarations (possibly an expected-class
-  form), then lower `.length` and indexed operations to generic resolved intrinsic operations.
+8. **Extend array operations only with a defined contract.** For example, allocation by length needs
+  explicit initialization and nullability rules before it can be added; registry-wide extension
+  policy belongs in doc 12.
 
 ## Acceptance Criteria
 
@@ -237,8 +178,9 @@ representation has its own runtime store checks.
 - A mutable view can be passed to read-only code without granting that code write capability.
 - `let mut` affects only rebinding; it does not silently make an array mutable.
 - Slot mutability is shallow and does not grant mutation of a referenced element object.
-- Array operations have explicit typed AST nodes and matching resolver and compiler behavior. Stable
-  intrinsic identities are a future architectural goal, not yet implemented.
+- Array operations carry resolved stable intrinsic IDs and instantiated types; the resolver checks
+  them and the compiler lowers by ID. Array-specific type and runtime semantics remain independent
+  of the intrinsic registry's source spelling.
 - Source-level type rules do not depend on JVM array descriptors or runtime class names.
 
 ## Deferred Questions
@@ -250,6 +192,5 @@ representation has its own runtime store checks.
   dedicated index-based loop lowering?
 - If first-class element-slot references are eventually added, what lifetime and escape rules govern
   them without exclusive borrowing?
-- Should the intrinsic registry remain compiler-internal, or become a general source-level extension
-  mechanism for standard-library and host-provided operations? Should source declarations resemble
-  intrinsic contracts, expected classes, or another signature-only construct?
+- Which future array operations justify new compiler intrinsics, and what initialization contract
+  should allocation by length provide?

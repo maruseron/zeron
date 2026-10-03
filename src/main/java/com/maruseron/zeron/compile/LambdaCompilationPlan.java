@@ -1,7 +1,6 @@
 package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.analize.Bind;
-import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
@@ -12,8 +11,11 @@ import java.util.*;
 final class LambdaCompilationPlan {
     record FunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
     record NullableFunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
+    record FunctionReference(String functionName, FunctionDescriptor sourceType,
+                             FunctionDescriptor targetType, String helperName) {}
 
     private record FunctionAdapterKey(FunctionDescriptor source, FunctionDescriptor target) {}
+    private record FunctionReferenceKey(String functionName, FunctionDescriptor targetType) {}
 
     private final SymbolTable symbols;
     private final Map<String, Stmt.ClassDecl> classes = new LinkedHashMap<>();
@@ -26,6 +28,8 @@ final class LambdaCompilationPlan {
     private final Map<Expr.Lambda, List<TypeDescriptor>> lambdaCaptureTypes = new IdentityHashMap<>();
     private final Map<FunctionAdapterKey, String> functionAdapterNames = new LinkedHashMap<>();
     private final Map<FunctionAdapterKey, String> nullableFunctionAdapterNames = new LinkedHashMap<>();
+    private final Map<FunctionReferenceKey, FunctionReference> functionReferences = new LinkedHashMap<>();
+    private final Map<Expr.Variable, FunctionReference> referencesByExpression = new IdentityHashMap<>();
     private Map<String, TypeDescriptor> activeCaptureTypes;
 
     LambdaCompilationPlan(final List<Stmt> declarations, final SymbolTable symbols) {
@@ -82,6 +86,14 @@ final class LambdaCompilationPlan {
         return nullableFunctionAdapterNames.get(new FunctionAdapterKey(source, target));
     }
 
+    List<FunctionReference> functionReferences() {
+        return List.copyOf(functionReferences.values());
+    }
+
+    FunctionReference functionReference(final Expr.Variable expression) {
+        return referencesByExpression.get(expression);
+    }
+
     private void collectLambdaShapes(final List<Stmt> statements) {
         for (final var statement : statements) {
             collectLambdaShapes(statement);
@@ -117,13 +129,18 @@ final class LambdaCompilationPlan {
                 collectFunctionShapes(type.returnType());
                 collectLambdaShapes(body);
             }
+            case Stmt.ExternalFunction external -> {
+                for (final var parameter : external.typeDescriptor().parameters()) {
+                    collectFunctionShapes(parameter);
+                }
+                collectFunctionShapes(external.typeDescriptor().returnType());
+            }
             case Stmt.Block(List<Stmt> statements) -> collectLambdaShapes(statements);
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 collectLambdaShapes(condition);
                 if (thenBranch != null) collectLambdaShapes(thenBranch);
                 if (elseBranch != null) collectLambdaShapes(elseBranch);
             }
-            case Stmt.Print(Expr expression) -> collectLambdaShapes(expression);
             case Stmt.Return(Expr value) -> { if (value != null) collectLambdaShapes(value); }
             case Stmt.Expression(Expr expression) -> collectLambdaShapes(expression);
             case Stmt.Var(Token _, TypeDescriptor type, Expr initializer, BindingMutability _) -> {
@@ -221,11 +238,31 @@ final class LambdaCompilationPlan {
             }
             case Expr.Assignment assignment -> collectLambdaShapes(assignment.value);
             case Expr.Unary unary -> collectLambdaShapes(unary.right);
-            case Expr.Variable _ -> {}
+            case Expr.Variable variable -> {
+                if (variable.resolvedFunctionName() != null) {
+                    collectFunctionReference(variable);
+                } else if (variable.storedFunctionType() != null) {
+                    collectFunctionAdapters(variable.storedFunctionType(), variable.getType());
+                }
+            }
             case Expr.Literal _ -> {}
             case null -> {}
             default -> {}
         }
+    }
+
+    private void collectFunctionReference(final Expr.Variable expression) {
+        final var sourceType = (FunctionDescriptor) TypeSubstitution.erase(expression.sourceFunctionType());
+        final var targetType = (FunctionDescriptor) TypeSubstitution.erase(expression.specializedFunctionType());
+        final var key = new FunctionReferenceKey(expression.resolvedFunctionName(), targetType);
+        final var reference = functionReferences.computeIfAbsent(key,
+                _ -> new FunctionReference(expression.resolvedFunctionName(), sourceType, targetType,
+                        "$functionRef$" + functionReferences.size()));
+        referencesByExpression.put(expression, reference);
+        for (int i = 0; i < targetType.arity(); i++) {
+            collectFunctionAdapters(targetType.parameters().get(i), sourceType.parameters().get(i));
+        }
+        collectFunctionAdapters(sourceType.returnType(), targetType.returnType());
     }
 
     private void collectLambdaCaptures() {
@@ -285,7 +322,6 @@ final class LambdaCompilationPlan {
                 collectCapturedVariables(iterable, nestedNames, captured, seen);
                 collectCapturedVariables(body, nestedNames, captured, seen);
             }
-            case Stmt.Print(Expr expression) -> collectCapturedVariables(expression, localNames, captured, seen);
             case Stmt.Return(Expr value) -> {
                 if (value != null) collectCapturedVariables(value, localNames, captured, seen);
             }

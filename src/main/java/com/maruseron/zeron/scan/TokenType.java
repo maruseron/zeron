@@ -6,15 +6,22 @@ public enum TokenType {
     LEFT_BRACE, RIGHT_BRACE,        // { }
     LEFT_BRACKET, RIGHT_BRACKET,    // [ ]
     COMMA, SEMICOLON,               // , ;
-    PIPE, AMPERSAND,                // | &
+    TILDE,                          // ~
 
     // One, two or three character tokens
     DOT, DOT_DOT,                   // . ..
     COLON, COLON_COLON,             // : ::
     MINUS, MINUS_EQUAL, ARROW,      // - -= ->
     PLUS, PLUS_EQUAL,               // + +=
+    PERCENT, PERCENT_EQUAL,         // % %=
     SLASH, SLASH_EQUAL, SLASH_STAR, // / /= /*
     STAR, STAR_EQUAL, STAR_SLASH,   // * *= */
+    PIPE, PIPE_EQUAL,               // | |=
+    AMPERSAND, AMPERSAND_EQUAL,     // & &=
+    CARET, CARET_EQUAL,             // ^ ^=
+    SHIFT_LEFT, SHIFT_LEFT_EQUAL,   // << <<=
+    SHIFT_RIGHT, SHIFT_RIGHT_EQUAL, // >> >>=
+    UNSIGNED_SHIFT_RIGHT, UNSIGNED_SHIFT_RIGHT_EQUAL, // >>> >>>=
     BANG, BANG_EQUAL,               // ! !=
     HUH, HUH_DOT,                   // ? ?.
     EQUAL, EQUAL_EQUAL,             // = ==
@@ -24,10 +31,10 @@ public enum TokenType {
     // Literals
     IDENTIFIER, STRING, INT, DOUBLE,
 
-    AND, AS, BREAK, CLASS, CONTRACT, CONSTRUCTOR, ELSE, FALSE, FN,
+    AND, AS, BREAK, CLASS, CONTRACT, CONSTRUCTOR, ELSE, EXTERNAL, FALSE, FN,
         CONTINUE,
     FOR, GET, IF, IMPLEMENT, IMPORT, IN, IS, LET, LOOP, MATCH, MUT,
-    NOT, NULL, OR, PACKAGE, PUBLIC, PRINT, PRIVATE, RETURN, SET, THEN,
+    NOT, NULL, OR, PACKAGE, PUBLIC, PRIVATE, RETURN, SET, THEN,
     THIS, TRUE, TYPE, TYPEOF, UNIT, UNTIL, WHILE,
 
     NEWLINE, EOF

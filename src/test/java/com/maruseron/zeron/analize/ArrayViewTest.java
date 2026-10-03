@@ -1,8 +1,12 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.domain.IntrinsicDefinition;
+import com.maruseron.zeron.domain.IntrinsicId;
+import com.maruseron.zeron.domain.IntrinsicRegistry;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
@@ -41,6 +45,55 @@ public final class ArrayViewTest {
         assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "firstValue"));
         assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "size"));
     }
+
+        @Test
+        public void resolvesArraySyntaxToStableTypedIntrinsicOperations() {
+        final var statements = parse("""
+            let values = [1, 2];
+            fn first(values: Array<Int>): Int { return values[0]; }
+            fn replace(values: &Array<Int>): Unit { values[0] = 3; }
+            fn size(values: Array<Int>): Int { return values.length; }
+            """);
+        final var resolver = new Resolver();
+        resolver.resolve(statements);
+
+        final var literal = (Expr.ArrayLiteral) ((Stmt.Var) statements.getFirst()).initializer();
+        final var literalOperation = literal.intrinsicOperation();
+        assertEquals(IntrinsicId.ARRAY_LITERAL, literalOperation.id());
+        assertEquals("zeron.array.literal.v1", literalOperation.id().stableName());
+        assertEquals(TypeDescriptor.ofInt(), literalOperation.parameterTypes().getFirst());
+        assertEquals(literal.getType(), literalOperation.resultType());
+
+        final var read = (Expr.Index) ((Stmt.Return) ((Stmt.Function) statements.get(1)).body().getFirst()).value();
+        assertEquals(IntrinsicId.ARRAY_READ, read.intrinsicOperation().id());
+        assertEquals(2, read.intrinsicOperation().parameterTypes().size());
+        assertEquals(TypeDescriptor.ofInt(), read.intrinsicOperation().resultType());
+
+        final var write = (Expr.IndexAssignment)
+            ((Stmt.Expression) ((Stmt.Function) statements.get(2)).body().getFirst()).expression();
+        assertEquals(IntrinsicId.ARRAY_WRITE, write.intrinsicOperation().id());
+        assertEquals(TypeDescriptor.ofInt(), write.intrinsicOperation().parameterTypes().get(2));
+        assertEquals(TypeDescriptor.ofUnit(), write.intrinsicOperation().resultType());
+
+        final var length = (Expr.Property)
+            ((Stmt.Return) ((Stmt.Function) statements.get(3)).body().getFirst()).value();
+        assertEquals(IntrinsicId.ARRAY_LENGTH, length.intrinsicOperation().id());
+        assertEquals(TypeDescriptor.ofInt(), length.intrinsicOperation().resultType());
+        }
+
+        @Test
+        public void rejectsDuplicateIntrinsicIdsAndPropertyBindings() {
+        final var registry = IntrinsicRegistry.standard();
+        final var length = registry.require(IntrinsicId.ARRAY_LENGTH);
+        final var read = registry.require(IntrinsicId.ARRAY_READ);
+
+        assertThrows(IllegalArgumentException.class,
+            () -> IntrinsicRegistry.of(List.of(length, length)));
+        assertThrows(IllegalArgumentException.class,
+            () -> IntrinsicRegistry.of(List.of(
+                new IntrinsicDefinition(length.id(), length.signature(), "size"),
+                new IntrinsicDefinition(read.id(), read.signature(), "size"))));
+        }
 
     @Test
     public void rejectsWritingThroughReadOnlyArrayAndUpgradingItsView() {

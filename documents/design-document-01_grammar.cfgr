@@ -9,8 +9,10 @@ qualifiedName           : IDENTIFIER {"." IDENTIFIER} ;
 importDeclaration       : "import" qualifiedName ["as" IDENTIFIER] ";" ;
 
 topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl
-                        | publicFunDecl | publicClassDecl | publicContractDecl ;
+                        | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
+                        | publicClassDecl | publicContractDecl ;
 publicFunDecl           : "public" funDecl ;
+publicExternalFunctionDecl : "public" externalFunctionDecl ;
 publicClassDecl         : "public" classDecl ;
 publicContractDecl      : "public" contractDecl ;
 declaration             : varDecl | funDecl | statement ;
@@ -18,6 +20,7 @@ declaration             : varDecl | funDecl | statement ;
 varDecl                 : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
 funDecl                 : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type]
                           ("=" expression ";" | block) ;
+externalFunctionDecl   : "external" "fn" IDENTIFIER "(" parameters ")" ":" type ";" ;
 typeParameters          : "<" typeParameter {"," typeParameter} ">" ;
 typeParameter           : IDENTIFIER [":" type] ;
 parameters              : [parameter {"," parameter}] ;
@@ -43,7 +46,6 @@ statement               : exprStmt
                         | continueStmt
                         | forStmt
                         | ifStmt
-                        | printStmt
                         | returnStmt
                         | loopStmt
                         | whileStmt
@@ -54,7 +56,6 @@ breakStmt               : "break" ";" ;
 continueStmt            : "continue" ";" ;
 forStmt                 : "for" "(" "let" IDENTIFIER "in" expression ")" statement ;
 ifStmt                  : "if" "(" expression ")" statement ["else" statement] ;
-printStmt               : "print" "(" expression ")" ";" ;
 returnStmt              : "return" [expression] ";" ;
 loopStmt                : "loop" statement ;
 whileStmt               : "while" "(" expression ")" statement ;
@@ -63,20 +64,27 @@ block                   : "{" { declaration } "}" ;
 
 expression              : assignment ;
 assignment              : logicOr [assignmentOperator assignment] ;
-assignmentOperator      : "=" | "+=" | "-=" | "*=" | "/=" ;
+assignmentOperator      : "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                        | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>=" ;
 logicOr                 : logicAnd {"or" logicAnd} ;
-logicAnd                : equality {"and" equality} ;
+logicAnd                : bitwiseOr {"and" bitwiseOr} ;
+bitwiseOr               : bitwiseXor {"|" bitwiseXor} ;
+bitwiseXor              : bitwiseAnd {"^" bitwiseAnd} ;
+bitwiseAnd              : equality {"&" equality} ;
 equality                : typeTest {("!=" | "==") typeTest} ;
 typeTest                : comparison ["is" ["not"] type] ;
-comparison              : term {(">" | ">=" | "<" | "<=") term} ;
+comparison              : shift {(">" | ">=" | "<" | "<=") shift} ;
+shift                   : term {("<<" | ">>" | ">>>") term} ;
 term                    : factor {("-" | "+") factor} ;
-factor                  : unary {("/" | "*") unary} ;
-unary                   : ("not" | "-" | "+" | "typeof") unary
+factor                  : unary {("/" | "*" | "%") unary} ;
+unary                   : ("not" | "-" | "+" | "~" | "typeof") unary
                         | cast ;
 cast                    : call {"as" ["?"] type} ;
-call                    : (genericFunctionCall | genericClassFactoryCall | primary) {callSuffix} ;
+call                    : (genericFunctionCall | genericClassFactoryCall | functionValueReference | primary)
+                          {callSuffix} ;
 callSuffix              : arguments | "[" expression "]" | "." IDENTIFIER ;
 genericFunctionCall     : IDENTIFIER typeArguments arguments ;
+functionValueReference : IDENTIFIER "::" typeArguments ;
 genericClassFactoryCall : IDENTIFIER typeArguments "." IDENTIFIER arguments ;
 arguments               : "(" [expression {"," expression}] ")" ;
 typeArguments           : "<" type {"," type} ">" ;
@@ -112,6 +120,8 @@ range                   : INT ".." INT ;
 #   bodies. Their result type is implicitly `&Class`, they have no `this`, and every reachable normal
 #   path in a block must return an `&Class` value. Allocation still uses the canonical `Class.new`.
 # - A generic function must have an explicit return type. Generic method declarations are not supported.
+# - Generic function values use `name::<Type, ...>` for explicit specialization, or a bare name
+#   when an expected function type determines every type parameter. These values are monomorphic.
 # - Generic functions may constrain a type parameter with one contract bound (`T: Contract`). Class
 #   and contract type-parameter bounds, multiple bounds, and mutating bound methods remain unsupported.
 # - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
@@ -119,10 +129,18 @@ range                   : INT ".." INT ;
 #   declare classes, contracts, and functions; cross-package top-level values are deferred.
 #   Selective class/contract/function imports may use `as` aliases and require public declarations.
 # - Non-entry functions require explicit return annotations so signatures are available up front.
+# - External functions are top-level signature-only declarations. Their implementation is selected
+#   by a compiler-side typed binding registry keyed by the source-qualified function name.
 # - `..` constructs an inclusive `zeron.ranges.IntRange`; `for` accepts arrays and values conforming
 #   to the bundled Iterable<T> contract.
+# - Output uses ordinary imported calls to `zeron.io.print` and `zeron.io.println`; `print` is not a
+#   statement keyword.
 # - Assignment targets are variables, properties, or array indices. Compound assignment is supported
-#   only for variables; property and index assignment accept '=' only.
+#   only for variables and includes arithmetic, remainder, bitwise, and shift operators; property
+#   and index assignment accept '=' only.
+# - `%` accepts matching `Int` or `Float` operands and follows JVM remainder semantics. Bitwise `&`,
+#   `|`, `^`, `~` and shifts require `Int`; `>>>` is zero-filling. Shift distances follow JVM Int
+#   behavior (only the low five bits are used).
 # - Array literals are non-empty. A valueless `return` has type Unit and is rejected in non-Unit functions.
 #   Type argument arity is checked by resolution.
 # Parser productions describe syntax; declaration, type-argument, and return-flow constraints are

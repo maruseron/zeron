@@ -1,5 +1,7 @@
 module TypeDescriptorGrammar;
 
+# RETIRED: archived descriptor notation only; not authoritative for current source syntax or types.
+
 Identifier      : { 'a'-'z' | 'A'-'Z' | '0'-'9' } ;
 Type            : Primitive | Wrapper | Function | Generic ;
 Primitive       : "Never" | "Any" | "Unit" | "Int" | "Float" | "Boolean" | "String" ;

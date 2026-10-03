@@ -1,0 +1,5 @@
+package zeron.io;
+
+public external fn print(value: Any?): Unit;
+
+public external fn println(value: Any?): Unit;

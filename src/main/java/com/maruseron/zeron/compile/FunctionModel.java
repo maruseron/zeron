@@ -11,10 +11,12 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /* example:
+import zeron.io.println;
+
 fn main() {
   let a = 5;
   let b = 7;
-  print(a + b);
+    println(a + b);
 }
 
 function main(): Unit
@@ -24,11 +26,9 @@ function main(): Unit
   { istore_1,                  pop,  1, Never, V,                null         }
   { bipush 7,                  push, 1, Int,   I,                j.l.Integer  }
   { istore_2,                  pop,  1, Never, V,                null         }
-  { getstatic System.out,      push, 1, null,  j.io.PrintStream, null         }
   { iload_1,                   push, 1, Int,   I,                j.l.Integer  }
   { iload_2,                   push, 1, Int,   I,                j.l.Integer  }
   { iadd,                      rplc, 2, Int,   I,                j.l.Integer  }
-  { invokevirtual println(I)V, pop,  2, Never, V,                null         }
   { return,                    none, 0, Unit,  V,                null         }
  */
 public final class FunctionModel {

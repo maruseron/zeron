@@ -10,24 +10,36 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 public final class StandardLibrary {
-    private static final String ITERATION_SOURCE = "/stdlib/iteration.zn";
-    private static final String INT_RANGE_SOURCE = "/stdlib/intrange.zn";
+    public static final int API_VERSION = 2;
+    public static final List<String> BUNDLED_SOURCE_PATHS =
+            List.of("/stdlib/iteration.zn", "/stdlib/intrange.zn", "/stdlib/io.zn");
 
     private StandardLibrary() {}
 
     static CompilationUnit iterationUnit() {
-        return loadUnit(ITERATION_SOURCE);
+        return loadUnit(BUNDLED_SOURCE_PATHS.getFirst());
     }
 
     static CompilationUnit intRangeUnit() {
-        return loadUnit(INT_RANGE_SOURCE);
+        return loadUnit(BUNDLED_SOURCE_PATHS.get(1));
+    }
+
+    public static List<CompilationUnit> bundledUnits() {
+        return BUNDLED_SOURCE_PATHS.stream().map(StandardLibrary::loadUnit).toList();
     }
 
     public static List<CompilationUnit> withBundledUnits(final List<CompilationUnit> sourceUnits) {
         final var combined = new ArrayList<>(sourceUnits);
-        if (!containsSource(combined, ITERATION_SOURCE)) combined.add(iterationUnit());
-        if (!containsSource(combined, INT_RANGE_SOURCE)) combined.add(intRangeUnit());
+        for (final var sourcePath : BUNDLED_SOURCE_PATHS) {
+            if (!containsSource(combined, sourcePath)) combined.add(loadUnit(sourcePath));
+        }
         return List.copyOf(combined);
+    }
+
+    public static boolean isBundledSourcePath(final String sourcePath) {
+        if (sourcePath == null) return false;
+        final var normalized = sourcePath.replace('\\', '/');
+        return BUNDLED_SOURCE_PATHS.stream().anyMatch(resourcePath -> normalized.endsWith(resourcePath));
     }
 
     private static boolean containsSource(final List<CompilationUnit> units, final String resourcePath) {

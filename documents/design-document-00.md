@@ -23,6 +23,8 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 
 - Core scalar types, `Unit`, function declarations, and type inference for ordinary bindings and
     function results.
+- Remainder for `Int` and `Float`, 32-bit `Int` bitwise and shift operators, and their variable-only
+    compound assignments. `++`/`--` are not part of the language; use `+= 1` or `-= 1`.
 - Built-in `Any` as a non-null top type: non-null values widen to `Any`, nullable values and `null`
     widen to `Any?`; supported type tests and checked/safe casts are implemented.
 - Generic top-level functions with explicit return types, call-site type inference or explicit type
@@ -40,6 +42,11 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - `for` loops over arrays, inline integer ranges, and user-defined types conforming to the bundled
     `Iterable<T>` and `Iterator<T>` contracts. Arrays retain specialized lowering; ranges are
     ordinary `zeron.ranges.IntRange` values and use protocol dispatch.
+- Callable `zeron.io.print` and `zeron.io.println` standard-library functions, lowered through
+    registered intrinsic IDs. The former print statement syntax has been removed.
+- Initial Java class-directory interop for public constructors and methods, including expanded
+    varargs calls with supported component types. JARs, JDK module discovery, fields, and ordinary
+    Java array signatures remain unsupported.
 - Binding reassignment as a declaration property: `let` bindings are immutable and `let mut`
     bindings may be reassigned.
 - Reference mutation capability (`&T`) is distinct from binding reassignment and is enforced for
@@ -50,13 +57,14 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 
 #### Prototypes and partial support
 
-- Lambda parameter inference is deferred and contextual: unresolved parameters can be fixed by a
-    later call or expected function type. This is an implementation prototype, not polymorphic
-    lambda typing.
-- Lambdas are reusable first-class values and lower to generated function-shape interfaces; named
-    function declarations are callable but are not general first-class function values. Lambdas
-    capture immutable bindings by value, but cannot implicitly capture and mutate reassignable
-    local bindings.
+- Safe immutable let-bound lambdas with identity or constant-result bodies generalize unresolved
+    parameters into rank-1 schemes; each call or expected function type instantiates them separately.
+    Operator-constrained lambdas remain on the contextual monomorphic inference path. Mutable
+    bindings and nested schemes are not generalized.
+- Lambdas are reusable first-class values and lower to generated function-shape interfaces. Named
+    functions can be used as values when an expected function type is available; generic named
+    functions require explicit or contextual specialization. Lambdas capture immutable bindings by
+    value, but cannot implicitly capture and mutate reassignable local bindings.
 - Nullable descriptors and basic `T`/`T?` assignments exist. Flow refinement for direct local and
     parameter null/type tests in statement branches and `if` expressions is implemented, including
     short-circuit Boolean conditions. Checked and safe casts are implemented for supported targets.
@@ -65,10 +73,12 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     zero-iteration path. See
     [design-document-08](design-document-08_flow-typing-type-tests-and-casts.md).
     Arrays support nullable element types, while broader nullable collection behavior remains limited.
-- Generic functions support one contract bound per type parameter. Variance, overloads, generic
-    class/contract bounds, and first-class generic function references remain unsupported.
-    Generic function values are not polymorphic lambdas. Generic callback adaptation works across
-    top-level functions and nominal members, though broader shape coverage and adapter reuse remain.
+- Generic functions support one contract bound per type parameter. Generic function references can
+    be specialized explicitly with `name::<Type>` or inferred from an expected function type; these
+    are monomorphic values, not polymorphic lambdas. Variance, overloads, generic class/contract
+    bounds, and first-class generic function values without specialization remain unsupported.
+    Generic callback adaptation works across top-level functions, specialized function references,
+    and nominal members; broader shape coverage and adapter reuse remain.
 
 #### Planned language features
 
@@ -76,9 +86,12 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     reference, such as `get(index: Int): T` delegating to `contents::get`. Define this as a distinct
     forwarding form, not as a function-reference value or a change to `=` expression bodies; syntax,
     generic substitution, overload resolution, and receiver mutability rules remain to be designed.
-- A stable intrinsic registry for array operations ([design](design-document-06_intrinsic-arrays.md));
-    algebraic data types, discriminated unions, and structural or nominal tuples.
+- Signature-only external/expected declarations remain to be designed; see the
+    [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
+    Algebraic data types, discriminated unions, and structural or nominal tuples are also future work.
 - Immutable collection types, list comprehensions, and explicit resource management.
+- Null-aware navigation (`?.`), null fallback (`??`/`??=`), and explicit structural/referential
+    equality semantics; see the [small language features discussion](design-document-10_small-miscelaneous.md).
 - Extension methods.
 - First-class effect handling and any monadic syntax; the semantics and surface syntax are open.
 
@@ -86,11 +99,13 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 
 ### Names, Packages, and Imports
 
-Package headers, qualified nominal identities, project source roots, per-unit function holders, and
-selective imports of public classes, contracts, and functions are implemented. Cross-unit top-level
-values and compiled-library discovery remain future work. Packages are source namespaces; imports are
-compile-time name bindings, not runtime loading. JVM modules remain a separate future layer. See the
-[namespaces, packages, and imports proposal](design-document-09_namespaces-packages-and-imports.md).
+Package headers, qualified nominal identities, selective imports, aliases, and public/package
+visibility are implemented. Packages are source namespaces; imports are compile-time name bindings,
+not runtime loading. Project discovery, library artifacts, and Java interop are covered in
+[design-document-11](design-document-11_compilation-libraries-and-host-integration.md); intrinsic
+bindings are covered in [design-document-12](design-document-12_intrinsics-and-external-bindings.md).
+Source-level name resolution is specified in
+[design-document-09](design-document-09_namespaces-packages-and-imports.md).
 
 ### Types
 
@@ -117,8 +132,8 @@ be written as ordinary declared types.
 - `Null` is the internal type of the `null` literal, not a type users can declare. It is assignable
   to a nullable type, but a binding initialized only with `null` needs an explicit nullable
   annotation, such as `let value: Int? = null;`.
-- Class and contract declarations resolve to nominal types in the current single-program type
-    namespace. Package- and module-qualified identity remain future work.
+- Class and contract declarations resolve to package-qualified nominal types across the current
+    compilation set. Module-qualified identity remains future work.
 
 #### Function types
 
@@ -193,7 +208,7 @@ its initializer only when it has an explicit nullable type.
 
 #### Variable declaration
 
-Current candidate for a Zeron variable declaration:
+Current variable declaration syntax:
 
 ```zeron
 let mut accumulator = 0;
@@ -232,17 +247,14 @@ a name.
 
 #### Function declaration
 
-Current candidate for function declaration is:
+Function declarations use `fn` with either a block body or an expression body:
 
 ```zeron
 fn multiply(a: Int, b: Int): Int {
     return a * b;
 }
 
-fn multiply(a: Int, b: Int): Int = a * b;
-
-// inferred as (Int, Int) -> Int
-fn multiply(a: Int, b: Int) = a * b;
+fn product(a: Int, b: Int): Int = a * b;
 ```
 
 #### Invocation
@@ -306,30 +318,27 @@ before body resolution.
 
 Unbounded type parameters are opaque in function bodies. A contract-bounded parameter can call that
 contract's non-mutating methods; operators and other type-specific operations still need future
-constraints. Lambdas remain monomorphic, and generic function names are not first-class values. At runtime,
-type parameters erase to `Object`; direct callback parameters and results crossing between erased
-and concrete function shapes use generated bridge helpers. Nested callbacks, nullable callback
-values, and mutable function views are adapted recursively; broader primitive/reference combination
-and bridge-reuse coverage remains. Invariant generic classes/contracts and callback adaptation across
-their erased member boundaries are implemented. Single contract bounds on generic functions are
-implemented; variance and generic class/contract bounds remain deferred.
+constraints. Contextually typed lambdas remain monomorphic; safe immutable let-bound lambdas have a
+limited rank-1 generalization slice. Generic named functions can be referenced as monomorphic
+function values by explicit specialization or expected function type. At runtime, type parameters
+erase to `Object`; direct callback parameters/results and specialized function references crossing
+between erased and concrete function shapes use generated bridge helpers. Nested callbacks, nullable
+callback values, and mutable function views are adapted recursively; broader primitive/reference
+combinations and bridge-reuse coverage remain. Invariant generic classes/contracts and callback
+adaptation across their erased member boundaries are implemented. Single contract bounds on generic
+functions are implemented; variance and generic class/contract bounds remain deferred.
 
 ---
 
 ### Sidetrack: simplest Zeron program
 
-Given the syntax so far, the simplest Zeron program possible would become the following:
+A minimal program using the standard output function is:
 
 ```zeron
-fn main() = print("Hello world");
-```
+import zeron.io.println;
 
-Or for those who would prefer the longer version, the full method, including the explicit
-Unit return:
-
-```zeron
-let main(): Unit {
-    return print("Hello world");
+fn main(): Unit {
+    println("Hello world");
 }
 ```
 
@@ -337,34 +346,24 @@ let main(): Unit {
 
 ### Higher order functions and Lambdas
 
-Zeron supports higher order functions by allowing functions
-to be sent as arguments to others:
+Zeron supports higher-order functions that receive function values. Lambdas and named functions can
+be passed directly when an expected function type is available. Generic named functions may also be
+specialized explicitly:
 
 ```zeron
+import zeron.io.println;
+
 fn doSomething(number: Int, action: (Int) -> Unit) {
     action(number);
 }
 
-doSomething(5, print);
-```
-
-For logic that hasn't been previously defined, one can
-instead use a lambda function for brevity:
-
-```zeron
-doSomething(5, (item) -> {
-    if (item % 2 == 0) print(item);
+doSomething(5, item -> {
+    if (item % 2 == 0) println(item);
 });
-```
 
-Or even, if the last argument in a parameter list is a
-single argument function:
-
-```zeron
-doSomething(number) {
-    // 'it' is the default name for a single argument lambda
-    print(it * 2); 
-};
+fn identity<T>(value: T): T = value;
+let intIdentity: (Int) -> Int = identity::<Int>;
+let stringIdentity: (String) -> String = identity;
 ```
 
 #### Lambda syntax
@@ -426,9 +425,11 @@ while (iterator.hasNext()) {
 stops once that condition becomes true; like `while`, it may run zero times.
 
 ```zeron
+import zeron.io.println;
+
 let i = 0;
 until (i == 5) {
-    print(i);
+    println(i);
     i += 1;
 }
 ```
@@ -561,7 +562,10 @@ exclusive access or borrow checking: aliases may observe mutations.
 ```zeron
 class Person {
     age: Int;
-    mut grow(): Unit -> age += 1;
+    public constructor new;
+    public mut grow(): Unit {
+        this.age = this.age + 1;
+    }
 }
 
 fn growPerson(person: &Person): Unit {

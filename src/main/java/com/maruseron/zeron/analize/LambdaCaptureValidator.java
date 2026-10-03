@@ -46,7 +46,6 @@ final class LambdaCaptureValidator {
                 if (thenBranch != null) walkCaptureUsage(thenBranch, localNames);
                 if (elseBranch != null) walkCaptureUsage(elseBranch, localNames);
             }
-            case Stmt.Print(Expr expression) -> walkCaptureUsage(expression, localNames);
             case Stmt.Return(Expr value) -> {
                 if (value != null) walkCaptureUsage(value, localNames);
             }

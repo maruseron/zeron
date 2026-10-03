@@ -89,9 +89,11 @@ public final class Parser {
         try {
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
+            if (match(EXTERNAL)) return externalFunctionDeclaration(false);
             if (levelMarker == null && match(PUBLIC)) {
                 if (match(CLASS)) return classDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
+                if (match(EXTERNAL)) return externalFunctionDeclaration(true);
                 if (match(FN)) return fnDeclaration(true);
                 throw error(previous(), "Only functions, classes, and contracts may be public.");
             }
@@ -140,6 +142,35 @@ public final class Parser {
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
+    }
+
+    private Stmt.ExternalFunction externalFunctionDeclaration(final boolean isPublic) {
+        if (levelMarker != null) {
+            throw error(previous(), "External JVM functions are only allowed at top level.");
+        }
+        consume(FN, "Expect 'fn' after 'external'.");
+        final var name = consume(IDENTIFIER, "Expect external function name.");
+        if (check(LESS)) {
+            throw error(peek(), "External JVM functions cannot be generic in this implementation.");
+        }
+        consume(LEFT_PAREN, "Expect '(' after external function name.");
+        final var parameterNames = new ArrayList<Token>();
+        final var parameterTypes = new ArrayList<TypeDescriptor>();
+        if (!check(RIGHT_PAREN)) {
+            do {
+                if (parameterNames.size() >= 254) error(peek(), "Can't have more than 254 parameters.");
+                parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
+                consume(COLON, "Expect ':' after parameter name.");
+                parameterTypes.add(collectType());
+            } while (match(COMMA));
+        }
+        consume(RIGHT_PAREN, "Expect ')' after parameters.");
+        consume(COLON, "External JVM functions require an explicit return type.");
+        final var returnType = collectType();
+        consume(SEMICOLON, "Expect ';' after external function declaration.");
+        final var descriptor = TypeDescriptor.functionOf(name.lexeme(), returnType,
+                parameterTypes.toArray(TypeDescriptor[]::new));
+        return new Stmt.ExternalFunction(name, List.copyOf(parameterNames), descriptor, isPublic);
     }
 
     private Stmt.Function parseFunctionDeclaration(
@@ -507,7 +538,6 @@ public final class Parser {
         if (match(RETURN)) return new Stmt.Return(return_());
         if (match(FOR)) return forStatement();
         if (match(IF)) return ifStatement();
-        if (match(PRINT)) return printStatement();
         if (match(LOOP, WHILE, UNTIL)) return unboundLoopStatement();
         if (match(LEFT_BRACE)) return new Stmt.Block(block());
 
@@ -571,14 +601,6 @@ public final class Parser {
         return new Stmt.If(paren, condition, thenBranch, elseBranch);
     }
 
-    private Stmt printStatement() {
-        consume(LEFT_PAREN, "Expect '(' before expression.");
-        final var value = expression();
-        consume(RIGHT_PAREN, "Expect ')' after expression.");
-        consume(SEMICOLON, "Expect ';' after expression.");
-        return new Stmt.Print(value);
-    }
-
     private Stmt unboundLoopStatement() {
         // wrap into loop level
         this.loopMarker = new LoopMarker(loopMarker);
@@ -635,7 +657,9 @@ public final class Parser {
     private Expr assignment() {
         var expr = or();
 
-        if (match(PLUS_EQUAL, MINUS_EQUAL, STAR_EQUAL, SLASH_EQUAL, EQUAL)) {
+        if (match(PLUS_EQUAL, MINUS_EQUAL, STAR_EQUAL, SLASH_EQUAL, PERCENT_EQUAL,
+            AMPERSAND_EQUAL, PIPE_EQUAL, CARET_EQUAL, SHIFT_LEFT_EQUAL,
+            SHIFT_RIGHT_EQUAL, UNSIGNED_SHIFT_RIGHT_EQUAL, EQUAL)) {
             final var operator = previous();
             final var value = assignment();
 
@@ -690,6 +714,14 @@ public final class Parser {
                                     value,
                                     TypeDescriptor.ofInfer()),
                             TypeDescriptor.ofInfer());
+                        case PERCENT_EQUAL -> compoundAssignment(name, expr, PERCENT, "%", value, operator);
+                        case AMPERSAND_EQUAL -> compoundAssignment(name, expr, AMPERSAND, "&", value, operator);
+                        case PIPE_EQUAL -> compoundAssignment(name, expr, PIPE, "|", value, operator);
+                        case CARET_EQUAL -> compoundAssignment(name, expr, CARET, "^", value, operator);
+                        case SHIFT_LEFT_EQUAL -> compoundAssignment(name, expr, SHIFT_LEFT, "<<", value, operator);
+                        case SHIFT_RIGHT_EQUAL -> compoundAssignment(name, expr, SHIFT_RIGHT, ">>", value, operator);
+                        case UNSIGNED_SHIFT_RIGHT_EQUAL ->
+                            compoundAssignment(name, expr, UNSIGNED_SHIFT_RIGHT, ">>>", value, operator);
                     default -> throw new IllegalStateException("unreachable");
                 };
             }
@@ -698,6 +730,19 @@ public final class Parser {
         }
 
         return expr;
+    }
+
+    private Expr compoundAssignment(final Token name,
+                                    final Expr target,
+                                    final TokenType operatorType,
+                                    final String operatorLexeme,
+                                    final Expr value,
+                                    final Token assignmentOperator) {
+        return new Expr.Assignment(name,
+                new Expr.Binary(target,
+                        new Token(operatorType, operatorLexeme, null, assignmentOperator.line()),
+                        value, TypeDescriptor.ofInfer()),
+                TypeDescriptor.ofInfer());
     }
 
     private Expr or() {
@@ -713,14 +758,41 @@ public final class Parser {
     }
 
     private Expr and() {
-        var expr = equality();
+        var expr = bitwiseOr();
 
         while (match(AND)) {
             final var operator = previous();
-            final var right = equality();
+            final var right = bitwiseOr();
             expr = new Expr.Logical(expr, operator, right);
         }
 
+        return expr;
+    }
+
+    private Expr bitwiseOr() {
+        var expr = bitwiseXor();
+        while (match(PIPE)) {
+            final var operator = previous();
+            expr = new Expr.Binary(expr, operator, bitwiseXor(), TypeDescriptor.ofInfer());
+        }
+        return expr;
+    }
+
+    private Expr bitwiseXor() {
+        var expr = bitwiseAnd();
+        while (match(CARET)) {
+            final var operator = previous();
+            expr = new Expr.Binary(expr, operator, bitwiseAnd(), TypeDescriptor.ofInfer());
+        }
+        return expr;
+    }
+
+    private Expr bitwiseAnd() {
+        var expr = equality();
+        while (match(AMPERSAND)) {
+            final var operator = previous();
+            expr = new Expr.Binary(expr, operator, equality(), TypeDescriptor.ofInfer());
+        }
         return expr;
     }
 
@@ -748,14 +820,34 @@ public final class Parser {
     }
 
     private Expr comparison() {
-        var expr = term();
+        var expr = shift();
 
         while (match(GREATER, GREATER_EQUAL, LESS, LESS_EQUAL)) {
             final var operator = previous();
-            final var right = term();
+            final var right = shift();
             expr = new Expr.Binary(expr, operator, right, TypeDescriptor.ofBoolean());
         }
 
+        return expr;
+    }
+
+    private Expr shift() {
+        var expr = term();
+        while (check(SHIFT_LEFT) || check(GREATER) && checkNext(GREATER)) {
+            final Token operator;
+            if (match(SHIFT_LEFT)) {
+                operator = previous();
+            } else {
+                final var first = advance();
+                advance();
+                if (match(GREATER)) {
+                    operator = new Token(UNSIGNED_SHIFT_RIGHT, ">>>", null, first.line());
+                } else {
+                    operator = new Token(SHIFT_RIGHT, ">>", null, first.line());
+                }
+            }
+            expr = new Expr.Binary(expr, operator, term(), TypeDescriptor.ofInfer());
+        }
         return expr;
     }
 
@@ -774,7 +866,7 @@ public final class Parser {
     private Expr factor() {
         var expr = unary();
 
-        while (match(SLASH, STAR)) {
+        while (match(SLASH, STAR, PERCENT)) {
             final var operator = previous();
             final var right = unary();
             expr = new Expr.Binary(expr, operator, right, TypeDescriptor.ofInfer());
@@ -784,7 +876,7 @@ public final class Parser {
     }
 
     private Expr unary() {
-        if (match(NOT, MINUS, PLUS, TYPEOF)) {
+        if (match(NOT, MINUS, PLUS, TYPEOF, TILDE)) {
             final var operator = previous();
             final var right = unary();
             return new Expr.Unary(operator, right, TypeDescriptor.ofInfer());
@@ -803,7 +895,12 @@ public final class Parser {
         var expr = primary();
 
         while (true) {
-            if (expr instanceof Expr.Variable variable && check(LESS)
+            if (expr instanceof Expr.Variable variable && match(COLON_COLON)) {
+                consume(LESS, "Expect '<' after '::' in a function specialization.");
+                final var typeArguments = collectTypeArguments();
+                consume(GREATER, "Expect '>' after function type arguments.");
+                expr = new Expr.Variable(variable.name, TypeDescriptor.ofInfer(), typeArguments);
+            } else if (expr instanceof Expr.Variable variable && check(LESS)
                     && looksLikeGenericFactoryCall()) {
                 advance();
                 final var typeArguments = collectTypeArguments();
@@ -822,7 +919,7 @@ public final class Parser {
                 expr = finishCall(variable.name, typeArguments);
             } else if (match(LEFT_PAREN)) {
                 if (expr instanceof Expr.Variable variable) {
-                    expr = finishCall(variable.name);
+                    expr = finishCall(variable.name, variable.explicitFunctionTypeArguments);
                 } else if (expr instanceof Expr.Property property) {
                     expr = finishMemberCall(property);
                 } else {
@@ -1098,6 +1195,10 @@ public final class Parser {
         return peek().type() == type;
     }
 
+    private boolean checkNext(final TokenType type) {
+        return current + 1 < tokens.size() && tokens.get(current + 1).type() == type;
+    }
+
     private Token advance() {
         if (!isAtEnd()) current++;
         return previous();
@@ -1128,7 +1229,7 @@ public final class Parser {
 
             switch (peek().type()) {
                 case BREAK, CLASS, CONTRACT, LET, FOR, IF,
-                     WHILE, UNTIL, LOOP, PRINT, RETURN -> { return; }
+                     WHILE, UNTIL, LOOP, RETURN -> { return; }
                 default -> {}
             }
 

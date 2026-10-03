@@ -114,11 +114,15 @@ public final class FunctionShapeKeyTest {
 
         final var declaration = (Stmt.Var) statements.getFirst();
         final var lambda = (Expr.Lambda) declaration.initializer();
-        final var expected = TypeDescriptor.functionOf("", TypeDescriptor.ofInt(), TypeDescriptor.ofInfer(), TypeDescriptor.ofInfer());
+        final var generalized = (FunctionDescriptor) lambda.getType();
 
-        assertEquals(expected, lambda.getType());
-        assertEquals(expected, resolver.symbols.getSymbol(declaration.name()).type());
-        assertEquals(2, ((FunctionDescriptor) lambda.getType()).arity());
+        assertTrue(generalized.isGeneric());
+        assertEquals(TypeDescriptor.ofInt(), generalized.returnType());
+        assertEquals(2, generalized.arity());
+        assertEquals(2, generalized.typeParameters().size());
+        assertEquals(generalized.typeParameters().get(0), generalized.parameters().get(0));
+        assertEquals(generalized.typeParameters().get(1), generalized.parameters().get(1));
+        assertEquals(generalized, resolver.symbols.getSymbol(declaration.name()).type());
     }
 
     @Test

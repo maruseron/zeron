@@ -114,6 +114,149 @@ public final class GenericFunctionTest {
     }
 
     @Test
+    public void specializesGenericFunctionValuesExplicitlyAndFromExpectedTypes() throws Exception {
+        final var className = "GenericFunctionValues" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                fn identity<T>(value: T): T = value;
+                fn makeIdentity<T>(): (T) -> T = value -> value;
+                fn consumeInt(operation: (Int) -> Int, value: Int): Int = operation(value);
+                fn explicitBinding(): Int {
+                    let operation: (Int) -> Int = identity::<Int>;
+                    return operation(41);
+                }
+                fn explicitImmediateCall(): Int = identity::<Int>(49);
+                fn inferredExplicitBinding(): Int {
+                    let operation = identity::<Int>;
+                    return operation(47);
+                }
+                fn expectedBinding(): String {
+                    let operation: (String) -> String = identity;
+                    return operation("expected");
+                }
+                fn explicitArgument(): Int = consumeInt(identity::<Int>, 42);
+                fn expectedArgument(): Int = consumeInt(identity, 43);
+                fn explicitReturn(): (Boolean) -> Boolean = identity::<Boolean>;
+                fn expectedReturn(): (Boolean) -> Boolean = identity;
+                fn returnedCallback(): Int {
+                    let factory: () -> (Int) -> Int = makeIdentity::<Int>;
+                    let operation = factory();
+                    return operation(44);
+                }
+                fn genericCallbackBridge(): Int {
+                    let apply: ((Int) -> Int, Int) -> Int = applyGeneric::<Int, Int>;
+                    return apply(identity::<Int>, 45);
+                }
+                fn applyGeneric<T, R>(operation: (T) -> R, value: T): R = operation(value);
+                fn inferredGenericCallbackBridge(): Int = applyGeneric(identity, 48);
+                fn localShadow(identity: (Int) -> Int): Int {
+                    let operation: (Int) -> Int = identity;
+                    return operation(46);
+                }
+                fn localShadowTest(): Int = localShadow(identity::<Int>);
+                """);
+        final var compiler = new Compiler(statements, className);
+        compiler.resolve();
+
+        try {
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(className);
+                assertEquals(41, program.getMethod("explicitBinding").invoke(null));
+                assertEquals(49, program.getMethod("explicitImmediateCall").invoke(null));
+                assertEquals(47, program.getMethod("inferredExplicitBinding").invoke(null));
+                assertEquals("expected", program.getMethod("expectedBinding").invoke(null));
+                assertEquals(42, program.getMethod("explicitArgument").invoke(null));
+                assertEquals(43, program.getMethod("expectedArgument").invoke(null));
+                assertEquals(44, program.getMethod("returnedCallback").invoke(null));
+                assertEquals(45, program.getMethod("genericCallbackBridge").invoke(null));
+                assertEquals(48, program.getMethod("inferredGenericCallbackBridge").invoke(null));
+                assertEquals(46, program.getMethod("localShadowTest").invoke(null));
+                final var explicitReturn = program.getMethod("explicitReturn").invoke(null);
+                final var expectedReturn = program.getMethod("expectedReturn").invoke(null);
+                assertEquals(true, explicitReturn.getClass().getInterfaces()[0]
+                        .getMethod("invoke", boolean.class).invoke(explicitReturn, true));
+                assertEquals(false, expectedReturn.getClass().getInterfaces()[0]
+                        .getMethod("invoke", boolean.class).invoke(expectedReturn, false));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
+    public void rejectsGenericFunctionValuesWithoutAValidSpecialization() {
+        for (final var source : List.of(
+                "fn identity<T>(value: T): T = value; let operation = identity;",
+                "fn identity<T>(value: T): T = value; "
+                        + "fn invalid(): (Int) -> String = identity;",
+                "fn identity<T>(value: T): T = value; "
+                        + "let operation: (Int) -> Int = identity::<Int, String>;",
+                "contract Named { name(): String; } "
+                        + "fn display<T: Named>(value: T): String = value.name(); "
+                        + "fn invalid(): (String) -> String = display;")) {
+            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        }
+    }
+
+    @Test
+    public void generalizesImmutableLambdasAndInstantiatesAtEachUse() throws Exception {
+        final var className = "PolymorphicLambdas" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                fn applyInt(operation: (Int) -> Int, value: Int): Int = operation(value);
+                fn polymorphicIdentity(): String {
+                    let identity = value -> value;
+                    let integer = identity(37);
+                    let text = identity("poly");
+                    return text;
+                }
+                fn polymorphicCallbackArgument(): Int {
+                    let identity = value -> value;
+                    return applyInt(identity, 38);
+                }
+                fn polymorphicCallbackReturn(): (Int) -> Int {
+                    let identity = value -> value;
+                    return identity;
+                }
+                fn polymorphicConstant(): String {
+                    let constant = ignored -> "constant";
+                    let fromInt = constant(1);
+                    return constant("unused");
+                }
+                """);
+        final var compiler = new Compiler(statements, className);
+        compiler.resolve();
+
+        try {
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(className);
+                assertEquals("poly", program.getMethod("polymorphicIdentity").invoke(null));
+                assertEquals(38, program.getMethod("polymorphicCallbackArgument").invoke(null));
+                assertEquals("constant", program.getMethod("polymorphicConstant").invoke(null));
+                final var callback = program.getMethod("polymorphicCallbackReturn").invoke(null);
+                assertEquals(39, callback.getClass().getInterfaces()[0]
+                        .getMethod("invoke", int.class).invoke(callback, 39));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
+    public void doesNotGeneralizeMutableLambdaBindings() {
+        for (final var source : List.of(
+            "fn invalid(): Unit { let mut identity = value -> value; "
+                + "let integer = identity(1); let text = identity(\"text\"); }",
+            "fn invalid(): Unit { let identity = value -> value; let mut alias = identity; }")) {
+            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        }
+    }
+
+    @Test
     public void erasesGenericValuesAndAdaptsCallbacksAtBothBoundaries() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var className = "GenericFunctions" + suffix;
@@ -162,12 +305,85 @@ public final class GenericFunctionTest {
     }
 
     @Test
+    public void adaptsPrimitiveAndReferenceCallbackMatrix() throws Exception {
+        final var className = "CallbackAbiMatrix" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                fn apply<T, R>(value: T, transform: (T) -> R): R = transform(value);
+                fn intToString(): String = apply(7, value -> if (value == 7) then "seven" else "other");
+                fn stringToInt(): Int = apply("seven", value -> if (value == "seven") then 7 else 0);
+                fn floatToString(): String = apply(2.5, value -> if (value > 2.0) then "wide" else "small");
+                fn stringToFloat(): Float = apply("wide", value -> if (value == "wide") then 4.5 else 1.5);
+                fn booleanToString(): String = apply(true, value -> if (value) then "true" else "false");
+                fn stringToBoolean(): Boolean = apply("true", value -> value == "true");
+                """);
+        final var compiler = new Compiler(statements, className);
+        compiler.resolve();
+
+        try {
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(className);
+                assertEquals("seven", program.getMethod("intToString").invoke(null));
+                assertEquals(7, program.getMethod("stringToInt").invoke(null));
+                assertEquals("wide", program.getMethod("floatToString").invoke(null));
+                assertEquals(4.5, (Double) program.getMethod("stringToFloat").invoke(null), 0.0);
+                assertEquals("true", program.getMethod("booleanToString").invoke(null));
+                assertEquals(true, program.getMethod("stringToBoolean").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
+    public void reusesDirectionalAdapterHelpersAcrossCallSites() throws Exception {
+        final var className = "CallbackAdapterReuse" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                fn apply<T, R>(value: T, transform: (T) -> R): R = transform(value);
+                fn identityFunction<T>(): (T) -> T = value -> value;
+                fn firstString(): String = apply("first", value -> value);
+                fn secondString(): String = apply("second", value -> value);
+                fn intToString(): String = apply(3, value -> "integer");
+                fn returnedStringCallback(): String {
+                    let callback: (String) -> String = identityFunction<String>();
+                    return callback("returned");
+                }
+                """);
+        final var compiler = new Compiler(statements, className);
+        compiler.resolve();
+
+        try {
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(className);
+                assertEquals("first", program.getMethod("firstString").invoke(null));
+                assertEquals("second", program.getMethod("secondString").invoke(null));
+                assertEquals("integer", program.getMethod("intToString").invoke(null));
+                assertEquals("returned", program.getMethod("returnedStringCallback").invoke(null));
+
+                final var adapterCount = java.util.Arrays.stream(program.getDeclaredMethods())
+                        .filter(method -> method.getName().startsWith("$adapter$"))
+                        .count();
+                assertEquals("same directional conversion shares one helper; reverse and distinct shapes do not",
+                        3, adapterCount);
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
     public void adaptsNestedNullableAndMutableFunctionCallbacks() throws Exception {
         final var className = "GenericCallbackShapes" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
         final var statements = parse("""
                 fn echoNested<T, R>(operation: ((T) -> R) -> R): ((T) -> R) -> R = operation;
                 fn echoNullable<T, R>(operation: ((T) -> R)?): ((T) -> R)? = operation;
+                fn echoNullableElements<T, R>(operation: (T?) -> R?): (T?) -> R? = operation;
                 fn echoMutable<T, R>(operation: &(T) -> R): &(T) -> R = operation;
                 fn nestedCallback(): Int {
                     let operation = echoNested<Int, Int>(inner -> inner(4));
@@ -178,6 +394,11 @@ public final class GenericFunctionTest {
                     return echoNullable<Int, Int>(operation);
                 }
                 fn nullCallback(): ((Int) -> Int)? = echoNullable<Int, Int>(null);
+                fn nullableElementCallback(value: Int?): String? {
+                    let transform = echoNullableElements<Int, String>(item ->
+                        if (item == null) then null else "present");
+                    return transform(value);
+                }
                 fn mutableCallback(operation: &(Int) -> Int): Int {
                     let echoed = echoMutable<Int, Int>(operation);
                     return echoed(5);
@@ -198,6 +419,10 @@ public final class GenericFunctionTest {
                 final var operation = Proxy.newProxyInstance(loader, new Class<?>[]{samType},
                     (_, _, arguments) -> (int) arguments[0] + 3);
                 assertEquals(8, program.getMethod("mutableCallback", samType).invoke(null, operation));
+                assertNull(program.getMethod("nullableElementCallback", Integer.class)
+                    .invoke(null, new Object[]{null}));
+                assertEquals("present", program.getMethod("nullableElementCallback", Integer.class)
+                    .invoke(null, 4));
 
                 final var callback = program.getMethod("nullableCallback").invoke(null);
                 assertNotNull(callback);
@@ -238,12 +463,17 @@ public final class GenericFunctionTest {
                 contract %s<T, R> {
                     getTransform(): (T) -> R;
                     apply(transform: (T) -> R, value: T): R;
+                    getTextTransform(): (T) -> String;
+                    applyText(transform: (T) -> String, value: T): String;
                 }
                 class %s is %s<Int, Int> {
                     transform: (Int) -> Int;
                     public constructor new;
                     public getTransform(): (Int) -> Int = this.transform;
                     public apply(transform: (Int) -> Int, value: Int): Int = transform(value);
+                    public getTextTransform(): (Int) -> String =
+                        value -> if (value == 52) then "fifty-two" else "other";
+                    public applyText(transform: (Int) -> String, value: Int): String = transform(value);
                 }
                 fn constructorPath(): Int {
                     let box = %s<Int, Int>.new(value -> value);
@@ -272,9 +502,19 @@ public final class GenericFunctionTest {
                     let source: %s<Int, Int> = %s.new(value -> value);
                     return source.apply(value -> value, 46);
                 }
+                fn contractTextResultBridgePath(): String {
+                    let source: %s<Int, Int> = %s.new(value -> value);
+                    let callback = source.getTextTransform();
+                    return callback(52);
+                }
+                fn contractTextArgumentBridgePath(): String {
+                    let source: %s<Int, Int> = %s.new(value -> value);
+                    return source.applyText(value ->
+                        if (value == 53) then "fifty-three" else "other", 53);
+                }
                 """.formatted(boxName, contractName, sourceName, contractName,
                 boxName, boxName, boxName, boxName, contractName, sourceName,
-                contractName, sourceName));
+                contractName, sourceName, contractName, sourceName, contractName, sourceName));
         final var compiler = new Compiler(statements, className);
             try {
                 compiler.resolve();
@@ -294,6 +534,8 @@ public final class GenericFunctionTest {
                 assertEquals(44, program.getMethod("fieldAssignmentPath").invoke(null));
                 assertEquals(45, program.getMethod("contractBridgePath").invoke(null));
                 assertEquals(46, program.getMethod("contractArgumentBridgePath").invoke(null));
+                assertEquals("fifty-two", program.getMethod("contractTextResultBridgePath").invoke(null));
+                assertEquals("fifty-three", program.getMethod("contractTextArgumentBridgePath").invoke(null));
 
                 final var erasedCallbackType = TypeDescriptor.functionOf("",
                     TypeDescriptor.ofName("java.lang.Object"),
@@ -319,6 +561,25 @@ public final class GenericFunctionTest {
                     argumentBridge.getParameterTypes()[1]);
                 assertEquals("contract generic result descriptor", Object.class,
                     argumentBridge.getReturnType());
+
+                final var erasedTextCallbackType = TypeDescriptor.functionOf("",
+                    TypeDescriptor.ofString(), TypeDescriptor.ofName("java.lang.Object"));
+                final var erasedTextCallbackInterface = FunctionShapeNames.interfaceName(erasedTextCallbackType);
+                final var textResultBridge = java.util.Arrays.stream(generatedSource.getDeclaredMethods())
+                    .filter(method -> method.getName().equals("getTextTransform") && method.isBridge())
+                    .findFirst()
+                    .orElseThrow();
+                assertEquals("mixed-shape contract callback result descriptor", erasedTextCallbackInterface,
+                    textResultBridge.getReturnType().getName());
+
+                final var textArgumentBridge = java.util.Arrays.stream(generatedSource.getDeclaredMethods())
+                    .filter(method -> method.getName().equals("applyText") && method.isBridge())
+                    .findFirst()
+                    .orElseThrow();
+                assertEquals("mixed-shape contract callback parameter descriptor", erasedTextCallbackInterface,
+                    textArgumentBridge.getParameterTypes()[0].getName());
+                assertEquals(Object.class, textArgumentBridge.getParameterTypes()[1]);
+                assertEquals(String.class, textArgumentBridge.getReturnType());
 
                 final var adapterMethods = java.util.Arrays.stream(program.getDeclaredMethods())
                     .filter(method -> method.getName().startsWith("$adapter$")

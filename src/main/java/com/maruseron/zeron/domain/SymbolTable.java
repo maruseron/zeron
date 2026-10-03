@@ -52,7 +52,6 @@ public final class SymbolTable {
 
     public static final int GLOBAL = -1;
 
-    private final Map<String, TypeDescriptor> types = new HashMap<>();
     private final Map<String, Bind> functions = new HashMap<>();
     private final Map<String, Bind> symbols = new HashMap<>();
     private final Map<String, Bind> allSymbols = new HashMap<>();

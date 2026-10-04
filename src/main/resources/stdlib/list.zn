@@ -1,0 +1,132 @@
+package zeron.collections;
+
+fn allocateArray<T>(size: Int, initial: T?): &Array<T?> = [initial];
+
+class ListEntry<T> {
+    value: T;
+
+    private constructor new;
+
+    public constructor from(value: T) = ListEntry<T>.new(value);
+
+    public itemValue(): T = this.value;
+}
+
+class ListIterator<T> is Iterator<T> {
+    values: List<T>;
+    position: Int;
+
+    private constructor new;
+
+    public constructor from(values: List<T>) = ListIterator<T>.new(values, 0);
+
+    public mut hasNext(): Boolean = this.position < this.values.size();
+
+    public mut next(): T {
+        let value = this.values.at(this.position);
+        this.position = this.position + 1;
+        return value;
+    }
+}
+
+public class List<T> is Iterable<T> {
+    values: &Array<ListEntry<T>?>;
+    count: Int;
+
+    private constructor new;
+
+    public constructor empty() =
+        List<T>.new(allocateArray<ListEntry<T>>(4, null), 0);
+
+    public constructor fromArray(source: Array<T>) {
+        let result = List<T>.empty();
+        let mut index = 0;
+        while (index < source.length) {
+            result.add(source[index]);
+            index = index + 1;
+        }
+        return result;
+    }
+
+    private mut ensureCapacity(required: Int): Unit {
+        if (required > this.values.length) {
+            let mut capacity = this.values.length * 2;
+            if (capacity < required) capacity = required;
+            let mut expanded = allocateArray<ListEntry<T>>(capacity, null);
+            let mut index = 0;
+            while (index < this.count) {
+                expanded[index] = this.values[index];
+                index = index + 1;
+            }
+            this.values = expanded;
+        }
+    }
+
+    private checkIndex(index: Int): Unit {
+        if (index < 0 or index >= this.count) {
+            this.values[this.values.length];
+        }
+    }
+
+    public size(): Int = this.count;
+
+    public isEmpty(): Boolean = this.count == 0;
+
+    public at(index: Int): T {
+        this.checkIndex(index);
+        let entry = this.values[index];
+        if (entry != null) return entry.itemValue();
+        return this.at(this.values.length);
+    }
+
+    public mut replaceAt(index: Int, value: T): T {
+        this.checkIndex(index);
+        let previous = this.at(index);
+        this.values[index] = ListEntry<T>.from(value);
+        return previous;
+    }
+
+    public mut add(value: T): Unit {
+        this.ensureCapacity(this.count + 1);
+        this.values[this.count] = ListEntry<T>.from(value);
+        this.count = this.count + 1;
+    }
+
+    public mut insert(index: Int, value: T): Unit {
+        if (index < 0 or index > this.count) {
+            this.values[this.values.length];
+        }
+        this.ensureCapacity(this.count + 1);
+        let mut cursor = this.count;
+        while (cursor > index) {
+            this.values[cursor] = this.values[cursor - 1];
+            cursor = cursor - 1;
+        }
+        this.values[index] = ListEntry<T>.from(value);
+        this.count = this.count + 1;
+    }
+
+    public mut removeAt(index: Int): T {
+        this.checkIndex(index);
+        let removed = this.at(index);
+        let mut cursor = index;
+        while (cursor + 1 < this.count) {
+            this.values[cursor] = this.values[cursor + 1];
+            cursor = cursor + 1;
+        }
+        this.count = this.count - 1;
+        this.values[this.count] = null;
+        return removed;
+    }
+
+    public mut clear(): Unit {
+        let mut index = 0;
+        while (index < this.count) {
+            this.values[index] = null;
+            index = index + 1;
+        }
+        this.count = 0;
+    }
+
+    public iterator(): &Iterator<T> = ListIterator<T>.from(this);
+}

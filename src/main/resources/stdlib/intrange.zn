@@ -17,7 +17,7 @@ public class IntIterator is Iterator<Int> {
     public constructor descending(current: Int, end: Int) =
         IntIterator.new(current, end, -1, false);
 
-    public hasNext(): Boolean = not this.done and (if (this.step > 0)
+    public mut hasNext(): Boolean = not this.done and (if (this.step > 0)
         then this.current <= this.end
         else this.current >= this.end);
     

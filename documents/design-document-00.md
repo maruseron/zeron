@@ -501,11 +501,18 @@ literals are not implemented. Range values can be stored and iterated later like
 #### Making an iterable
 
 `Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`,
-defined in `src/main/resources/stdlib/iteration.zn`. The `for` protocol recognizes only the
+defined in `src/main/resources/stdlib/iteration.zn`. The standard library also provides a lazy
+`Sequence<T>` API in `src/main/resources/stdlib/sequence.zn` and an array-backed mutable `List<T>`
+in `src/main/resources/stdlib/list.zn`. The `for` protocol recognizes only the
 fully-qualified `zeron.collections.Iterable<T>` contract; a same-named contract in another package
 does not make a type iterable. A custom iterable imports and implements these public contracts
 through ordinary class conformance; arrays retain specialized lowering and ranges use ordinary
 protocol dispatch.
+
+`List<T>.empty()` creates a growable list, and `List<T>.fromArray(values)` copies an array. Its
+read operations (`size`, `isEmpty`, `at`, and iteration) work through `List<T>`; structural
+mutations (`add`, `insert`, `replaceAt`, `removeAt`, and `clear`) require `&List<T>`. Assigning a
+mutable list reference to a `List<T>` variable gives a read-only view of the same list.
 
 ```zeron
 package geometry;

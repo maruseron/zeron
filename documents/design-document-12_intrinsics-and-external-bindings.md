@@ -21,7 +21,7 @@ An intrinsic is not a Java class lookup mechanism and does not imply JDK module 
 - `FunctionBindingRegistry` maps signature-only top-level external declarations to typed JVM targets
   by qualified source name. The resolver checks the declaration signature, and the compiler emits a
   Zeron bridge for the binding.
-- Array literal, length, read, and write operations are syntax intrinsics. `zeron.io.print` and
+- Array literal, fill, length, read, and write operations are intrinsics. `zeron.io.print` and
   `zeron.io.println` are external function declarations backed by typed JVM call plans.
 - Intrinsic IDs and bindings are internal. There is no source-level `intrinsic` keyword, external
   class or instance-method declaration form, or expected-class declaration.
@@ -73,6 +73,7 @@ Stable identifiers are versioned independently of source spelling. The current i
 | ID | Source binding | Signature / operation |
 | --- | --- | --- |
 | `zeron.array.literal.v1` | Array literal syntax | `array.literal<T>(elements: T...) -> &Array<T>` |
+| `zeron.array.fill.v1` | Bundled list backing allocation | `array.fill<T>(size: Int, initial: T?) -> &Array<T?>` |
 | `zeron.array.length.v1` | `array.length` / `.length` | `array.length<T>(array: Array<T>) -> Int` |
 | `zeron.array.read.v1` | Index read syntax | `array.read<T>(array: Array<T>, index: Int) -> T` |
 | `zeron.array.write.v1` | Index assignment syntax | `array.write<T>(array: &Array<T>, index: Int, value: T) -> Unit` |

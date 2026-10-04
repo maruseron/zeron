@@ -2,6 +2,7 @@ package com.maruseron.zeron;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.compile.Compiler;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public final class StandardLibraryTest {
@@ -107,7 +109,7 @@ public final class StandardLibraryTest {
                     value: Int;
                     ready: Boolean;
                     public constructor new;
-                    public hasNext(): Boolean = this.ready;
+                    public mut hasNext(): Boolean = this.ready;
                     public mut next(): Int {
                         this.ready = false;
                         return this.value;
@@ -234,6 +236,126 @@ public final class StandardLibraryTest {
             deleteTree(mathOutput);
             deleteTree(projectRoot);
         }
+    }
+
+    @Test
+    public void lazySequenceOperatorsComposeAndSupportOrdinaryIteration() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "sequenceClient" + suffix;
+        final var className = packageName + ".SequenceTest" + suffix;
+        final var source = parse("SequenceTest.zn", """
+                package %s;
+                import zeron.collections.Sequence;
+                fn transformed(): Int {
+                    let values = Sequence<Int>.fromArray([1, 2, 3, 4, 5, 6])
+                        .map(value -> value * 2)
+                        .filter(value -> value > 4)
+                        .drop(1)
+                        .take(2);
+                    let mut total = 0;
+                    for (let value in values) total += value;
+                    return total;
+                }
+                fn folded(): Int = Sequence<Int>.fromArray([1, 2, 3, 4]).fold(0,
+                    (total, value) -> total + value);
+                fn predicates(): Boolean {
+                    let values = Sequence<Int>.fromArray([2, 4, 6]);
+                    return values.any(value -> value == 4) and values.all(value -> value > 0);
+                }
+                fn count(): Int = Sequence<Int>.fromArray([1, 2, 3]).filter(value -> value > 1).count();
+                """.formatted(packageName));
+        final var compiler = Compiler.forCompilationUnits(List.of(source), className, packageName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var test = loader.loadClass(className);
+                assertEquals(18, test.getMethod("transformed").invoke(null));
+                assertEquals(10, test.getMethod("folded").invoke(null));
+                assertEquals(true, test.getMethod("predicates").invoke(null));
+                assertEquals(2, test.getMethod("count").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void arrayBackedListMutatesGrowsAndProjectsToReadOnlyView() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "listClient" + suffix;
+        final var className = packageName + ".ListTest" + suffix;
+        final var source = parse("ListTest.zn", """
+                package %s;
+                import zeron.collections.List;
+                fn result(): Int {
+                    let mut values: &List<Int> = List<Int>.empty();
+                    values.add(2);
+                    values.add(4);
+                    values.add(6);
+                    values.add(8);
+                    values.add(10);
+                    values.insert(1, 3);
+                    let replaced = values.replaceAt(2, 5);
+                    let removed = values.removeAt(4);
+                    let readonly: List<Int> = values;
+                    let mut total = 0;
+                    for (let value in readonly) total += value;
+                    return total + replaced + removed + readonly.size();
+                }
+                fn empty(): Boolean = List<Int>.empty().isEmpty();
+                fn copied(): Int {
+                    let mut values: &List<Int> = List<Int>.fromArray([7, 8, 9]);
+                    values.add(10);
+                    values.clear();
+                    values.add(11);
+                    return values.at(0) + values.size();
+                }
+                fn nullableElements(): Boolean {
+                    let mut values: &List<String?> = List<String?>.empty();
+                    values.add(null);
+                    values.add("present");
+                    return (values.at(0) ?? "missing") == "missing"
+                        and (values.at(1) ?? "missing") == "present";
+                }
+                """.formatted(packageName));
+        final var compiler = Compiler.forCompilationUnits(List.of(source), className, packageName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var test = loader.loadClass(className);
+                assertEquals(43, test.getMethod("result").invoke(null));
+                assertEquals(true, test.getMethod("empty").invoke(null));
+                assertEquals(12, test.getMethod("copied").invoke(null));
+                assertEquals(true, test.getMethod("nullableElements").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void listMutationRequiresMutableReferenceView() {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "readonlyList" + suffix;
+        final var source = parse("ReadOnlyList.zn", """
+                package %s;
+                import zeron.collections.List;
+                fn invalid(values: List<Int>): Unit {
+                    values.add(1);
+                }
+                """.formatted(packageName));
+
+        assertThrows(ResolutionError.class, () -> Compiler.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(source)),
+                packageName + ".ReadOnlyList", packageName).resolve());
     }
 
     @Test

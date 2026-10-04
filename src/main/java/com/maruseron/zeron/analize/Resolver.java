@@ -1451,7 +1451,14 @@ public final class Resolver {
                     descriptor = (FunctionDescriptor) symbols.getFunction(functionToken).type();
                 }
                 if (descriptor.isGeneric()) {
-                    yield resolveGenericCall(call, descriptor);
+                    final var resultType = resolveGenericCall(call, descriptor);
+                    if ("zeron.collections.allocateArray".equals(call.resolvedFunctionName())) {
+                        final var arrayElement = arrayFillElementType(call.getType(), call.callee);
+                        call.setIntrinsicOperation(resolveIntrinsic(IntrinsicId.ARRAY_FILL,
+                                List.of(arrayElement),
+                                call.arguments.stream().map(Expr::getType).toList(), call.callee));
+                    }
+                    yield resultType;
                 }
 
                 if (!call.explicitTypeArguments.isEmpty()) {
@@ -2788,6 +2795,18 @@ public final class Resolver {
         if (type instanceof ReferenceDescriptor reference) type = reference.baseType();
         if (type instanceof ArrayDescriptor arrayType) return arrayType;
         Zeron.resolutionError(new ResolutionError(where, "Expected a non-null Array<T> value."));
+        throw new IllegalStateException("unreachable");
+    }
+
+    private TypeDescriptor arrayFillElementType(final TypeDescriptor resultType, final Token where) {
+        TypeDescriptor arrayType = resultType;
+        if (arrayType instanceof ReferenceDescriptor reference) arrayType = reference.baseType();
+        if (arrayType instanceof ArrayDescriptor array
+                && array.elementType() instanceof NullableDescriptor nullable) {
+            return nullable.baseType();
+        }
+        Zeron.resolutionError(new ResolutionError(where,
+                "The internal array allocator must return a nullable-element array view."));
         throw new IllegalStateException("unreachable");
     }
 

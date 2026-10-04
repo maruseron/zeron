@@ -16,10 +16,11 @@ a source package a JVM module.
   functions deterministic per-source-unit JVM holders.
 - Top-level values outside the entry source unit remain unsupported until initialization order and cycle behavior are
   specified. Non-entry functions require explicit return types.
-- Bundled source mode is the default and includes `zeron.collections` iteration contracts,
-  `zeron.ranges`, and `zeron.io`. Standard-library declarations remain explicit imports.
+- Bundled source mode is the default and includes `zeron.collections` iteration, list, and
+  lazy-sequence APIs, `zeron.ranges`, and `zeron.io`. Standard-library declarations remain explicit
+  imports.
 - The compiler writes `META-INF/zeron/api-v4.bin`. The index has schema version 4 and carries the
-  required standard-library API version, currently 2.
+  required standard-library API version, currently 4.
 - Zeron libraries can be built into a class directory and consumed in compiled mode. Library loading
   validates the API version and creates metadata-only declarations; consumer compilation does not
   re-emit library classes.

@@ -15,7 +15,8 @@ element type. A fresh literal produces `&Array<T>` so its slots may be updated; 
 through `&Array<T>`, and `array.length` returns the fixed length. Indexes are zero-based; compiled
 programs use `Objects.checkIndex` and throw `IndexOutOfBoundsException` for an invalid index.
 Each literal creates a distinct backing array. Empty literals and allocation by length are not
-implemented.
+available as general source-level operations. The bundled list implementation uses a registered
+fill-initialized array operation internally for its private backing storage.
 
 ## Purpose
 

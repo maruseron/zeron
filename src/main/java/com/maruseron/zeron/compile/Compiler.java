@@ -1465,6 +1465,7 @@ public final class Compiler {
 
         switch (operation.id()) {
             case ARRAY_LITERAL -> emitArrayLiteral(composer, (Expr.ArrayLiteral) expression, operation);
+            case ARRAY_FILL -> throw new IllegalStateException("Array fill is not a syntax expression.");
             case ARRAY_LENGTH -> {
                 final var property = (Expr.Property) expression;
                 emitExpr(composer, property.receiver);
@@ -1958,6 +1959,14 @@ public final class Compiler {
     }
 
     private void emitCall(final CodeBuilder composer, final Expr.Call call) {
+        if (call.intrinsicOperation() != null) {
+            if (call.intrinsicOperation().id() != IntrinsicId.ARRAY_FILL) {
+                throw new IllegalStateException("Unexpected intrinsic function call: "
+                        + call.intrinsicOperation().id().stableName());
+            }
+            emitArrayAllocation(composer, call, call.intrinsicOperation());
+            return;
+        }
         if (call.implicitMemberCall() != null) {
             emitMemberCall(composer, call.implicitMemberCall());
             return;
@@ -2010,6 +2019,21 @@ public final class Compiler {
         } else {
             lastEmittedType = functionType.returnType();
         }
+    }
+
+    private void emitArrayAllocation(final CodeBuilder composer,
+                                     final Expr.Call call,
+                                     final ResolvedIntrinsicOperation operation) {
+        emitExpr(composer, call.arguments.get(0));
+        composer.anewarray(ClassDesc.of("java.lang.Object"));
+        composer.dup();
+        emitExpr(composer, call.arguments.get(1));
+        emitConversion(composer, lastEmittedType, operation.parameterTypes().get(1));
+        emitBox(composer, lastEmittedType);
+        composer.invokestatic(ClassDesc.of("java.util.Arrays"), "fill",
+                MethodTypeDesc.of(ConstantDescs.CD_void,
+                        ConstantDescs.CD_Object.arrayType(), ConstantDescs.CD_Object));
+        lastEmittedType = operation.resultType();
     }
 
         private void emitFunctionReference(final CodeBuilder composer, final Expr.Variable reference) {
@@ -2530,7 +2554,8 @@ public final class Compiler {
             return;
         }
         if (sourceType.equals(targetType) || sourceType instanceof NullDescriptor && targetType.isNullable()
-            || resolver.isContractProjection(targetType, sourceType)) {
+            || resolver.isContractProjection(targetType, sourceType)
+            || isErasedContractProjection(targetType, sourceType)) {
             lastEmittedType = targetType;
             return;
         }
@@ -2573,6 +2598,26 @@ public final class Compiler {
             return;
         }
         throw new IllegalStateException("Unsupported conversion from " + sourceType + " to " + targetType);
+    }
+
+    private boolean isErasedContractProjection(final TypeDescriptor targetType,
+                                              final TypeDescriptor sourceType) {
+        final var contractName = rawNominalName(targetType);
+        final var className = rawNominalName(sourceType);
+        if (contractName == null || className == null) return false;
+        final var classDeclaration = resolver.classes().get(className);
+        if (classDeclaration == null) return false;
+        return classDeclaration.contractUses().stream()
+                .anyMatch(contractUse -> contractUse.name().lexeme().equals(contractName));
+    }
+
+    private String rawNominalName(final TypeDescriptor type) {
+        return switch (type) {
+            case ReferenceDescriptor reference -> rawNominalName(reference.baseType());
+            case GenericDescriptor generic -> generic.baseType().name();
+            case NominalDescriptor nominal -> nominal.name();
+            default -> null;
+        };
     }
 
     private FunctionDescriptor functionView(final TypeDescriptor type) {

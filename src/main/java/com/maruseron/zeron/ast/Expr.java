@@ -331,6 +331,7 @@ public sealed interface Expr {
         private FunctionDescriptor genericFunctionType;
         private String resolvedFunctionName;
         private MemberCall implicitMemberCall;
+        private ResolvedIntrinsicOperation intrinsicOperation;
 
         public Call(Token callee, Token paren, List<Expr> arguments,
                     List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -357,6 +358,10 @@ public sealed interface Expr {
         public void setResolvedFunctionName(final String name) { resolvedFunctionName = name; }
         public MemberCall implicitMemberCall() { return implicitMemberCall; }
         public void setImplicitMemberCall(final MemberCall call) { implicitMemberCall = call; }
+        public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }
+        public void setIntrinsicOperation(final ResolvedIntrinsicOperation operation) {
+            intrinsicOperation = operation;
+        }
 
         public void setGenericFunctionType(final FunctionDescriptor functionType) {
             this.genericFunctionType = functionType;

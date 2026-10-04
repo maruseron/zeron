@@ -256,6 +256,10 @@ final class LambdaCompilationPlan {
                 collectLambdaShapes(binary.left);
                 collectLambdaShapes(binary.right);
             }
+            case Expr.Logical logical -> {
+                collectLambdaShapes(logical.left);
+                collectLambdaShapes(logical.right);
+            }
             case Expr.Coalesce coalesce -> {
                 collectLambdaShapes(coalesce.left);
                 collectLambdaShapes(coalesce.right);

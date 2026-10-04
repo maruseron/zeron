@@ -178,7 +178,7 @@ public final class ControlFlowTest {
                 class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
-                    public hasNext(): Boolean = this.index < 3;
+                    public mut hasNext(): Boolean = this.index < 3;
                     public mut next(): Int {
                         let value = this.index;
                         this.index = this.index + 1;
@@ -235,7 +235,7 @@ public final class ControlFlowTest {
                 class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
-                    public hasNext(): Boolean = this.index < 5;
+                    public mut hasNext(): Boolean = this.index < 5;
                     public mut next(): Int {
                         let value = this.index;
                         this.index = this.index + 1;
@@ -250,7 +250,7 @@ public final class ControlFlowTest {
                     value: T;
                     ready: Boolean;
                     public constructor new;
-                    public hasNext(): Boolean = this.ready;
+                    public mut hasNext(): Boolean = this.ready;
                     public mut next(): T {
                         this.ready = false;
                         return this.value;

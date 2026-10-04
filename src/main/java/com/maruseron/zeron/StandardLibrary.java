@@ -10,9 +10,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 public final class StandardLibrary {
-    public static final int API_VERSION = 2;
+    public static final int API_VERSION = 4;
     public static final List<String> BUNDLED_SOURCE_PATHS =
-            List.of("/stdlib/iteration.zn", "/stdlib/intrange.zn", "/stdlib/io.zn");
+            List.of("/stdlib/iteration.zn", "/stdlib/list.zn", "/stdlib/sequence.zn",
+                    "/stdlib/intrange.zn", "/stdlib/io.zn");
 
     private StandardLibrary() {}
 
@@ -21,7 +22,7 @@ public final class StandardLibrary {
     }
 
     static CompilationUnit intRangeUnit() {
-        return loadUnit(BUNDLED_SOURCE_PATHS.get(1));
+        return loadUnit(BUNDLED_SOURCE_PATHS.get(3));
     }
 
     public static List<CompilationUnit> bundledUnits() {

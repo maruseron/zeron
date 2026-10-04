@@ -1,0 +1,31 @@
+package zeron.collections;
+
+import zeron.lang.Option;
+import zeron.lang.Some;
+import zeron.lang.None;
+
+fn unwrapSome<T>(option: Option<T>): T = unwrapSome<T>(option);
+
+public contract Iterator<T> {
+    mut next(): Option<T>;
+}
+
+public contract Iterable<T> {
+    iterator(): &Iterator<T>;
+}
+
+public class ArrayIterator<T> is Iterator<T> {
+    arr: Array<T>;
+    current: Int;
+
+    private constructor new;
+
+    public constructor from(arr: Array<T>) = ArrayIterator<T>.new(arr, 0);
+
+    public mut next(): Option<T> {
+        if (this.current >= this.arr.length) return None<T>.none();
+        let value = this.arr[this.current];
+        this.current = this.current + 1;
+        return Some<T>.from(value);
+    }
+}

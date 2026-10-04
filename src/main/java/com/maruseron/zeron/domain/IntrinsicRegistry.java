@@ -50,6 +50,7 @@ public final class IntrinsicRegistry {
 
     private static IntrinsicRegistry createStandard() {
         final var element = new TypeParameterDescriptor(Integer.MIN_VALUE, "Element");
+        final var optionValue = new TypeParameterDescriptor(Integer.MIN_VALUE + 1, "OptionValue");
         final var array = TypeDescriptor.arrayOf(element);
         final var typeParameters = java.util.List.of(element);
         return new IntrinsicRegistry(java.util.List.of(
@@ -60,6 +61,18 @@ public final class IntrinsicRegistry {
                         new IntrinsicSignature(typeParameters,
                                 java.util.List.of(TypeDescriptor.ofInt(), element.toNullable()),
                                 new ReferenceDescriptor(TypeDescriptor.arrayOf(element.toNullable())), false), null),
+                new IntrinsicDefinition(IntrinsicId.ARRAY_ALLOC,
+                        new IntrinsicSignature(typeParameters, java.util.List.of(TypeDescriptor.ofInt()),
+                                new ReferenceDescriptor(array), false), null),
+                new IntrinsicDefinition(IntrinsicId.ARRAY_CLEAR_SLOT,
+                        new IntrinsicSignature(typeParameters,
+                                java.util.List.of(new ReferenceDescriptor(array), TypeDescriptor.ofInt()),
+                                TypeDescriptor.ofUnit(), false), null),
+                new IntrinsicDefinition(IntrinsicId.OPTION_UNWRAP_SOME,
+                        new IntrinsicSignature(java.util.List.of(optionValue),
+                                java.util.List.of(TypeDescriptor.genericOf(
+                                        TypeDescriptor.ofName("zeron.lang.Option"), optionValue)),
+                                optionValue, false), null),
                 new IntrinsicDefinition(IntrinsicId.ARRAY_LENGTH,
                         new IntrinsicSignature(typeParameters, java.util.List.of(array),
                                 TypeDescriptor.ofInt(), false), "length"),

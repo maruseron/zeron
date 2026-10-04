@@ -148,6 +148,51 @@ public final class ClassContractTest {
     }
 
     @Test
+    public void sealedContractsEmitJvmPermittedSubclassesAndRejectUnlistedClasses() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var contractName = "SealedContract" + suffix;
+        final var firstName = "FirstVariant" + suffix;
+        final var secondName = "SecondVariant" + suffix;
+        final var programName = "SealedProgram" + suffix;
+        final var source = """
+                public sealed contract %s permits %s, %s {}
+                public class %s is %s {}
+                public class %s is %s {}
+                """.formatted(contractName, firstName, secondName,
+                firstName, contractName, secondName, contractName);
+        final var contractFile = Path.of("dist", contractName + ".class");
+        final var firstFile = Path.of("dist", firstName + ".class");
+        final var secondFile = Path.of("dist", secondName + ".class");
+        final var programFile = Path.of("dist", programName + ".class");
+
+        try {
+            final var compiler = new Compiler(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var contract = loader.loadClass(contractName);
+                assertTrue(contract.isSealed());
+                assertEquals(List.of(firstName, secondName),
+                        java.util.Arrays.stream(contract.getPermittedSubclasses())
+                                .map(Class::getName).toList());
+            }
+        } finally {
+            Files.deleteIfExists(contractFile);
+            Files.deleteIfExists(firstFile);
+            Files.deleteIfExists(secondFile);
+            Files.deleteIfExists(programFile);
+        }
+
+        final var invalidSource = parse("""
+                sealed contract Closed permits Allowed {}
+                class Allowed is Closed {}
+                class Intruder is Closed {}
+                """);
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(invalidSource));
+    }
+
+    @Test
     public void sampleCallSitesUseConstructorVirtualAndInterfaceDispatch() throws Exception {
     compileCanonicalSample();
     final var program = ClassFile.of().parse(Path.of("dist", "test.class"));

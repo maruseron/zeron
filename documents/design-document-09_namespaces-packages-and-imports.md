@@ -2,8 +2,8 @@
 
 ## Status
 
-Package headers, package-qualified nominal identities, type/function imports, aliases, and public
-versus package-visible declarations are implemented. Top-level value imports, wildcard imports,
+Package headers, package-qualified nominal identities, explicit and star type/function imports,
+aliases, and public versus package-visible declarations are implemented. Top-level value imports,
 re-exports, and module-level visibility remain deferred. Project source discovery, library artifacts,
 Java interop, and compiler intrinsic bindings are covered separately in
 [design-document-11_compilation-libraries-and-host-integration.md](design-document-11_compilation-libraries-and-host-integration.md).
@@ -42,8 +42,8 @@ The cited languages offer several useful patterns for source-level naming and vi
 - Haskell uses module headers and export lists, with selective, qualified, hidden, and aliased imports. [Haskell 2010, Chapter 5](https://www.haskell.org/onlinereport/haskell2010/haskellch5.html).
 - On the JVM, source packages and imports are distinct from JPMS modules. The normative source-language reference is [JLS Chapter 7](https://docs.oracle.com/javase/specs/jls/se26/html/jls-7.html); build, runtime classpath, and JPMS concerns are covered in [doc 11](design-document-11_compilation-libraries-and-host-integration.md).
 
-The implemented source model uses package headers, explicit imports, aliases, and public declarations.
-Wildcard imports, re-exports, and module-level dependency semantics remain deferred.
+The implemented source model uses package headers, explicit and star imports, aliases, and public
+declarations. Re-exports and module-level dependency semantics remain deferred.
 
 ## Goals and Non-Goals
 
@@ -52,12 +52,13 @@ Goals for the source-language layer:
 - Give every class, contract, top-level function, and top-level value a stable source identity.
 - Allow same-spelled declarations in different packages without confusing type equality or function-shape keys.
 - Make imported names, visibility, and ambiguity deterministic and statically checked.
-- Keep package identity independent of directory layout and JVM names.
+- Keep package identity independent of JVM names; project builds validate that source directories
+  match package declarations relative to their configured source root.
 
 Non-goals for this language-design document:
 
 - JPMS `module-info`, module-path resolution, services, or `opens`.
-- Wildcard imports, re-exports, extension imports, or a dependency repository.
+- Re-exports, extension imports, or a dependency repository.
 - File-local visibility, friend modules, or a general build-system manifest.
 - Project source discovery, compiled-library distribution, Java interop, and intrinsic implementation
     binding; see [doc 11](design-document-11_compilation-libraries-and-host-integration.md).
@@ -65,10 +66,11 @@ Non-goals for this language-design document:
 ## Source Model
 
 A source file is one compilation unit and has at most one package header before its declarations.
-Package membership is declared in source; directory layout is a project convention, not the
-definition of identity. The default package remains available for existing standalone scripts.
-The implemented imports resolve public class, contract, and function declarations. Top-level value
-imports remain deferred.
+Package membership is declared in source and defines identity. In project-root builds, the source
+directory relative to its configured root must match the package path; standalone file compilation
+does not impose a directory convention. The default package remains available for root-level project
+sources and standalone scripts. Explicit and star imports resolve public class, contract, and
+function declarations. Top-level value imports remain deferred.
 
 Implemented syntax:
 
@@ -76,15 +78,17 @@ Implemented syntax:
 CompilationUnit       ::= [PackageDeclaration] ImportDeclaration* TopLevelDeclaration* EOF
 PackageDeclaration    ::= "package" QualifiedName ";"
 ImportDeclaration     ::= "import" QualifiedName ["as" Identifier] ";"
+                         | "import" QualifiedName "." "*" ";"
 QualifiedName         ::= Identifier {"." Identifier}
 TopLevelDeclaration  ::= VariableDeclaration | FunctionDeclaration | ClassDeclaration
                          | ContractDeclaration | "public" (FunctionDeclaration
                          | ClassDeclaration | ContractDeclaration)
 ```
 
-Imports resolve class, contract, and function targets. Non-entry functions require explicit return
-types so their signatures are available before bodies are resolved. Non-entry top-level values
-remain unsupported until initialization order is specified.
+Imports resolve class, contract, and function targets. Star imports enumerate public Zeron
+declarations in a known package; Java package enumeration is unsupported. Non-entry functions
+require explicit return types so their signatures are available before bodies are resolved.
+Non-entry top-level values remain unsupported until initialization order is specified.
 
 Example producer:
 
@@ -107,6 +111,7 @@ package app;
 import geometry.Point as GeoPoint;
 import math.add as sum;
 import zeron.io.println;
+import geometry.*;
 
 fn main(): Unit {
     let point: GeoPoint = GeoPoint.new(0, 0);
@@ -114,10 +119,14 @@ fn main(): Unit {
 }
 ```
 
-Imports are file-scoped and name declarations, not expressions. Imports and aliases resolve public
-classes, contracts, and top-level functions; function imports participate in ordinary calls and
-function-value resolution. Top-level value imports and fully qualified value expressions remain
-deferred. Dot remains the receiver-member operator.
+Imports are file-scoped and name declarations, not expressions. Explicit and star imports resolve
+public classes, contracts, and top-level functions; function imports participate in ordinary calls
+and function-value resolution. Explicit imports take precedence over star imports. Multiple star
+imports that provide the same unqualified name are ambiguous when that name is used; an explicit
+import or alias disambiguates it. In a type annotation, explicitly import a type when multiple
+star-imported packages are in scope so its qualified type identity is unambiguous. Star imports are
+not re-exports. Top-level value imports and fully qualified value expressions remain deferred. Dot
+remains the receiver-member operator.
 
 ## Namespaces and Resolution
 
@@ -132,7 +141,7 @@ For unqualified lookup:
 
 1. Resolve local values in lexical scope, or type parameters in type position.
 2. Resolve declarations in the current package.
-3. Resolve explicit imports and aliases.
+3. Resolve explicit imports and aliases, then unique star-import candidates.
 4. Resolve built-ins/predefined names in their existing namespaces.
 
 An import does not silently shadow a different declaration in the current package. Two imported declarations with the same local name in the same namespace are an ambiguity error; use `as` to disambiguate. Type and value imports resolve in their respective syntactic contexts. Fully qualified type names bypass imports.
@@ -142,9 +151,10 @@ packages. Unmarked declarations are package-visible. The initial design has no t
 or `internal` modifier; package-private defaults avoid accidentally exporting a package's
 implementation. Existing default-package scripts remain mutually visible as before.
 
-Imports target individual classes, contracts, and functions, with aliases. Wildcard imports,
-re-exports, and value imports remain deferred. Built-in types remain implicitly available, but there
-is no implicit wildcard import of a standard library or `java.lang`. The CLI compiles the bundled
+Explicit imports target individual classes, contracts, and functions, with aliases. Star imports,
+re-exports, and value imports are distinct; only star imports are implemented. Built-in types remain
+implicitly available, but there is no implicit wildcard import of a standard library or `java.lang`.
+The CLI compiles the bundled
 `zeron.collections` and `zeron.ranges` source units as ordinary units.
 
 ## Relationship to Compilation and Interop
@@ -162,8 +172,8 @@ described in [design-document-11_compilation-libraries-and-host-integration.md](
    local and imported names resolve deterministically in the type and value namespaces.
 3. **Selective imports and visibility: implemented first slice.** Public classes, contracts, and
    functions can be imported with aliases; unmarked declarations remain package-visible.
-4. **Deferred language-level imports.** Top-level value imports, wildcard imports, re-exports,
-   extension imports, and friend/module visibility require separate semantics.
+4. **Deferred language-level imports.** Top-level value imports, re-exports, extension imports, and
+   friend/module visibility require separate semantics.
 
 ## Acceptance Criteria
 
@@ -171,6 +181,6 @@ The following are acceptance criteria for the source naming and import model:
 
 - Same-simple-name classes/contracts in different packages have distinct source identities and generated binary names.
 - Same-package declarations are available without imports; only public declarations are imported across packages.
-- Explicit imports and aliases resolve public classes, contracts, and top-level functions; ambiguous imports fail deterministically.
+- Explicit and star imports resolve public classes, contracts, and top-level functions; ambiguous star-import uses fail deterministically, and explicit imports disambiguate them.
 - Package-qualified type identity propagates through generic substitution, contract projection, and `FunctionShapeKey`.
 - Imports and aliases are compile-time bindings; they do not by themselves load code or change source identity.

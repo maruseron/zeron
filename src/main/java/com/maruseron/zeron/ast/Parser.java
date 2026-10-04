@@ -27,6 +27,8 @@ public final class Parser {
     private String packageName = "";
     private final List<ImportDeclaration> imports = new ArrayList<>();
     private final Map<String, String> importedTypes = new LinkedHashMap<>();
+    private final List<String> onDemandImports = new ArrayList<>();
+    private final Set<String> localTypeNames = new java.util.HashSet<>();
     private static final AtomicInteger TYPE_PARAMETER_SCOPES = new AtomicInteger();
     private Map<String, TypeParameterDescriptor> activeTypeParameters = Map.of();
 
@@ -60,20 +62,31 @@ public final class Parser {
             packageName = parseQualifiedName("Expect package name.");
             consume(SEMICOLON, "Expect ';' after package declaration.");
         }
-            while (match(IMPORT)) {
-                final var target = advance();
-                if (target.type() != IDENTIFIER) error(target, "Expect qualified import name.");
-                final var qualifiedName = new StringBuilder(target.lexeme());
-                while (match(DOT)) qualifiedName.append('.').append(
-                    consume(IDENTIFIER, "Expect name after '.'.").lexeme());
-                final var localName = match(AS)
-                    ? consume(IDENTIFIER, "Expect import alias.").lexeme()
-                    : qualifiedName.substring(qualifiedName.lastIndexOf(".") + 1);
-                consume(SEMICOLON, "Expect ';' after import.");
-                final var imported = new ImportDeclaration(qualifiedName.toString(), localName, target);
-                imports.add(imported);
-                importedTypes.putIfAbsent(localName, qualifiedName.toString());
+        while (match(IMPORT)) {
+            final var target = advance();
+            if (target.type() != IDENTIFIER) error(target, "Expect qualified import name.");
+            final var qualifiedName = new StringBuilder(target.lexeme());
+            var onDemand = false;
+            while (match(DOT)) {
+                if (match(STAR)) {
+                    onDemand = true;
+                    break;
+                }
+                qualifiedName.append('.').append(
+                        consume(IDENTIFIER, "Expect name after '.'.").lexeme());
             }
+            final var localName = onDemand ? ""
+                    : match(AS)
+                        ? consume(IDENTIFIER, "Expect import alias.").lexeme()
+                        : qualifiedName.substring(qualifiedName.lastIndexOf(".") + 1);
+            if (onDemand && match(AS)) error(previous(), "Star imports cannot have aliases.");
+            consume(SEMICOLON, "Expect ';' after import.");
+            final var imported = new ImportDeclaration(qualifiedName.toString(), localName, target, onDemand);
+            imports.add(imported);
+            if (onDemand) onDemandImports.add(qualifiedName.toString());
+            else importedTypes.putIfAbsent(localName, qualifiedName.toString());
+        }
+        collectLocalTypeNames();
         final var statements = new ArrayList<Stmt>();
         while (!isAtEnd()) {
             statements.add(declaration());
@@ -81,6 +94,19 @@ public final class Parser {
         statements.removeIf(statement -> statement == null);
 
         return new CompilationUnit(sourcePath, packageName, imports, statements);
+    }
+
+    private void collectLocalTypeNames() {
+        var braceDepth = 0;
+        for (var index = current; index + 1 < tokens.size(); index++) {
+            final var token = tokens.get(index);
+            if (braceDepth == 0 && (token.type() == CLASS || token.type() == CONTRACT)
+                    && tokens.get(index + 1).type() == IDENTIFIER) {
+                localTypeNames.add(tokens.get(index + 1).lexeme());
+            }
+            if (token.type() == LEFT_BRACE) braceDepth++;
+            else if (token.type() == RIGHT_BRACE) braceDepth--;
+        }
     }
 
     private Stmt declaration() {
@@ -91,12 +117,20 @@ public final class Parser {
             if (levelMarker == null && match(PUBLIC)) {
                 if (match(CLASS)) return classDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
+                if (match(SEALED)) {
+                    consume(CONTRACT, "Only contracts can be sealed.");
+                    return contractDeclaration(true, true);
+                }
                 if (match(EXTERNAL)) return externalFunctionDeclaration(true);
                 if (match(FN)) return fnDeclaration(true);
                 throw error(previous(), "Only functions, classes, and contracts may be public.");
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
+            if (levelMarker == null && match(SEALED)) {
+                consume(CONTRACT, "Only contracts can be sealed.");
+                return contractDeclaration(false, true);
+            }
 
             if (levelMarker != null) return statement();
             throw error(peek(), "Expected declaration at top level.");
@@ -462,11 +496,34 @@ public final class Parser {
     }
 
     private Stmt.ContractDecl contractDeclaration(final boolean isTopLevelPublic) {
+        return contractDeclaration(isTopLevelPublic, false);
+    }
+
+    private Stmt.ContractDecl contractDeclaration(final boolean isTopLevelPublic,
+                                                  final boolean isSealed) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect contract name."));
         final var typeParameters = typeParameterDeclaration(name, false);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
+            final var permittedClasses = new ArrayList<Stmt.ContractUse>();
+            if (match(PERMITS)) {
+                do {
+                    final var className = qualifyTypeToken(
+                            consume(IDENTIFIER, "Expect permitted class name."));
+                    final var hasTypeArguments = match(LESS);
+                    final var typeArguments = hasTypeArguments
+                            ? collectTypeArguments()
+                            : List.<TypeDescriptor>of();
+                    if (hasTypeArguments) consume(GREATER, "Expect '>' after permitted class type arguments.");
+                    permittedClasses.add(new Stmt.ContractUse(className, typeArguments));
+                } while (match(COMMA));
+            }
+            if (isSealed != !permittedClasses.isEmpty()) {
+                error(name, isSealed
+                        ? "A sealed contract must declare at least one permitted class."
+                        : "Only sealed contracts may declare permitted classes.");
+            }
             consume(LEFT_BRACE, "Expect '{' before contract members.");
             final var methods = new ArrayList<Stmt.ContractMethod>();
             final var properties = new ArrayList<Stmt.ContractProperty>();
@@ -498,7 +555,7 @@ public final class Parser {
             }
             consume(RIGHT_BRACE, "Expect '}' after contract members.");
                 return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()), List.copyOf(methods),
-                    List.copyOf(properties), isTopLevelPublic);
+                    List.copyOf(properties), isTopLevelPublic, isSealed, permittedClasses);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -635,12 +692,17 @@ public final class Parser {
     }
 
     private String qualifyTypeName(final String name) {
-        if (name.indexOf('.') >= 0 || packageName.isEmpty()
+        if (name.indexOf('.') >= 0
             || Set.of("Never", "Any", "Infer", "Unit", "Int", "Float", "Boolean", "String", "Array")
                 .contains(name)
             || activeTypeParameters.containsKey(name)) return name;
         if (importedTypes.containsKey(name)) return importedTypes.get(name);
-        return packageName + "." + name;
+        if (localTypeNames.contains(name)) return packageName.isEmpty() ? name : packageName + "." + name;
+        if (!onDemandImports.isEmpty()) {
+            final var explicitPackageType = onDemandImports.getFirst() + "." + name;
+            return explicitPackageType;
+        }
+        return packageName.isEmpty() ? name : packageName + "." + name;
     }
 
     private Token withLexeme(final Token token, final String lexeme) {

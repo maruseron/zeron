@@ -175,14 +175,17 @@ public final class ControlFlowTest {
     @Test
     public void resolvesForOverAUserDefinedIterable() {
         final var source = parseUnit("""
+                import zeron.lang.Option;
+                import zeron.lang.Some;
+                import zeron.lang.None;
                 class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
-                    public mut hasNext(): Boolean = this.index < 3;
-                    public mut next(): Int {
+                    public mut next(): Option<Int> {
+                        if (this.index >= 3) return None<Int>.none();
                         let value = this.index;
                         this.index = this.index + 1;
-                        return value;
+                        return Some<Int>.from(value);
                     }
                 }
                 class Counter is zeron.collections.Iterable<Int> {
@@ -205,16 +208,14 @@ public final class ControlFlowTest {
     public void rejectsSameNamedLocalIterableProtocol() {
         final var source = parse("""
                 contract Iterator<T> {
-                    hasNext(): Boolean;
-                    mut next(): T;
+                    next(): T;
                 }
                 contract Iterable<T> {
                     iterator(): &Iterator<T>;
                 }
                 class CounterIterator is Iterator<Int> {
                     public constructor new;
-                    public hasNext(): Boolean = false;
-                    public mut next(): Int = 0;
+                    public next(): Int = 0;
                 }
                 class Counter is Iterable<Int> {
                     public constructor new;
@@ -232,14 +233,17 @@ public final class ControlFlowTest {
         final var className = "IterableForGenerated" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
         final var declarations = parseUnit("""
+                import zeron.lang.Option;
+                import zeron.lang.Some;
+                import zeron.lang.None;
                 class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
-                    public mut hasNext(): Boolean = this.index < 5;
-                    public mut next(): Int {
+                    public mut next(): Option<Int> {
+                        if (this.index >= 5) return None<Int>.none();
                         let value = this.index;
                         this.index = this.index + 1;
-                        return value;
+                        return Some<Int>.from(value);
                     }
                 }
                 class Counter is zeron.collections.Iterable<Int> {
@@ -250,10 +254,10 @@ public final class ControlFlowTest {
                     value: T;
                     ready: Boolean;
                     public constructor new;
-                    public mut hasNext(): Boolean = this.ready;
-                    public mut next(): T {
+                    public mut next(): Option<T> {
+                        if (not this.ready) return None<T>.none();
                         this.ready = false;
-                        return this.value;
+                        return Some<T>.from(this.value);
                     }
                 }
                 class Single<T> is zeron.collections.Iterable<T> {

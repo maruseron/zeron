@@ -2,6 +2,9 @@ package zeron.ranges;
 
 import zeron.collections.Iterator;
 import zeron.collections.Iterable;
+import zeron.lang.Option;
+import zeron.lang.Some;
+import zeron.lang.None;
 
 public class IntIterator is Iterator<Int> {
     current: Int;
@@ -17,18 +20,17 @@ public class IntIterator is Iterator<Int> {
     public constructor descending(current: Int, end: Int) =
         IntIterator.new(current, end, -1, false);
 
-    public mut hasNext(): Boolean = not this.done and (if (this.step > 0)
-        then this.current <= this.end
-        else this.current >= this.end);
-    
-    public mut next(): Int {
+    public mut next(): Option<Int> {
+        if (this.done) return None<Int>.none();
+        if (this.step > 0 and this.current > this.end) return None<Int>.none();
+        if (this.step < 0 and this.current < this.end) return None<Int>.none();
         let temp = this.current;
         if (this.current == this.end) {
             this.done = true;
         } else {
             this.current = this.current + this.step;
         }
-        return temp;
+        return Some<Int>.from(temp);
     }
 }
 

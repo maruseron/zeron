@@ -8,13 +8,15 @@ packageDeclaration      : "package" qualifiedName ";" ;
 qualifiedName           : IDENTIFIER {"." IDENTIFIER} ;
 importDeclaration       : "import" qualifiedName ["as" IDENTIFIER] ";" ;
 
-topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl
+topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl
                         | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
-                        | publicClassDecl | publicContractDecl ;
+                        | publicClassDecl | publicContractDecl | publicSealedContractDecl ;
 publicFunDecl           : "public" funDecl ;
 publicExternalFunctionDecl : "public" externalFunctionDecl ;
 publicClassDecl         : "public" classDecl ;
 publicContractDecl      : "public" contractDecl ;
+publicSealedContractDecl : "public" sealedContractDecl ;
+sealedContractDecl      : "sealed" contractDecl ;
 declaration             : varDecl | funDecl | statement ;
 
 varDecl                 : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
@@ -41,7 +43,9 @@ namedConstructorDecl    : visibility "constructor" IDENTIFIER "(" parameters ")"
                           ("=" expression ";" | block) ;
 methodDecl              : visibility ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
                           ("=" expression ";" | block) ;
-contractDecl            : "contract" IDENTIFIER [typeParameters] "{" contractMember* "}" ;
+contractDecl            : "contract" IDENTIFIER [typeParameters] ["permits" permittedClass
+                          {"," permittedClass}] "{" contractMember* "}" ;
+permittedClass          : qualifiedName [typeArguments] ;
 contractMember          : contractProperty | contractMethod ;
 contractProperty        : ["mut"] "property" IDENTIFIER ":" type ";" ;
 contractMethod          : ["default"] ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
@@ -122,6 +126,9 @@ range                   : INT ".." INT ;
 
 # Semantic/parser constraints:
 # - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
+# - Sealed contracts require a non-empty permits list. Permitted classes must be in the contract's
+#   package; public sealed contracts permit only public classes. Generic arity and type parameters
+#   correspond by position. Permitted implementation classes are final.
 # - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
 #   An explicit `private constructor new;` makes canonical construction private.
 # - Fields and auto-properties may have initializers. Initialized members are omitted from canonical

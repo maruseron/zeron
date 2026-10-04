@@ -3,6 +3,9 @@ package com.maruseron.zeron.domain;
 public enum IntrinsicId {
     ARRAY_LITERAL("zeron.array.literal.v1"),
     ARRAY_FILL("zeron.array.fill.v1"),
+    ARRAY_ALLOC("zeron.array.allocate.v1"),
+    ARRAY_CLEAR_SLOT("zeron.array.clear-slot.v1"),
+    OPTION_UNWRAP_SOME("zeron.option.unwrap-some.v1"),
     ARRAY_LENGTH("zeron.array.length.v1"),
     ARRAY_READ("zeron.array.read.v1"),
     ARRAY_WRITE("zeron.array.write.v1");

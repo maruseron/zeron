@@ -10,10 +10,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 public final class StandardLibrary {
-    public static final int API_VERSION = 4;
+    public static final int API_VERSION = 7;
     public static final List<String> BUNDLED_SOURCE_PATHS =
-            List.of("/stdlib/iteration.zn", "/stdlib/list.zn", "/stdlib/sequence.zn",
-                    "/stdlib/intrange.zn", "/stdlib/io.zn");
+            List.of("/stdlib/zeron/collections/iteration.zn",
+                    "/stdlib/zeron/collections/list.zn",
+                    "/stdlib/zeron/collections/sequence.zn",
+                    "/stdlib/zeron/ranges/intrange.zn",
+                    "/stdlib/zeron/io/io.zn",
+                    "/stdlib/zeron/lang/option.zn");
 
     private StandardLibrary() {}
 

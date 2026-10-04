@@ -17,6 +17,7 @@ import java.lang.classfile.*;
 import java.lang.classfile.attribute.ConstantValueAttribute;
 import java.lang.classfile.attribute.NestHostAttribute;
 import java.lang.classfile.attribute.NestMembersAttribute;
+import java.lang.classfile.attribute.PermittedSubclassesAttribute;
 import java.lang.classfile.attribute.SignatureAttribute;
 import java.lang.classfile.constantpool.ConstantPoolBuilder;
 import java.lang.classfile.constantpool.MethodRefEntry;
@@ -179,7 +180,9 @@ public final class Compiler {
     public void compile() throws IOException {
         Files.createDirectories(outputDirectory);
         generateUnitValueClass();
-        lambdaPlan = new LambdaCompilationPlan(declarations, symbols);
+        final var signatureDeclarations = compilationUnits.stream()
+                .flatMap(unit -> unit.declarations().stream()).toList();
+        lambdaPlan = new LambdaCompilationPlan(declarations, signatureDeclarations, symbols);
         for (final var shape : lambdaPlan.functionShapes().entrySet()) {
             generateGeneratedLambdaClass(shape.getKey(), shape.getValue());
         }
@@ -211,7 +214,7 @@ public final class Compiler {
         generateNominalTypes();
         final var libraryIndex = ZeronLibraryIndex.fromCompilation(compilationUnits, functionOwners,
                 name -> symbols.getFunctionType(resolver.functionSymbolToken(name)), includeBundledSourcesInIndex);
-        libraryIndex.writeTo(outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v4.bin")));
+        libraryIndex.writeTo(outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v5.bin")));
     }
 
     private void indexDeclarationOwners() {
@@ -317,6 +320,10 @@ public final class Compiler {
                     builder -> {
                         builder.withFlags((contract.isPublic() ? ClassFile.ACC_PUBLIC : 0)
                             | ClassFile.ACC_INTERFACE | ClassFile.ACC_ABSTRACT);
+                        if (contract.isSealed()) {
+                            builder.with(PermittedSubclassesAttribute.ofSymbols(contract.permittedClasses().stream()
+                                    .map(permitted -> ClassDesc.of(permitted.name().lexeme())).toList()));
+                        }
                         final var signature = nominalSignature(contract.typeParameters(), List.of());
                         if (signature != null) {
                             builder.with(SignatureAttribute.of(builder.constantPool().utf8Entry(signature)));
@@ -1219,6 +1226,8 @@ public final class Compiler {
             TypeDescriptor.ofName(iteratorName), elementType));
         final var iterableContractType = TypeDescriptor.genericOf(
             TypeDescriptor.ofName(iterableName), elementType);
+        final var optionType = TypeDescriptor.genericOf(
+            TypeDescriptor.ofName("zeron.lang.Option"), elementType);
 
         emitExpr(composer, iterable);
         emitConversion(composer, lastEmittedType, iterableContractType);
@@ -1227,19 +1236,26 @@ public final class Compiler {
         lastEmittedType = iteratorType;
         final var iteratorLocal = declareLoopLocal(nextLoopTemporary("iterator"), iteratorType);
         composer.astore(iteratorLocal.lvt() + localSlotOffset);
+        final var optionLocal = declareLoopLocal(nextLoopTemporary("option"), optionType);
         final var valueLocal = declareLoopLocal(iterationBind, elementType);
 
         final var loopStart = composer.newLabel();
         final var loopExit = composer.newLabel();
         composer.labelBinding(loopStart);
         composer.aload(iteratorLocal.lvt() + localSlotOffset);
-        composer.invokeinterface(ClassDesc.of(iteratorName), "hasNext",
+        composer.invokeinterface(ClassDesc.of(iteratorName), "next",
+                MethodTypeDesc.of(ClassDesc.of("zeron.lang.Option")));
+        composer.astore(optionLocal.lvt() + localSlotOffset);
+
+        composer.aload(optionLocal.lvt() + localSlotOffset);
+        composer.invokeinterface(ClassDesc.of("zeron.lang.Option"), "isSome",
                 MethodTypeDesc.of(ConstantDescs.CD_boolean));
         composer.ifeq(loopExit);
 
-        composer.aload(iteratorLocal.lvt() + localSlotOffset);
-        composer.invokeinterface(ClassDesc.of(iteratorName), "next",
-                MethodTypeDesc.of(ConstantDescs.CD_Object));
+        composer.aload(optionLocal.lvt() + localSlotOffset);
+        composer.aconst_null();
+        composer.invokeinterface(ClassDesc.of("zeron.lang.Option"), "valueOr",
+                MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
         emitConversion(composer, TypeDescriptor.ofName("java.lang.Object"), elementType);
         composer.storeLocal(TypeKind.fromDescriptor(
                 TypeDescriptor.toJavaClassDesc(elementType).descriptorString()),
@@ -1466,6 +1482,8 @@ public final class Compiler {
         switch (operation.id()) {
             case ARRAY_LITERAL -> emitArrayLiteral(composer, (Expr.ArrayLiteral) expression, operation);
             case ARRAY_FILL -> throw new IllegalStateException("Array fill is not a syntax expression.");
+            case ARRAY_ALLOC, ARRAY_CLEAR_SLOT, OPTION_UNWRAP_SOME ->
+                    throw new IllegalStateException("Array storage intrinsic is not a syntax expression.");
             case ARRAY_LENGTH -> {
                 final var property = (Expr.Property) expression;
                 emitExpr(composer, property.receiver);
@@ -1960,11 +1978,14 @@ public final class Compiler {
 
     private void emitCall(final CodeBuilder composer, final Expr.Call call) {
         if (call.intrinsicOperation() != null) {
-            if (call.intrinsicOperation().id() != IntrinsicId.ARRAY_FILL) {
-                throw new IllegalStateException("Unexpected intrinsic function call: "
+            switch (call.intrinsicOperation().id()) {
+                case ARRAY_FILL -> emitArrayFill(composer, call, call.intrinsicOperation());
+                case ARRAY_ALLOC -> emitArrayAllocate(composer, call, call.intrinsicOperation());
+                case ARRAY_CLEAR_SLOT -> emitArraySlotClear(composer, call);
+                case OPTION_UNWRAP_SOME -> emitOptionUnwrapSome(composer, call);
+                default -> throw new IllegalStateException("Unexpected intrinsic function call: "
                         + call.intrinsicOperation().id().stableName());
             }
-            emitArrayAllocation(composer, call, call.intrinsicOperation());
             return;
         }
         if (call.implicitMemberCall() != null) {
@@ -2021,9 +2042,9 @@ public final class Compiler {
         }
     }
 
-    private void emitArrayAllocation(final CodeBuilder composer,
-                                     final Expr.Call call,
-                                     final ResolvedIntrinsicOperation operation) {
+    private void emitArrayFill(final CodeBuilder composer,
+                               final Expr.Call call,
+                               final ResolvedIntrinsicOperation operation) {
         emitExpr(composer, call.arguments.get(0));
         composer.anewarray(ClassDesc.of("java.lang.Object"));
         composer.dup();
@@ -2034,6 +2055,31 @@ public final class Compiler {
                 MethodTypeDesc.of(ConstantDescs.CD_void,
                         ConstantDescs.CD_Object.arrayType(), ConstantDescs.CD_Object));
         lastEmittedType = operation.resultType();
+    }
+
+    private void emitArrayAllocate(final CodeBuilder composer,
+                                   final Expr.Call call,
+                                   final ResolvedIntrinsicOperation operation) {
+        emitExpr(composer, call.arguments.getFirst());
+        composer.anewarray(ClassDesc.of("java.lang.Object"));
+        lastEmittedType = operation.resultType();
+    }
+
+    private void emitArraySlotClear(final CodeBuilder composer, final Expr.Call call) {
+        emitExpr(composer, call.arguments.get(0));
+        emitExpr(composer, call.arguments.get(1));
+        composer.aconst_null();
+        composer.aastore();
+        emitUnitValue(composer);
+        lastEmittedType = TypeDescriptor.ofUnit();
+    }
+
+    private void emitOptionUnwrapSome(final CodeBuilder composer, final Expr.Call call) {
+        emitExpr(composer, call.arguments.getFirst());
+        composer.aconst_null();
+        composer.invokeinterface(ClassDesc.of("zeron.lang.Option"), "valueOr",
+                MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+        lastEmittedType = call.getType();
     }
 
         private void emitFunctionReference(final CodeBuilder composer, final Expr.Variable reference) {

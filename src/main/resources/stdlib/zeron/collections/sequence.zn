@@ -1,14 +1,8 @@
 package zeron.collections;
 
-class SequenceValue<T> {
-    item: T;
-
-    private constructor new;
-
-    public constructor from(value: T) = SequenceValue<T>.new(value);
-
-    public itemValue(): T = this.item;
-}
+import zeron.lang.Option;
+import zeron.lang.Some;
+import zeron.lang.None;
 
 class ArraySequence<T> is Iterable<T> {
     values: Array<T>;
@@ -42,11 +36,11 @@ class MappedIterator<T, R> is Iterator<R> {
     public constructor from(source: &Iterator<T>, transform: (T) -> R) =
         MappedIterator<T, R>.new(source, transform);
 
-    public mut hasNext(): Boolean = this.source.hasNext();
-
-    public mut next(): R {
+    public mut next(): Option<R> {
         let transform = this.transform;
-        return transform(this.source.next());
+        let item = this.source.next();
+        if (not item.isSome()) return None<R>.none();
+        return Some<R>.from(transform(unwrapSome<T>(item)));
     }
 }
 
@@ -66,34 +60,19 @@ class FilteredSequence<T> is Iterable<T> {
 class FilteredIterator<T> is Iterator<T> {
     source: &Iterator<T>;
     predicate: (T) -> Boolean;
-    buffered: SequenceValue<T>?;
-
     private constructor new;
 
     public constructor from(source: &Iterator<T>, predicate: (T) -> Boolean) =
-        FilteredIterator<T>.new(source, predicate, null);
+        FilteredIterator<T>.new(source, predicate);
 
-    public mut hasNext(): Boolean {
-        if (this.buffered != null) return true;
-        while (this.source.hasNext()) {
-            let value = this.source.next();
-            let predicate = this.predicate;
-            if (predicate(value)) {
-                this.buffered = SequenceValue<T>.from(value);
-                return true;
-            }
+    public mut next(): Option<T> {
+        let predicate = this.predicate;
+        let mut item = this.source.next();
+        while (item.isSome()) {
+            if (predicate(unwrapSome<T>(item))) return item;
+            item = this.source.next();
         }
-        return false;
-    }
-
-    public mut next(): T {
-        this.hasNext();
-        let value = this.buffered;
-        if (value != null) {
-            this.buffered = null;
-            return value.itemValue();
-        }
-        return this.source.next();
+        return None<T>.none();
     }
 }
 
@@ -119,12 +98,10 @@ class TakenIterator<T> is Iterator<T> {
     public constructor from(source: &Iterator<T>, count: Int) =
         TakenIterator<T>.new(source, count);
 
-    public mut hasNext(): Boolean = this.remaining > 0 and this.source.hasNext();
-
-    public mut next(): T {
-        let value = this.source.next();
+    public mut next(): Option<T> {
+        if (this.remaining <= 0) return None<T>.none();
         this.remaining = this.remaining - 1;
-        return value;
+        return this.source.next();
     }
 }
 
@@ -151,20 +128,19 @@ class DroppedIterator<T> is Iterator<T> {
     public constructor from(source: &Iterator<T>, count: Int) =
         DroppedIterator<T>.new(source, count, false);
 
-    public mut hasNext(): Boolean {
+    public mut next(): Option<T> {
         if (not this.initialized) {
             let mut skipped = 0;
-            while (skipped < this.count and this.source.hasNext()) {
-                this.source.next();
+            while (skipped < this.count) {
+                let item = this.source.next();
+                if (not item.isSome()) {
+                    this.initialized = true;
+                    return item;
+                }
                 skipped += 1;
             }
             this.initialized = true;
         }
-        return this.source.hasNext();
-    }
-
-    public mut next(): T {
-        this.hasNext();
         return this.source.next();
     }
 }
@@ -197,16 +173,20 @@ public class Sequence<T> is Iterable<T> {
 
     public forEach(action: (T) -> Unit): Unit {
         let mut iterator = this.iterator();
-        while (iterator.hasNext()) {
-            action(iterator.next());
+        let mut item = iterator.next();
+        while (item.isSome()) {
+            action(unwrapSome<T>(item));
+            item = iterator.next();
         }
     }
 
     public fold<R>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         let mut iterator = this.iterator();
-        while (iterator.hasNext()) {
-            result = combine(result, iterator.next());
+        let mut item = iterator.next();
+        while (item.isSome()) {
+            result = combine(result, unwrapSome<T>(item));
+            item = iterator.next();
         }
         return result;
     }
@@ -214,25 +194,31 @@ public class Sequence<T> is Iterable<T> {
     public count(): Int {
         let mut result = 0;
         let mut iterator = this.iterator();
-        while (iterator.hasNext()) {
-            iterator.next();
+        let mut item = iterator.next();
+        while (item.isSome()) {
+            unwrapSome<T>(item);
             result += 1;
+            item = iterator.next();
         }
         return result;
     }
 
     public any(predicate: (T) -> Boolean): Boolean {
         let mut iterator = this.iterator();
-        while (iterator.hasNext()) {
-            if (predicate(iterator.next())) return true;
+        let mut item = iterator.next();
+        while (item.isSome()) {
+            if (predicate(unwrapSome<T>(item))) return true;
+            item = iterator.next();
         }
         return false;
     }
 
     public all(predicate: (T) -> Boolean): Boolean {
         let mut iterator = this.iterator();
-        while (iterator.hasNext()) {
-            if (not predicate(iterator.next())) return false;
+        let mut item = iterator.next();
+        while (item.isSome()) {
+            if (not predicate(unwrapSome<T>(item))) return false;
+            item = iterator.next();
         }
         return true;
     }

@@ -73,10 +73,21 @@ public sealed interface Stmt {
 
     record ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                         List<ContractMethod> methods, List<ContractProperty> properties,
-                        boolean isPublic) implements Stmt, Decl {
+                        boolean isPublic, boolean isSealed,
+                        List<ContractUse> permittedClasses) implements Stmt, Decl {
+        public ContractDecl {
+            permittedClasses = List.copyOf(permittedClasses);
+        }
+
         public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                             List<ContractMethod> methods, boolean isPublic) {
-            this(name, typeParameters, methods, List.of(), isPublic);
+            this(name, typeParameters, methods, List.of(), isPublic, false, List.of());
+        }
+
+        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                            List<ContractMethod> methods, List<ContractProperty> properties,
+                            boolean isPublic) {
+            this(name, typeParameters, methods, properties, isPublic, false, List.of());
         }
     }
 

@@ -185,12 +185,23 @@ public class Zeron {
         sourcePaths.stream().filter(path -> !path.equals(absoluteEntry)).forEach(orderedSources::add);
         final var units = new ArrayList<CompilationUnit>();
         for (final var sourcePath : orderedSources) {
-            final var sourceRootIndex = absoluteRoots.stream().filter(sourcePath::startsWith)
-                .mapToInt(absoluteRoots::indexOf).findFirst().orElse(0);
-            final var relativePath = "root" + sourceRootIndex + "/"
-                + absoluteRoots.get(sourceRootIndex).relativize(sourcePath).toString().replace('\\', '/');
-            units.add(Parser.of(Scanner.from(Files.readString(sourcePath)).scanTokens())
-                .parseCompilationUnit(relativePath));
+            final var sourceRootIndex = sourceRootIndex(absoluteRoots, sourcePath);
+            final var relativePath = absoluteRoots.get(sourceRootIndex).relativize(sourcePath);
+            final var relativeDirectory = relativePath.getParent() == null
+                    ? ""
+                    : relativePath.getParent().toString().replace('\\', '/').replace('/', '.');
+            final var unit = Parser.of(Scanner.from(Files.readString(sourcePath)).scanTokens())
+                    .parseCompilationUnit("root" + sourceRootIndex + "/"
+                            + relativePath.toString().replace('\\', '/'));
+            if (hadError) return;
+            if (!unit.packageName().equals(relativeDirectory)) {
+                error(1, "Package '" + (unit.packageName().isEmpty() ? "<default>" : unit.packageName())
+                        + "' in " + sourcePath + " must match its directory under source root '"
+                        + absoluteRoots.get(sourceRootIndex) + "' (expected '"
+                        + (relativeDirectory.isEmpty() ? "<default>" : relativeDirectory) + "').");
+                return;
+            }
+            units.add(unit);
         }
         if (hadError) {
             return;
@@ -201,6 +212,24 @@ public class Zeron {
                 : entryUnit.packageName() + "." + sourceClassName(absoluteEntry);
         runUnits(units, programName, entryUnit.packageName(), libraries,
             bundleStandardLibrarySources, javaClassPathRoots);
+    }
+
+    private static int sourceRootIndex(final List<Path> roots, final Path sourcePath) {
+        var selectedIndex = -1;
+        var selectedDepth = -1;
+        for (var index = 0; index < roots.size(); index++) {
+            final var root = roots.get(index);
+            if (!sourcePath.startsWith(root)) continue;
+            final var depth = root.getNameCount();
+            if (depth > selectedDepth) {
+                selectedIndex = index;
+                selectedDepth = depth;
+            }
+        }
+        if (selectedIndex < 0) {
+            throw new IllegalArgumentException("Source file is outside configured roots: " + sourcePath);
+        }
+        return selectedIndex;
     }
 
     private static void runPrompt() throws IOException {

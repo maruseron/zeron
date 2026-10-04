@@ -44,6 +44,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     ordinary `zeron.ranges.IntRange` values and use protocol dispatch.
 - Callable `zeron.io.print` and `zeron.io.println` standard-library functions, lowered through
     registered intrinsic IDs. The former print statement syntax has been removed.
+- `zeron.lang.Option<T>` as a sealed contract implemented by `Some<T>` and `None<T>`, with `fold` for
+    consuming either case without exceptions. `Iterator<T>.next()` returns this type, using `None`
+    for exhaustion and `Some` for yielded values.
 - Initial Java class-directory interop for public constructors and methods, including expanded
     varargs calls with supported component types. JARs, JDK module discovery, fields, and ordinary
     Java array signatures remain unsupported.
@@ -422,9 +425,10 @@ let x =      if (n <  0) then "negative"
 times. The condition must have type `Boolean`.
 
 ```zeron
-while (iterator.hasNext()) {
-    let value = iterator.next();
-    consume(value);
+let mut next = iterator.next();
+while (next.isSome()) {
+    next.fold(value -> consume(value), () -> ());
+    next = iterator.next();
 }
 ```
 
@@ -472,8 +476,9 @@ such as `Response.error(...)` remain ordinary API-level values rather than built
 `for` supports `Array<T>` values, `zeron.ranges.IntRange` values, and values conforming to the bundled
 `Iterable<T>` contract. The loop evaluates its iterable expression once, binds an immutable element
 name, and supports `break` and `continue`. Arrays use dedicated index-based lowering. Integer range
-literals construct ordinary `IntRange` values, whose `iterator()`, `hasNext()`, and `next()` methods
-use contract dispatch. Ranges are inclusive, choose an ascending or descending unit step from their
+literals construct ordinary `IntRange` values whose `next()` returns `Option<Int>` through contract
+dispatch. `None` signals exhaustion; `Some` carries an element. Ranges are inclusive, choose an
+ascending or descending unit step from their
 endpoints, and do not increment after yielding the final endpoint, avoiding integer overflow.
 
 #### Range syntax
@@ -501,10 +506,11 @@ literals are not implemented. Range values can be stored and iterated later like
 #### Making an iterable
 
 `Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`,
-defined in `src/main/resources/stdlib/iteration.zn`. The standard library also provides a lazy
-`Sequence<T>` API in `src/main/resources/stdlib/sequence.zn` and an array-backed mutable `List<T>`
-in `src/main/resources/stdlib/list.zn`. The `for` protocol recognizes only the
-fully-qualified `zeron.collections.Iterable<T>` contract; a same-named contract in another package
+defined in `src/main/resources/stdlib/zeron/collections/iteration.zn`. The standard library also
+provides a lazy `Sequence<T>` API in `src/main/resources/stdlib/zeron/collections/sequence.zn` and
+an array-backed mutable `List<T>` in `src/main/resources/stdlib/zeron/collections/list.zn`. The
+`for` protocol recognizes only the fully-qualified `zeron.collections.Iterable<T>` contract; a
+same-named contract in another package
 does not make a type iterable. A custom iterable imports and implements these public contracts
 through ordinary class conformance; arrays retain specialized lowering and ranges use ordinary
 protocol dispatch.
@@ -513,6 +519,8 @@ protocol dispatch.
 read operations (`size`, `isEmpty`, `at`, and iteration) work through `List<T>`; structural
 mutations (`add`, `insert`, `replaceAt`, `removeAt`, and `clear`) require `&List<T>`. Assigning a
 mutable list reference to a `List<T>` variable gives a read-only view of the same list.
+The backing array stores elements directly; unused capacity is tracked by the list size, so nullable
+elements remain valid without allocating a wrapper object per element.
 
 ```zeron
 package geometry;

@@ -13,13 +13,43 @@ The goal is to establish useful object semantics before adding inheritance or ad
 - Binding reassignment and reference mutation remain independent: `let mut x` permits rebinding, while `&T` permits mutation through the reference.
 - Lambdas can capture immutable class or contract references by value, including mutable reference views. Reassignable local bindings remain uncapturable.
 - Classes and contracts support invariant type parameters. Fields, methods, construction, and declaration-site conformance are checked after substitution.
+- Sealed contracts declare a closed set of permitted classes with `sealed contract C permits A, B`.
+  Permitted classes must be in the contract package, conform directly, and use matching generic
+  parameters in declaration order. The compiler records permits in library metadata and the JVM
+  `PermittedSubclasses` attribute. `Option<T>` is the bundled example.
 - Parameterized nominal types retain source-level identity but erase to one raw JVM class or interface per declaration. Generic contract bridges adapt differing erased signatures.
 - Named constructors are static factories with expression or block bodies and an implicit mutable class-reference result. Omitted canonical declarations synthesize public construction; `private constructor new;` restricts it.
-- `Iterator<T>` and `Iterable<T>` are ordinary bundled contracts. `zeron.ranges.IntRange` implements
+- `Iterator<T>` and `Iterable<T>` are ordinary bundled contracts. `Iterator<T>.next()` returns
+  `zeron.lang.Option<T>`; `None` signals exhaustion and `Some` carries a value. The `for` loop
+  lowers this protocol and extracts elements only from `Some`.
+  `zeron.ranges.IntRange` implements
     `Iterable<Int>` and range loops invoke its methods through interface dispatch; arrays retain
     specialized lowering.
 
 ## Recommended Semantic Model
+
+### Sealed contracts
+
+An ordinary contract remains an open protocol. A sealed contract closes its direct implementation
+set with a non-empty `permits` clause:
+
+```zeron
+public sealed contract Option<T> permits Some<T>, None<T> {
+    isSome(): Boolean;
+}
+```
+
+Each permitted class must be declared in the contract's package, directly conform to the contract,
+and have the same number of type parameters. For the initial generic design, the permits arguments
+and the class's conformance arguments must refer to their respective declaration parameters in the
+same order. Public sealed contracts may permit only public classes. Classes are final in the current
+language, so a permitted class cannot open the sealed set through subclassing.
+
+The compiler enforces the permits list during resolution and emits the JVM `PermittedSubclasses`
+attribute. Compiled-library metadata carries the sealed flag and permits templates so separate
+consumer compilations enforce the same rule. A permits-list change is a public API change. Sealing
+does not by itself make branches exhaustive; future pattern-matching rules must define exhaustiveness
+separately.
 
 ### Nominal identity
 

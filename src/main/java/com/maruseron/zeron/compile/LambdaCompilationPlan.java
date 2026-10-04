@@ -37,8 +37,14 @@ final class LambdaCompilationPlan {
     private Map<String, TypeDescriptor> activeCaptureTypes;
 
     LambdaCompilationPlan(final List<Stmt> declarations, final SymbolTable symbols) {
+        this(declarations, declarations, symbols);
+    }
+
+    LambdaCompilationPlan(final List<Stmt> declarations,
+                          final List<Stmt> signatureDeclarations,
+                          final SymbolTable symbols) {
         this.symbols = symbols;
-        for (final var declaration : declarations) {
+        for (final var declaration : signatureDeclarations) {
             if (declaration instanceof Stmt.ClassDecl classDeclaration) {
                 classes.put(classDeclaration.name().lexeme(), classDeclaration);
             } else if (declaration instanceof Stmt.ContractDecl contractDeclaration) {

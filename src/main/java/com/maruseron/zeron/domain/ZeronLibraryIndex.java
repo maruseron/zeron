@@ -25,7 +25,7 @@ import java.util.function.Function;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 4;
+    public static final int VERSION = 5;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -85,8 +85,11 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     .map(property -> new Stmt.ContractProperty(token(property.name()),
                             property.type(), property.mutating()))
                     .toList();
+                final var permittedClasses = contract.permittedClasses().stream()
+                    .map(use -> new Stmt.ContractUse(token(use.qualifiedName()), use.typeArguments()))
+                    .toList();
                 statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(),
-                        methods, properties, true));
+                        methods, properties, true, contract.sealed(), permittedClasses));
             }
             }
         }
@@ -132,12 +135,22 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     public record ContractExport(String qualifiedName,
                                  List<TypeParameterDescriptor> typeParameters,
                                  List<MethodExport> methods,
-                                 List<PropertyExport> properties) implements ExportedDeclaration {
+                                 List<PropertyExport> properties,
+                                 boolean sealed,
+                                 List<ContractUseExport> permittedClasses) implements ExportedDeclaration {
         public ContractExport {
             Objects.requireNonNull(qualifiedName);
             typeParameters = List.copyOf(typeParameters);
             methods = List.copyOf(methods);
             properties = List.copyOf(properties);
+            permittedClasses = List.copyOf(permittedClasses);
+        }
+
+        public ContractExport(String qualifiedName,
+                              List<TypeParameterDescriptor> typeParameters,
+                              List<MethodExport> methods,
+                              List<PropertyExport> properties) {
+            this(qualifiedName, typeParameters, methods, properties, false, List.of());
         }
     }
 
@@ -235,6 +248,11 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                     contract.properties().stream()
                                             .map(property -> new PropertyExport(property.name().lexeme(),
                                                     property.type(), property.isMutating()))
+                                            .toList(),
+                                    contract.isSealed(),
+                                    contract.permittedClasses().stream()
+                                            .map(use -> new ContractUseExport(
+                                                    use.name().lexeme(), use.typeArguments()))
                                             .toList()));
                     default -> {}
                 }
@@ -275,7 +293,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v4.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v5.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -326,6 +344,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 writeTypeParameters(output, contract.typeParameters(), context);
                 writeMethods(output, contract.methods(), context);
                 writeProperties(output, contract.properties(), context);
+                output.writeBoolean(contract.sealed());
+                output.writeInt(contract.permittedClasses().size());
+                for (final var permitted : contract.permittedClasses()) {
+                    output.writeUTF(permitted.qualifiedName());
+                    output.writeInt(permitted.typeArguments().size());
+                    for (final var type : permitted.typeArguments()) writeType(output, type, context);
+                }
             }
         }
     }
@@ -364,7 +389,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var context = new ReadContext();
                 final var typeParameters = readTypeParameters(input, context);
                 final var methods = readMethods(input, context);
-                yield new ContractExport(name, typeParameters, methods, readProperties(input, context));
+                final var properties = readProperties(input, context);
+                final var sealed = input.readBoolean();
+                final var permitted = new ArrayList<ContractUseExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var permittedName = input.readUTF();
+                    final var arguments = new ArrayList<TypeDescriptor>();
+                    for (int j = 0, argumentCount = readCount(input); j < argumentCount; j++) {
+                        arguments.add(readType(input, context));
+                    }
+                    permitted.add(new ContractUseExport(permittedName, arguments));
+                }
+                yield new ContractExport(name, typeParameters, methods, properties, sealed, permitted);
             }
             default -> throw new IOException("Unknown declaration kind in Zeron library index.");
         };

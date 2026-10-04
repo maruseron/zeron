@@ -127,6 +127,7 @@ public final class Resolver {
     private String packageName;
     private Map<String, String> currentTypeImports = Map.of();
     private Map<String, String> currentFunctionImports = Map.of();
+    private List<String> currentOnDemandImports = List.of();
     private final Deque<Set<Token>> flowWriteScopes = new ArrayDeque<>();
     private final Deque<LoopFlow> loopFlows = new ArrayDeque<>();
     private final Deque<TypeDescriptor> expectedReturnTypes = new ArrayDeque<>();
@@ -200,16 +201,19 @@ public final class Resolver {
             final var imports = validateImports(unit);
             currentTypeImports = imports.types();
             currentFunctionImports = imports.functions();
+            currentOnDemandImports = imports.onDemandPackages();
             for (final var statement : unit.declarations()) resolve(statement);
         }
         Zeron.debug("resolution finished successfully with symbol table: \n" + symbols);
     }
 
-    private record ImportEnvironment(Map<String, String> types, Map<String, String> functions) {}
+    private record ImportEnvironment(Map<String, String> types, Map<String, String> functions,
+                                     List<String> onDemandPackages) {}
 
     private ImportEnvironment validateImports(final CompilationUnit unit) {
         final var importedTypes = new LinkedHashMap<String, String>();
         final var importedFunctions = new LinkedHashMap<String, String>();
+        final var onDemandPackages = new ArrayList<String>();
         final var localTypeNames = new HashSet<String>();
         final var localValueNames = new HashSet<String>();
         classes.keySet().stream().filter(name -> packageOf(name).equals(unit.packageName()))
@@ -223,6 +227,21 @@ public final class Resolver {
 
         for (final var importDeclaration : unit.imports()) {
             final var target = importDeclaration.qualifiedName();
+            if (importDeclaration.onDemand()) {
+                if (onDemandPackages.contains(target)) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Duplicate star import for package '" + target + "'."));
+                }
+                final var packageExists = classes.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
+                        || contracts.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
+                        || functions.keySet().stream().anyMatch(name -> packageOf(name).equals(target));
+                if (!packageExists) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Unknown Zeron package '" + target + "' in star import."));
+                }
+                onDemandPackages.add(target);
+                continue;
+            }
             final var classDeclaration = classes.get(target);
             final var contractDeclaration = contracts.get(target);
             final var functionDeclaration = functions.get(target);
@@ -273,7 +292,8 @@ public final class Resolver {
                 }
             }
         }
-        return new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions));
+        return new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions),
+                List.copyOf(onDemandPackages));
     }
 
     private void registerFunction(final String ownerPackage, final Stmt.FunctionDeclaration function) {
@@ -437,6 +457,7 @@ public final class Resolver {
     }
 
     private void resolveContract(final Stmt.ContractDecl contract) {
+        validateSealedContract(contract);
         final var methodNames = new HashSet<String>();
         for (final var method : contract.methods()) {
             if (!methodNames.add(method.name().lexeme())) {
@@ -452,6 +473,67 @@ public final class Resolver {
                 Zeron.resolutionError(new ResolutionError(property.name(), "Duplicate contract member."));
             }
             validateType(property.type(), property.name());
+        }
+    }
+
+    private void validateSealedContract(final Stmt.ContractDecl contract) {
+        if (!contract.isSealed()) {
+            if (!contract.permittedClasses().isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(contract.name(),
+                        "Only sealed contracts may declare permitted classes."));
+            }
+            return;
+        }
+        if (contract.permittedClasses().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(contract.name(),
+                    "A sealed contract must declare at least one permitted class."));
+        }
+
+        final var permittedNames = new HashSet<String>();
+        for (final var permitted : contract.permittedClasses()) {
+            final var className = permitted.name().lexeme();
+            if (!permittedNames.add(className)) {
+                Zeron.resolutionError(new ResolutionError(permitted.name(),
+                        "Duplicate permitted class."));
+            }
+            final var implementation = classes.get(className);
+            if (implementation == null) {
+                Zeron.resolutionError(new ResolutionError(permitted.name(),
+                        "Unknown permitted class."));
+            }
+            if (!packageOf(className).equals(packageOf(contract.name().lexeme()))) {
+                Zeron.resolutionError(new ResolutionError(permitted.name(),
+                        "A permitted class must be in the sealed contract's package."));
+            }
+            if (contract.isPublic() && !implementation.isPublic()) {
+                Zeron.resolutionError(new ResolutionError(permitted.name(),
+                        "A public sealed contract can only permit public classes."));
+            }
+            if (implementation.typeParameters().size() != contract.typeParameters().size()
+                    || permitted.typeArguments().size() != contract.typeParameters().size()) {
+                Zeron.resolutionError(new ResolutionError(permitted.name(),
+                        "A permitted class must use the sealed contract's type parameters in order."));
+            }
+            for (int i = 0; i < contract.typeParameters().size(); i++) {
+                if (!permitted.typeArguments().get(i).equals(contract.typeParameters().get(i))) {
+                    Zeron.resolutionError(new ResolutionError(permitted.name(),
+                            "A permitted class must use the sealed contract's type parameters in order."));
+                }
+            }
+            final var conformance = implementation.contractUses().stream()
+                    .filter(use -> use.name().lexeme().equals(contract.name().lexeme()))
+                    .findFirst()
+                    .orElse(null);
+            if (conformance == null || conformance.typeArguments().size() != implementation.typeParameters().size()) {
+                Zeron.resolutionError(new ResolutionError(permitted.name(),
+                        "A permitted class must directly conform to the sealed contract."));
+            }
+            for (int i = 0; i < implementation.typeParameters().size(); i++) {
+                if (!conformance.typeArguments().get(i).equals(implementation.typeParameters().get(i))) {
+                    Zeron.resolutionError(new ResolutionError(permitted.name(),
+                            "A permitted class must conform using its type parameters in order."));
+                }
+            }
         }
     }
 
@@ -534,6 +616,11 @@ public final class Resolver {
                                 + contractUse.typeArguments().size() + "."));
             }
             contractUse.typeArguments().forEach(type -> validateType(type, contractName));
+            if (contract.isSealed() && contract.permittedClasses().stream()
+                    .noneMatch(permitted -> permitted.name().lexeme().equals(declaration.name().lexeme()))) {
+                Zeron.resolutionError(new ResolutionError(contractName,
+                        "Class is not listed in the sealed contract's permits clause."));
+            }
         }
 
         final var previousClass = currentClassName;
@@ -852,6 +939,7 @@ public final class Resolver {
     private void validateType(final TypeDescriptor type, final Token where) {
         switch (type) {
             case NominalDescriptor nominal -> {
+                validateStarTypeAmbiguity(nominal.name(), where);
                 if (!types.contains(nominal.name())) {
                     final var javaClass = javaClassPath.find(nominal.name());
                     if (javaClass == null) {
@@ -885,6 +973,7 @@ public final class Resolver {
             case FunctionDescriptor function -> validateFunctionTypes(function, where);
             case GenericDescriptor generic -> {
                 final var name = generic.baseType().name();
+                validateStarTypeAmbiguity(name, where);
                 final var classDeclaration = classes.get(name);
                 final var contractDeclaration = contracts.get(name);
                 if (classDeclaration == null && contractDeclaration == null) {
@@ -1430,7 +1519,7 @@ public final class Resolver {
                         yield null;
                     }
                 } else {
-                    final var functionName = resolveFunctionName(call.callee.lexeme());
+                    final var functionName = resolveFunctionName(call.callee.lexeme(), call.callee);
                     final var functionToken = functionName == null ? null : functionSymbolTokens.get(functionName);
                     if (functionToken == null) {
                         if (currentMethodOwner == null) {
@@ -1453,9 +1542,23 @@ public final class Resolver {
                 if (descriptor.isGeneric()) {
                     final var resultType = resolveGenericCall(call, descriptor);
                     if ("zeron.collections.allocateArray".equals(call.resolvedFunctionName())) {
-                        final var arrayElement = arrayFillElementType(call.getType(), call.callee);
-                        call.setIntrinsicOperation(resolveIntrinsic(IntrinsicId.ARRAY_FILL,
+                        final var arrayElement = arrayElementType(call.getType(), call.callee);
+                        call.setIntrinsicOperation(resolveIntrinsic(IntrinsicId.ARRAY_ALLOC,
                                 List.of(arrayElement),
+                                call.arguments.stream().map(Expr::getType).toList(), call.callee));
+                    } else if ("zeron.collections.clearArraySlot".equals(call.resolvedFunctionName())) {
+                        final var arrayElement = arrayElementType(call.arguments.getFirst().getType(), call.callee);
+                        call.setIntrinsicOperation(resolveIntrinsic(IntrinsicId.ARRAY_CLEAR_SLOT,
+                                List.of(arrayElement),
+                                call.arguments.stream().map(Expr::getType).toList(), call.callee));
+                    } else if ("zeron.collections.unwrapSome".equals(call.resolvedFunctionName())) {
+                        var optionType = call.arguments.getFirst().getType();
+                        if (optionType instanceof ReferenceDescriptor reference) {
+                            optionType = reference.baseType();
+                        }
+                        final var optionValue = ((GenericDescriptor) optionType).typeParameters().getFirst();
+                        call.setIntrinsicOperation(resolveIntrinsic(IntrinsicId.OPTION_UNWRAP_SOME,
+                                List.of(optionValue),
                                 call.arguments.stream().map(Expr::getType).toList(), call.callee));
                     }
                     yield resultType;
@@ -1657,7 +1760,7 @@ public final class Resolver {
                     yield fieldType;
                 }
                 if (!symbols.containsSymbol(name)) {
-                    final var functionName = resolveFunctionName(name.lexeme());
+                    final var functionName = resolveFunctionName(name.lexeme(), name);
                     if (functionName != null) {
                         final var functionType = (FunctionDescriptor) symbols
                                 .getFunction(functionSymbolTokens.get(functionName)).type();
@@ -2049,7 +2152,7 @@ public final class Resolver {
                                              final TypeDescriptor alreadyResolvedReceiverType) {
         Zeron.debug("resolving member call       " + call.name.lexeme() + " for " + call.receiver);
         final var classOwnerName = call.receiver instanceof Expr.Variable typeName
-            ? resolveClassName(typeName.name.lexeme())
+            ? resolveClassName(typeName.name.lexeme(), typeName.name)
             : null;
         if (call.safeNavigation() && classOwnerName != null) {
             Zeron.resolutionError(new ResolutionError(call.name,
@@ -2507,7 +2610,7 @@ public final class Resolver {
         return descriptor.returnType();
     }
 
-    private String resolveClassName(final String name) {
+    private String resolveClassName(final String name, final Token where) {
         if (classes.containsKey(name)) return name;
         final var importedName = currentTypeImports.get(name);
         if (importedName != null && (classes.containsKey(importedName) || javaClassPath.find(importedName) != null)) {
@@ -2515,13 +2618,58 @@ public final class Resolver {
         }
         final var qualifiedName = packageName.isEmpty() ? name : packageName + "." + name;
         if (classes.containsKey(qualifiedName) || javaClassPath.find(qualifiedName) != null) return qualifiedName;
+        final var starCandidates = starTypeCandidates(name);
+        if (starCandidates.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(where,
+                    "Ambiguous type '" + name + "' from star imports; add an explicit import or alias."));
+        }
+        if (starCandidates.size() == 1) return starCandidates.getFirst();
         return javaClassPath.find(name) != null ? name : null;
     }
 
-    private String resolveFunctionName(final String name) {
+    private List<String> starTypeCandidates(final String simpleTypeName) {
+        return currentOnDemandImports.stream()
+                .filter(importedPackage -> !importedPackage.equals(packageName))
+                .map(importedPackage -> importedPackage + "." + simpleTypeName)
+                .filter(name -> {
+                    final var classDeclaration = classes.get(name);
+                    final var contractDeclaration = contracts.get(name);
+                    return classDeclaration != null && classDeclaration.isPublic()
+                            || contractDeclaration != null && contractDeclaration.isPublic();
+                })
+                .distinct()
+                .toList();
+    }
+
+    private void validateStarTypeAmbiguity(final String qualifiedName, final Token where) {
+        final var importedTypeName = simpleName(qualifiedName);
+        final var fromStarImport = currentOnDemandImports.stream()
+                .anyMatch(importedPackage -> qualifiedName.startsWith(importedPackage + "."));
+        if (fromStarImport && !currentTypeImports.containsValue(qualifiedName)
+                && starTypeCandidates(importedTypeName).size() > 1) {
+            Zeron.resolutionError(new ResolutionError(where,
+                    "Ambiguous type '" + importedTypeName
+                            + "' from star imports; add an explicit import or alias."));
+        }
+    }
+
+    private String resolveFunctionName(final String name, final Token where) {
         final var localName = qualify(packageName, name);
         if (functions.containsKey(localName)) return localName;
-        return currentFunctionImports.get(name);
+        final var explicitImport = currentFunctionImports.get(name);
+        if (explicitImport != null) return explicitImport;
+        final var candidates = currentOnDemandImports.stream()
+                .filter(importedPackage -> !importedPackage.equals(packageName))
+                .map(importedPackage -> qualify(importedPackage, name))
+                .filter(functions::containsKey)
+                .filter(functionName -> ((Stmt.FunctionDeclaration) functions.get(functionName)).isPublic())
+                .distinct()
+                .toList();
+        if (candidates.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(where,
+                    "Ambiguous function '" + name + "' from star imports; add an explicit import or alias."));
+        }
+        return candidates.isEmpty() ? null : candidates.getFirst();
     }
 
     private TypeDescriptor resolveArgument(final Expr argument,
@@ -2542,7 +2690,7 @@ public final class Resolver {
         if (argument instanceof Expr.Variable variable
                 && (variable.resolvedFunctionName() != null
                 || !symbols.containsSymbol(variable.name)
-                && resolveFunctionName(variable.name.lexeme()) != null)) {
+                && resolveFunctionName(variable.name.lexeme(), variable.name) != null)) {
             return resolveFunctionReference(variable, expectedType);
         }
         if (argument instanceof Expr.Lambda lambda) {
@@ -2582,7 +2730,7 @@ public final class Resolver {
     private FunctionDescriptor resolveFunctionReference(final Expr.Variable reference,
                                                          final TypeDescriptor expectedType) {
         final var functionName = reference.resolvedFunctionName() == null
-                ? resolveFunctionName(reference.name.lexeme())
+                ? resolveFunctionName(reference.name.lexeme(), reference.name)
                 : reference.resolvedFunctionName();
         if (functionName == null || symbols.containsSymbol(reference.name)
                 && reference.resolvedFunctionName() == null) {
@@ -2798,15 +2946,12 @@ public final class Resolver {
         throw new IllegalStateException("unreachable");
     }
 
-    private TypeDescriptor arrayFillElementType(final TypeDescriptor resultType, final Token where) {
+    private TypeDescriptor arrayElementType(final TypeDescriptor resultType, final Token where) {
         TypeDescriptor arrayType = resultType;
         if (arrayType instanceof ReferenceDescriptor reference) arrayType = reference.baseType();
-        if (arrayType instanceof ArrayDescriptor array
-                && array.elementType() instanceof NullableDescriptor nullable) {
-            return nullable.baseType();
-        }
+        if (arrayType instanceof ArrayDescriptor array) return array.elementType();
         Zeron.resolutionError(new ResolutionError(where,
-                "The internal array allocator must return a nullable-element array view."));
+                "The internal array operation requires an array value."));
         throw new IllegalStateException("unreachable");
     }
 
@@ -3102,7 +3247,7 @@ public final class Resolver {
                 && variable.explicitFunctionTypeArguments.isEmpty()
                 && variable.resolvedFunctionName() == null
                 && !symbols.containsSymbol(variable.name)
-                && resolveFunctionName(variable.name.lexeme()) != null;
+                && resolveFunctionName(variable.name.lexeme(), variable.name) != null;
     }
 
     private TypeDescriptor resolveGenericCall(final Expr.Call call,

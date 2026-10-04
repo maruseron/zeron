@@ -27,11 +27,13 @@ public final class ZeronLibraryIndexTest {
         final var libraryPackage = "library" + suffix;
         final var appPackage = "app" + suffix;
         final var entryName = "LibraryIndexMain" + suffix;
-        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v2.bin");
+        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v4.bin");
         final var mainPath = Path.of("dist", appPackage, entryName + ".class");
         final var boxPath = Path.of("dist", libraryPackage, "Box.class");
         final var contractPath = Path.of("dist", libraryPackage, "Echo.class");
         final var namedPath = Path.of("dist", libraryPackage, "Named.class");
+        final var holderContractPath = Path.of("dist", libraryPackage, "Holder.class");
+        final var stringHolderPath = Path.of("dist", libraryPackage, "StringHolder.class");
         var functionHolderPath = (Path) null;
         final var entry = parse("app/Main.zn", """
                 package %s;
@@ -40,17 +42,32 @@ public final class ZeronLibraryIndexTest {
         final var library = parse("library/Api.zn", """
                 package %s;
                 public contract Echo<T> {
+                    property tag: Int;
                     echo(value: T): T;
+                    copy<U>(value: U): U;
+                    select<U>(ignored: U): T;
                 }
                 public contract Named {
                     name(): String;
+                    default label(): String = this.name();
                 }
                 public class Box<T> is Echo<T> {
                     value: T;
+                    mirror: T = value;
+                    public property tag: Int = 7;
+                    public property echoValue: T = value;
                     public constructor new;
-                    public read(): T = this.value;
+                    public read(): T = this.mirror;
                     public mut write(value: T): Unit { this.value = value; }
                     public echo(value: T): T = value;
+                    public copy<V>(value: V): V = value;
+                    public select<V>(ignored: V): T = this.value;
+                }
+                public contract Holder<T> {
+                    mut property value: T;
+                }
+                public class StringHolder is Holder<String> {
+                    public mut property value: String;
                 }
                 public fn identity<T>(value: T): T = value;
                 public fn display<T: Named>(value: T): String = value.name();
@@ -97,8 +114,27 @@ public final class ZeronLibraryIndexTest {
             assertEquals(box.typeParameters().getFirst(), box.canonicalConstructorParameters().getFirst());
             assertEquals(libraryPackage + ".Echo", box.contracts().getFirst().qualifiedName());
             assertTrue(box.methods().stream().anyMatch(method -> method.name().equals("read")));
+            assertTrue(box.properties().stream().anyMatch(property -> property.name().equals("tag")
+                    && !property.mutating()));
+            assertEquals(box.typeParameters().getFirst(), box.properties().stream()
+                    .filter(property -> property.name().equals("echoValue"))
+                    .findFirst().orElseThrow().type());
             assertTrue(box.methods().stream().anyMatch(method -> method.name().equals("write")
                     && method.mutating()));
+            final var copy = box.methods().stream()
+                    .filter(method -> method.name().equals("copy"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(1, copy.signature().typeParameters().size());
+            assertEquals(copy.signature().typeParameters().getFirst(), copy.signature().parameters().getFirst());
+            assertEquals(copy.signature().parameters().getFirst(), copy.signature().returnType());
+            final var select = box.methods().stream()
+                    .filter(method -> method.name().equals("select"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(select.signature().typeParameters().getFirst(),
+                    select.signature().parameters().getFirst());
+            assertEquals(box.typeParameters().getFirst(), select.signature().returnType());
 
             final var echo = index.declarations().stream()
                     .filter(ZeronLibraryIndex.ContractExport.class::isInstance)
@@ -106,7 +142,23 @@ public final class ZeronLibraryIndexTest {
                     .filter(type -> type.qualifiedName().equals(libraryPackage + ".Echo"))
                     .findFirst()
                     .orElseThrow();
-            assertEquals(1, echo.methods().size());
+            assertEquals(3, echo.methods().size());
+            assertTrue(echo.properties().stream().anyMatch(property -> property.name().equals("tag")));
+            final var contractSelect = echo.methods().stream()
+                    .filter(method -> method.name().equals("select"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(contractSelect.signature().typeParameters().getFirst(),
+                    contractSelect.signature().parameters().getFirst());
+            assertEquals(echo.typeParameters().getFirst(), contractSelect.signature().returnType());
+            final var named = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.ContractExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ContractExport.class::cast)
+                    .filter(type -> type.qualifiedName().equals(libraryPackage + ".Named"))
+                    .findFirst()
+                    .orElseThrow();
+            assertTrue(named.methods().stream().anyMatch(method -> method.name().equals("label")
+                    && method.defaultMethod()));
             assertFalse(index.declarations().stream()
                     .anyMatch(declaration -> declaration.qualifiedName().equals(libraryPackage + ".hidden")));
             assertFalse(index.declarations().stream()
@@ -118,6 +170,8 @@ public final class ZeronLibraryIndexTest {
             Files.deleteIfExists(boxPath);
             Files.deleteIfExists(contractPath);
             Files.deleteIfExists(namedPath);
+            Files.deleteIfExists(holderContractPath);
+            Files.deleteIfExists(stringHolderPath);
             if (functionHolderPath != null) Files.deleteIfExists(functionHolderPath);
         }
     }
@@ -125,7 +179,7 @@ public final class ZeronLibraryIndexTest {
         @Test
         public void rejectsLibraryIndexesBuiltAgainstAnotherStandardLibraryVersion() throws Exception {
                 final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-incompatible-library-");
-                final var indexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v2.bin"));
+                final var indexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v4.bin"));
                 try {
                         new ZeronLibraryIndex(StandardLibrary.API_VERSION + 1, List.of()).writeTo(indexPath);
                         assertThrows(IOException.class, () -> ZeronLibraryIndex.readFromDirectory(libraryRoot));
@@ -154,17 +208,34 @@ public final class ZeronLibraryIndexTest {
                 final var libraryMainName = libraryPackage + ".LibraryBuilder" + suffix;
                 final var clientMainName = appPackage + ".LibraryConsumer" + suffix;
                 final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-library-classes-");
-                final var libraryIndexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v2.bin"));
+                final var libraryIndexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v4.bin"));
                 final var libraryUnit = parse("library/Api.zn", """
                                 package %s;
                                 public contract Echo<T> {
+                                        property tag: Int;
                                         echo(value: T): T;
+                                        copy<U>(value: U): U;
+                                        select<U>(ignored: U): T;
                                 }
                                 public class Box<T> is Echo<T> {
                                         value: T;
+                                        public property tag: Int = 7;
+                                        public property echoValue: T = value;
                                         public constructor new;
                                         public read(): T = this.value;
                                         public echo(value: T): T = value;
+                                        public copy<V>(value: V): V = value;
+                                        public select<V>(ignored: V): T = this.value;
+                                }
+                                public contract Holder<T> {
+                                        mut property value: T;
+                                }
+                                public contract Named {
+                                        name(): String;
+                                        default label(): String = this.name();
+                                }
+                                public class StringHolder is Holder<String> {
+                                        public mut property value: String;
                                 }
                                 public fn identity<T>(value: T): T = value;
                                 """.formatted(libraryPackage));
@@ -178,7 +249,7 @@ public final class ZeronLibraryIndexTest {
 
                         copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
                         Files.createDirectories(libraryIndexPath.getParent());
-                        Files.copy(Path.of("dist", "META-INF", "zeron", "api-v2.bin"), libraryIndexPath);
+                        Files.copy(Path.of("dist", "META-INF", "zeron", "api-v4.bin"), libraryIndexPath);
                         final var library = ZeronLibraryIndex.readFromDirectory(libraryRoot);
 
                         deleteTree(Path.of("dist"));
@@ -186,13 +257,33 @@ public final class ZeronLibraryIndexTest {
                                         package %s;
                                         import %s.Box as LibraryBox;
                                         import %s.Echo as Echo;
+                                        import %s.Holder as Holder;
+                                        import %s.Named as Named;
+                                        import %s.StringHolder as StringHolder;
                                         import %s.identity as identity;
+                                        class ClientName is Named {
+                                                public constructor new;
+                                                public name(): String = "library default";
+                                        }
                                         fn result(): Int {
                                                 let box = LibraryBox<Int>.new(identity<Int>(55));
                                                 let echo: Echo<Int> = box;
-                                                return echo.echo(box.read());
+                                                return echo.copy(echo.select("ignored"));
                                         }
-                                        """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage));
+                                        fn propertyResult(): Int = LibraryBox<Int>.new(12).tag;
+                                        fn genericPropertyResult(): Int = LibraryBox<Int>.new(14).echoValue;
+                                        fn contractPropertyResult(value: Echo<Int>): Int = value.tag;
+                                        fn genericContractPropertyResult(): String {
+                                                let holder: &Holder<String> = StringHolder.new("one");
+                                                holder.value = "two";
+                                                return holder.value;
+                                        }
+                                        fn libraryDefaultMethodResult(): String {
+                                                let named: Named = ClientName.new();
+                                                return named.label();
+                                        }
+                                                """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage,
+                                        libraryPackage, libraryPackage, libraryPackage));
                         final var clientCompiler = Compiler.forCompilationUnits(
                                         List.of(client), clientMainName, appPackage, List.of(library));
                         clientCompiler.resolve();
@@ -201,6 +292,20 @@ public final class ZeronLibraryIndexTest {
                         try (final var loader = new URLClassLoader(new java.net.URL[]{
                                         Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()}, getClass().getClassLoader())) {
                                 assertEquals(55, loader.loadClass(clientMainName).getMethod("result").invoke(null));
+                                assertEquals(7,
+                                        loader.loadClass(clientMainName).getMethod("propertyResult").invoke(null));
+                                assertEquals(14, loader.loadClass(clientMainName)
+                                        .getMethod("genericPropertyResult").invoke(null));
+                                final var boxClass = loader.loadClass(libraryPackage + ".Box");
+                                final var box = boxClass.getConstructor(Object.class).newInstance(13);
+                                assertEquals(7, loader.loadClass(clientMainName)
+                                        .getMethod("contractPropertyResult",
+                                                loader.loadClass(libraryPackage + ".Echo"))
+                                        .invoke(null, box));
+                                assertEquals("two", loader.loadClass(clientMainName)
+                                        .getMethod("genericContractPropertyResult").invoke(null));
+                                assertEquals("library default", loader.loadClass(clientMainName)
+                                        .getMethod("libraryDefaultMethodResult").invoke(null));
                         }
                 } finally {
                         deleteTree(Path.of("dist"));

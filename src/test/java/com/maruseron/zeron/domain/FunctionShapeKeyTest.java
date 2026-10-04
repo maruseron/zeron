@@ -8,9 +8,7 @@ import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
-import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
-import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;

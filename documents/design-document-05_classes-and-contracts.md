@@ -29,13 +29,15 @@ Class and contract identities are package-qualified across the current compilati
 
 ### Objects, fields, and construction
 
-Class instances are reference-identity heap objects. Every field is private; fields cannot declare visibility, and v1 generates no accessors. Public methods define the class API and preserve control over invariants.
+Class instances are reference-identity heap objects. Fields are private and cannot declare visibility. Visibility-marked properties provide public or private accessor APIs without exposing their backing storage.
 
-Construction must initialize every field before the new object becomes observable. Each class has one
-canonical constructor, which accepts one argument per field in field-declaration order and lowers to
-the JVM `<init>`. If a class omits a canonical-constructor declaration, the compiler synthesizes a
-public one. A class may explicitly declare `private constructor new;` to restrict direct construction;
-an explicit `public constructor new;` remains valid but is redundant.
+Construction must initialize every field before the new object becomes observable. Each class has
+one canonical constructor, which accepts one argument for each field without an initializer, in
+field-declaration order, followed by each uninitialized auto-property in property-declaration order,
+and lowers to the JVM `<init>`. If a class omits a canonical-constructor
+declaration, the compiler synthesizes a public one. A class may explicitly declare
+`private constructor new;` to restrict direct construction; an explicit `public constructor new;`
+remains valid but is redundant.
 
 ```zeron
 class Person {
@@ -47,9 +49,30 @@ let person = Person.new("Ada", 37);
 ```
 
 The compiler generates the JVM `<init>` for `new`; the source call allocates the object and invokes
-the canonical constructor. There are no field initializers or user-written canonical-constructor
-bodies. The canonical constructor is the only object-allocation path and initializes every field
-before exposing the instance.
+the canonical constructor. A field initializer is a fixed class-defined initial value, not a default
+constructor argument: initialized fields and auto-properties are omitted from the constructor
+signature and cannot be overridden by callers. Initializers run once per construction; field
+initializers run in field order followed by auto-property initializers in property order. An
+initializer may use literals, operators, and reads of earlier fields, including earlier
+constructor-supplied fields. It may not read itself or a later field, call functions or methods,
+write state, create lambdas, or otherwise perform unsupported effects. This restricted expression
+set makes initialization order explicit; named constructors can provide alternate values by
+calling the canonical constructor and assigning fields explicitly.
+
+```zeron
+class Server {
+    host: String;
+    port: Int = 8080;
+    secure: Boolean = false;
+    public constructor new;
+}
+
+let server = Server.new("example.com");
+```
+
+The canonical constructor is the only object-allocation path and initializes every field and
+auto-property before
+exposing the instance. There are no user-written canonical-constructor bodies.
 
 Named constructors are additional static factory entry points. They require explicit visibility,
 have a unique name in the class member namespace, and accept either an expression body or a block:
@@ -88,7 +111,56 @@ Preserve three separate questions:
 
 An immutable binding may hold a mutable reference, and a reassignable binding may hold a read-only reference. These are not interchangeable permissions. A fresh `Class.new(...)` expression has type `&Class`; it can be projected to a read-only `Class` view, but a read-only view cannot be upgraded. `&T` does not imply exclusive ownership or borrow checking; aliases may observe the same mutation.
 
-Every class method declares visibility explicitly with `public` or `private`. `mut` is independent of visibility and marks a method that requires a mutable receiver. Method return types are explicit in v1. Fields are private without a modifier. There are no public fields, generated accessors, properties, or compound field assignments.
+Every class method and property declares visibility explicitly with `public` or `private`. `mut` is independent of visibility: for methods it requires a mutable receiver; for properties it adds a setter and requires a mutable receiver for writes. Method return types are explicit in v1. Fields are private without a modifier.
+
+Properties use the same `name: Type` member shape as fields but require visibility. Without an
+accessor block, the compiler provides private backing storage and a getter; `mut` additionally
+provides a setter. An optional initializer supplies the fixed initial value and removes that
+auto-property from canonical constructor parameters.
+
+Custom properties use `get` and `set(value)` accessors with expression or block bodies. The declared
+property type is the getter result and setter parameter type. Custom accessors do not receive hidden
+backing storage; code that needs state declares an ordinary private field and accesses it by name.
+Custom properties require a getter, cannot have an initializer, and require `mut` when they define a
+setter.
+
+Reads require a visible getter. Writes require a setter and a mutable receiver (`&Class` or
+`&Contract`). Compound assignment is supported on writable properties: the receiver is evaluated
+once, then the getter, right-hand side/operator, and setter execute in order. It is a
+read-compute-write operation, not an atomic update. `??=` remains limited to mutable local bindings.
+Safe-navigation assignment is not supported.
+
+Contracts may declare `property name: Type;` for a read-only property or
+`mut property name: Type;` for a writable property. A conforming public class property must have
+the same type; a writable requirement needs
+a setter, while a read-only requirement accepts either read-only or writable implementations.
+Auto-properties and custom accessors satisfy the same contract requirements through generated JVM
+accessor methods.
+
+```zeron
+contract Meter {
+    mut property value: Int;
+}
+
+class Thermostat is Meter {
+    storedValue: Int;
+    public mut property value: Int {
+        get = this.storedValue;
+        set(next) = this.storedValue = next;
+    }
+
+    public property name: String;
+    public mut property target: Int = 20;
+}
+```
+
+Inside an instance method, an unresolved field read or method call may use the current receiver
+implicitly. Lexical locals and parameters take precedence, followed by top-level functions; only
+then are class fields or methods considered. Implicit field reads and method calls use the same
+visibility and receiver-mutability checks as `this.field` and `this.method(...)`. Field writes
+remain explicit and must use `this.field = value`. Lambdas may use implicit members and capture
+the immutable `this` binding under the ordinary lambda-capture rules. Named constructors are static
+factories and do not have implicit `this`.
 
 ```zeron
 class Person {
@@ -96,12 +168,12 @@ class Person {
     age: Int;
     public constructor new;
 
-    public name(): String = this.name;
+    public name(): String = name;
     public mut birthday(): Unit {
-        this.grow();
+        grow();
     }
     private mut grow(): Unit {
-        this.age = this.age + 1;
+        this.age = age + 1;
     }
 }
 ```
@@ -112,24 +184,45 @@ For example, a closure may capture an immutable binding by value. If that bindin
 
 A contract describes required member signatures and permits a value of a concrete class to be used through that abstraction. Conformance should be checked statically: every required member must exist with compatible parameter, return, and receiver-capability types.
 
-Contracts contain required method signatures with explicit return types and no visibility modifier;
-those requirements are public by definition. A class may conform to multiple contracts through a
+Contract methods have explicit return types and no visibility modifier; requirements and default
+implementations are public by definition. `default` introduces an optional concrete method
+implementation, and may precede `mut`:
+
+```zeron
+contract Named {
+    property name: String;
+    default label(): String = this.name;
+}
+```
+
+A default method may call required methods and read required properties through `this`; mutating
+defaults require `default mut` and a mutable receiver. A public class method overrides a compatible
+default. One unique compatible default may satisfy an abstract requirement, including a requirement
+from another contract implemented by the class. Multiple applicable defaults require an explicit
+class method. Default methods have no stored state and compile as JVM interface methods; calls use
+normal interface dispatch. Compiled API indexes preserve whether an exported contract method has a
+default body.
+
+A class may conform to multiple contracts through a
 comma-separated declaration-site list. Every requirement must be satisfied by a compatible public
-class method; parameter types, return types, and receiver mutability must match. Identical
-requirements from several contracts can be satisfied by one method. Conflicting requirements with
+class method or applicable default method. The implementation return type may be assignable to the required return type under
+the existing nominal and nullable compatibility rules; parameter types and receiver mutability must
+still match exactly. Identical requirements from several contracts can be satisfied by one method.
+Conflicting requirements with
 the same name are rejected because overloads are not supported. Calls through contract-typed
 references use interface dispatch. Each class remains final; multiple contract conformance is not
 class inheritance or contract-to-contract inheritance.
 
-Defer default implementations, associated types, multiple inheritance, and intersection types. These features depend on a working base model and should not be prerequisites for ordinary classes or simple contracts.
+Defer associated types, multiple inheritance, and intersection types. These features depend on a
+working base model and should not be prerequisites for ordinary classes or simple contracts.
 
 ### Invariant generic classes and contracts
 
-Class and contract type parameters are scoped to their declaration. Generic nominal types are invariant: `Box<Int>` is distinct from `Box<String>`, and a parameterized class or contract must be used with exactly its declared number of type arguments. Construction supplies explicit arguments on the class type before `.new`; constructor inference is not performed.
+Class and contract type parameters are scoped to their declaration. Methods may declare their own unbounded type parameters after the method name; those parameters are scoped to that method and cannot shadow enclosing class or contract parameters. Member calls infer method arguments from their values and contextual lambdas, or accept explicit arguments before the call argument list. Contract implementations must match generic method signatures up to renaming of method type parameters. Generic nominal types are invariant: `Box<Int>` is distinct from `Box<String>`, and a parameterized class or contract must be used with exactly its declared number of type arguments. Construction supplies explicit arguments on the class type before `.new`; constructor inference is not performed.
 
 Fields, method parameters, method results, `this`, and constructor fields are substituted from the receiver or construction type. Type parameters remain opaque inside generic bodies; operations requiring constraints are rejected. Each declaration emits one JVM class or interface regardless of its source type arguments. Type variables erase to `java.lang.Object`, while parameterized nominal types erase to their raw JVM class.
 
-Generic contracts use declaration-site conformance with explicit contract arguments. Requirements are substituted before checking public visibility, exact parameter and result types, and receiver mutability. Calls through parameterized contract types use interface dispatch. If a concrete implementation signature differs from the erased interface signature, a public synthetic bridge adapts arguments and results with casts and boxing/unboxing as needed.
+Generic contracts use declaration-site conformance with explicit contract arguments. Requirements are substituted before checking public visibility, exact parameter types, covariant result assignability, and receiver mutability. Calls through parameterized contract types use interface dispatch. If a concrete implementation signature differs from the erased interface signature, a public synthetic bridge adapts arguments and results with casts and boxing/unboxing as needed.
 
 Callback adaptation across erased generic nominal boundaries is implemented. Lambdas are contextually resolved against substituted constructor and member signatures; the compiler plans adapters for callback-valued fields, member arguments/results, and erased contract bridges. Generated bridge methods can call the public synthetic static adapters in the program class. Resolver, runtime, and ABI tests cover primitive/reference specializations, field reads/writes, method arguments/results, nested and nullable callbacks, mutable function views, and both contract bridge directions. Broader shape combinations and adapter reuse remain follow-up coverage.
 
@@ -179,18 +272,23 @@ TypeParameters       ::= "<" Identifier {"," Identifier} ">"
 ContractList         ::= ContractUse {"," ContractUse}
 ContractUse          ::= Identifier ["<" TypeList ">"]
 TypeList             ::= Type {"," Type}
-ClassMember          ::= Field | Constructor | NamedConstructor | Method
-Field                ::= Identifier ":" Type ";"
+ClassMember          ::= Field | Property | Constructor | NamedConstructor | Method
+Field                ::= Identifier ":" Type ["=" Expression] ";"
+Property             ::= Visibility ["mut"] "property" Identifier ":" Type ["=" Expression] ";"
+                     |  Visibility ["mut"] "property" Identifier ":" Type "{" PropertyAccessor+ "}"
+PropertyAccessor     ::= "get" ("=" Expression ";" | Block)
+                     |  "set" "(" Identifier ")" ("=" Expression ";" | Block)
 Constructor          ::= Visibility "constructor" "new" ";"
 NamedConstructor     ::= Visibility "constructor" Identifier "(" [ParameterList] ")" MethodBody
 Method               ::= Visibility ["mut"] Identifier "(" [ParameterList] ")" ":" Type MethodBody
-ContractDeclaration  ::= "contract" Identifier [TypeParameters] "{" ContractMethod* "}"
+ContractDeclaration  ::= "contract" Identifier [TypeParameters] "{" (ContractProperty | ContractMethod)* "}"
+ContractProperty     ::= ["mut"] "property" Identifier ":" Type ";"
 ContractMethod       ::= ["mut"] Identifier "(" [ParameterList] ")" ":" Type ";"
 Visibility           ::= "public" | "private"
 MethodBody           ::= "=" Expression ";" | Block
 ```
 
-Fields, methods, and named constructors share one member namespace; duplicate member names and overloads are not supported. Every class has one canonical constructor, synthesized as public when omitted; only `private constructor new;` is needed to restrict direct construction. Named constructors lower to static factories, have no `this`, and return `&Class`; every reachable normal path in a block must return a class reference. Factory bodies may use locals and branches, and may return any expression assignable to `&Class`. Object allocation and initialization still happen only through the canonical constructor. Method calls use `receiver.method(...)`; field reads and writes use `receiver.field` and `receiver.field = value`, with writes allowed only through a mutable view from within the declaring class. `this` names the current receiver.
+Fields, properties, methods, and named constructors share one member namespace; duplicate member names and overloads are not supported. Every class has one canonical constructor, synthesized as public when omitted; only `private constructor new;` is needed to restrict direct construction. Named constructors lower to static factories, have no `this`, and return `&Class`; every reachable normal path in a block must return a class reference. Factory bodies may use locals and branches, and may return any expression assignable to `&Class`. Object allocation and initialization still happen only through the canonical constructor. Method calls use `receiver.method(...)`; property reads and writes use `receiver.property` and `receiver.property = value`. Field reads and writes use explicitly named private storage. `this` names the current receiver. Initializers are fixed values, not optional constructor parameters; only uninitialized fields and auto-properties appear in the canonical constructor signature.
 
 ## Implementation Roadmap
 
@@ -203,7 +301,10 @@ Fields, methods, and named constructors share one member namespace; duplicate me
 3. **Named constructors implemented.** Named factories support expression and block bodies, implicit
     `&Class` returns, generic class substitutions, private canonical construction, and public static
     JVM lowering.
-4. **Expand the type-system surface.** Consider class inheritance, abstract classes,
+4. **Properties implemented.** Visibility-marked auto-properties and explicit custom accessors share
+    the ordinary member namespace; contract property requirements, generic ABI metadata, receiver
+    mutability checks, and receiver-once compound assignment are covered by runtime tests.
+5. **Expand the type-system surface.** Consider class inheritance, abstract classes,
     contract-to-contract inheritance, intersection types, bounds, variance, overload resolution,
     broader inference, and module-qualified type identity as separate designs.
 
@@ -217,6 +318,9 @@ The initial class-and-contract milestone is complete when:
 - Rebinding a variable and mutating an object through a reference are checked independently.
 - Mutating methods cannot be invoked through a read-only reference.
 - Contract conformance and calls through a contract type are statically checked.
+- Auto-properties and custom accessors implement read-only/writable contract property requirements.
+- Writable property assignment requires a mutable receiver; compound assignment evaluates the
+  receiver once and follows getter-compute-setter order.
 - Generic class and contract arguments are invariant, substituted consistently, and erased to one
     raw JVM class/interface per declaration; bridge methods preserve generic contract dispatch.
 - A class instance can be captured by a lambda according to the explicit reference-capability rules, while mutable local bindings remain uncaptured.
@@ -233,7 +337,7 @@ internal array intrinsic registry does not introduce this language feature. See
 for the current distinction between intrinsic IDs and future external/expected declarations.
 
 Class inheritance, abstract classes, bounds, variance, source-level overload resolution, broader
-inference, default contract methods, contract-to-contract inheritance, intersection types, extension
+inference, contract-to-contract inheritance, intersection types, extension
 methods, JPMS integration, serialization, public fields, generated accessors, and ownership/borrow
 checking remain deferred. Class-directory compiled-library discovery and the initial Java interop
 slice are implemented; JAR discovery and broader Java platform integration remain future work. Each deferred feature adds semantic rules that should build

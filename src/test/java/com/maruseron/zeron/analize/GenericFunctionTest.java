@@ -8,13 +8,17 @@ import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.net.URLClassLoader;
 import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -41,6 +45,90 @@ public final class GenericFunctionTest {
         assertEquals(TypeDescriptor.ofString(), bindingType(resolver, statements, "inferred"));
         assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "firstValue"));
         assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "transformed"));
+    }
+
+    @Test
+    public void infersAndExecutesGenericClassAndContractMethods() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var className = "GenericMethods" + suffix;
+        final var classFile = Path.of("dist", "Echo.class");
+        final var contractFile = Path.of("dist", "Transform.class");
+        final var programFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                contract Transform<T> {
+                    echo<V>(value: V): V;
+                }
+                class Echo<T> is Transform<T> {
+                    value: T;
+                    public constructor new;
+                    public echo<U>(value: U): U = value;
+                    public choose<U>(ignored: U): T = this.value;
+                    public apply<U, R>(value: U, transform: (U) -> R): R = transform(value);
+                    public relay<V>(value: V): V = this.echo(value);
+                }
+                fn inferredCall(): Int = Echo<String>.new("stored").echo(7);
+                fn explicitCall(): String = Echo<String>.new("stored").echo<String>("explicit");
+                fn substitutedOwner(): String = Echo<String>.new("stored").choose(1);
+                fn callbackInference(): Int =
+                    Echo<String>.new("stored").apply(3, number -> number + 1);
+                fn nestedInference(): Int = Echo<String>.new("stored").relay(9);
+                fn contractDispatch(): String {
+                    let value: Transform<String> = Echo<String>.new("stored");
+                    return value.echo<String>("contract");
+                }
+                """);
+        final var compiler = new Compiler(statements, className);
+        compiler.resolve();
+
+        try {
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(7, generated.getMethod("inferredCall").invoke(null));
+                assertEquals("explicit", generated.getMethod("explicitCall").invoke(null));
+                assertEquals("stored", generated.getMethod("substitutedOwner").invoke(null));
+                assertEquals(4, generated.getMethod("callbackInference").invoke(null));
+                assertEquals(9, generated.getMethod("nestedInference").invoke(null));
+                assertEquals("contract", generated.getMethod("contractDispatch").invoke(null));
+                final var echoClass = loader.loadClass("Echo");
+                assertEquals("T", echoClass.getTypeParameters()[0].getName());
+                assertEquals("Transform<T>", echoClass.getGenericInterfaces()[0].getTypeName());
+                final var echoMethod = echoClass.getMethod("echo", Object.class);
+                assertEquals("U", echoMethod.getTypeParameters()[0].getName());
+                assertEquals("U", echoMethod.getGenericParameterTypes()[0].getTypeName());
+                assertEquals("U", echoMethod.getGenericReturnType().getTypeName());
+                final var chooseMethod = echoClass.getMethod("choose", Object.class);
+                assertEquals("T", chooseMethod.getGenericReturnType().getTypeName());
+                final var contractMethod = loader.loadClass("Transform")
+                        .getMethod("echo", Object.class);
+                assertEquals("V", contractMethod.getTypeParameters()[0].getName());
+            }
+        } finally {
+            Files.deleteIfExists(programFile);
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(contractFile);
+        }
+    }
+
+    @Test
+    public void rejectsInvalidGenericMethodCallsAndContractSignatures() {
+        for (final var source : List.of(
+                "class Box { public constructor new; public make<T>(value: T): T = value; "
+                        + "public invalid(): Int = this.make(); }",
+                "class Box { public constructor new; public identity<T>(value: T): T = value; "
+                        + "public invalid(): Int = this.identity<Int, String>(1); }",
+                "contract Copy { copy<T>(value: T): T; } "
+                        + "class Invalid is Copy { public constructor new; "
+                        + "public copy<T>(value: Int): Int = value; }",
+                "class Hidden { public constructor new; private identity<T>(value: T): T = value; } "
+                        + "class Other { public constructor new; "
+                        + "public call(): Int = Hidden.new().identity(1); }",
+                "class Box { public constructor new; public mut update<T>(value: T): T = value; } "
+                        + "class Other { public constructor new; "
+                        + "public call(value: Box): Int = value.update(1); }")) {
+            assertThrows(source, ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        }
     }
 
     @Test
@@ -290,6 +378,10 @@ public final class GenericFunctionTest {
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 final var program = loader.loadClass(className);
+                final var identity = program.getMethod("identity", Object.class);
+                assertEquals("T", identity.getTypeParameters()[0].getName());
+                assertEquals("T", identity.getGenericParameterTypes()[0].getTypeName());
+                assertEquals("T", identity.getGenericReturnType().getTypeName());
                 assertEquals(42, program.getMethod("identityInt").invoke(null));
                 assertEquals("zeron", program.getMethod("identityText").invoke(null));
                 assertEquals(17, program.getMethod("firstArray").invoke(null));
@@ -311,11 +403,21 @@ public final class GenericFunctionTest {
         final var statements = parse("""
                 fn apply<T, R>(value: T, transform: (T) -> R): R = transform(value);
                 fn intToString(): String = apply(7, value -> if (value == 7) then "seven" else "other");
+                fn intToInt(): Int = apply(7, value -> value + 1);
+                fn intToFloat(): Float = apply(7, value -> 7.5);
+                fn intToBoolean(): Boolean = apply(7, value -> value == 7);
                 fn stringToInt(): Int = apply("seven", value -> if (value == "seven") then 7 else 0);
+                fn stringToString(): String = apply("seven", value -> value + "!");
                 fn floatToString(): String = apply(2.5, value -> if (value > 2.0) then "wide" else "small");
                 fn stringToFloat(): Float = apply("wide", value -> if (value == "wide") then 4.5 else 1.5);
+                fn floatToInt(): Int = apply(2.5, value -> if (value > 2.0) then 2 else 0);
+                fn floatToFloat(): Float = apply(2.5, value -> value + 0.5);
+                fn floatToBoolean(): Boolean = apply(2.5, value -> value > 2.0);
                 fn booleanToString(): String = apply(true, value -> if (value) then "true" else "false");
                 fn stringToBoolean(): Boolean = apply("true", value -> value == "true");
+                fn booleanToInt(): Int = apply(true, value -> if (value) then 1 else 0);
+                fn booleanToFloat(): Float = apply(true, value -> if (value) then 1.5 else 0.5);
+                fn booleanToBoolean(): Boolean = apply(true, value -> value == false);
                 """);
         final var compiler = new Compiler(statements, className);
         compiler.resolve();
@@ -326,11 +428,78 @@ public final class GenericFunctionTest {
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 final var program = loader.loadClass(className);
                 assertEquals("seven", program.getMethod("intToString").invoke(null));
+                assertEquals(8, program.getMethod("intToInt").invoke(null));
+                assertEquals(7.5, (Double) program.getMethod("intToFloat").invoke(null), 0.0);
+                assertEquals(true, program.getMethod("intToBoolean").invoke(null));
                 assertEquals(7, program.getMethod("stringToInt").invoke(null));
+                assertEquals("seven!", program.getMethod("stringToString").invoke(null));
                 assertEquals("wide", program.getMethod("floatToString").invoke(null));
                 assertEquals(4.5, (Double) program.getMethod("stringToFloat").invoke(null), 0.0);
+                assertEquals(2, program.getMethod("floatToInt").invoke(null));
+                assertEquals(3.0, (Double) program.getMethod("floatToFloat").invoke(null), 0.0);
+                assertEquals(true, program.getMethod("floatToBoolean").invoke(null));
                 assertEquals("true", program.getMethod("booleanToString").invoke(null));
                 assertEquals(true, program.getMethod("stringToBoolean").invoke(null));
+                assertEquals(1, program.getMethod("booleanToInt").invoke(null));
+                assertEquals(1.5, (Double) program.getMethod("booleanToFloat").invoke(null), 0.0);
+                assertEquals(false, program.getMethod("booleanToBoolean").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
+    public void adaptsCapturedCallbacksAcrossReturnedAndStoredGenericBoundaries() throws Exception {
+        final var className = "CapturedGenericCallbacks" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var source = """
+                fn apply<T, R>(value: T, transform: (T) -> R): R = transform(value);
+                fn constant<T, R>(value: R): (T) -> R = ignored -> value;
+                fn returnedPrimitiveCallback(): Int {
+                    let base = 40;
+                    let callback: (Int) -> Int = constant<Int, Int>(base + 1);
+                    let stored = callback;
+                    return apply(1, stored);
+                }
+                fn returnedReferenceCallback(): String {
+                    let captured = "captured";
+                    let callback: (String) -> String = constant<String, String>(captured);
+                    let stored: (String) -> String = callback;
+                    return apply("ignored", stored);
+                }
+                fn callerCaptureThroughGenericCallback(): Int {
+                    let base = 40;
+                    let callback = value -> value + base;
+                    let stored: (Int) -> Int = callback;
+                    return apply(2, stored);
+                }
+                """;
+
+        try {
+            final var firstCompiler = new Compiler(parse(source), className);
+            firstCompiler.resolve();
+            firstCompiler.compile();
+            final var firstMainClass = Files.readAllBytes(classFile);
+            final var firstLambdaClasses = generatedLambdaClasses();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertCapturedCallbackResults(loader, className);
+            }
+
+            final var secondCompiler = new Compiler(parse(source), className);
+            secondCompiler.resolve();
+            secondCompiler.compile();
+            assertArrayEquals(firstMainClass, Files.readAllBytes(classFile));
+            final var secondLambdaClasses = generatedLambdaClasses();
+            assertEquals(firstLambdaClasses.keySet(), secondLambdaClasses.keySet());
+            for (final var entry : firstLambdaClasses.entrySet()) {
+                assertArrayEquals("recompiled lambda interface " + entry.getKey(),
+                        entry.getValue(), secondLambdaClasses.get(entry.getKey()));
+            }
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertCapturedCallbackResults(loader, className);
             }
         } finally {
             Files.deleteIfExists(classFile);
@@ -680,6 +849,26 @@ public final class GenericFunctionTest {
 
     private static List<Stmt> parse(final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
+    }
+
+    private static Map<String, byte[]> generatedLambdaClasses() throws IOException {
+        final var lambdaClasses = new HashMap<String, byte[]>();
+        try (final var files = Files.list(Path.of("dist"))) {
+            for (final var file : files
+                    .filter(path -> path.getFileName().toString().startsWith("Lambda$V1_"))
+                    .toList()) {
+                lambdaClasses.put(file.getFileName().toString(), Files.readAllBytes(file));
+            }
+        }
+        return lambdaClasses;
+    }
+
+    private static void assertCapturedCallbackResults(final URLClassLoader loader,
+                                                      final String className) throws Exception {
+        final var program = loader.loadClass(className);
+        assertEquals(41, program.getMethod("returnedPrimitiveCallback").invoke(null));
+        assertEquals("captured", program.getMethod("returnedReferenceCallback").invoke(null));
+        assertEquals(42, program.getMethod("callerCaptureThroughGenericCallback").invoke(null));
     }
 
     private static TypeDescriptor bindingType(final Resolver resolver,

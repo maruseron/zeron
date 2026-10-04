@@ -32,8 +32,8 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Generic functions accept and return callback values involving type parameters; generated bridge
     methods adapt concrete lambda shapes to and from erased callback interfaces.
 - Higher-order function calls and lambda values, including zero- and multi-parameter lambdas.
-- Nominal classes and contracts with private fields, canonical construction, methods, static
-    conformance checking, and contract dispatch.
+- Nominal classes and contracts with private fields, declaration-ordered field initialization,
+    canonical construction, methods, static conformance checking, and contract dispatch.
 - Invariant generic classes and contracts with explicit construction arguments, member substitution,
     declaration-site conformance, raw JVM erasure, erased-signature bridges, and callback adaptation
     across erased nominal fields and members.
@@ -86,12 +86,19 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     reference, such as `get(index: Int): T` delegating to `contents::get`. Define this as a distinct
     forwarding form, not as a function-reference value or a change to `=` expression bodies; syntax,
     generic substitution, overload resolution, and receiver mutability rules remain to be designed.
+- Default parameters are future work, separate from field initializers. The proposed first design
+    permits defaults only on a trailing sequence of parameters; omitted defaults are evaluated once
+    per call, in parameter order, and may refer only to earlier parameters. Resolve defaults in the
+    declaration's scope, and lower omitted suffixes through generated overloads that delegate to the
+    full-arity implementation. Interactions with methods, contracts, external functions, and
+    separately compiled libraries need further design.
 - Signature-only external/expected declarations remain to be designed; see the
     [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
     Algebraic data types, discriminated unions, and structural or nominal tuples are also future work.
 - Immutable collection types, list comprehensions, and explicit resource management.
-- Null-aware navigation (`?.`), null fallback (`??`/`??=`), and explicit structural/referential
-    equality semantics; see the [small language features discussion](design-document-10_small-miscelaneous.md).
+- Null-aware navigation (`?.`), null-fallback assignment (`??=`), and explicit structural/referential
+    equality semantics remain future work; null coalescing (`??`) is implemented. See the
+    [small language features discussion](design-document-10_small-miscelaneous.md).
 - Extension methods.
 - First-class effect handling and any monadic syntax; the semantics and surface syntax are open.
 
@@ -494,9 +501,11 @@ literals are not implemented. Range values can be stored and iterated later like
 #### Making an iterable
 
 `Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`,
-defined in `src/main/resources/stdlib/iteration.zn`. The CLI loads this file as a separate source
-unit. A custom iterable imports and implements these public contracts through ordinary class
-conformance; arrays retain specialized lowering and ranges use ordinary protocol dispatch.
+defined in `src/main/resources/stdlib/iteration.zn`. The `for` protocol recognizes only the
+fully-qualified `zeron.collections.Iterable<T>` contract; a same-named contract in another package
+does not make a type iterable. A custom iterable imports and implements these public contracts
+through ordinary class conformance; arrays retain specialized lowering and ranges use ordinary
+protocol dispatch.
 
 ```zeron
 package geometry;
@@ -514,9 +523,13 @@ public class PersonList is Iterable<Person> {
 
 Classes are nominal reference types with object identity. A class has private fields, one canonical
 constructor that initializes every field in declaration order, and methods with explicit visibility
-and return types. The canonical constructor is public by default; an explicit private declaration
-can restrict direct construction. Implemented named constructors are static factory methods with
-expression or block bodies and an implicit `&Class` result:
+and return types. Fields may have fixed initializers; these are evaluated during construction and
+are not overrideable constructor defaults. Only fields without initializers become canonical
+constructor parameters, in declaration order. Initializers may contain literals, operators, and
+reads of earlier fields, but not calls, writes, or lambdas. The canonical constructor is public by
+default; an explicit private declaration can restrict direct construction. Implemented named
+constructors are static factory methods with expression or block bodies and an implicit `&Class`
+result:
 
 ```zeron
 class Person {
@@ -533,11 +546,13 @@ class Person {
 let person = Person.fromName("Ada");
 ```
 
-Construction initializes every field exactly once. Omitting a canonical declaration synthesizes a
-public constructor; `private constructor new;` restricts direct construction. Fields are private and
-there are no public fields, generated accessors, properties, or user-written canonical-constructor
-bodies. Named factories have no `this`; block bodies must return `&Class` on every normal path, and
-all object allocation still goes through canonical `new`. Methods provide the class API. Contracts declare required method signatures; the
+Construction initializes every field and auto-property exactly once. Omitting a canonical
+declaration synthesizes a public constructor; `private constructor new;` restricts direct
+construction. Fields remain private. Visibility-marked properties generate getters, and `mut`
+properties also generate setters; custom accessors use explicitly declared backing fields. Named
+factories have no `this`; block bodies must return `&Class` on every normal path, and all object
+allocation still goes through canonical `new`. Methods and properties provide the class API.
+Contracts can require method signatures and read-only or writable properties; the
 source design permits multiple declaration-site conformances, checked statically, and calls through
 contract-typed references use interface dispatch, including when a class conforms to multiple
 contracts. Separate `implement` declarations, default methods, contract inheritance, and class

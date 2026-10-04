@@ -1,7 +1,9 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.StandardLibrary;
 import com.maruseron.zeron.compile.Compiler;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
@@ -172,15 +174,8 @@ public final class ControlFlowTest {
 
     @Test
     public void resolvesForOverAUserDefinedIterable() {
-        final var source = parse("""
-                contract Iterator<T> {
-                    hasNext(): Boolean;
-                    mut next(): T;
-                }
-                contract Iterable<T> {
-                    iterator(): &Iterator<T>;
-                }
-                class CounterIterator is Iterator<Int> {
+        final var source = parseUnit("""
+                class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
                     public hasNext(): Boolean = this.index < 3;
@@ -190,9 +185,9 @@ public final class ControlFlowTest {
                         return value;
                     }
                 }
-                class Counter is Iterable<Int> {
+                class Counter is zeron.collections.Iterable<Int> {
                     public constructor new;
-                    public iterator(): &Iterator<Int> = CounterIterator.new(0);
+                    public iterator(): &zeron.collections.Iterator<Int> = CounterIterator.new(0);
                 }
                 fn sum(): Int {
                     let mut result = 0;
@@ -203,14 +198,12 @@ public final class ControlFlowTest {
                 }
                 """);
 
-        new Resolver().resolve(source);
+        new Resolver().resolveUnits(StandardLibrary.withBundledUnits(List.of(source)));
     }
 
     @Test
-    public void compilesForUserDefinedIterableWithBreakContinueAndSingleEvaluation() throws Exception {
-        final var className = "IterableForGenerated" + UUID.randomUUID().toString().replace("-", "");
-        final var classFile = Path.of("dist", className + ".class");
-        final var declarations = parse("""
+    public void rejectsSameNamedLocalIterableProtocol() {
+        final var source = parse("""
                 contract Iterator<T> {
                     hasNext(): Boolean;
                     mut next(): T;
@@ -219,6 +212,27 @@ public final class ControlFlowTest {
                     iterator(): &Iterator<T>;
                 }
                 class CounterIterator is Iterator<Int> {
+                    public constructor new;
+                    public hasNext(): Boolean = false;
+                    public mut next(): Int = 0;
+                }
+                class Counter is Iterable<Int> {
+                    public constructor new;
+                    public iterator(): &Iterator<Int> = CounterIterator.new();
+                }
+                fn invalid(): Unit {
+                    for (let value in Counter.new()) {}
+                }
+                """);
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(source));
+    }
+
+    @Test
+    public void compilesForUserDefinedIterableWithBreakContinueAndSingleEvaluation() throws Exception {
+        final var className = "IterableForGenerated" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var declarations = parseUnit("""
+                class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
                     public hasNext(): Boolean = this.index < 5;
@@ -228,11 +242,11 @@ public final class ControlFlowTest {
                         return value;
                     }
                 }
-                class Counter is Iterable<Int> {
+                class Counter is zeron.collections.Iterable<Int> {
                     public constructor new;
-                    public iterator(): &Iterator<Int> = CounterIterator.new(0);
+                    public iterator(): &zeron.collections.Iterator<Int> = CounterIterator.new(0);
                 }
-                class SingleIterator<T> is Iterator<T> {
+                class SingleIterator<T> is zeron.collections.Iterator<T> {
                     value: T;
                     ready: Boolean;
                     public constructor new;
@@ -242,13 +256,14 @@ public final class ControlFlowTest {
                         return this.value;
                     }
                 }
-                class Single<T> is Iterable<T> {
+                class Single<T> is zeron.collections.Iterable<T> {
                     value: T;
                     public constructor new;
-                    public iterator(): &Iterator<T> = SingleIterator<T>.new(this.value, true);
+                    public iterator(): &zeron.collections.Iterator<T> =
+                        SingleIterator<T>.new(this.value, true);
                 }
                 let mut sourceCalls = 0;
-                fn makeCounter(): Iterable<Int> {
+                fn makeCounter(): zeron.collections.Iterable<Int> {
                     sourceCalls += 1;
                     return Counter.new();
                 }
@@ -272,7 +287,8 @@ public final class ControlFlowTest {
                 """);
 
         try {
-            final var compiler = new Compiler(declarations, className);
+            final var compiler = Compiler.forCompilationUnits(
+                    StandardLibrary.withBundledUnits(List.of(declarations)), className, "");
             compiler.resolve();
             compiler.compile();
 
@@ -447,5 +463,9 @@ public final class ControlFlowTest {
 
     private static List<Stmt> parse(final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
+    }
+
+    private static CompilationUnit parseUnit(final String source) {
+        return Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit("ControlFlowTest.zn");
     }
 }

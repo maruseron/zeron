@@ -80,13 +80,18 @@ Class mutation follows these rules:
     `public` or `private`; there is no inferred mutation effect.
 - Calling a `mut` method requires a mutable receiver view (`&Class`). Non-`mut` methods may be
     called through either mutable or read-only views.
-- Fields remain private and have no visibility modifier, generated accessor, or setter. Field reads
+- Fields remain private and have no visibility modifier or generated accessor. Field reads
     are available inside the declaring class; field writes are allowed only there and require a
-    mutable receiver. Field writes use direct assignment; compound field assignment is unsupported.
+    mutable receiver. Field writes use direct assignment.
+- A property declared `mut` has a setter; assigning through it requires a mutable receiver.
+    Compound property assignment evaluates its receiver once, then calls the getter, computes the
+    new value, and calls the setter. This read-compute-write sequence is not atomic.
+- Contracts may require read-only or writable properties. A writable requirement needs a setter;
+    a read-only requirement accepts either kind of implementation.
 - Contracts declare whether a required method is `mut`; a conforming public class method must match
     that receiver capability exactly.
-- Methods cannot overload by receiver capability. Fields and methods share one member namespace,
-    and duplicate member names are rejected.
+- Methods cannot overload by receiver capability. Fields, properties, and methods share one member
+    namespace, and duplicate member names are rejected.
 
 These rules do not change binding reassignment: rebinding the local name still separately requires
 `let mut`.
@@ -110,8 +115,8 @@ On the JVM, these permissions normally need no new runtime class representation:
 
 1. **Binding reassignment baseline: implemented.** The AST and bindings use an explicit policy; resolver and compiler handle reassignment, with sample coverage for local/global writes and shadow restoration.
 2. **Preserve `&T` in the type model: implemented.** Reference capability is resolved and enforced for arrays, function views, classes, and contracts. Mutable-to-read-only projection is allowed; the reverse is rejected.
-3. **Specify class mutation operations: implemented.** Explicit `mut` methods require mutable receivers; visibility is independent. Fields are private, have no setters/accessors, and may be assigned only inside their declaring class through a mutable receiver. Method overloads by receiver capability are unsupported.
-4. **Extend capability checks to class members: implemented.** The resolver checks mutable receivers for mutating class and contract methods, and checks mutable receivers and declaring-class access for field writes.
+3. **Specify class mutation operations: implemented.** Explicit `mut` methods require mutable receivers; visibility is independent. Fields are private and may be assigned only inside their declaring class through a mutable receiver. Method overloads by receiver capability are unsupported.
+4. **Extend capability checks to class members: implemented.** The resolver checks mutable receivers for mutating class and contract methods and writable property assignment, and checks mutable receivers and declaring-class access for field writes.
 5. **Expand tests around the distinction: implemented baseline.** Resolver and runtime tests cover binding reassignment, class mutation, read-only rejection, field privacy, and array/function projections. Extend these tests when additional member forms are designed.
 
 ## Design Decision

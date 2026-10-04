@@ -20,6 +20,7 @@ public sealed interface Expr {
         public final Token paren;
         public final List<Expr> arguments;
         public final List<TypeDescriptor> explicitTypeArguments;
+        private final boolean safeNavigation;
         private TypeDescriptor type;
         private FunctionDescriptor resolvedDescriptor;
         private String resolvedClassName;
@@ -29,16 +30,24 @@ public sealed interface Expr {
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
+            this(receiver, name, paren, arguments, explicitTypeArguments, type, false);
+        }
+
+        public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
+                          List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type,
+                          boolean safeNavigation) {
             this.receiver = receiver;
             this.name = name;
             this.paren = paren;
             this.arguments = List.copyOf(arguments);
             this.explicitTypeArguments = List.copyOf(explicitTypeArguments);
             this.type = type;
+            this.safeNavigation = safeNavigation;
         }
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+        public boolean safeNavigation() { return safeNavigation; }
         public FunctionDescriptor resolvedDescriptor() { return resolvedDescriptor; }
         public void setResolvedDescriptor(FunctionDescriptor descriptor) { resolvedDescriptor = descriptor; }
         public String resolvedClassName() { return resolvedClassName; }
@@ -54,19 +63,32 @@ public sealed interface Expr {
     final class Property implements Expr {
         public final Expr receiver;
         public final Token name;
+        private final boolean safeNavigation;
         private TypeDescriptor type;
         private ResolvedIntrinsicOperation intrinsicOperation;
+        private String resolvedOwnerName;
+        private boolean resolvedAsProperty;
 
         public Property(Expr receiver, Token name, TypeDescriptor type) {
+            this(receiver, name, type, false);
+        }
+
+        public Property(Expr receiver, Token name, TypeDescriptor type, boolean safeNavigation) {
             this.receiver = receiver;
             this.name = name;
             this.type = type;
+            this.safeNavigation = safeNavigation;
         }
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+        public boolean safeNavigation() { return safeNavigation; }
         public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }
         public void setIntrinsicOperation(ResolvedIntrinsicOperation operation) { intrinsicOperation = operation; }
+        public String resolvedOwnerName() { return resolvedOwnerName; }
+        public void setResolvedOwnerName(final String ownerName) { resolvedOwnerName = ownerName; }
+        public boolean resolvedAsProperty() { return resolvedAsProperty; }
+        public void setResolvedAsProperty(final boolean value) { resolvedAsProperty = value; }
     }
 
     final class PropertyAssignment implements Expr {
@@ -82,6 +104,26 @@ public sealed interface Expr {
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+    }
+
+    final class PropertyCompoundAssignment implements Expr {
+        public final Property property;
+        public final Token operator;
+        public final Expr value;
+        private TypeDescriptor type;
+        private Binary resolvedOperation;
+
+        public PropertyCompoundAssignment(Property property, Token operator, Expr value) {
+            this.property = property;
+            this.operator = operator;
+            this.value = value;
+            this.type = TypeDescriptor.ofUnit();
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(TypeDescriptor type) { this.type = type; }
+        public Binary resolvedOperation() { return resolvedOperation; }
+        public void setResolvedOperation(final Binary operation) { resolvedOperation = operation; }
     }
 
     final class Assignment implements Expr {
@@ -121,6 +163,21 @@ public sealed interface Expr {
                     "value=" + value + ", " +
                     "type=" + type + ']';
         }
+    }
+
+    final class CoalesceAssignment implements Expr {
+        public final Token name;
+        public final Expr value;
+        private TypeDescriptor type;
+
+        public CoalesceAssignment(final Token name, final Expr value) {
+            this.name = name;
+            this.value = value;
+            this.type = TypeDescriptor.ofInfer();
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor resolvedType) { type = resolvedType; }
     }
 
     final class ArrayLiteral implements Expr {
@@ -273,6 +330,7 @@ public sealed interface Expr {
         private TypeDescriptor type;
         private FunctionDescriptor genericFunctionType;
         private String resolvedFunctionName;
+        private MemberCall implicitMemberCall;
 
         public Call(Token callee, Token paren, List<Expr> arguments,
                     List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -297,6 +355,8 @@ public sealed interface Expr {
 
         public String resolvedFunctionName() { return resolvedFunctionName; }
         public void setResolvedFunctionName(final String name) { resolvedFunctionName = name; }
+        public MemberCall implicitMemberCall() { return implicitMemberCall; }
+        public void setImplicitMemberCall(final MemberCall call) { implicitMemberCall = call; }
 
         public void setGenericFunctionType(final FunctionDescriptor functionType) {
             this.genericFunctionType = functionType;
@@ -528,6 +588,27 @@ public sealed interface Expr {
         }
     }
 
+    final class Coalesce implements Expr {
+        public final Expr left;
+        public final Token operator;
+        public final Expr right;
+        private TypeDescriptor leftNonNullType;
+        private TypeDescriptor type;
+
+        public Coalesce(final Expr left, final Token operator, final Expr right) {
+            this.left = left;
+            this.operator = operator;
+            this.right = right;
+            this.leftNonNullType = TypeDescriptor.ofInfer();
+            this.type = TypeDescriptor.ofInfer();
+        }
+
+        public TypeDescriptor leftNonNullType() { return leftNonNullType; }
+        public void setLeftNonNullType(final TypeDescriptor resolvedType) { leftNonNullType = resolvedType; }
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor resolvedType) { type = resolvedType; }
+    }
+
     final class Unary implements Expr {
         public final Token operator;
         public final Expr right;
@@ -575,6 +656,9 @@ public sealed interface Expr {
         private FunctionDescriptor sourceFunctionType;
         private FunctionDescriptor specializedFunctionType;
         private FunctionDescriptor storedFunctionType;
+        private Expr implicitFieldReceiver;
+        private String implicitFieldOwner;
+        private TypeDescriptor implicitFieldType;
 
         public Variable(Token name, TypeDescriptor type) {
             this(name, type, List.of());
@@ -602,6 +686,14 @@ public sealed interface Expr {
         public void setSpecializedFunctionType(final FunctionDescriptor type) { specializedFunctionType = type; }
         public FunctionDescriptor storedFunctionType() { return storedFunctionType; }
         public void setStoredFunctionType(final FunctionDescriptor type) { storedFunctionType = type; }
+        public Expr implicitFieldReceiver() { return implicitFieldReceiver; }
+        public String implicitFieldOwner() { return implicitFieldOwner; }
+        public TypeDescriptor implicitFieldType() { return implicitFieldType; }
+        public void setImplicitFieldRead(final Expr receiver, final String owner, final TypeDescriptor fieldType) {
+            implicitFieldReceiver = receiver;
+            implicitFieldOwner = owner;
+            implicitFieldType = fieldType;
+        }
 
         public boolean equals(Object obj) {
             if (obj == this) return true;

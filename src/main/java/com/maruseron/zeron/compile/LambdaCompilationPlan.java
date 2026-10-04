@@ -16,6 +16,7 @@ final class LambdaCompilationPlan {
 
     private record FunctionAdapterKey(FunctionDescriptor source, FunctionDescriptor target) {}
     private record FunctionReferenceKey(String functionName, FunctionDescriptor targetType) {}
+    private record LambdaMemberKey(String owner, String member) {}
 
     private final SymbolTable symbols;
     private final Map<String, Stmt.ClassDecl> classes = new LinkedHashMap<>();
@@ -30,6 +31,9 @@ final class LambdaCompilationPlan {
     private final Map<FunctionAdapterKey, String> nullableFunctionAdapterNames = new LinkedHashMap<>();
     private final Map<FunctionReferenceKey, FunctionReference> functionReferences = new LinkedHashMap<>();
     private final Map<Expr.Variable, FunctionReference> referencesByExpression = new IdentityHashMap<>();
+    private final Set<LambdaMemberKey> lambdaFieldReads = new HashSet<>();
+    private final Set<LambdaMemberKey> lambdaFieldWrites = new HashSet<>();
+    private final Set<LambdaMemberKey> lambdaMethodCalls = new HashSet<>();
     private Map<String, TypeDescriptor> activeCaptureTypes;
 
     LambdaCompilationPlan(final List<Stmt> declarations, final SymbolTable symbols) {
@@ -63,6 +67,18 @@ final class LambdaCompilationPlan {
 
     List<TypeDescriptor> captureTypes(final Expr.Lambda lambda) {
         return lambdaCaptureTypes.getOrDefault(lambda, List.of());
+    }
+
+    boolean needsLambdaFieldReadBridge(final String owner, final String field) {
+        return lambdaFieldReads.contains(new LambdaMemberKey(owner, field));
+    }
+
+    boolean needsLambdaFieldWriteBridge(final String owner, final String field) {
+        return lambdaFieldWrites.contains(new LambdaMemberKey(owner, field));
+    }
+
+    boolean needsLambdaMethodBridge(final String owner, final String method) {
+        return lambdaMethodCalls.contains(new LambdaMemberKey(owner, method));
     }
 
     List<FunctionAdapter> adapters() {
@@ -104,6 +120,12 @@ final class LambdaCompilationPlan {
         switch (statement) {
             case Stmt.ClassDecl declaration -> {
                 for (final var field : declaration.fields()) collectFunctionShapes(field.type());
+                for (final var property : declaration.properties()) {
+                    collectFunctionShapes(property.type());
+                    if (property.initializer() != null) collectLambdaShapes(property.initializer());
+                    if (property.getterBody() != null) collectLambdaShapes(property.getterBody());
+                    if (property.setterBody() != null) collectLambdaShapes(property.setterBody());
+                }
                 for (final var method : declaration.methods()) {
                     for (final var parameter : method.typeDescriptor().parameters()) collectFunctionShapes(parameter);
                     collectFunctionShapes(method.typeDescriptor().returnType());
@@ -122,7 +144,9 @@ final class LambdaCompilationPlan {
                 for (final var method : declaration.methods()) {
                     for (final var parameter : method.typeDescriptor().parameters()) collectFunctionShapes(parameter);
                     collectFunctionShapes(method.typeDescriptor().returnType());
+                    collectLambdaShapes(method.body());
                 }
+                for (final var property : declaration.properties()) collectFunctionShapes(property.type());
             }
             case Stmt.Function(Token _, List<Token> _, FunctionDescriptor type, List<Stmt> body, boolean _) -> {
                 for (final var parameter : type.parameters()) collectFunctionShapes(parameter);
@@ -200,6 +224,12 @@ final class LambdaCompilationPlan {
                 collectLambdaShapes(assignment.property.receiver);
                 collectLambdaShapes(assignment.value);
             }
+            case Expr.PropertyCompoundAssignment assignment -> {
+                collectFieldWriteAdapter(new Expr.PropertyAssignment(
+                        assignment.property, assignment.value, TypeDescriptor.ofUnit()));
+                collectLambdaShapes(assignment.property.receiver);
+                collectLambdaShapes(assignment.value);
+            }
             case Expr.ArrayLiteral literal -> {
                 for (final var element : literal.elements) collectLambdaShapes(element);
             }
@@ -226,8 +256,17 @@ final class LambdaCompilationPlan {
                 collectLambdaShapes(binary.left);
                 collectLambdaShapes(binary.right);
             }
+            case Expr.Coalesce coalesce -> {
+                collectLambdaShapes(coalesce.left);
+                collectLambdaShapes(coalesce.right);
+            }
+            case Expr.CoalesceAssignment assignment -> collectLambdaShapes(assignment.value);
             case Expr.Call call -> {
                 collectFunctionAdapters(call);
+                if (call.implicitMemberCall() != null) {
+                    collectMemberCallAdapters(call.implicitMemberCall());
+                    collectLambdaShapes(call.implicitMemberCall().receiver);
+                }
                 for (final var argument : call.arguments) collectLambdaShapes(argument);
             }
             case Expr.Grouping grouping -> collectLambdaShapes(grouping.expression);
@@ -244,6 +283,7 @@ final class LambdaCompilationPlan {
                 } else if (variable.storedFunctionType() != null) {
                     collectFunctionAdapters(variable.storedFunctionType(), variable.getType());
                 }
+                collectLambdaShapes(variable.implicitFieldReceiver());
             }
             case Expr.Literal _ -> {}
             case null -> {}
@@ -351,14 +391,27 @@ final class LambdaCompilationPlan {
         if (expr == null) return;
         switch (expr) {
             case Expr.MemberCall call -> {
+                lambdaMethodCalls.add(new LambdaMemberKey(
+                        call.resolvedOwnerName() == null
+                                ? nominalName(call.receiver.getType())
+                                : call.resolvedOwnerName(),
+                        call.name.lexeme()));
                 collectCapturedVariables(call.receiver, localNames, captured, seen);
                 for (final var argument : call.arguments) {
                     collectCapturedVariables(argument, localNames, captured, seen);
                 }
             }
             case Expr.Property property ->
-                    collectCapturedVariables(property.receiver, localNames, captured, seen);
+                    collectCapturedProperty(property, localNames, captured, seen);
             case Expr.PropertyAssignment assignment -> {
+                final var owner = nominalName(assignment.property.receiver.getType());
+                if (!assignment.property.resolvedAsProperty()) {
+                    lambdaFieldWrites.add(new LambdaMemberKey(owner, assignment.property.name.lexeme()));
+                }
+                collectCapturedVariables(assignment.property.receiver, localNames, captured, seen);
+                collectCapturedVariables(assignment.value, localNames, captured, seen);
+            }
+            case Expr.PropertyCompoundAssignment assignment -> {
                 collectCapturedVariables(assignment.property.receiver, localNames, captured, seen);
                 collectCapturedVariables(assignment.value, localNames, captured, seen);
             }
@@ -375,11 +428,22 @@ final class LambdaCompilationPlan {
                 collectCapturedVariables(assignment.value, localNames, captured, seen);
             }
             case Expr.Assignment assignment -> collectCapturedVariables(assignment.value, localNames, captured, seen);
+            case Expr.CoalesceAssignment assignment ->
+                    collectCapturedVariables(assignment.value, localNames, captured, seen);
             case Expr.Binary binary -> {
                 collectCapturedVariables(binary.left, localNames, captured, seen);
                 collectCapturedVariables(binary.right, localNames, captured, seen);
             }
             case Expr.Call call -> {
+                if (call.implicitMemberCall() != null) {
+                    final var implicitCall = call.implicitMemberCall();
+                    lambdaMethodCalls.add(new LambdaMemberKey(
+                            implicitCall.resolvedOwnerName() == null
+                                    ? nominalName(implicitCall.receiver.getType())
+                                    : implicitCall.resolvedOwnerName(),
+                            implicitCall.name.lexeme()));
+                    collectCapturedVariables(implicitCall.receiver, localNames, captured, seen);
+                }
                 for (final var argument : call.arguments) {
                     collectCapturedVariables(argument, localNames, captured, seen);
                 }
@@ -402,6 +466,12 @@ final class LambdaCompilationPlan {
             }
             case Expr.Unary unary -> collectCapturedVariables(unary.right, localNames, captured, seen);
             case Expr.Variable variable -> {
+                if (variable.implicitFieldReceiver() != null) {
+                    lambdaFieldReads.add(new LambdaMemberKey(
+                            variable.implicitFieldOwner(), variable.name.lexeme()));
+                    collectCapturedVariables(variable.implicitFieldReceiver(), localNames, captured, seen);
+                    return;
+                }
                 final var name = variable.name.lexeme();
                 if (localNames.contains(name)) return;
                 if ((symbols.containsSymbol(variable.name) || symbols.containsAnySymbol(variable.name))
@@ -414,6 +484,17 @@ final class LambdaCompilationPlan {
             }
             default -> {}
         }
+    }
+
+    private void collectCapturedProperty(final Expr.Property property,
+                                         final Set<String> localNames,
+                                         final List<Token> captured,
+                                         final Set<String> seen) {
+        if (property.intrinsicOperation() == null && !property.resolvedAsProperty()) {
+            lambdaFieldReads.add(new LambdaMemberKey(
+                    nominalName(property.receiver.getType()), property.name.lexeme()));
+        }
+        collectCapturedVariables(property.receiver, localNames, captured, seen);
     }
 
     private void collectFunctionAdapters(final Expr.Call call) {
@@ -437,9 +518,10 @@ final class LambdaCompilationPlan {
         if (call.name.lexeme().equals("new") && call.receiver instanceof Expr.Variable typeName) {
             final var declaration = classes.get(typeName.name.lexeme());
             if (declaration == null) return;
-            for (int i = 0; i < Math.min(call.arguments.size(), declaration.fields().size()); i++) {
+            final var constructorTypes = declaration.canonicalConstructorTypes();
+            for (int i = 0; i < Math.min(call.arguments.size(), constructorTypes.size()); i++) {
                 collectFunctionAdapters(call.arguments.get(i).getType(),
-                        TypeSubstitution.erase(declaration.fields().get(i).type()));
+                        TypeSubstitution.erase(constructorTypes.get(i)));
             }
             return;
         }
@@ -472,7 +554,24 @@ final class LambdaCompilationPlan {
 
     private void collectFieldReadAdapter(final Expr.Property property) {
         final var declaration = classes.get(nominalName(property.receiver.getType()));
-        if (declaration == null) return;
+        if (declaration == null) {
+            final var contract = contracts.get(nominalName(property.receiver.getType()));
+            if (contract == null) return;
+            contract.properties().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
+                    .findFirst()
+                    .ifPresent(candidate -> collectFunctionAdapters(
+                            TypeSubstitution.erase(candidate.type()), property.getType()));
+            return;
+        }
+        final var classProperty = declaration.properties().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
+                .findFirst()
+                .orElse(null);
+        if (classProperty != null) {
+            collectFunctionAdapters(TypeSubstitution.erase(classProperty.type()), property.getType());
+            return;
+        }
         final var field = field(declaration, property.name.lexeme());
         if (field != null) {
             collectFunctionAdapters(TypeSubstitution.erase(field.type()), property.getType());
@@ -482,7 +581,25 @@ final class LambdaCompilationPlan {
     private void collectFieldWriteAdapter(final Expr.PropertyAssignment assignment) {
         final var property = assignment.property;
         final var declaration = classes.get(nominalName(property.receiver.getType()));
-        if (declaration == null) return;
+        if (declaration == null) {
+            final var contract = contracts.get(nominalName(property.receiver.getType()));
+            if (contract != null) {
+                contract.properties().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
+                        .findFirst()
+                        .ifPresent(candidate -> collectFunctionAdapters(assignment.value.getType(),
+                                TypeSubstitution.erase(candidate.type())));
+            }
+            return;
+        }
+        final var classProperty = declaration.properties().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
+                .findFirst()
+                .orElse(null);
+        if (classProperty != null) {
+            collectFunctionAdapters(assignment.value.getType(), TypeSubstitution.erase(classProperty.type()));
+            return;
+        }
         final var field = field(declaration, property.name.lexeme());
         if (field != null) {
             collectFunctionAdapters(assignment.value.getType(), TypeSubstitution.erase(field.type()));
@@ -507,6 +624,17 @@ final class LambdaCompilationPlan {
                 }
                 collectFunctionAdapters(implementation.typeDescriptor().returnType(),
                         TypeSubstitution.erase(required.typeDescriptor().returnType()));
+            }
+            for (final var required : contract.properties()) {
+                final var implementation = declaration.properties().stream()
+                        .filter(property -> property.name().lexeme().equals(required.name().lexeme()))
+                        .findFirst()
+                        .orElse(null);
+                if (implementation == null) continue;
+                collectFunctionAdapters(implementation.type(), TypeSubstitution.erase(required.type()));
+                if (required.isMutating()) {
+                    collectFunctionAdapters(TypeSubstitution.erase(required.type()), implementation.type());
+                }
             }
         }
     }

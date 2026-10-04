@@ -30,15 +30,22 @@ classDecl               : "class" IDENTIFIER [typeParameters]
                           ["is" contractUse {"," contractUse}]
                           "{" classMember* "}" ;
 contractUse             : qualifiedName [typeArguments] ;
-classMember             : fieldDecl | constructorDecl | namedConstructorDecl | methodDecl ;
+classMember             : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl | methodDecl ;
 fieldDecl               : IDENTIFIER ":" type ";" ;
+propertyDecl            : visibility ["mut"] "property" IDENTIFIER ":" type ["=" expression]
+                          (";" | "{" propertyAccessor+ "}") ;
+propertyAccessor        : "get" ("=" expression ";" | block)
+                        | "set" "(" IDENTIFIER ")" ("=" expression ";" | block) ;
 constructorDecl         : visibility "constructor" "new" ";" ;
 namedConstructorDecl    : visibility "constructor" IDENTIFIER "(" parameters ")"
                           ("=" expression ";" | block) ;
-methodDecl              : visibility ["mut"] IDENTIFIER "(" parameters ")" ":" type
+methodDecl              : visibility ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
                           ("=" expression ";" | block) ;
-contractDecl            : "contract" IDENTIFIER [typeParameters] "{" contractMethod* "}" ;
-contractMethod          : ["mut"] IDENTIFIER "(" parameters ")" ":" type ";" ;
+contractDecl            : "contract" IDENTIFIER [typeParameters] "{" contractMember* "}" ;
+contractMember          : contractProperty | contractMethod ;
+contractProperty        : ["mut"] "property" IDENTIFIER ":" type ";" ;
+contractMethod          : ["default"] ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
+                          (";" | "=" expression ";" | block) ;
 visibility              : "public" | "private" ;
 
 statement               : exprStmt
@@ -63,15 +70,16 @@ untilStmt               : "until" "(" expression ")" statement ;
 block                   : "{" { declaration } "}" ;
 
 expression              : assignment ;
-assignment              : logicOr [assignmentOperator assignment] ;
+assignment              : coalesce [assignmentOperator assignment] ;
 assignmentOperator      : "=" | "+=" | "-=" | "*=" | "/=" | "%="
-                        | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>=" ;
+                        | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>=" | "??=" ;
+coalesce                : logicOr ["??" coalesce] ;
 logicOr                 : logicAnd {"or" logicAnd} ;
 logicAnd                : bitwiseOr {"and" bitwiseOr} ;
 bitwiseOr               : bitwiseXor {"|" bitwiseXor} ;
 bitwiseXor              : bitwiseAnd {"^" bitwiseAnd} ;
 bitwiseAnd              : equality {"&" equality} ;
-equality                : typeTest {("!=" | "==") typeTest} ;
+equality                : typeTest {("!=" | "==" | "===") typeTest} ;
 typeTest                : comparison ["is" ["not"] type] ;
 comparison              : shift {(">" | ">=" | "<" | "<=") shift} ;
 shift                   : term {("<<" | ">>" | ">>>") term} ;
@@ -82,7 +90,7 @@ unary                   : ("not" | "-" | "+" | "~" | "typeof") unary
 cast                    : call {"as" ["?"] type} ;
 call                    : (genericFunctionCall | genericClassFactoryCall | functionValueReference | primary)
                           {callSuffix} ;
-callSuffix              : arguments | "[" expression "]" | "." IDENTIFIER ;
+callSuffix              : arguments | "[" expression "]" | ("." | "?.") IDENTIFIER ;
 genericFunctionCall     : IDENTIFIER typeArguments arguments ;
 functionValueReference : IDENTIFIER "::" typeArguments ;
 genericClassFactoryCall : IDENTIFIER typeArguments "." IDENTIFIER arguments ;
@@ -116,10 +124,20 @@ range                   : INT ".." INT ;
 # - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
 # - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
 #   An explicit `private constructor new;` makes canonical construction private.
+# - Fields and auto-properties may have initializers. Initialized members are omitted from canonical
+#   constructor parameters. Uninitialized fields are parameters first, followed by uninitialized
+#   auto-properties, each in declaration order within its group.
+# - A visibility-marked class `property` has a generated getter; `mut` adds a generated setter which
+#   requires a mutable receiver. A custom accessor block replaces generated accessors. Custom
+#   properties require a getter and use explicitly declared fields for backing storage.
+# - Contracts may require read-only properties (`property name: Type;`) or writable properties
+#   (`mut property name: Type;`). Implementations may use auto or custom accessors.
 # - Named constructors are static factories with explicit visibility and either expression or block
 #   bodies. Their result type is implicitly `&Class`, they have no `this`, and every reachable normal
 #   path in a block must return an `&Class` value. Allocation still uses the canonical `Class.new`.
-# - A generic function must have an explicit return type. Generic method declarations are not supported.
+# - Generic functions and methods must have explicit return types. Method type parameters are
+#   unbounded, scoped to that method, and cannot shadow enclosing class or contract parameters.
+#   Calls infer type arguments from arguments or accept explicit arguments before the argument list.
 # - Generic function values use `name::<Type, ...>` for explicit specialization, or a bare name
 #   when an expected function type determines every type parameter. These values are monomorphic.
 # - Generic functions may constrain a type parameter with one contract bound (`T: Contract`). Class
@@ -136,8 +154,8 @@ range                   : INT ".." INT ;
 # - Output uses ordinary imported calls to `zeron.io.print` and `zeron.io.println`; `print` is not a
 #   statement keyword.
 # - Assignment targets are variables, properties, or array indices. Compound assignment is supported
-#   only for variables and includes arithmetic, remainder, bitwise, and shift operators; property
-#   and index assignment accept '=' only.
+#   for variables and writable properties; property receivers are evaluated once, then the getter,
+#   operator, and setter run in that order. Indexed assignment accepts '=' only.
 # - `%` accepts matching `Int` or `Float` operands and follows JVM remainder semantics. Bitwise `&`,
 #   `|`, `^`, `~` and shifts require `Int`; `>>>` is zero-filling. Shift distances follow JVM Int
 #   behavior (only the low five bits are used).

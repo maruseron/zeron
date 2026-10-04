@@ -25,7 +25,7 @@ import java.util.function.Function;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 2;
+    public static final int VERSION = 4;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -67,17 +67,26 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         parameterNames(method.signature(), className.line()), method.signature(), true,
                         method.mutating(), List.of()))
                     .toList();
+                final var properties = classExport.properties().stream()
+                    .map(property -> new Stmt.Property(token(property.name()), property.type(), null,
+                            true, property.mutating(), null, null, null, false))
+                    .toList();
                 statements.add(new Stmt.ClassDecl(className, classExport.typeParameters(), contractUses,
-                    fields, constructor, namedConstructors, methods, true));
+                    fields, properties, constructor, namedConstructors, methods, true));
             }
             case ContractExport contract -> {
                 final var contractName = token(contract.qualifiedName());
                 final var methods = contract.methods().stream()
                     .map(method -> new Stmt.ContractMethod(token(method.name()),
                         parameterNames(method.signature(), contractName.line()), method.signature(),
-                        method.mutating()))
+                        method.mutating(), method.defaultMethod(), List.of()))
                     .toList();
-                statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(), methods, true));
+                final var properties = contract.properties().stream()
+                    .map(property -> new Stmt.ContractProperty(token(property.name()),
+                            property.type(), property.mutating()))
+                    .toList();
+                statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(),
+                        methods, properties, true));
             }
             }
         }
@@ -107,7 +116,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                               List<TypeDescriptor> canonicalConstructorParameters,
                               boolean canonicalConstructorPublic,
                               List<NamedConstructorExport> namedConstructors,
-                              List<MethodExport> methods) implements ExportedDeclaration {
+                              List<MethodExport> methods,
+                              List<PropertyExport> properties) implements ExportedDeclaration {
         public ClassExport {
             Objects.requireNonNull(qualifiedName);
             typeParameters = List.copyOf(typeParameters);
@@ -115,16 +125,19 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             canonicalConstructorParameters = List.copyOf(canonicalConstructorParameters);
             namedConstructors = List.copyOf(namedConstructors);
             methods = List.copyOf(methods);
+            properties = List.copyOf(properties);
         }
     }
 
     public record ContractExport(String qualifiedName,
                                  List<TypeParameterDescriptor> typeParameters,
-                                 List<MethodExport> methods) implements ExportedDeclaration {
+                                 List<MethodExport> methods,
+                                 List<PropertyExport> properties) implements ExportedDeclaration {
         public ContractExport {
             Objects.requireNonNull(qualifiedName);
             typeParameters = List.copyOf(typeParameters);
             methods = List.copyOf(methods);
+            properties = List.copyOf(properties);
         }
     }
 
@@ -142,10 +155,22 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
     }
 
-    public record MethodExport(String name, FunctionDescriptor signature, boolean mutating) {
+    public record MethodExport(String name, FunctionDescriptor signature,
+                               boolean mutating, boolean defaultMethod) {
         public MethodExport {
             Objects.requireNonNull(name);
             Objects.requireNonNull(signature);
+        }
+
+        public MethodExport(String name, FunctionDescriptor signature, boolean mutating) {
+            this(name, signature, mutating, false);
+        }
+    }
+
+    public record PropertyExport(String name, TypeDescriptor type, boolean mutating) {
+        public PropertyExport {
+            Objects.requireNonNull(name);
+            Objects.requireNonNull(type);
         }
     }
 
@@ -181,7 +206,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                         .map(use -> new ContractUseExport(use.name().lexeme(), use.typeArguments()))
                                         .toList(),
                                 classDeclaration.constructor().isPublic()
-                                        ? classDeclaration.fields().stream().map(Stmt.Field::type).toList()
+                                        ? classDeclaration.canonicalConstructorTypes()
                                         : List.of(),
                                 classDeclaration.constructor().isPublic(),
                                 classDeclaration.namedConstructors().stream()
@@ -193,13 +218,23 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                         .filter(Stmt.Method::isPublic)
                                         .map(method -> new MethodExport(method.name().lexeme(),
                                                 method.typeDescriptor(), method.isMutating()))
+                                        .toList(),
+                                classDeclaration.properties().stream()
+                                        .filter(Stmt.Property::isPublic)
+                                        .map(property -> new PropertyExport(property.name().lexeme(),
+                                                property.type(), property.isMutating()))
                                         .toList()));
                     }
                     case Stmt.ContractDecl contract when contract.isPublic() ->
                             exports.add(new ContractExport(contract.name().lexeme(), contract.typeParameters(),
                                     contract.methods().stream()
                                             .map(method -> new MethodExport(method.name().lexeme(),
-                                                    method.typeDescriptor(), method.isMutating()))
+                                                    method.typeDescriptor(), method.isMutating(),
+                                                    method.isDefault()))
+                                            .toList(),
+                                    contract.properties().stream()
+                                            .map(property -> new PropertyExport(property.name().lexeme(),
+                                                    property.type(), property.isMutating()))
                                             .toList()));
                     default -> {}
                 }
@@ -240,7 +275,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v2.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v4.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -282,6 +317,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     writeFunction(output, constructor.signature(), context);
                 }
                 writeMethods(output, classExport.methods(), context);
+                writeProperties(output, classExport.properties(), context);
             }
             case ContractExport contract -> {
                 output.writeByte(3);
@@ -289,6 +325,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var context = new WriteContext();
                 writeTypeParameters(output, contract.typeParameters(), context);
                 writeMethods(output, contract.methods(), context);
+                writeProperties(output, contract.properties(), context);
             }
         }
     }
@@ -318,14 +355,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 for (int i = 0, count = readCount(input); i < count; i++) {
                     constructors.add(new NamedConstructorExport(input.readUTF(), readFunction(input, context)));
                 }
+                final var methods = readMethods(input, context);
                 yield new ClassExport(name, typeParameters, contracts, constructorParameters, canonicalPublic,
-                        constructors, readMethods(input, context));
+                        constructors, methods, readProperties(input, context));
             }
             case 3 -> {
                 final var name = input.readUTF();
                 final var context = new ReadContext();
                 final var typeParameters = readTypeParameters(input, context);
-                yield new ContractExport(name, typeParameters, readMethods(input, context));
+                final var methods = readMethods(input, context);
+                yield new ContractExport(name, typeParameters, methods, readProperties(input, context));
             }
             default -> throw new IOException("Unknown declaration kind in Zeron library index.");
         };
@@ -338,6 +377,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         for (final var method : methods) {
             output.writeUTF(method.name());
             output.writeBoolean(method.mutating());
+            output.writeBoolean(method.defaultMethod());
             writeFunction(output, method.signature(), context);
         }
     }
@@ -348,9 +388,32 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         for (int i = 0, count = readCount(input); i < count; i++) {
             final var name = input.readUTF();
             final var mutating = input.readBoolean();
-            methods.add(new MethodExport(name, readFunction(input, context), mutating));
+            final var defaultMethod = input.readBoolean();
+            methods.add(new MethodExport(name, readFunction(input, context), mutating, defaultMethod));
         }
         return methods;
+    }
+
+    private static void writeProperties(final DataOutputStream output,
+                                        final List<PropertyExport> properties,
+                                        final WriteContext context) throws IOException {
+        output.writeInt(properties.size());
+        for (final var property : properties) {
+            output.writeUTF(property.name());
+            output.writeBoolean(property.mutating());
+            writeType(output, property.type(), context);
+        }
+    }
+
+    private static List<PropertyExport> readProperties(final DataInputStream input,
+                                                       final ReadContext context) throws IOException {
+        final var properties = new ArrayList<PropertyExport>();
+        for (int i = 0, count = readCount(input); i < count; i++) {
+            final var name = input.readUTF();
+            final var mutating = input.readBoolean();
+            properties.add(new PropertyExport(name, readType(input, context), mutating));
+        }
+        return List.copyOf(properties);
     }
 
     private static void writeFunction(final DataOutputStream output,

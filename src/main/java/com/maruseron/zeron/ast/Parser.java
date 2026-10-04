@@ -2,7 +2,6 @@ package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.UnitLiteral;
-import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
@@ -14,7 +13,6 @@ import com.maruseron.zeron.scan.TokenType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -225,6 +223,12 @@ public final class Parser {
 
     private Map<String, TypeParameterDescriptor> typeParameterDeclaration(final Token declarationName,
                                                                           final boolean allowBounds) {
+        return typeParameterDeclaration(declarationName, allowBounds, false);
+    }
+
+    private Map<String, TypeParameterDescriptor> typeParameterDeclaration(final Token declarationName,
+                                                                          final boolean allowBounds,
+                                                                          final boolean rejectShadowing) {
         if (!match(LESS)) return Map.of();
         final var scopeId = TYPE_PARAMETER_SCOPES.incrementAndGet();
         final var parameters = new LinkedHashMap<String, TypeParameterDescriptor>();
@@ -233,10 +237,15 @@ public final class Parser {
             if (parameters.containsKey(parameter.lexeme())) {
                 error(parameter, "Duplicate type parameter.");
             }
+            if (rejectShadowing && activeTypeParameters.containsKey(parameter.lexeme())) {
+                error(parameter, "Method type parameters cannot shadow enclosing type parameters.");
+            }
             var descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme());
             parameters.put(parameter.lexeme(), descriptor);
             if (match(COLON)) {
-                if (!allowBounds) error(parameter, "Bounds are currently supported only on generic functions.");
+                if (!allowBounds) {
+                    error(parameter, "Type-parameter bounds are supported only on top-level generic functions.");
+                }
                 final var enclosingTypeParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(parameters);
                 final var bound = collectType();
@@ -272,6 +281,7 @@ public final class Parser {
             consume(LEFT_BRACE, "Expect '{' before class members.");
 
             final var fields = new ArrayList<Stmt.Field>();
+            final var properties = new ArrayList<Stmt.Property>();
             final var namedConstructors = new ArrayList<Stmt.NamedConstructor>();
             final var methods = new ArrayList<Stmt.Method>();
             Stmt.Constructor constructor = null;
@@ -289,7 +299,15 @@ public final class Parser {
                                     List.copyOf(typeParameters.values())));
                         }
                     } else {
-                        methods.add(classMethod(isPublic));
+                        final var isMutating = match(MUT);
+                        if (match(PROPERTY)) {
+                            final var propertyName = consume(IDENTIFIER, "Expect property name.");
+                            consume(COLON, "Expect ':' after property name.");
+                            properties.add(classProperty(propertyName, isPublic, isMutating));
+                        } else {
+                            final var memberName = consume(IDENTIFIER, "Expect method name or 'property'.");
+                            methods.add(classMethod(isPublic, isMutating, memberName));
+                        }
                     }
                 } else if (match(CONSTRUCTOR)) {
                     error(previous(), "Constructors must declare 'public' or 'private' visibility.");
@@ -297,8 +315,9 @@ public final class Parser {
                     final var fieldName = consume(IDENTIFIER, "Expect field name or explicitly visible method.");
                     consume(COLON, "Expect ':' after field name.");
                     final var fieldType = collectType();
+                    final var initializer = match(EQUAL) ? expression() : null;
                     consume(SEMICOLON, "Expect ';' after field declaration.");
-                    fields.add(new Stmt.Field(fieldName, fieldType));
+                    fields.add(new Stmt.Field(fieldName, fieldType, initializer));
                 }
             }
             consume(RIGHT_BRACE, "Expect '}' after class members.");
@@ -307,19 +326,93 @@ public final class Parser {
                 constructor = new Stmt.Constructor(canonicalName, true);
                 }
             return new Stmt.ClassDecl(name, List.copyOf(typeParameters.values()), List.copyOf(contractUses),
-                    List.copyOf(fields), constructor, List.copyOf(namedConstructors), List.copyOf(methods),
+                    List.copyOf(fields), List.copyOf(properties), constructor,
+                    List.copyOf(namedConstructors), List.copyOf(methods),
                     isTopLevelPublic);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
     }
 
-    private Stmt.Method classMethod(final boolean isPublic) {
-        final var isMutating = match(MUT);
-        final var name = consume(IDENTIFIER, "Expect method name.");
-        final var signature = methodSignature(name, false);
-        return new Stmt.Method(name, signature.parameters(), signature.typeDescriptor(),
-                isPublic, isMutating, signature.body());
+    private Stmt.Method classMethod(final boolean isPublic,
+                                    final boolean isMutating,
+                                    final Token name) {
+        final var methodTypeParameters = typeParameterDeclaration(name, false, true);
+        final var enclosingTypeParameters = activeTypeParameters;
+        activeTypeParameters = new LinkedHashMap<>(enclosingTypeParameters);
+        activeTypeParameters.putAll(methodTypeParameters);
+        try {
+            final var signature = methodSignature(name, false,
+                    List.copyOf(methodTypeParameters.values()));
+            return new Stmt.Method(name, signature.parameters(), signature.typeDescriptor(),
+                    isPublic, isMutating, signature.body());
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
+        }
+    }
+
+    private Stmt.Property classProperty(final Token name,
+                                        final boolean isPublic,
+                                        final boolean isMutating) {
+        final var type = collectType();
+        final var initializer = match(EQUAL) ? expression() : null;
+        List<Stmt> getterBody = null;
+        List<Stmt> setterBody = null;
+        Token setterParameter = null;
+        if (match(LEFT_BRACE)) {
+            final var previousLevel = levelMarker;
+            levelMarker = new LevelMarker(levelMarker);
+            try {
+                while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                    if (match(GET)) {
+                        if (getterBody != null) error(previous(), "Duplicate property getter.");
+                        getterBody = accessorBody("getter");
+                    } else if (match(SET)) {
+                        if (setterBody != null) error(previous(), "Duplicate property setter.");
+                        consume(LEFT_PAREN, "Expect '(' after 'set'.");
+                        setterParameter = consume(IDENTIFIER, "Expect setter value parameter.");
+                        consume(RIGHT_PAREN, "Expect ')' after setter parameter.");
+                        setterBody = accessorBody("setter");
+                    } else {
+                        throw error(peek(), "Expect 'get' or 'set' in property accessor block.");
+                    }
+                }
+                consume(RIGHT_BRACE, "Expect '}' after property accessors.");
+            } finally {
+                levelMarker = previousLevel;
+            }
+        } else {
+            consume(SEMICOLON, "Expect ';' after property declaration.");
+        }
+        if (getterBody != null && setterBody == null && isMutating) {
+            error(name, "A 'mut' property requires a setter.");
+        }
+        if ((getterBody != null || setterBody != null) && getterBody == null) {
+            error(name, "A custom property requires a getter.");
+        }
+        if (!isMutating && setterBody != null) {
+            error(name, "A property setter requires 'mut'.");
+        }
+        if (getterBody == null && setterBody != null) {
+            error(name, "A custom setter requires a getter.");
+        }
+        if (initializer != null && getterBody != null) {
+            error(name, "A custom property cannot have an initializer.");
+        }
+        return new Stmt.Property(name, type, initializer, isPublic, isMutating,
+                getterBody, setterParameter, setterBody);
+    }
+
+    private List<Stmt> accessorBody(final String accessorName) {
+        if (match(EQUAL)) {
+            final var expression = expression();
+            consume(SEMICOLON, "Expect ';' after " + accessorName + " expression.");
+            return List.of(accessorName.equals("getter")
+                    ? new Stmt.Return(expression)
+                    : new Stmt.Expression(expression));
+        }
+        consume(LEFT_BRACE, "Expect '=' or '{' before " + accessorName + " body.");
+        return block();
     }
 
     private Stmt.NamedConstructor namedConstructor(final Token constructorName,
@@ -376,16 +469,36 @@ public final class Parser {
         try {
             consume(LEFT_BRACE, "Expect '{' before contract members.");
             final var methods = new ArrayList<Stmt.ContractMethod>();
+            final var properties = new ArrayList<Stmt.ContractProperty>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                final var isDefault = match(DEFAULT);
                 final var isMutating = match(MUT);
+                if (match(PROPERTY)) {
+                    if (isDefault) error(previous(), "Contract properties cannot have default implementations.");
+                    final var propertyName = consume(IDENTIFIER, "Expect property name.");
+                    consume(COLON, "Expect ':' after property name.");
+                    properties.add(new Stmt.ContractProperty(propertyName, collectType(), isMutating));
+                    consume(SEMICOLON, "Expect ';' after contract property requirement.");
+                    continue;
+                }
                 final var methodName = consume(IDENTIFIER, "Expect contract method name.");
-                final var signature = methodSignature(methodName, true);
-                methods.add(new Stmt.ContractMethod(methodName, signature.parameters(),
-                        signature.typeDescriptor(), isMutating));
+                final var methodTypeParameters = typeParameterDeclaration(methodName, false, true);
+                final var enclosingMethodTypeParameters = activeTypeParameters;
+                activeTypeParameters = new LinkedHashMap<>(enclosingMethodTypeParameters);
+                activeTypeParameters.putAll(methodTypeParameters);
+                try {
+                    final var signature = methodSignature(methodName, !isDefault,
+                            List.copyOf(methodTypeParameters.values()));
+                    methods.add(new Stmt.ContractMethod(methodName, signature.parameters(),
+                            signature.typeDescriptor(), isMutating, isDefault,
+                            isDefault ? signature.body() : List.of()));
+                } finally {
+                    activeTypeParameters = enclosingMethodTypeParameters;
+                }
             }
             consume(RIGHT_BRACE, "Expect '}' after contract members.");
                 return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()), List.copyOf(methods),
-                    isTopLevelPublic);
+                    List.copyOf(properties), isTopLevelPublic);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -395,7 +508,9 @@ public final class Parser {
                                 com.maruseron.zeron.domain.FunctionDescriptor typeDescriptor,
                                 List<Stmt> body) {}
 
-    private ParsedMethod methodSignature(final Token name, final boolean isContract) {
+    private ParsedMethod methodSignature(final Token name,
+                                         final boolean isContract,
+                                         final List<TypeParameterDescriptor> typeParameters) {
         consume(LEFT_PAREN, "Expect '(' after method name.");
         final var parameterNames = new ArrayList<Token>();
         final var parameterTypes = new ArrayList<TypeDescriptor>();
@@ -413,8 +528,8 @@ public final class Parser {
         final var returnType = hasReturnType ? collectType() : TypeDescriptor.ofUnit();
         if (!hasReturnType) error(name, "Class and contract methods require an explicit return type.");
 
-        final var descriptor = TypeDescriptor.functionOf(name.lexeme(), returnType,
-                parameterTypes.toArray(TypeDescriptor[]::new));
+        final var descriptor = TypeDescriptor.genericFunctionOf(name.lexeme(), returnType,
+                parameterTypes, typeParameters);
         if (isContract) {
             consume(SEMICOLON, "Expect ';' after contract method signature.");
             return new ParsedMethod(List.copyOf(parameterNames), descriptor, List.of());
@@ -427,8 +542,8 @@ public final class Parser {
             consume(SEMICOLON, "Expect ';' after method expression.");
             levelMarker = levelMarker.enclosing();
             return new ParsedMethod(List.copyOf(parameterNames),
-                    TypeDescriptor.functionOf(name.lexeme(), returnType,
-                            parameterTypes.toArray(TypeDescriptor[]::new)), body);
+                    TypeDescriptor.genericFunctionOf(name.lexeme(), returnType,
+                            parameterTypes, typeParameters), body);
         }
 
         consume(LEFT_BRACE, "Expect '{' before method body.");
@@ -655,7 +770,16 @@ public final class Parser {
     }
 
     private Expr assignment() {
-        var expr = or();
+        var expr = coalesce();
+
+        if (match(HUH_HUH_EQUAL)) {
+            final var operator = previous();
+            final var value = assignment();
+            if (expr instanceof Expr.Variable variable) {
+                return new Expr.CoalesceAssignment(variable.name, value);
+            }
+            error(operator, "'??=' can only assign to a mutable local variable.");
+        }
 
         if (match(PLUS_EQUAL, MINUS_EQUAL, STAR_EQUAL, SLASH_EQUAL, PERCENT_EQUAL,
             AMPERSAND_EQUAL, PIPE_EQUAL, CARET_EQUAL, SHIFT_LEFT_EQUAL,
@@ -664,7 +788,10 @@ public final class Parser {
             final var value = assignment();
 
             if (expr instanceof Expr.Property property) {
-                if (operator.type() != EQUAL) error(operator, "Field assignment currently supports '=' only.");
+                if (operator.type() != EQUAL) {
+                    return new Expr.PropertyCompoundAssignment(
+                            property, compoundOperator(operator), value);
+                }
                 return new Expr.PropertyAssignment(property, value, TypeDescriptor.ofInfer());
             }
 
@@ -729,6 +856,34 @@ public final class Parser {
             error(operator, "Invalid assignment target.");
         }
 
+        return expr;
+    }
+
+    private Token compoundOperator(final Token assignmentOperator) {
+        final var operator = switch (assignmentOperator.type()) {
+            case PLUS_EQUAL -> PLUS;
+            case MINUS_EQUAL -> MINUS;
+            case STAR_EQUAL -> STAR;
+            case SLASH_EQUAL -> SLASH;
+            case PERCENT_EQUAL -> PERCENT;
+            case AMPERSAND_EQUAL -> AMPERSAND;
+            case PIPE_EQUAL -> PIPE;
+            case CARET_EQUAL -> CARET;
+            case SHIFT_LEFT_EQUAL -> SHIFT_LEFT;
+            case SHIFT_RIGHT_EQUAL -> SHIFT_RIGHT;
+            case UNSIGNED_SHIFT_RIGHT_EQUAL -> UNSIGNED_SHIFT_RIGHT;
+            default -> throw new IllegalArgumentException("Not a compound assignment operator.");
+        };
+        return new Token(operator, assignmentOperator.lexeme().substring(
+                0, assignmentOperator.lexeme().length() - 1), null, assignmentOperator.line());
+    }
+
+    private Expr coalesce() {
+        final var expr = or();
+        if (match(HUH_HUH)) {
+            final var operator = previous();
+            return new Expr.Coalesce(expr, operator, coalesce());
+        }
         return expr;
     }
 
@@ -799,7 +954,7 @@ public final class Parser {
     private Expr equality() {
         var expr = typeTest();
 
-        while (match(BANG_EQUAL, EQUAL_EQUAL)) {
+        while (match(BANG_EQUAL, EQUAL_EQUAL, EQUAL_EQUAL_EQUAL)) {
             final var operator = previous();
             final var right = typeTest();
             expr = new Expr.Binary(expr, operator, right, TypeDescriptor.ofBoolean());
@@ -917,6 +1072,13 @@ public final class Parser {
                 consume(GREATER, "Expect '>' after type arguments.");
                 consume(LEFT_PAREN, "Expect '(' after type arguments.");
                 expr = finishCall(variable.name, typeArguments);
+            } else if (expr instanceof Expr.Property property && check(LESS)
+                    && looksLikeTypeArgumentsCall()) {
+                advance();
+                final var typeArguments = collectTypeArguments();
+                consume(GREATER, "Expect '>' after method type arguments.");
+                consume(LEFT_PAREN, "Expect '(' after method type arguments.");
+                expr = finishMemberCall(property, typeArguments);
             } else if (match(LEFT_PAREN)) {
                 if (expr instanceof Expr.Variable variable) {
                     expr = finishCall(variable.name, variable.explicitFunctionTypeArguments);
@@ -929,19 +1091,16 @@ public final class Parser {
                 final var index = expression();
                 consume(RIGHT_BRACKET, "Expect ']' after array index.");
                 expr = new Expr.Index(expr, index, TypeDescriptor.ofInfer());
-            } else if (match(DOT)) {
+            } else if (match(DOT, HUH_DOT)) {
+                final var safeNavigation = previous().type() == HUH_DOT;
                 final var property = consume(IDENTIFIER, "Expect member name after '.'.");
-                expr = new Expr.Property(expr, property, TypeDescriptor.ofInfer());
+                expr = new Expr.Property(expr, property, TypeDescriptor.ofInfer(), safeNavigation);
             } else {
                 break;
             }
         }
 
         return expr;
-    }
-
-    private Expr finishCall(final Token callee) {
-        return finishCall(callee, List.of());
     }
 
     private Expr finishCall(final Token callee, final List<TypeDescriptor> typeArguments) {
@@ -987,7 +1146,7 @@ public final class Parser {
         }
         final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
         return new Expr.MemberCall(property.receiver, property.name, paren, arguments,
-                explicitTypeArguments, TypeDescriptor.ofInfer());
+                explicitTypeArguments, TypeDescriptor.ofInfer(), property.safeNavigation());
     }
 
     private boolean looksLikeGenericFactoryCall() {

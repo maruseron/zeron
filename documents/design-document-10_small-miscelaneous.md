@@ -2,18 +2,19 @@
 
 ## Status
 
-This is a low-priority discussion note for nullable navigation, null fallback, and equality. It sketches
-possible behavior and lists decisions that should be made before implementation. Nothing here commits
-to syntax or semantics beyond behavior already present in the language.
+This note records the implementation status and semantics for nullable navigation, null fallback, and
+equality, including remaining design questions.
 
 Declaration-site class conformance to contracts is already implemented (`class C is Contract`); it is
 not a proposed feature in this note. See [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md).
 
 ## Current Foundation
 
-- Nullable types (`T?`), null checks, flow refinement, checked casts, and safe casts are implemented.
-- `?.` is tokenized by the scanner but has no expression semantics. `??` and `??=` are not
-  implemented.
+- Nullable types (`T?`), null checks, flow refinement, checked casts, safe casts, and safe member
+  navigation are implemented.
+- `?.` is implemented for property reads and method calls. `??` is implemented with
+  right-associative short-circuit evaluation, nullable-path flow joins, and common-branch typing.
+  `??=` is implemented for mutable local bindings.
 - `==` and `!=` compare primitive values and strings by value. Reference comparisons currently use
   `Objects.equals`; generated classes inherit `Object.equals` unless behavior is supplied elsewhere,
   so nominal instances currently compare by identity.
@@ -21,7 +22,7 @@ not a proposed feature in this note. See [design-document-05_classes-and-contrac
 
 ## Conditional Navigation: `?.`
 
-Safe navigation would allow a property or method access on a nullable receiver without requiring an
+Safe navigation allows a property or method access on a nullable receiver without requiring an
 explicit branch:
 
 ```zeron
@@ -33,101 +34,104 @@ When the receiver is null, the access is skipped and the expression produces nul
 ordinary property or method operation is performed. This fits nullable types, classes, contracts, and
 existing flow typing without introducing a new type-system category.
 
-Before implementation, pin down:
+The receiver is evaluated exactly once. A null receiver skips the member operation and, for method
+calls, skips argument evaluation. Otherwise, the ordinary member operation is performed. The result
+is nullable; an already-nullable result stays nullable rather than introducing a nested nullable
+type. `Unit` results use the existing nullable reference representation.
 
-- Whether navigation is limited to properties and method calls, or also applies to indexing and
-  other postfix operations.
-- Whether a nullable result is flattened (`T??` is not currently a type) and how a `Unit` result is
-  represented.
-- Whether method arguments are evaluated only when the receiver is non-null; the natural choice is
-  short-circuit evaluation.
-- How mutable receiver requirements apply to `nullableReference?.mutatingMethod()`.
-- How chained navigation and flow facts behave, while keeping properties and calls unstable across
-  separate evaluations.
-
-The compiler should evaluate the receiver once, branch around the access on null, and join a nullable
-result. It should not duplicate a receiver expression that has side effects.
+Navigation applies only to property reads and named method calls, not indexing or assignment.
+Arguments are resolved on the non-null receiver path, and resulting flow facts are joined with the
+null path. A nullable mutable reference (for example, `&Counter?`) retains its mutable capability for
+mutating calls; a read-only nullable receiver cannot call a mutating method. Safe navigation on a
+statically non-null receiver is accepted as redundant. Chained `?.` operations are supported.
 
 ## Null Fallback: `??`
 
-Null coalescing would select a fallback only when the left operand is null:
+Null coalescing selects a fallback only when the left operand is null:
 
 ```zeron
 let displayName = user.nickname ?? user.name;
 ```
 
-This can make common nullable defaults more direct than an `if` expression. The operation should
-short-circuit: evaluate the right operand only when the left operand is null.
+This makes common nullable defaults more direct than an `if` expression. The operator is lower
+precedence than `or` and higher precedence than assignment, and it associates right-to-left:
 
-Before implementation, pin down:
+```zeron
+a ?? b ?? c       // a ?? (b ?? c)
+value ?? a or b   // value ?? (a or b)
+```
 
-- Precedence relative to comparisons, `and`, and `or`, and whether it associates right-to-left.
-- Whether the left operand must be nullable and whether `T? ?? T` always produces `T`.
-- How unrelated branch types find a common result type, including `Any` and `Any?`.
-- Whether `null ?? null` requires an explicit result type.
-- Whether the result refines any source binding; the conservative choice is that it does not.
+The left operand must have a nullable flow-effective type or the `Null` type; statically non-null
+left operands are rejected. The non-null left value and fallback are joined with the same common-type
+rules as `if` expressions. Thus `Int? ?? Int` produces `Int`, `Int? ?? null` produces `Int?`, and
+unrelated non-null alternatives use `Any`. If either joined alternative remains nullable, the result
+is nullable too (for example, `Int? ?? String?` produces `Any?`). `null ?? value` has the fallback's
+type, while `null ?? null` is rejected because its result type cannot be inferred.
 
-Flow analysis should match the short-circuit runtime behavior, and the resolver should use the same
-branch-join rules as `if` expressions.
+Evaluation is left-to-right and short-circuiting: the fallback is resolved and evaluated only on the
+left-null path. Direct local and parameter reads receive null/non-null branch facts while resolving
+the fallback. The result joins facts from both paths; it does not itself refine the original binding.
+The compiler evaluates the left expression once and branches to the fallback only when that value is
+null.
+
+The scanner, parser, resolver, compiler, and runtime/resolution tests implement this contract. The
+null-only inference case and redundant coalescing are diagnosed during resolution.
 
 ## Null-Fallback Assignment: `??=`
 
-Null-fallback assignment would initialize a nullable binding only when its current value is null:
+Null-fallback assignment initializes a nullable local binding only when its current value is null:
 
 ```zeron
 let mut cached: String? = null;
 cached ??= loadName();
 ```
 
-This resembles existing variable-only compound assignment and may be useful for lazy defaults.
+The target must be a mutable local binding with a nullable declared type. Top-level
+bindings, immutable bindings, properties, and indexed targets are not supported. The expression
+yields the target's nullable type and value, consistent with existing assignment expressions; it
+does not yield `Unit`.
 
-Before implementation, pin down:
-
-- Whether the target is limited to mutable variable bindings initially; that is the conservative
-  choice.
-- Whether the right-hand side is evaluated only when the target is null.
-- Whether the expression yields the assigned/current value or `Unit`.
-- Whether property or indexed targets may be supported later, including rules to evaluate their
-  receiver and index exactly once.
-- How the assignment updates flow facts and whether a subsequent read is known non-null.
+The current value is read once. A non-null current value is returned unchanged, and the right-hand
+side is evaluated only on the null path. When a non-null fallback is assigned, the binding is
+refined to non-null after the expression. A nullable fallback may leave it nullable, so no
+non-null refinement is retained. Flow facts are joined between the unchanged non-null path and the
+assignment path; assignment writes invalidate refinements within enclosing short-circuit expressions.
 
 ## Structural and Referential Equality: `==` and `===`
 
-A distinct referential-equality operator could make object identity explicit while reserving `==` for
-equality of values:
+Existing `==` and `!=` semantics are preserved. They compare primitive values and strings by value
+and use `Objects.equals` for other reference values. Generated nominal classes normally inherit
+`Object.equals`, so they compare by identity unless behavior is supplied elsewhere.
+
+`===` explicitly checks reference identity:
 
 ```zeron
 left == right   // value equality
 left === right  // same object identity
 ```
 
-The current `==` behavior is mixed: primitive values and strings compare by value, while generated
-nominal classes and arrays normally compare by identity through their inherited `Object.equals`.
+`===` accepts classes and contracts, `Any`, arrays, function values, and `String`, including their
+nullable forms. A null literal can be compared with any of these reference-valued types. Nullable
+primitive wrappers and `Unit` are rejected so identity does not depend on boxing or singleton
+representation. Non-null operands must have compatible reference views; for example, a class can be
+compared through a contract it implements or through `Any`. Unconstrained type parameters and
+unrelated reference types are rejected. A null literal compared with itself is rejected because no
+reference type can be inferred.
 
-Before changing this behavior, pin down:
+The operator does not call `equals` and never inspects fields. It has the same equality precedence as
+`==`. Null checks using `=== null` participate in the existing null-flow refinement.
 
-- Which nominal types support structural equality: all classes, only explicitly opted-in types, or
-  types implementing an equality contract.
-- What `==` does when a type has no structural-equality implementation; implicit identity fallback
-  or a compile-time error are both possible, but should not be mixed accidentally.
-- Whether equality is recursive for fields/arrays, how cycles are handled, and whether field privacy
-  affects the operation.
-- Whether equality is available through `Any` and generic type parameters, and what constraints
-  those operations require.
-- Whether `===` accepts only reference-like operands, how null compares, and what the operator does
-  for primitives.
-- How equality remains consistent with null flow refinement and contract/interface views.
-
-An equality contract is one possible foundation, but operator overloading and data/record types are
-separate design decisions. The language should not silently derive equality from every private field
-without an explicit decision about API stability and cycles.
+Structural equality remains deferred. If added later, it should require an explicit equality
+contract or opt-in; the language must not derive it silently from private fields. Recursive values,
+cycles, `Any`, and generic constraints remain open design questions for that separate feature.
 
 ## Suggested Order
 
-1. Define a coherent equality contract alongside any future data/value-type design; avoid changing
+1. **Null coalescing: implemented.** Keep short-circuit typing and flow behavior aligned with `if`
+   expression joins.
+2. Define a coherent equality contract alongside any future data/value-type design; avoid changing
    existing `==` behavior until compatibility is understood.
-2. Specify and implement `??`, including short-circuit typing and flow behavior.
-3. Add `?.` for properties and method calls, reusing nullable branch joins and enforcing receiver
+3. **Safe navigation: implemented.** Add `?.` for properties and method calls, reusing nullable branch joins and enforcing receiver
    mutability.
 4. Add `??=` for mutable variable bindings once its expression result and flow effects are settled.
 

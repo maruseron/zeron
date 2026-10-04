@@ -84,6 +84,10 @@ final class LambdaCaptureValidator {
                 walkCaptureUsage(assignment.property.receiver, localNames);
                 walkCaptureUsage(assignment.value, localNames);
             }
+            case Expr.PropertyCompoundAssignment assignment -> {
+                walkCaptureUsage(assignment.property.receiver, localNames);
+                walkCaptureUsage(assignment.value, localNames);
+            }
             case Expr.ArrayLiteral literal -> {
                 for (final var element : literal.elements) walkCaptureUsage(element, localNames);
             }
@@ -97,11 +101,15 @@ final class LambdaCaptureValidator {
                 walkCaptureUsage(assignment.value, localNames);
             }
             case Expr.Assignment assignment -> walkCaptureUsage(assignment.value, localNames);
+            case Expr.CoalesceAssignment assignment -> walkCaptureUsage(assignment.value, localNames);
             case Expr.Binary binary -> {
                 walkCaptureUsage(binary.left, localNames);
                 walkCaptureUsage(binary.right, localNames);
             }
             case Expr.Call call -> {
+                if (call.implicitMemberCall() != null) {
+                    walkCaptureUsage(call.implicitMemberCall().receiver, localNames);
+                }
                 for (final var argument : call.arguments) {
                     walkCaptureUsage(argument, localNames);
                 }
@@ -118,8 +126,16 @@ final class LambdaCaptureValidator {
                 walkCaptureUsage(logical.left, localNames);
                 walkCaptureUsage(logical.right, localNames);
             }
+            case Expr.Coalesce coalesce -> {
+                walkCaptureUsage(coalesce.left, localNames);
+                walkCaptureUsage(coalesce.right, localNames);
+            }
             case Expr.Unary unary -> walkCaptureUsage(unary.right, localNames);
             case Expr.Variable variable -> {
+                if (variable.implicitFieldReceiver() != null) {
+                    walkCaptureUsage(variable.implicitFieldReceiver(), localNames);
+                    return;
+                }
                 if (localNames.contains(variable.name.lexeme())) return;
                 if (symbols.containsSymbol(variable.name)
                         && symbols.getSymbol(variable.name).mutability().isReassignable()) {

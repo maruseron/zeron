@@ -3,7 +3,6 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.compile.Compiler;
-import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.FunctionShapeNames;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;

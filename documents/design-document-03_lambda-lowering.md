@@ -53,6 +53,12 @@ boxing, and unboxing explicitly; `LambdaMetafactory` still creates the adapter o
 boundary applies when a generic function returns a callback involving its type variables. Ordinary
 concrete function-shape identities remain unchanged.
 
+The direct generic callback test matrix covers every input/output pairing among `Int`, `Float`,
+`Boolean`, and `String`. Runtime tests also cover stored callbacks, returned callbacks capturing
+primitive and reference values, caller-local captures crossing a generic callback boundary, directional
+adapter reuse, and deterministic repeated compilation. Broader incremental-compilation and shape
+combinations across nested and nominal boundaries remain follow-up coverage.
+
 ### Generic nominal callback boundaries
 
 Generic classes and contracts are supported and erase their type variables and parameterized nominal
@@ -130,7 +136,7 @@ Address the remaining work in this order:
 	implementation does not provide higher-rank polymorphism.
 6. **Specify and implement capture lowering: implemented prototype.** Immutable captured values are passed through the `invokedynamic` factory descriptor and bound to the runtime function object; static helpers receive captures before the lambda's declared parameters. Explicit shared mutable cells remain future work.
 7. **Unify artifact output: implemented baseline.** Generated programs are emitted under `dist/`; source classes follow their declared package paths, while generated lambda interfaces remain in the default package. Define stale-artifact handling and configurable output directories if incremental or multi-project compilation requires them.
-8. **Expand behavior tests.** Cover same-shape lambdas with different bodies, zero and multiple parameters, primitive and reference types, lambdas stored and returned as values, nested lambdas, immutable captures, explicit shared mutation, and repeated/incremental compilation. Verify both program output and emitted descriptors/call instructions.
+8. **Expand behavior tests: broader baseline implemented.** Tests cover same-shape lambdas with different bodies, zero and multiple parameters, the complete `Int`/`Float`/`Boolean`/`String` callback input-output matrix, stored and returned callbacks, nested lambdas, immutable captures across generic boundaries, adapter reuse, and deterministic repeated compilation. Continue with incremental/multi-project compilation, explicit shared mutation, and additional nominal/nested shape combinations; verify both program output and emitted descriptors/call instructions.
 
 ## Acceptance Criteria for Broader Lambda Support
 

@@ -26,6 +26,103 @@ import static org.junit.Assert.assertThrows;
 
 public final class ClassContractTest {
     @Test
+    public void autoAndCustomPropertiesSupportContractsAndCompoundAssignment() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "PropertyProgram" + suffix;
+        final var source = """
+                contract CounterView {
+                    mut property value: Int;
+                }
+                class Counter is CounterView {
+                    raw: Int;
+                    public mut property value: Int {
+                        get = this.raw;
+                        set(next) = this.raw = next;
+                    }
+                    public mut add(step: Int): Unit {
+                        this.value += step;
+                    }
+                }
+                class AutoValues {
+                    public property name: String;
+                    public mut property count: Int = 1;
+                }
+                let mut receiverCalls = 0;
+                fn countedCounter(): &Counter {
+                    receiverCalls += 1;
+                    return Counter.new(0);
+                }
+                fn customResult(): Int {
+                    let counter = Counter.new(1);
+                    counter.value += 41;
+                    return counter.value;
+                }
+                fn compoundReceiverCount(): Int {
+                    countedCounter().value += 1;
+                    return receiverCalls;
+                }
+                fn contractResult(counter: &CounterView): Int {
+                    counter.value += 1;
+                    return counter.value;
+                }
+                fn autoResult(): Int = AutoValues.new("zeron").count;
+                fn safeResult(counter: Counter?): Int? = counter?.value;
+                """;
+        final var classFile = Path.of("dist", programName + ".class");
+        final var counterFile = Path.of("dist", "Counter.class");
+        final var contractFile = Path.of("dist", "CounterView.class");
+        final var autoFile = Path.of("dist", "AutoValues.class");
+
+        try {
+            final var compiler = new Compiler(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals(42, program.getMethod("customResult").invoke(null));
+                assertEquals(1, program.getMethod("compoundReceiverCount").invoke(null));
+                final var counterClass = loader.loadClass("Counter");
+                final var counterConstructor = counterClass.getDeclaredConstructor(int.class);
+                counterConstructor.setAccessible(true);
+                assertEquals(11, program.getMethod("contractResult",
+                        loader.loadClass("CounterView")).invoke(null, counterConstructor.newInstance(10)));
+                assertEquals(1, program.getMethod("autoResult").invoke(null));
+                assertEquals(null, program.getMethod("safeResult", counterClass).invoke(null, new Object[]{null}));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(counterFile);
+            Files.deleteIfExists(contractFile);
+            Files.deleteIfExists(autoFile);
+        }
+    }
+
+    @Test
+    public void propertyAssignmentRequiresMutablePropertyAndReceiver() {
+        final var readOnlyPropertyWrite = """
+                class ReadOnlyProperty {
+                    public property value: Int;
+                }
+                fn write(value: &ReadOnlyProperty): Unit {
+                    value.value = 1;
+                }
+                """;
+        final var immutableReceiverWrite = """
+                class MutableProperty {
+                    public mut property value: Int;
+                }
+                fn write(value: MutableProperty): Unit {
+                    value.value = 1;
+                }
+                """;
+        assertThrows(ResolutionError.class,
+                () -> new Resolver().resolve(parse(readOnlyPropertyWrite)));
+        assertThrows(ResolutionError.class,
+                () -> new Resolver().resolve(parse(immutableReceiverWrite)));
+    }
+
+    @Test
     public void sampleBytecodeContainsPrivateFieldsAndContractMethods() throws Exception {
     compileCanonicalSample();
     final var counter = ClassFile.of().parse(Path.of("dist", "TestCounter.class"));
@@ -73,6 +170,89 @@ public final class ClassContractTest {
     assertTrue(invocations.stream().anyMatch(invoke -> invoke.opcode() == Opcode.INVOKEINTERFACE
         && invoke.owner().asInternalName().equals("TestCounterView")
         && invoke.name().equalsString("read")));
+    }
+
+    @Test
+    public void initializesFixedFieldsInDeclarationOrderWithoutConstructorArguments() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var className = "InitializedFields" + suffix;
+        final var programName = "InitializedFieldsProgram" + suffix;
+        final var classFile = Path.of("dist", className + ".class");
+        final var programFile = Path.of("dist", programName + ".class");
+        final var source = """
+                public class %s {
+                    seed: Int;
+                    doubled: Int = seed * 2;
+                    result: Int = doubled + seed;
+                    ratio: Float = 2.5;
+                    enabled: Boolean = true;
+                    public constructor new;
+                    public resultValue(): Int = result;
+                    public ratioValue(): Float = ratio;
+                    public enabledValue(): Boolean = enabled;
+                }
+                class Snapshot<T> {
+                    value: T;
+                    copy: T = value;
+                    public constructor new;
+                    public read(): T = copy;
+                }
+                fn run(): Int {
+                    let state = %s.new(7);
+                    let snapshot = Snapshot<Int>.new(19);
+                    return state.resultValue() + snapshot.read();
+                }
+                """.formatted(className, className);
+
+        try {
+            final var compiler = new Compiler(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generatedClass = loader.loadClass(className);
+                final var instance = generatedClass.getConstructor(int.class).newInstance(7);
+                assertEquals(21, generatedClass.getMethod("resultValue").invoke(instance));
+                assertEquals(2.5, generatedClass.getMethod("ratioValue").invoke(instance));
+                assertEquals(true, generatedClass.getMethod("enabledValue").invoke(instance));
+                assertEquals(40, loader.loadClass(programName).getMethod("run").invoke(null));
+                assertEquals(1, generatedClass.getDeclaredConstructors().length);
+                assertEquals(1, generatedClass.getDeclaredConstructors()[0].getParameterCount());
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(programFile);
+        }
+    }
+
+    @Test
+    public void rejectsInvalidFieldInitializersAndArgumentsForInitializedFields() {
+        final var laterFieldRead = """
+                class LaterField {
+                    first: Int = second;
+                    second: Int = 2;
+                    public constructor new;
+                }
+                """;
+        final var initializerCall = """
+                fn value(): Int = 1;
+                class CalledInitializer {
+                    field: Int = value();
+                    public constructor new;
+                }
+                """;
+        final var wrongConstructorArity = """
+                class FixedField {
+                    required: Int;
+                    fixed: Int = 2;
+                    public constructor new;
+                }
+                fn invalid(): &FixedField = FixedField.new(1, 2);
+                """;
+
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(laterFieldRead)));
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(initializerCall)));
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(wrongConstructorArity)));
     }
 
     @Test
@@ -187,6 +367,140 @@ public final class ClassContractTest {
         assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(privateFieldSource)));
         assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(readonlyMutationSource)));
         assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(mutableCaptureSource)));
+    }
+
+    @Test
+    public void resolvesImplicitThisReadsCallsAndLambdaCaptures() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var className = "ImplicitThis" + suffix;
+        final var programName = "ImplicitThisProgram" + suffix;
+        final var classFile = Path.of("dist", className + ".class");
+        final var programFile = Path.of("dist", programName + ".class");
+        final var source = """
+                class %s {
+                    value: Int;
+                    public constructor new;
+                    private readValue(): Int = value;
+                    private priority(): Int = value;
+                    public readPublic(): Int = value;
+                    public mut increment(): Unit {
+                        this.value = value + 1;
+                    }
+                    public mut incrementTwice(): Unit {
+                        increment();
+                        increment();
+                    }
+                    public localShadow(): Int {
+                        let value = 90;
+                        return value;
+                    }
+                    public parameterShadow(value: Int): Int = value;
+                    public callShadow(): Int = readValue();
+                    public fieldClosure(): Int {
+                        let read = () -> value;
+                        return read();
+                    }
+                    public methodClosure(): Int {
+                        let read = () -> readValue();
+                        return read();
+                    }
+                    public globalPriority(): Int = priority();
+                }
+                fn priority(): Int = 100;
+                fn run(): Int {
+                    let mut value = %s.new(2);
+                    value.incrementTwice();
+                    return value.readPublic() + value.localShadow() + value.parameterShadow(3)
+                        + value.callShadow() + value.fieldClosure() + value.methodClosure()
+                        + value.globalPriority();
+                }
+                """.formatted(className, className);
+
+        try {
+            final var compiler = new Compiler(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(209, loader.loadClass(programName).getMethod("run").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(programFile);
+        }
+    }
+
+    @Test
+    public void requiresExplicitThisForFieldWritesAndMutableReceiverForImplicitCalls() {
+        final var implicitFieldWrite = """
+                class ImplicitWrite {
+                    value: Int;
+                    public constructor new;
+                    public mut increment(): Unit {
+                        value = value + 1;
+                    }
+                }
+                """;
+        final var readonlyMutatingCall = """
+                class ImplicitMutation {
+                    value: Int;
+                    public constructor new;
+                    private mut increment(): Unit {
+                        this.value = value + 1;
+                    }
+                    public invalid(): Unit {
+                        increment();
+                    }
+                }
+                """;
+
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(implicitFieldWrite)));
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(readonlyMutatingCall)));
+    }
+
+    @Test
+    public void implicitThisWorksInLambdasAcrossPackages() throws Exception {
+        final var programName = "app.ImplicitThisPackageProgram";
+        final var classFile = Path.of("dist", "model", "ImplicitThisPackageBox.class");
+        final var programFile = Path.of("dist", "app", "ImplicitThisPackageProgram.class");
+        final var boxUnit = Parser.of(Scanner.from("""
+                package model;
+                public class ImplicitThisPackageBox {
+                    value: Int;
+                    public constructor new;
+                    private readValue(): Int = value;
+                    public fieldReader(): () -> Int = () -> value;
+                    public methodReader(): () -> Int = () -> readValue();
+                    public mut fieldIncrementer(): () -> Unit = () -> this.value = value + 1;
+                }
+                """).scanTokens()).parseCompilationUnit("ImplicitThisPackageBox.zn");
+        final var appUnit = Parser.of(Scanner.from("""
+                package app;
+                import model.ImplicitThisPackageBox;
+                fn result(): Int {
+                    let box = ImplicitThisPackageBox.new(7);
+                    let readField = box.fieldReader();
+                    let readMethod = box.methodReader();
+                    let mut mutableBox = box;
+                    let increment = mutableBox.fieldIncrementer();
+                    increment();
+                    return readField() + readMethod();
+                }
+                """).scanTokens()).parseCompilationUnit("ImplicitThisPackageMain.zn");
+
+        try {
+            final var compiler = Compiler.forCompilationUnits(
+                    List.of(appUnit, boxUnit), programName, "app");
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(16, loader.loadClass(programName).getMethod("result").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(programFile);
+        }
     }
 
     @Test
@@ -541,6 +855,225 @@ public final class ClassContractTest {
                 """;
 
         assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+    }
+
+    @Test
+    public void covariantContractReturnsUseNominalCompatibilityAndErasedBridges() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "CovariantContractProgram" + suffix;
+        final var entityName = "CovariantEntity" + suffix;
+        final var concreteName = "CovariantConcrete" + suffix;
+        final var factoryName = "CovariantFactory" + suffix;
+        final var genericFactoryName = "CovariantGenericFactory" + suffix;
+        final var implementationName = "CovariantDefaultFactory" + suffix;
+        final var source = """
+                contract %s {
+                    name(): String;
+                }
+                class %s is %s {
+                    public constructor new;
+                    public name(): String = "zeron";
+                }
+                contract %s {
+                    create(): %s;
+                }
+                contract %s<T> {
+                    create(): T;
+                }
+                class %s is %s, %s<%s> {
+                    public constructor new;
+                    public create(): %s = %s.new();
+                }
+                fn readNamed(factory: %s): String = factory.create().name();
+                fn readGeneric(factory: %s<%s>): String = factory.create().name();
+                fn namedTest(): String = readNamed(%s.new());
+                fn genericTest(): String = readGeneric(%s.new());
+                """.formatted(entityName, concreteName, entityName, factoryName, entityName,
+                genericFactoryName, implementationName, factoryName, genericFactoryName, entityName,
+                concreteName, concreteName, factoryName, genericFactoryName, entityName,
+                implementationName, implementationName);
+        final var programFile = Path.of("dist", programName + ".class");
+        final var entityFile = Path.of("dist", entityName + ".class");
+        final var concreteFile = Path.of("dist", concreteName + ".class");
+        final var factoryFile = Path.of("dist", factoryName + ".class");
+        final var genericFactoryFile = Path.of("dist", genericFactoryName + ".class");
+        final var implementationFile = Path.of("dist", implementationName + ".class");
+
+        try {
+            final var compiler = new Compiler(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var implementation = loader.loadClass(implementationName);
+                final var entityClass = loader.loadClass(entityName);
+                final var bridges = java.util.Arrays.stream(implementation.getDeclaredMethods())
+                        .filter(method -> method.getName().equals("create") && method.isBridge())
+                        .toList();
+                assertEquals(2, bridges.size());
+                assertTrue(bridges.stream().anyMatch(method -> method.getReturnType().equals(entityClass)));
+                assertTrue(bridges.stream().anyMatch(method -> method.getReturnType().equals(Object.class)));
+
+                final var program = loader.loadClass(programName);
+                assertEquals("zeron", program.getMethod("namedTest").invoke(null));
+                assertEquals("zeron", program.getMethod("genericTest").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(programFile);
+            Files.deleteIfExists(entityFile);
+            Files.deleteIfExists(concreteFile);
+            Files.deleteIfExists(factoryFile);
+            Files.deleteIfExists(genericFactoryFile);
+            Files.deleteIfExists(implementationFile);
+        }
+    }
+
+    @Test
+    public void contractReturnCovarianceFollowsNullableAndInvariantParameterRules() {
+        final var nullableRequirement = """
+                contract Entity { name(): String; }
+                contract Factory { create(): Entity?; }
+                class DefaultFactory is Entity, Factory {
+                    public constructor new;
+                    public name(): String = "zeron";
+                    public create(): Entity = this;
+                }
+                """;
+        final var nullableImplementation = """
+                contract Entity { name(): String; }
+                contract Factory { create(): Entity; }
+                class DefaultFactory is Entity, Factory {
+                    public constructor new;
+                    public name(): String = "zeron";
+                    public create(): Entity? = null;
+                }
+                """;
+        final var parameterMismatch = """
+                contract Factory { create(value: Any): Any; }
+                class DefaultFactory is Factory {
+                    public constructor new;
+                    public create(value: String): String = value;
+                }
+                """;
+        final var primitiveMismatch = """
+                contract NumericFactory { create(): Float; }
+                class IntegerFactory is NumericFactory {
+                    public constructor new;
+                    public create(): Int = 1;
+                }
+                """;
+
+        new Resolver().resolve(parse(nullableRequirement));
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(nullableImplementation)));
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(parameterMismatch)));
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(primitiveMismatch)));
+    }
+
+    @Test
+    public void defaultContractMethodsDispatchThroughInterfacesAndCanSatisfyRequirements() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "DefaultContractProgram" + suffix;
+        final var namedName = "DefaultNamed" + suffix;
+        final var personName = "DefaultPerson" + suffix;
+        final var overrideName = "DefaultOverride" + suffix;
+        final var productName = "DefaultProduct" + suffix;
+        final var fancyProductName = "DefaultFancyProduct" + suffix;
+        final var makerName = "DefaultMaker" + suffix;
+        final var productMakerName = "DefaultProductMaker" + suffix;
+        final var bothMakerName = "DefaultBothMaker" + suffix;
+        final var counterViewName = "DefaultCounterView" + suffix;
+        final var counterName = "DefaultCounter" + suffix;
+        final var source = """
+                contract %s {
+                    property name: String;
+                    default label(): String = this.name;
+                }
+                class %s is %s {
+                    public property name: String;
+                    public constructor new;
+                }
+                class %s is %s {
+                    public property name: String;
+                    public constructor new;
+                    public label(): String = "override";
+                }
+                contract %s { name(): String; }
+                class %s is %s {
+                    public constructor new;
+                    public name(): String = "fancy";
+                }
+                contract %s {
+                    default create(): %s = %s.new();
+                }
+                contract %s { create(): %s; }
+                class %s is %s, %s { public constructor new; }
+                contract %s {
+                    mut property count: Int;
+                    default mut increment(): Unit { this.count += 1; }
+                }
+                class %s is %s {
+                    public mut property count: Int;
+                    public constructor new;
+                }
+                fn readLabel(value: %s): String = value.label();
+                fn readProduct(value: %s): String = value.create().name();
+                fn increment(value: &%s): Int {
+                    value.increment();
+                    return value.count;
+                }
+                fn defaultTest(): String = readLabel(%s.new("Ada"));
+                fn overrideTest(): String = readLabel(%s.new("Ada"));
+                fn crossContractDefaultTest(): String = readProduct(%s.new());
+                fn mutatingDefaultTest(): Int {
+                    let mut value = %s.new(4);
+                    value.increment();
+                    return value.count;
+                }
+                """.formatted(namedName, personName, namedName, overrideName, namedName,
+                productName, fancyProductName, productName, makerName, fancyProductName, fancyProductName,
+                productMakerName, productName, bothMakerName, makerName, productMakerName,
+                counterViewName, counterName, counterViewName, namedName, productMakerName,
+                counterViewName, personName, overrideName, bothMakerName, counterName);
+        final var generatedNames = List.of(programName, namedName, personName, overrideName, productName,
+                fancyProductName, makerName, productMakerName, bothMakerName, counterViewName, counterName);
+        try {
+            final var compiler = new Compiler(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals("Ada", program.getMethod("defaultTest").invoke(null));
+                assertEquals("override", program.getMethod("overrideTest").invoke(null));
+                assertEquals("fancy", program.getMethod("crossContractDefaultTest").invoke(null));
+                assertEquals(5, program.getMethod("mutatingDefaultTest").invoke(null));
+                final var bothMaker = loader.loadClass(bothMakerName);
+                final var bridge = java.util.Arrays.stream(bothMaker.getDeclaredMethods())
+                        .filter(method -> method.getName().equals("create") && method.isBridge())
+                        .findFirst()
+                        .orElseThrow();
+                assertEquals(loader.loadClass(productName), bridge.getReturnType());
+            }
+        } finally {
+            for (final var name : generatedNames) Files.deleteIfExists(Path.of("dist", name + ".class"));
+        }
+    }
+
+    @Test
+    public void competingDefaultMethodsRequireClassOverride() {
+        final var source = """
+                contract First { default value(): String = "first"; }
+                contract Second { default value(): String = "second"; }
+                class Ambiguous is First, Second { public constructor new; }
+                """;
+        final var differingMutability = """
+                contract MutableFirst { default mut value(): Int = 1; }
+                contract ReadOnlySecond { default value(): Int = 2; }
+                class Ambiguous is MutableFirst, ReadOnlySecond { public constructor new; }
+                """;
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(differingMutability)));
     }
 
     @Test

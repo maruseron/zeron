@@ -97,7 +97,7 @@ public final class SymbolTable {
     public Bind getFunction(final Token name) {
         if (!functions.containsKey(name.lexeme())) {
             Zeron.resolutionError(new ResolutionError(name,
-                    "Unknown symbol: " + name.lexeme()));
+                    "Unknown symbol: '" + name.lexeme() + "'"));
         }
 
         return functions.get(name.lexeme());
@@ -106,7 +106,7 @@ public final class SymbolTable {
     public FunctionDescriptor getFunctionType(final Token name) {
         if (!functions.containsKey(name.lexeme())) {
             Zeron.resolutionError(new ResolutionError(name,
-                    "Unknown symbol: " + name.lexeme()));
+                    "Unknown symbol: '" + name.lexeme() + "'"));
         }
 
         return (FunctionDescriptor) functions.get(name.lexeme()).type();
@@ -115,7 +115,7 @@ public final class SymbolTable {
     public Bind getSymbol(final Token name) {
         if (!symbols.containsKey(name.lexeme())) {
             Zeron.resolutionError(new ResolutionError(name,
-                    "Unknown symbol."));
+                    "Unknown symbol: '" + name.lexeme() + "'"));
         }
 
         return symbols.get(name.lexeme());
@@ -124,7 +124,7 @@ public final class SymbolTable {
     public Bind getAnySymbol(final Token name) {
         if (!allSymbols.containsKey(name.lexeme())) {
             Zeron.resolutionError(new ResolutionError(name,
-                    "Unknown symbol."));
+                    "Unknown symbol: '" + name.lexeme() + "'"));
         }
 
         return allSymbols.get(name.lexeme());

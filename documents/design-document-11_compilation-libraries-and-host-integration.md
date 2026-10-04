@@ -18,7 +18,7 @@ a source package a JVM module.
   specified. Non-entry functions require explicit return types.
 - Bundled source mode is the default and includes `zeron.collections` iteration contracts,
   `zeron.ranges`, and `zeron.io`. Standard-library declarations remain explicit imports.
-- The compiler writes `META-INF/zeron/api-v2.bin`. The index has schema version 2 and carries the
+- The compiler writes `META-INF/zeron/api-v4.bin`. The index has schema version 4 and carries the
   required standard-library API version, currently 2.
 - Zeron libraries can be built into a class directory and consumed in compiled mode. Library loading
   validates the API version and creates metadata-only declarations; consumer compilation does not
@@ -48,10 +48,13 @@ compilation, and configurable artifact layouts remain open.
 
 ## Zeron Library Artifacts
 
-The API index is a binary sidecar at `META-INF/zeron/api-v2.bin`. Its schema version is separate from
+The API index is a binary sidecar at `META-INF/zeron/api-v4.bin`. Its schema version is separate from
 the standard-library API version. It records qualified public signatures, generated JVM owners,
-generic parameters, nullability, reference views, mutability markers, and callback shapes. It does
-not contain bodies or private implementation details.
+declaration and method generic parameters, nullability, reference views, mutability markers, and
+callback shapes. Public property requirements and getter/setter capabilities are recorded alongside
+class and contract signatures. Method type parameters and references to enclosing class or contract
+parameters use the same scoped type encoding as generic function signatures. It does not contain
+bodies or private implementation details.
 
 `--build-stdlib <output-directory>` compiles the canonical bundled units as a class directory.
 Consumers may select that artifact with `--stdlib compiled --library <class-directory>`; the default

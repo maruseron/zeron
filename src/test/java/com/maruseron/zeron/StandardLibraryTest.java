@@ -26,6 +26,27 @@ import static org.junit.Assert.assertTrue;
 public final class StandardLibraryTest {
 
     @Test
+    public void cliErrorStateDoesNotLeakBetweenInvocations() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var invalidSource = Files.createTempFile(Path.of("target"), "InvalidCli" + suffix, ".zn");
+        final var validSource = Files.createTempFile(Path.of("target"), "ValidCli" + suffix, ".zn");
+        final var generatedClass = Path.of("dist", validSource.getFileName().toString()
+                .replaceFirst("\\.zn$", "") + ".class");
+        Files.writeString(invalidSource, "fn invalid(): Int = missing;");
+        Files.writeString(validSource, "fn valid(): Int = 42;");
+
+        try {
+            assertEquals(71, Zeron.runCli(invalidSource.toString()));
+            assertEquals(0, Zeron.runCli(validSource.toString()));
+            assertTrue(Files.exists(generatedClass));
+        } finally {
+            Files.deleteIfExists(invalidSource);
+            Files.deleteIfExists(validSource);
+            Files.deleteIfExists(generatedClass);
+        }
+    }
+
+    @Test
     public void bundledPrintFunctionsUseRegisteredJvmBindings() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var packageName = "ioClient" + suffix;
@@ -163,7 +184,7 @@ public final class StandardLibraryTest {
                 """.formatted(geometryPackage));
 
         try {
-            Zeron.main(new String[]{appSource.toString(), geometrySource.toString()});
+            assertEquals(0, Zeron.runCli(appSource.toString(), geometrySource.toString()));
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 assertEquals(42, loader.loadClass(appPackage + "." + mainName)
@@ -202,7 +223,8 @@ public final class StandardLibraryTest {
                 """.formatted(mathPackage));
 
         try {
-            Zeron.main(new String[]{"--root", projectRoot.toString(), "--entry", entryRelativePath.toString()});
+            assertEquals(0, Zeron.runCli(
+                    "--root", projectRoot.toString(), "--entry", entryRelativePath.toString()));
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 assertEquals(42, loader.loadClass(appPackage + ".Main").getMethod("result").invoke(null));
@@ -234,9 +256,9 @@ public final class StandardLibraryTest {
             libraryCompiler.compile();
 
             copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
-            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v2.bin"));
+            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v4.bin"));
             Files.createDirectories(libraryIndex.getParent());
-            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v2.bin"), libraryIndex);
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v4.bin"), libraryIndex);
 
             deleteTree(Path.of("dist"));
             Files.writeString(clientSource, """
@@ -244,7 +266,7 @@ public final class StandardLibraryTest {
                     import %s.identity as identity;
                     fn result(): Int = identity<Int>(63);
                     """.formatted(appPackage, libraryPackage));
-            Zeron.main(new String[]{clientSource.toString(), "--library", libraryRoot.toString()});
+            assertEquals(0, Zeron.runCli(clientSource.toString(), "--library", libraryRoot.toString()));
 
             try (final var loader = new URLClassLoader(new java.net.URL[]{
                     Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()}, getClass().getClassLoader())) {
@@ -266,14 +288,17 @@ public final class StandardLibraryTest {
         final var libraryOutput = Path.of("target", "zeron-stdlib-" + suffix);
         final var sourceFile = Path.of("target", "CompiledStdlibClient" + suffix + ".zn");
         final var entryName = sourceFile.getFileName().toString().replaceFirst("\\.zn$", "");
-        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v2.bin"));
+        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v4.bin"));
         final var iterableClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterable.class"));
         final var iteratorClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterator.class"));
+        final var arrayIteratorClass = libraryOutput.resolve(
+                Path.of("zeron", "collections", "ArrayIterator.class"));
         final var rangeClass = libraryOutput.resolve(Path.of("zeron", "ranges", "IntRange.class"));
         Files.createDirectories(sourceFile.getParent());
         Files.writeString(sourceFile, """
                 package %s;
                 import zeron.collections.Iterable;
+                import zeron.collections.ArrayIterator;
                 import zeron.io.print;
                 import zeron.io.println;
                 fn sum(values: Iterable<Int>): Int {
@@ -282,6 +307,12 @@ public final class StandardLibraryTest {
                     return total;
                 }
                 fn result(): Int = sum(1..3);
+                fn arrayIteratorResult(): Int {
+                    let iterator = ArrayIterator<Int>.from([2, 3, 5]);
+                    let mut total = 0;
+                    while (iterator.hasNext()) total += iterator.next();
+                    return total;
+                }
                 fn announce(): Unit {
                     print("compiled");
                     println("!");
@@ -290,15 +321,16 @@ public final class StandardLibraryTest {
 
         try {
             deleteTree(Path.of("dist"));
-            Zeron.main(new String[]{"--build-stdlib", libraryOutput.toString()});
+            assertEquals(0, Zeron.runCli("--build-stdlib", libraryOutput.toString()));
             assertTrue(Files.exists(apiIndex));
             assertTrue(Files.exists(iterableClass));
             assertTrue(Files.exists(iteratorClass));
+            assertTrue(Files.exists(arrayIteratorClass));
             assertTrue(Files.exists(rangeClass));
 
             deleteTree(Path.of("dist"));
-            Zeron.main(new String[]{sourceFile.toString(), "--stdlib", "compiled",
-                    "--library", libraryOutput.toString()});
+            assertEquals(0, Zeron.runCli(sourceFile.toString(), "--stdlib", "compiled",
+                    "--library", libraryOutput.toString()));
             final var output = new ByteArrayOutputStream();
             final var originalOutput = System.out;
             try (final var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {
@@ -307,6 +339,7 @@ public final class StandardLibraryTest {
                         Path.of("dist").toUri().toURL(), libraryOutput.toUri().toURL()}, getClass().getClassLoader())) {
                     final var client = loader.loadClass(appPackage + "." + entryName);
                     assertEquals(6, client.getMethod("result").invoke(null));
+                    assertEquals(10, client.getMethod("arrayIteratorResult").invoke(null));
                     client.getMethod("announce").invoke(null);
                 } finally {
                     System.setOut(originalOutput);
@@ -335,7 +368,8 @@ public final class StandardLibraryTest {
 
         try {
             deleteTree(Path.of("dist"));
-            Zeron.main(new String[]{sourceFile.toString(), "--java-classpath", "target/test-classes"});
+            assertEquals(0, Zeron.runCli(
+                    sourceFile.toString(), "--java-classpath", "target/test-classes"));
             try (final var loader = new URLClassLoader(new java.net.URL[]{
                     Path.of("dist").toUri().toURL(), Path.of("target", "test-classes").toUri().toURL()},
                     getClass().getClassLoader())) {

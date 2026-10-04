@@ -32,7 +32,22 @@ public class Zeron {
     private static boolean debugEnabled;
 
     static void main(final String... args) throws IOException {
+        final var exitCode = runCli(args);
+        if (exitCode != 0) System.exit(exitCode);
+    }
+
+    public static int runCli(final String... args) throws IOException {
+        hadError = false;
+        hadResolutionError = false;
         debugEnabled = false;
+        try {
+            return runCliInvocation(args);
+        } catch (final ResolutionError _) {
+            return exitCode();
+        }
+    }
+
+    private static int runCliInvocation(final String... args) throws IOException {
         final var scriptPaths = new ArrayList<String>();
         final var sourceRoots = new ArrayList<Path>();
         final var libraryRoots = new ArrayList<Path>();
@@ -74,9 +89,7 @@ public class Zeron {
                 throw new IllegalArgumentException("--build-stdlib cannot be combined with source or library inputs.");
             }
             buildStandardLibrary(standardLibraryOutput);
-            if (hadError) System.exit(65);
-            if (hadResolutionError) System.exit(71);
-            return;
+            return exitCode();
         }
         if (entry != null || !sourceRoots.isEmpty()) {
             if (entry == null || sourceRoots.isEmpty()) {
@@ -89,6 +102,13 @@ public class Zeron {
             }
             runPrompt();
         } else runFiles(scriptPaths, libraryRoots, javaClassPathRoots, bundleStandardLibrarySources);
+        return exitCode();
+    }
+
+    private static int exitCode() {
+        if (hadError) return 65;
+        if (hadResolutionError) return 71;
+        return 0;
     }
 
     public static void debug(final String message) {
@@ -110,7 +130,6 @@ public class Zeron {
                     .parseCompilationUnit(sourcePath.toString()));
         }
         if (hadError) {
-            System.exit(65);
             return;
         }
         final var packageName = units.getFirst().packageName();
@@ -120,7 +139,6 @@ public class Zeron {
                     .anyMatch(Stmt.Var.class::isInstance);
             if (hasTopLevelValues) {
                 error(1, "Cross-package top-level values are deferred until initialization order is specified.");
-                System.exit(65);
                 return;
             }
         }
@@ -129,8 +147,6 @@ public class Zeron {
                 : packageName + "." + sourceClassName(Paths.get(paths.getFirst()));
         runUnits(units, programName, packageName, libraries,
             bundleStandardLibrarySources, javaClassPathRoots);
-        if (hadError) System.exit(65);
-        if (hadResolutionError) System.exit(71);
     }
 
     private static void runProject(final List<Path> roots,
@@ -177,7 +193,6 @@ public class Zeron {
                 .parseCompilationUnit(relativePath));
         }
         if (hadError) {
-            System.exit(65);
             return;
         }
         final var entryUnit = units.getFirst();
@@ -186,8 +201,6 @@ public class Zeron {
                 : entryUnit.packageName() + "." + sourceClassName(absoluteEntry);
         runUnits(units, programName, entryUnit.packageName(), libraries,
             bundleStandardLibrarySources, javaClassPathRoots);
-        if (hadError) System.exit(65);
-        if (hadResolutionError) System.exit(71);
     }
 
     private static void runPrompt() throws IOException {

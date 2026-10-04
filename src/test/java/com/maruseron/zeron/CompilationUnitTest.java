@@ -2,7 +2,6 @@ package com.maruseron.zeron;
 
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
-import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.compile.Compiler;

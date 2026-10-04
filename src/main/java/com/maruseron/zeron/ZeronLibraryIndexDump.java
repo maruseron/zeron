@@ -30,7 +30,7 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v2.bin|class-directory>");
+            System.err.println("Usage: ZeronLibraryIndexDump <api-v4.bin|class-directory>");
             return;
         }
         final var path = Path.of(args[0]);
@@ -84,14 +84,23 @@ public final class ZeronLibraryIndexDump {
                                 + formatParameters(method.signature()) + ": "
                                 + formatType(method.signature().returnType()));
                     }
+                    for (final var property : classExport.properties()) {
+                        System.out.println("  public " + (property.mutating() ? "mut " : "")
+                                + property.name() + ": " + formatType(property.type()));
+                    }
                 }
                 case ZeronLibraryIndex.ContractExport contract -> {
                     System.out.println("contract " + contract.qualifiedName()
                             + formatTypeParameters(contract.typeParameters()));
                     for (final var method : contract.methods()) {
-                        System.out.println("  " + (method.mutating() ? "mut " : "") + method.name()
+                        System.out.println("  " + (method.defaultMethod() ? "default " : "")
+                                + (method.mutating() ? "mut " : "") + method.name()
                                 + formatParameters(method.signature()) + ": "
                                 + formatType(method.signature().returnType()));
+                    }
+                    for (final var property : contract.properties()) {
+                        System.out.println("  " + (property.mutating() ? "mut " : "")
+                                + property.name() + ": " + formatType(property.type()));
                     }
                 }
             }

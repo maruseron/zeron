@@ -8,6 +8,13 @@ erases type variables to JVM reference types. Callback parameters and callback r
 including nested callbacks, nullable callback values, and mutable function views, are adapted through
 generated bridge helpers.
 
+Generic methods on classes and contracts are implemented in the same unbounded first slice:
+type arguments are inferred from arguments or supplied explicitly at member calls. Contract
+implementations match generic method signatures up to renaming of method type parameters. The
+method parameters are erased in JVM descriptors; the Zeron library index retains them for
+Zeron-to-Zeron consumers, and class/method `Signature` attributes expose the corresponding generic
+metadata to JVM tools.
+
 Invariant generic classes/contracts and callback adaptation across their erased nominal boundaries
 are also implemented; see [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md)
 and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). Generic named
@@ -128,8 +135,10 @@ shape matrix and broader adapter reuse still need coverage.
    bridges covered by resolver and generated-code tests.
 2. **Callback-shape adaptation: implemented baseline.** Nullable callback values, nested callback
   parameters/results, and mutable function views are adapted recursively without changing
-  source-level function-shape identity. Expand tests across all primitive/reference combinations
-  and bridge reuse.
+  source-level function-shape identity. Tests cover all input/output combinations among `Int`,
+  `Float`, `Boolean`, and `String`, stored and returned callbacks with captures, and deterministic
+  repeated compilation. Directional adapter reuse is covered for generic top-level boundaries;
+  broader reuse and shape coverage across nested and nominal boundaries remain follow-up work.
 3. **Generic function values: implemented first slice.** `name::<T>` explicitly specializes a
   generic function value; an expected function type can infer the specialization when it determines
   every type parameter. Specialized values lower through deduplicated static bridges and
@@ -156,6 +165,11 @@ shape matrix and broader adapter reuse still need coverage.
   diagnose conflicts or unresolved parameters.
 - Generic function values accept full explicit specialization or expected-type inference, validate
   bounds and signature compatibility, and reject unresolved specializations.
+- Generic class/contract methods accept inferred or full explicit type arguments, compose method
+  substitutions with receiver substitutions, and contract implementation signatures compare up to
+  method type-parameter renaming.
+- Generic nominal and method signatures are present in JVM class files and agree with erased method
+  descriptors; the Zeron API index retains source-level method type parameters for compiled libraries.
 - Contract-bounded generic function calls validate inferred and explicit type arguments; only
   readonly methods declared by the bound are callable on `T`.
 - Type-specific operations on unconstrained type variables fail during resolution rather than
@@ -167,4 +181,5 @@ shape matrix and broader adapter reuse still need coverage.
   bridges, adapting callback parameters/results across the concrete and erased SAM shapes.
 - Generic lowering does not change canonical identities for ordinary concrete function shapes.
 
-Update this note whenever parser, resolver, or backend support changes the accepted generic-function contract.
+Update this note whenever parser, resolver, or backend support changes the accepted generic-function or
+generic-method contract.

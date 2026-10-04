@@ -23,6 +23,7 @@ public final class Resolver {
         FlowFact {
             if (nonNullAlternatives != null) nonNullAlternatives = Set.copyOf(nonNullAlternatives);
         }
+
     }
     private static final class FlowState {
         private final IdentityHashMap<Token, FlowFact> facts = new IdentityHashMap<>();
@@ -93,6 +94,8 @@ public final class Resolver {
     }
 
     private record ConditionFlows(FlowState whenTrue, FlowState whenFalse) {}
+    private record SafeNavigationFlows(FlowState nonNull, FlowState nullPath) {}
+    private record PropertyInfo(TypeDescriptor type, boolean isPublic, boolean isMutating) {}
 
     private static final class LoopFlow {
         private final List<FlowState> breakStates = new ArrayList<>();
@@ -130,6 +133,8 @@ public final class Resolver {
     private FlowState flowState = new FlowState();
     private int loopDepth;
     private String currentClassName;
+    private Stmt.ClassDecl currentMethodOwner;
+    private List<Stmt.Field> initializerVisibleFields;
 
     public Resolver() {
         this("", List.of(), FunctionBindingRegistry.standard());
@@ -438,6 +443,50 @@ public final class Resolver {
                 Zeron.resolutionError(new ResolutionError(method.name(), "Duplicate contract method."));
             }
             validateFunctionTypes(method.typeDescriptor(), method.name());
+            if (method.isDefault()) {
+                resolveContractMethod(contract, method);
+            }
+        }
+        for (final var property : contract.properties()) {
+            if (!methodNames.add(property.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(property.name(), "Duplicate contract member."));
+            }
+            validateType(property.type(), property.name());
+        }
+    }
+
+    private void resolveContractMethod(final Stmt.ContractDecl owner,
+                                       final Stmt.ContractMethod method) {
+        beginScope();
+        expectedReturnTypes.push(method.typeDescriptor().returnType());
+        final var enclosingFlow = flowState;
+        final var enclosingLoopDepth = loopDepth;
+        flowState = new FlowState();
+        loopDepth = 0;
+        final var thisToken = new Token(TokenType.THIS, "this", null, method.name().line());
+        final TypeDescriptor ownerType = owner.typeParameters().isEmpty()
+                ? TypeDescriptor.of(owner.name().lexeme())
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(owner.name().lexeme()),
+                        owner.typeParameters().stream().map(parameter -> (TypeDescriptor) parameter).toList());
+        final var thisType = method.isMutating()
+                ? new ReferenceDescriptor(ownerType)
+                : ownerType;
+        declare(SYNTHETIC_VAR, thisToken, thisType, BindingMutability.IMMUTABLE);
+        define(thisToken);
+        for (int i = 0; i < method.parameters().size(); i++) {
+            final var parameter = method.parameters().get(i);
+            declare(SYNTHETIC_VAR, parameter, method.typeDescriptor().parameters().get(i),
+                    BindingMutability.IMMUTABLE);
+            define(parameter);
+        }
+        try {
+            resolveStmts(method.body());
+            ensureReturns(method.name(), method.typeDescriptor().returnType(), method.body());
+        } finally {
+            expectedReturnTypes.pop();
+            endScope();
+            loopDepth = enclosingLoopDepth;
+            flowState = enclosingFlow;
         }
     }
 
@@ -451,6 +500,16 @@ public final class Resolver {
         }
 
         final var methodNames = new HashSet<String>();
+        for (final var property : declaration.properties()) {
+            if (!fieldNames.add(property.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(property.name(), "Duplicate class member."));
+            }
+            validateType(property.type(), property.name());
+            if (property.isMutating() && property.setterBody() == null && property.isCustom()) {
+                Zeron.resolutionError(new ResolutionError(property.name(),
+                        "A writable custom property requires a setter."));
+            }
+        }
         for (final var method : declaration.methods()) {
             if (!fieldNames.add(method.name().lexeme()) || !methodNames.add(method.name().lexeme())) {
                 Zeron.resolutionError(new ResolutionError(method.name(), "Duplicate class member."));
@@ -478,8 +537,23 @@ public final class Resolver {
         }
 
         final var previousClass = currentClassName;
+        final var previousInitializerFields = initializerVisibleFields;
         currentClassName = declaration.name().lexeme();
         try {
+            for (int fieldIndex = 0; fieldIndex < declaration.fields().size(); fieldIndex++) {
+                final var field = declaration.fields().get(fieldIndex);
+                if (field.initializer() == null) continue;
+                resolveFieldInitializer(declaration, field,
+                        declaration.fields().subList(0, fieldIndex));
+            }
+            for (final var property : declaration.properties()) {
+                if (property.initializer() != null) {
+                    resolveFieldInitializer(declaration,
+                            new Stmt.Field(property.name(), property.type(), property.initializer()),
+                            declaration.fields());
+                }
+                if (property.isCustom()) resolvePropertyAccessors(declaration, property);
+            }
             for (final var method : declaration.methods()) resolveMethod(declaration, method);
             for (final var constructor : declaration.namedConstructors()) {
                 resolveNamedConstructor(constructor);
@@ -489,6 +563,62 @@ public final class Resolver {
             }
         } finally {
             currentClassName = previousClass;
+            initializerVisibleFields = previousInitializerFields;
+        }
+    }
+
+    private void resolveFieldInitializer(final Stmt.ClassDecl owner,
+                                        final Stmt.Field field,
+                                        final List<Stmt.Field> earlierFields) {
+        validateFieldInitializer(field.initializer(), earlierFields, field.name());
+        final var previousMethodOwner = currentMethodOwner;
+        final var previousInitializerFields = initializerVisibleFields;
+        final var previousFlow = flowState;
+        currentMethodOwner = owner;
+        initializerVisibleFields = List.copyOf(earlierFields);
+        flowState = new FlowState();
+        beginScope();
+        final var thisToken = new Token(TokenType.THIS, "this", null, field.name().line());
+        declare(SYNTHETIC_VAR, thisToken, classType(owner), BindingMutability.IMMUTABLE);
+        define(thisToken);
+        try {
+            final var initializerType = resolve(field.initializer());
+            ensureAssignable(field.type(), initializerType, field.name());
+        } finally {
+            endScope();
+            currentMethodOwner = previousMethodOwner;
+            initializerVisibleFields = previousInitializerFields;
+            flowState = previousFlow;
+        }
+    }
+
+    private void validateFieldInitializer(final Expr initializer,
+                                          final List<Stmt.Field> earlierFields,
+                                          final Token where) {
+        switch (initializer) {
+            case Expr.Literal _ -> {}
+            case Expr.Grouping grouping ->
+                    validateFieldInitializer(grouping.expression, earlierFields, where);
+            case Expr.Unary unary ->
+                    validateFieldInitializer(unary.right, earlierFields, where);
+            case Expr.Binary binary -> {
+                validateFieldInitializer(binary.left, earlierFields, where);
+                validateFieldInitializer(binary.right, earlierFields, where);
+            }
+            case Expr.Logical logical -> {
+                validateFieldInitializer(logical.left, earlierFields, where);
+                validateFieldInitializer(logical.right, earlierFields, where);
+            }
+            case Expr.Variable variable -> {
+                if (earlierFields.stream().noneMatch(candidate ->
+                        candidate.name().lexeme().equals(variable.name.lexeme()))
+                        || !variable.explicitFunctionTypeArguments.isEmpty()) {
+                    Zeron.resolutionError(new ResolutionError(variable.name,
+                            "A field initializer may read only fields declared earlier."));
+                }
+            }
+            default -> Zeron.resolutionError(new ResolutionError(where,
+                    "Field initializers currently allow only literals, operators, and reads of earlier fields."));
         }
     }
 
@@ -496,6 +626,8 @@ public final class Resolver {
         beginScope();
     expectedReturnTypes.push(method.typeDescriptor().returnType());
         final var enclosingFlow = flowState;
+        final var enclosingMethodOwner = currentMethodOwner;
+        currentMethodOwner = owner;
         flowState = new FlowState();
         final var thisToken = new Token(TokenType.THIS, "this", null, method.name().line());
         final TypeDescriptor ownerType = classType(owner);
@@ -516,6 +648,26 @@ public final class Resolver {
             expectedReturnTypes.pop();
             endScope();
             flowState = enclosingFlow;
+            currentMethodOwner = enclosingMethodOwner;
+        }
+    }
+
+    private void resolvePropertyAccessors(final Stmt.ClassDecl owner,
+                                          final Stmt.Property property) {
+        if (property.getterBody() != null) {
+            final var getterName = new Token(TokenType.IDENTIFIER,
+                    Stmt.propertyGetterName(property.name().lexeme()), null, property.name().line());
+            final var getterType = TypeDescriptor.functionOf(getterName.lexeme(), property.type());
+            resolveMethod(owner, new Stmt.Method(getterName, List.of(), getterType,
+                    property.isPublic(), false, property.getterBody()));
+        }
+        if (property.setterBody() != null) {
+            final var setterName = new Token(TokenType.IDENTIFIER,
+                    Stmt.propertySetterName(property.name().lexeme()), null, property.name().line());
+            final var setterType = TypeDescriptor.functionOf(setterName.lexeme(),
+                    TypeDescriptor.ofUnit(), property.type());
+            resolveMethod(owner, new Stmt.Method(setterName, List.of(property.setterParameter()),
+                    setterType, property.isPublic(), true, property.setterBody()));
         }
     }
 
@@ -558,16 +710,123 @@ public final class Resolver {
                     .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
                     .findFirst()
                     .orElse(null);
-                final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
+            final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
                     required.typeDescriptor(), substitutions);
-                if (implementation == null || !implementation.isPublic()
+            final var defaults = implementation == null
+                    ? defaultMethodsFor(declaration, requiredType)
+                    : List.<DefaultMethodSelection>of();
+            if (defaults.size() > 1) {
+                Zeron.resolutionError(new ResolutionError(contractUse.name(),
+                        "Multiple default contract methods named '" + required.name().lexeme()
+                                + "' require an explicit class implementation."));
+            }
+            final var defaultMethod = defaults.size() == 1
+                    && defaults.getFirst().method().isMutating() == required.isMutating()
+                    ? defaults.getFirst()
+                    : null;
+            if (implementation == null && defaultMethod == null
+                    || implementation != null && (!implementation.isPublic()
                     || implementation.isMutating() != required.isMutating()
-                    || !implementation.typeDescriptor().equals(requiredType)) {
+                    || !compatibleMethodSignatures(requiredType, implementation.typeDescriptor()))) {
                 Zeron.resolutionError(new ResolutionError(contractUse.name(),
                         "Class does not provide a compatible public contract method '"
                                 + required.name().lexeme() + "'."));
             }
         }
+
+        for (final var required : contract.properties()) {
+            final var implementation = declaration.properties().stream()
+                    .filter(property -> property.name().lexeme().equals(required.name().lexeme()))
+                    .findFirst()
+                    .orElse(null);
+            final var requiredType = TypeSubstitution.substitute(required.type(), substitutions);
+            if (implementation == null || !implementation.isPublic()
+                    || (required.isMutating() && !implementation.isMutating())
+                    || !requiredType.equals(implementation.type())) {
+                Zeron.resolutionError(new ResolutionError(contractUse.name(),
+                        "Class does not provide a compatible public contract property '"
+                                + required.name().lexeme() + "'."));
+            }
+        }
+    }
+
+    public record DefaultMethodSelection(String ownerName, Stmt.ContractMethod method,
+                                         FunctionDescriptor instantiatedType) {}
+
+    public DefaultMethodSelection defaultMethodFor(final Stmt.ClassDecl declaration,
+                                                   final Stmt.ContractUse requiredUse,
+                                                   final Stmt.ContractMethod required) {
+        final var substitutions = contractSubstitutions(requiredUse);
+        final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
+                required.typeDescriptor(), substitutions);
+        final var matches = defaultMethodsFor(declaration, requiredType);
+        return matches.size() == 1
+                && matches.getFirst().method().isMutating() == required.isMutating()
+                ? matches.getFirst()
+                : null;
+    }
+
+    private List<DefaultMethodSelection> defaultMethodsFor(final Stmt.ClassDecl declaration,
+                                                          final FunctionDescriptor requiredType) {
+        final var matches = new ArrayList<DefaultMethodSelection>();
+        for (final var contractUse : declaration.contractUses()) {
+            final var candidateContract = contracts.get(contractUse.name().lexeme());
+            final var substitutions = contractSubstitutions(contractUse);
+            for (final var candidate : candidateContract.methods()) {
+                if (!candidate.isDefault()
+                        || !candidate.name().lexeme().equals(requiredType.name())) continue;
+                final var candidateType = (FunctionDescriptor) TypeSubstitution.substitute(
+                        candidate.typeDescriptor(), substitutions);
+                if (compatibleMethodSignatures(requiredType, candidateType)) {
+                    matches.add(new DefaultMethodSelection(candidateContract.name().lexeme(), candidate,
+                            candidateType));
+                }
+            }
+        }
+        return List.copyOf(matches);
+    }
+
+    private List<DefaultMethodSelection> defaultMethodsOnClass(final Stmt.ClassDecl declaration,
+                                                              final String methodName) {
+        final var matches = new ArrayList<DefaultMethodSelection>();
+        for (final var contractUse : declaration.contractUses()) {
+            final var contract = contracts.get(contractUse.name().lexeme());
+            final var substitutions = contractSubstitutions(contractUse);
+            for (final var method : contract.methods()) {
+                if (!method.isDefault() || !method.name().lexeme().equals(methodName)) continue;
+                final var type = (FunctionDescriptor) TypeSubstitution.substitute(
+                        method.typeDescriptor(), substitutions);
+                matches.add(new DefaultMethodSelection(contract.name().lexeme(), method, type));
+            }
+        }
+        return List.copyOf(matches);
+    }
+
+    private LinkedHashMap<TypeParameterDescriptor, TypeDescriptor> contractSubstitutions(
+            final Stmt.ContractUse contractUse) {
+        final var contract = contracts.get(contractUse.name().lexeme());
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int i = 0; i < contract.typeParameters().size(); i++) {
+            substitutions.put(contract.typeParameters().get(i), contractUse.typeArguments().get(i));
+        }
+        return substitutions;
+    }
+
+    private boolean compatibleMethodSignatures(final FunctionDescriptor required,
+                                               final FunctionDescriptor implementation) {
+        if (required.typeParameters().size() != implementation.typeParameters().size()
+                || required.arity() != implementation.arity()) return false;
+        final var methodSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int i = 0; i < required.typeParameters().size(); i++) {
+            methodSubstitutions.put(required.typeParameters().get(i),
+                    implementation.typeParameters().get(i));
+        }
+        for (int i = 0; i < required.arity(); i++) {
+            if (!TypeSubstitution.substitute(required.parameters().get(i), methodSubstitutions)
+                    .equals(implementation.parameters().get(i))) return false;
+        }
+        final var requiredReturn = TypeSubstitution.substitute(required.returnType(), methodSubstitutions);
+        return typeCompatibility.canAssign(requiredReturn, implementation.returnType());
     }
 
     private void validateFunctionTypes(final FunctionDescriptor function, final Token where) {
@@ -788,7 +1047,7 @@ public final class Resolver {
                 flowState.markUnreachable();
             }
             case Stmt.Var var -> {
-                Zeron.debug("resolving variable " + var.name().lexeme() + " " + var.type());
+                Zeron.debug("resolving variable       " + var.name().lexeme() + " " + var.type());
                 if (!(var.type() instanceof InferDescriptor)) validateType(var.type(), var.name());
 
                 declare(var, var.name(), var.type(), var.mutability());
@@ -901,21 +1160,56 @@ public final class Resolver {
         return switch (expr) {
             case Expr.MemberCall call -> resolveMemberCall(call);
             case Expr.PropertyAssignment assignment -> {
+                if (assignment.property.safeNavigation()) {
+                    Zeron.resolutionError(new ResolutionError(assignment.property.name,
+                            "Safe navigation cannot be used for property assignment."));
+                }
                 resolveProperty(assignment.property);
                 final var receiverType = assignment.property.receiver.getType();
                 final var ownerName = className(receiverType);
-                final var field = findField(ownerName, assignment.property.name);
                 if (!(receiverType instanceof ReferenceDescriptor)) {
                     Zeron.resolutionError(new ResolutionError(assignment.property.name,
-                            "Field assignment requires a mutable reference."));
+                            "Property assignment requires a mutable reference."));
                 }
                 final var owner = classes.get(ownerName);
-                final var expectedType = owner == null ? field.type()
-                        : TypeSubstitution.substitute(field.type(),
-                                substitutionsFor(owner.typeParameters(), receiverType));
+                final var propertyDeclaration = findProperty(ownerName, assignment.property.name);
+                final TypeDescriptor expectedType;
+                if (propertyDeclaration != null) {
+                    if (!propertyDeclaration.isMutating()) {
+                        Zeron.resolutionError(new ResolutionError(assignment.property.name,
+                                "Property is read-only."));
+                    }
+                    expectedType = resolvedPropertyType(ownerName, propertyDeclaration, receiverType);
+                } else {
+                    final var field = findField(ownerName, assignment.property.name);
+                    expectedType = owner == null ? field.type()
+                            : TypeSubstitution.substitute(field.type(),
+                                    substitutionsFor(owner.typeParameters(), receiverType));
+                }
                 ensureAssignable(expectedType,
                     resolveArgument(assignment.value, expectedType),
                     assignment.property.name);
+                assignment.setType(TypeDescriptor.ofUnit());
+                yield TypeDescriptor.ofUnit();
+            }
+            case Expr.PropertyCompoundAssignment assignment -> {
+                resolveProperty(assignment.property);
+                final var receiverType = assignment.property.receiver.getType();
+                if (!(receiverType instanceof ReferenceDescriptor)) {
+                    Zeron.resolutionError(new ResolutionError(assignment.property.name,
+                            "Property compound assignment requires a mutable reference."));
+                }
+                final var ownerName = className(receiverType);
+                final var property = findProperty(ownerName, assignment.property.name);
+                if (property == null || !property.isMutating()) {
+                    Zeron.resolutionError(new ResolutionError(assignment.property.name,
+                            "Compound assignment requires a writable property."));
+                }
+                final var operation = new Expr.Binary(assignment.property,
+                        assignment.operator, assignment.value, TypeDescriptor.ofInfer());
+                final var valueType = resolve(operation);
+                assignment.setResolvedOperation(operation);
+                ensureAssignable(assignment.property.getType(), valueType, assignment.property.name);
                 assignment.setType(TypeDescriptor.ofUnit());
                 yield TypeDescriptor.ofUnit();
             }
@@ -1003,6 +1297,7 @@ public final class Resolver {
                 assignment.setType(expectedType);
                 yield expectedType;
             }
+            case Expr.CoalesceAssignment assignment -> resolveCoalesceAssignment(assignment);
             // |> a + b ::= when predicate x is Infer, TypeParam
             //            | predicate a && not predicate b -> typeof b
             //            | predicate b && not predicate a -> typeof a
@@ -1011,6 +1306,35 @@ public final class Resolver {
             // resolve left and right, ensure types are exact and
             // return the expression tagged with the resolved type
             case Expr.Binary binary -> {
+                if (binary.operator.type() == TokenType.EQUAL_EQUAL_EQUAL) {
+                    final var leftType = resolve(binary.left);
+                    final var rightType = resolve(binary.right);
+                    final var leftIsNull = leftType instanceof NullDescriptor;
+                    final var rightIsNull = rightType instanceof NullDescriptor;
+                    if (leftIsNull && rightIsNull
+                            || leftIsNull && !isIdentityComparable(rightType)
+                            || rightIsNull && !isIdentityComparable(leftType)) {
+                        Zeron.resolutionError(new ResolutionError(binary.operator,
+                                "'===' requires reference-valued operands; nullable primitives and Unit "
+                                        + "are not supported."));
+                    }
+                    if (!leftIsNull && !rightIsNull) {
+                        if (!isIdentityComparable(leftType) || !isIdentityComparable(rightType)) {
+                            Zeron.resolutionError(new ResolutionError(binary.operator,
+                                    "'===' requires reference-valued operands; nullable primitives and Unit "
+                                            + "are not supported."));
+                        }
+                        final var leftView = identityViewType(leftType);
+                        final var rightView = identityViewType(rightType);
+                        if (!typeCompatibility.canAssign(leftView, rightView)
+                                && !typeCompatibility.canAssign(rightView, leftView)) {
+                            Zeron.resolutionError(new ResolutionError(binary.operator,
+                                    "'===' operands must have compatible reference types."));
+                        }
+                    }
+                    binary.setType(TypeDescriptor.ofBoolean());
+                    yield TypeDescriptor.ofBoolean();
+                }
                 if ((binary.operator.type() == TokenType.EQUAL_EQUAL
                         || binary.operator.type() == TokenType.BANG_EQUAL)
                         && (isNullLiteral(binary.left) || isNullLiteral(binary.right))) {
@@ -1109,8 +1433,19 @@ public final class Resolver {
                     final var functionName = resolveFunctionName(call.callee.lexeme());
                     final var functionToken = functionName == null ? null : functionSymbolTokens.get(functionName);
                     if (functionToken == null) {
-                        Zeron.resolutionError(new ResolutionError(call.callee,
-                                "Unknown function '" + call.callee.lexeme() + "'."));
+                        if (currentMethodOwner == null) {
+                            Zeron.resolutionError(new ResolutionError(call.callee,
+                                    "Unknown function '" + call.callee.lexeme() + "'."));
+                        }
+                        final var receiver = new Expr.Variable(
+                                new Token(TokenType.THIS, "this", null, call.callee.line()),
+                                TypeDescriptor.ofInfer());
+                        final var implicitCall = new Expr.MemberCall(receiver, call.callee, call.paren,
+                                call.arguments, call.explicitTypeArguments, TypeDescriptor.ofInfer());
+                        call.setImplicitMemberCall(implicitCall);
+                        final var resultType = resolveMemberCall(implicitCall);
+                        call.setType(resultType);
+                        yield resultType;
                     }
                     call.setResolvedFunctionName(functionName);
                     descriptor = (FunctionDescriptor) symbols.getFunction(functionToken).type();
@@ -1124,7 +1459,7 @@ public final class Resolver {
                             "This function does not declare type parameters."));
                 }
                 var parameters = descriptor.parameters();
-                Zeron.debug("resolving call     " + call.callee.lexeme() + parameters
+                Zeron.debug("resolving call              " + call.callee.lexeme() + parameters
                     + " -> " + descriptor.returnType());
 
                 // if arities differ, there were too many args
@@ -1174,6 +1509,53 @@ public final class Resolver {
                 flowState = FlowState.join(thenFlow, elseFlow);
                 iff.setType(commonType);
                 yield commonType;
+            }
+            case Expr.Coalesce coalesce -> {
+                final var leftType = resolve(coalesce.left);
+                final var afterLeft = flowState.copy();
+                if (!(leftType instanceof NullableDescriptor) && !(leftType instanceof NullDescriptor)) {
+                    Zeron.resolutionError(new ResolutionError(coalesce.operator,
+                            "The left operand of '??' must be nullable."));
+                }
+
+                final var nonNullType = leftType instanceof NullableDescriptor nullable
+                        ? nullable.baseType()
+                        : TypeDescriptor.ofInfer();
+                coalesce.setLeftNonNullType(nonNullType);
+                final var nonNullFlow = leftType instanceof NullDescriptor
+                        ? FlowState.unreachable()
+                        : afterLeft.copy();
+                final var nullFlow = afterLeft.copy();
+                if (!(leftType instanceof NullDescriptor)) {
+                    final var variable = directVariable(coalesce.left);
+                    if (variable != null && isRefinable(variable.name)) {
+                        final var binding = symbols.getSymbol(variable.name);
+                        final var existingFact = afterLeft.get(binding.name());
+                        final var nonNullFact = existingFact == null
+                                ? nonNullFact(binding.type())
+                                : new FlowFact(false, existingFact.nonNullAlternatives());
+                        nonNullFlow.put(binding.name(), nonNullFact);
+                        nullFlow.put(binding.name(), new FlowFact(true, Set.of()));
+                    }
+                }
+
+                flowState = nullFlow;
+                final var fallbackType = resolve(coalesce.right);
+                final var fallbackFlow = flowState.copy();
+                final TypeDescriptor resultType;
+                if (leftType instanceof NullDescriptor) {
+                    if (fallbackType instanceof NullDescriptor) {
+                        Zeron.resolutionError(new ResolutionError(coalesce.operator,
+                                "The result type of 'null ?? null' cannot be inferred."));
+                    }
+                    resultType = fallbackType;
+                } else {
+                    resultType = ensureCommonParent(coalesce.operator, nonNullType, fallbackType);
+                }
+
+                flowState = FlowState.join(nonNullFlow, fallbackFlow);
+                coalesce.setType(resultType);
+                yield resultType;
             }
             // suggested type for lambdas will always be inferred,
             // but they need to be structurally inferred. we can extract
@@ -1259,16 +1641,29 @@ public final class Resolver {
                     yield resolveFunctionReference(variable, null);
                 }
                 final var name = variable.name;
+                if (initializerVisibleFields != null && name.type() != TokenType.THIS) {
+                    final var fieldType = resolveImplicitFieldRead(variable);
+                    if (fieldType == null) {
+                        Zeron.resolutionError(new ResolutionError(name,
+                                "A field initializer may read only fields declared earlier."));
+                    }
+                    yield fieldType;
+                }
                 if (!symbols.containsSymbol(name)) {
                     final var functionName = resolveFunctionName(name.lexeme());
-                    if (functionName != null
-                            && ((FunctionDescriptor) symbols.getFunction(functionSymbolTokens.get(functionName))
-                            .type()).isGeneric()) {
-                        Zeron.resolutionError(new ResolutionError(name,
-                                "A generic function value needs explicit type arguments or an expected function type."));
+                    if (functionName != null) {
+                        final var functionType = (FunctionDescriptor) symbols
+                                .getFunction(functionSymbolTokens.get(functionName)).type();
+                        if (functionType.isGeneric()) {
+                            Zeron.resolutionError(new ResolutionError(name,
+                                    "A generic function value needs explicit type arguments or an expected function type."));
+                        }
+                        yield resolveFunctionReference(variable, null);
                     }
+                    final var implicitFieldType = resolveImplicitFieldRead(variable);
+                    if (implicitFieldType != null) yield implicitFieldType;
                 }
-                Zeron.debug("resolving lookup   " + name.lexeme());
+                Zeron.debug("resolving variable lookup   " + name.lexeme());
                 if (symbols.containsSymbol(name) && !symbols.getSymbol(name).isInit()) {
                     Zeron.resolutionError(new ResolutionError(name,
                             "Can't read local variable in its own initializer."));
@@ -1289,8 +1684,60 @@ public final class Resolver {
             Zeron.resolutionError(new ResolutionError(test.operator,
                     "Type test is impossible between " + sourceType + " and " + test.targetType + "."));
         }
+
         test.setType(TypeDescriptor.ofBoolean());
         return TypeDescriptor.ofBoolean();
+    }
+
+    private TypeDescriptor resolveCoalesceAssignment(final Expr.CoalesceAssignment assignment) {
+        final var binding = symbols.getSymbol(assignment.name);
+        if (!binding.mutability().isReassignable()) {
+            Zeron.resolutionError(new ResolutionError(assignment.name,
+                    "Cannot reassign immutable binding '" + assignment.name.lexeme() + "'."));
+        }
+        if (binding.lvt() == SymbolTable.GLOBAL) {
+            Zeron.resolutionError(new ResolutionError(assignment.name,
+                    "'??=' is currently supported only for mutable local bindings."));
+        }
+        if (!(binding.type() instanceof NullableDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(assignment.name,
+                    "The target of '??=' must have a nullable declared type."));
+        }
+
+        final var incoming = flowState.copy();
+        final var currentType = effectiveType(binding);
+        final var canBeNonNull = !(currentType instanceof NullDescriptor);
+        final var canBeNull = currentType instanceof NullableDescriptor
+                || currentType instanceof NullDescriptor;
+        final var nonNullFlow = canBeNonNull ? incoming.copy() : FlowState.unreachable();
+        final var nullFlow = canBeNull ? incoming.copy() : FlowState.unreachable();
+        if (canBeNonNull && canBeNull) {
+            final var existingFact = incoming.get(binding.name());
+            nonNullFlow.put(binding.name(), existingFact == null
+                    ? nonNullFact(binding.type())
+                    : new FlowFact(false, existingFact.nonNullAlternatives()));
+        }
+        if (canBeNull) {
+            nullFlow.put(binding.name(), new FlowFact(true, Set.of()));
+        }
+
+        flowState = nullFlow.copy();
+        final var valueType = resolveArgument(assignment.value, binding.type());
+        ensureAssignable(binding.type(), valueType, assignment.name);
+        if (flowState.isReachable()) {
+            if (valueType instanceof NullDescriptor) {
+                flowState.put(binding.name(), new FlowFact(true, Set.of()));
+            } else if (!(valueType instanceof NullableDescriptor)) {
+                flowState.put(binding.name(), nonNullFact(binding.type()));
+            } else {
+                flowState.remove(binding.name());
+            }
+            for (final var writeScope : flowWriteScopes) writeScope.add(binding.name());
+        }
+        flowState = FlowState.join(nonNullFlow, flowState);
+        symbols.define(assignment.name);
+        assignment.setType(binding.type());
+        return binding.type();
     }
 
     private void validateRuntimeTestTarget(final TypeDescriptor targetType, final Token where) {
@@ -1365,7 +1812,8 @@ public final class Resolver {
                     final var binding = symbols.getSymbol(checked.name);
                     final var nullFact = new FlowFact(true, Set.of());
                     final var nonNullFact = nonNullFact(binding.type());
-                    final var equalsNull = binary.operator.type() == TokenType.EQUAL_EQUAL;
+                    final var equalsNull = binary.operator.type() == TokenType.EQUAL_EQUAL
+                            || binary.operator.type() == TokenType.EQUAL_EQUAL_EQUAL;
                     whenTrue.put(binding.name(), equalsNull ? nullFact : nonNullFact);
                     whenFalse.put(binding.name(), equalsNull ? nonNullFact : nullFact);
                 }
@@ -1459,8 +1907,25 @@ public final class Resolver {
 
     private boolean isNullComparison(final Expr.Binary binary) {
         return (binary.operator.type() == TokenType.EQUAL_EQUAL
-                || binary.operator.type() == TokenType.BANG_EQUAL)
+                || binary.operator.type() == TokenType.BANG_EQUAL
+                || binary.operator.type() == TokenType.EQUAL_EQUAL_EQUAL)
                 && (isNullLiteral(binary.left) || isNullLiteral(binary.right));
+    }
+
+    private boolean isIdentityComparable(final TypeDescriptor type) {
+        final var identityType = identityViewType(type);
+        return identityType instanceof AnyDescriptor
+                || identityType instanceof NominalDescriptor
+                || identityType instanceof GenericDescriptor
+                || identityType instanceof ArrayDescriptor
+                || identityType instanceof FunctionDescriptor
+                || identityType instanceof StringDescriptor;
+    }
+
+    private TypeDescriptor identityViewType(final TypeDescriptor type) {
+        if (type instanceof NullableDescriptor nullable) return identityViewType(nullable.baseType());
+        if (type instanceof ReferenceDescriptor reference) return identityViewType(reference.baseType());
+        return type;
     }
 
     private boolean isPrimitive(final TypeDescriptor type) {
@@ -1471,25 +1936,75 @@ public final class Resolver {
                 || baseType instanceof BooleanDescriptor;
     }
 
-    private TypeDescriptor resolveProperty(final Expr.Property property) {
-        final var receiverType = resolve(property.receiver);
-        final var baseType = receiverType instanceof ReferenceDescriptor reference
+    private TypeDescriptor resolveImplicitFieldRead(final Expr.Variable variable) {
+        if (currentMethodOwner == null) return null;
+        final var availableFields = initializerVisibleFields == null
+                ? currentMethodOwner.fields()
+                : initializerVisibleFields;
+        final var field = availableFields.stream()
+                .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
+                .findFirst()
+                .orElse(null);
+        if (field == null) return null;
+
+        final var receiver = new Expr.Variable(
+                new Token(TokenType.THIS, "this", null, variable.name.line()),
+                TypeDescriptor.ofInfer());
+        final var receiverType = resolve(receiver);
+        ensureFieldAccessible(variable.name, currentMethodOwner.name().lexeme());
+        final var receiverBaseType = receiverType instanceof ReferenceDescriptor reference
                 ? reference.baseType()
                 : receiverType;
+        final var resolvedType = TypeSubstitution.substitute(field.type(),
+                substitutionsFor(currentMethodOwner.typeParameters(), receiverBaseType));
+        variable.setImplicitFieldRead(receiver, currentMethodOwner.name().lexeme(), field.type());
+        variable.setType(resolvedType);
+        return resolvedType;
+    }
+
+    private TypeDescriptor resolveProperty(final Expr.Property property) {
+        final var receiverType = resolve(property.receiver);
+        final var safeFlows = property.safeNavigation()
+                ? beginSafeNavigation(property.receiver, property.name, receiverType)
+                : null;
+        final var memberReceiverType = receiverType instanceof NullableDescriptor nullable
+                ? nullable.baseType()
+                : receiverType;
+        final var baseType = memberReceiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : memberReceiverType;
         final var propertyIntrinsic = intrinsics.property(property.name.lexeme());
         if (propertyIntrinsic != null && propertyIntrinsic.id() == IntrinsicId.ARRAY_LENGTH
             && baseType instanceof ArrayDescriptor arrayType) {
             final var operation = resolveIntrinsic(propertyIntrinsic.id(),
-                List.of(arrayType.elementType()), List.of(receiverType), property.name);
+                List.of(arrayType.elementType()), List.of(memberReceiverType), property.name);
             property.setIntrinsicOperation(operation);
-            property.setType(operation.resultType());
-            return operation.resultType();
+            final var resultType = property.safeNavigation()
+                    ? operation.resultType().toNullable()
+                    : operation.resultType();
+            property.setType(resultType);
+            finishSafeNavigation(safeFlows);
+            return resultType;
         }
         final var ownerName = className(baseType);
         final var owner = classes.get(ownerName);
-        if (owner == null) {
-            Zeron.resolutionError(new ResolutionError(property.name, "Unknown property."));
+        final var propertyDeclaration = findProperty(ownerName, property.name);
+        if (propertyDeclaration != null) {
+            if (!propertyDeclaration.isPublic()
+                    && !Objects.equals(currentClassName, ownerName)) {
+                Zeron.resolutionError(new ResolutionError(property.name, "Property is private."));
+            }
+            final var propertyType = resolvedPropertyType(ownerName, propertyDeclaration, memberReceiverType);
+            property.setResolvedOwnerName(ownerName);
+            property.setResolvedAsProperty(true);
+            final var resultType = property.safeNavigation()
+                    ? propertyType.toNullable()
+                    : propertyType;
+            property.setType(resultType);
+            finishSafeNavigation(safeFlows);
+            return resultType;
         }
+        if (owner == null) Zeron.resolutionError(new ResolutionError(property.name, "Unknown property."));
         final var field = owner.fields().stream()
                 .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
                 .findFirst()
@@ -1499,15 +2014,40 @@ public final class Resolver {
         }
         ensureFieldAccessible(property.name, ownerName);
         final var fieldType = TypeSubstitution.substitute(field.type(),
-                substitutionsFor(owner.typeParameters(), receiverType));
-        property.setType(fieldType);
-        return fieldType;
+                substitutionsFor(owner.typeParameters(), memberReceiverType));
+        final var resultType = property.safeNavigation() ? fieldType.toNullable() : fieldType;
+        property.setType(resultType);
+        finishSafeNavigation(safeFlows);
+        return resultType;
     }
 
     private TypeDescriptor resolveMemberCall(final Expr.MemberCall call) {
+        if (call.safeNavigation()) {
+            final var receiverType = resolve(call.receiver);
+            final var safeFlows = beginSafeNavigation(call.receiver, call.name, receiverType);
+            final var memberReceiverType = receiverType instanceof NullableDescriptor nullable
+                    ? nullable.baseType()
+                    : receiverType;
+            flowState = safeFlows.nonNull().copy();
+            final var resultType = resolveMemberCall(call, memberReceiverType);
+            finishSafeNavigation(safeFlows);
+            final var nullableResult = resultType.toNullable();
+            call.setType(nullableResult);
+            return nullableResult;
+        }
+        return resolveMemberCall(call, null);
+    }
+
+    private TypeDescriptor resolveMemberCall(final Expr.MemberCall call,
+                                             final TypeDescriptor alreadyResolvedReceiverType) {
+        Zeron.debug("resolving member call       " + call.name.lexeme() + " for " + call.receiver);
         final var classOwnerName = call.receiver instanceof Expr.Variable typeName
             ? resolveClassName(typeName.name.lexeme())
             : null;
+        if (call.safeNavigation() && classOwnerName != null) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Safe navigation cannot be used for constructors or static calls."));
+        }
         if (classOwnerName != null) {
             final var declaration = classes.get(classOwnerName);
             if (declaration == null) {
@@ -1530,14 +2070,15 @@ public final class Resolver {
                     && !Objects.equals(currentClassName, declaration.name().lexeme())) {
                     Zeron.resolutionError(new ResolutionError(call.name, "Constructor is private."));
                 }
-                if (call.arguments.size() != declaration.fields().size()) {
+                final var constructorTypes = declaration.canonicalConstructorTypes();
+                if (call.arguments.size() != constructorTypes.size()) {
                     Zeron.resolutionError(new ResolutionError(call.name,
-                        "Expected " + declaration.fields().size() + " constructor arguments, found "
+                        "Expected " + constructorTypes.size() + " constructor arguments, found "
                             + call.arguments.size() + "."));
                 }
                 for (int i = 0; i < call.arguments.size(); i++) {
                     final var expectedType = TypeSubstitution.substitute(
-                        declaration.fields().get(i).type(), substitutions);
+                        constructorTypes.get(i), substitutions);
                     ensureAssignable(expectedType,
                         resolveArgument(call.arguments.get(i), expectedType), call.name);
                 }
@@ -1578,7 +2119,9 @@ public final class Resolver {
                 return instantiatedFactory.returnType();
         }
 
-        final var receiverType = resolve(call.receiver);
+        final var receiverType = alreadyResolvedReceiverType == null
+                ? resolve(call.receiver)
+                : alreadyResolvedReceiverType;
         if (receiverType instanceof TypeParameterDescriptor parameter) {
             return resolveBoundedMemberCall(call, parameter);
         }
@@ -1594,9 +2137,46 @@ public final class Resolver {
                 .findFirst()
                 .orElse(null);
         if (classMethod == null && contractMethod == null) {
+            if (owner != null) {
+                final var defaults = defaultMethodsOnClass(owner, call.name.lexeme());
+                if (defaults.size() > 1) {
+                    Zeron.resolutionError(new ResolutionError(call.name,
+                            "Multiple default contract methods named '" + call.name.lexeme()
+                                    + "' require an explicit class implementation."));
+                }
+                if (!defaults.isEmpty()) {
+                    final var defaultMethod = defaults.getFirst();
+                    final var descriptor = defaultMethod.instantiatedType();
+                    if (defaultMethod.method().isMutating()
+                            && !(receiverType instanceof ReferenceDescriptor)) {
+                        Zeron.resolutionError(new ResolutionError(call.name,
+                                "Mutating method requires a mutable reference."));
+                    }
+                    call.setResolvedOwnerName(defaultMethod.ownerName());
+                    call.setReceiverRequiresCast(true);
+                    if (descriptor.isGeneric()) return resolveGenericMemberCall(call, descriptor);
+                    if (!call.explicitTypeArguments.isEmpty()) {
+                        Zeron.resolutionError(new ResolutionError(call.name,
+                                "This method does not declare type parameters."));
+                    }
+                    call.setResolvedDescriptor(descriptor);
+                    if (descriptor.arity() != call.arguments.size()) {
+                        Zeron.resolutionError(new ResolutionError(call.name,
+                                "Expected " + descriptor.arity() + " arguments, found "
+                                        + call.arguments.size() + "."));
+                    }
+                    for (int i = 0; i < call.arguments.size(); i++) {
+                        ensureAssignable(descriptor.parameters().get(i),
+                                resolveArgument(call.arguments.get(i), descriptor.parameters().get(i)),
+                                call.name);
+                    }
+                    call.setType(descriptor.returnType());
+                    return descriptor.returnType();
+                }
+            }
             final var javaClass = javaClassPath.find(ownerName);
             if (javaClass != null) return resolveJavaInstanceCall(call, receiverType, javaClass);
-            Zeron.resolutionError(new ResolutionError(call.name, "Unknown method."));
+            Zeron.resolutionError(new ResolutionError(call.name, "Unknown method: '" + call.name.lexeme() + "'"));
         }
 
         final var descriptor = classMethod != null
@@ -1607,7 +2187,6 @@ public final class Resolver {
             : contract.typeParameters();
         final var instantiatedDescriptor = (FunctionDescriptor) TypeSubstitution.substitute(
             descriptor, substitutionsFor(typeParameters, receiverType));
-        call.setResolvedDescriptor(instantiatedDescriptor);
         final var isMutating = classMethod != null
                 ? classMethod.isMutating()
                 : contractMethod.isMutating();
@@ -1619,6 +2198,14 @@ public final class Resolver {
             Zeron.resolutionError(new ResolutionError(call.name,
                     "Mutating method requires a mutable reference."));
         }
+        if (instantiatedDescriptor.isGeneric()) {
+            return resolveGenericMemberCall(call, instantiatedDescriptor);
+        }
+        if (!call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "This method does not declare type parameters."));
+        }
+        call.setResolvedDescriptor(instantiatedDescriptor);
         if (instantiatedDescriptor.arity() != call.arguments.size()) {
             Zeron.resolutionError(new ResolutionError(call.name,
                     "Expected " + instantiatedDescriptor.arity() + " arguments, found "
@@ -1631,6 +2218,100 @@ public final class Resolver {
         }
         call.setType(instantiatedDescriptor.returnType());
         return instantiatedDescriptor.returnType();
+    }
+
+    private SafeNavigationFlows beginSafeNavigation(final Expr receiver,
+                                                    final Token where,
+                                                    final TypeDescriptor receiverType) {
+        if (receiverType instanceof NullDescriptor) {
+            Zeron.resolutionError(new ResolutionError(where,
+                    "Safe navigation requires a receiver with a known non-null type."));
+        }
+        final var afterReceiver = flowState.copy();
+        final var mayBeNull = receiverType instanceof NullableDescriptor;
+        final var nonNullFlow = afterReceiver.copy();
+        final var nullPath = mayBeNull ? afterReceiver.copy() : FlowState.unreachable();
+        if (mayBeNull) {
+            final var variable = directVariable(receiver);
+            if (variable != null && isRefinable(variable.name)) {
+                final var binding = symbols.getSymbol(variable.name);
+                final var existingFact = afterReceiver.get(binding.name());
+                nonNullFlow.put(binding.name(), existingFact == null
+                        ? nonNullFact(binding.type())
+                        : new FlowFact(false, existingFact.nonNullAlternatives()));
+                nullPath.put(binding.name(), new FlowFact(true, Set.of()));
+            }
+        }
+        flowState = nonNullFlow.copy();
+        return new SafeNavigationFlows(nonNullFlow, nullPath);
+    }
+
+    private void finishSafeNavigation(final SafeNavigationFlows flows) {
+        if (flows != null) {
+            flowState = FlowState.join(flowState, flows.nullPath());
+        }
+    }
+
+    private TypeDescriptor resolveGenericMemberCall(final Expr.MemberCall call,
+                                                    final FunctionDescriptor genericType) {
+        final var typeParameters = genericType.typeParameters();
+        if (!call.explicitTypeArguments.isEmpty()
+                && call.explicitTypeArguments.size() != typeParameters.size()) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Expected " + typeParameters.size() + " type arguments, found "
+                            + call.explicitTypeArguments.size() + "."));
+        }
+        if (genericType.arity() != call.arguments.size()) {
+            Zeron.resolutionError(new ResolutionError(call.name,
+                    "Expected " + genericType.arity() + " arguments, found " + call.arguments.size() + "."));
+        }
+
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
+            final var explicitType = call.explicitTypeArguments.get(i);
+            validateType(explicitType, call.name);
+            substitutions.put(typeParameters.get(i), explicitType);
+        }
+
+        final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var argument = call.arguments.get(i);
+            if (argument instanceof Expr.Lambda || isFunctionReferenceCandidate(argument)) continue;
+            resolvedArguments[i] = resolve(argument);
+            TypeUnifier.unify(genericType.parameters().get(i), resolvedArguments[i], substitutions, call.name);
+        }
+
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var argument = call.arguments.get(i);
+            if (!(argument instanceof Expr.Lambda) && !isFunctionReferenceCandidate(argument)) continue;
+            final var expected = TypeSubstitution.substitute(genericType.parameters().get(i), substitutions);
+            if (functionType(expected) == null) {
+                Zeron.resolutionError(new ResolutionError(call.name,
+                        "A function value argument requires a function parameter type."));
+            }
+            resolvedArguments[i] = resolveArgument(argument, expected);
+            TypeUnifier.unify(genericType.parameters().get(i), resolvedArguments[i], substitutions, call.name);
+        }
+
+        for (final var parameter : typeParameters) {
+            if (!substitutions.containsKey(parameter)) {
+                Zeron.resolutionError(new ResolutionError(call.name,
+                        "Cannot infer type parameter '" + parameter.name()
+                                + "'; provide an explicit type argument."));
+            }
+        }
+
+        final var instantiatedParameters = genericType.parameters().stream()
+                .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
+                .toList();
+        for (int i = 0; i < resolvedArguments.length; i++) {
+            ensureAssignable(instantiatedParameters.get(i), resolvedArguments[i], call.name);
+        }
+        final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
+        call.setResolvedDescriptor(TypeDescriptor.functionOf(genericType.name(), instantiatedReturn,
+                instantiatedParameters.toArray(TypeDescriptor[]::new)));
+        call.setType(instantiatedReturn);
+        return instantiatedReturn;
     }
 
     private TypeDescriptor resolveJavaTypeCall(final Expr.MemberCall call,
@@ -1798,6 +2479,12 @@ public final class Resolver {
         }
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
                 method.typeDescriptor(), substitutions);
+        if (descriptor.isGeneric()) {
+            final var result = resolveGenericMemberCall(call, descriptor);
+            call.setResolvedOwnerName(ownerName);
+            call.setReceiverRequiresCast(true);
+            return result;
+        }
         if (descriptor.arity() != call.arguments.size()) {
             Zeron.resolutionError(new ResolutionError(call.name,
                     "Expected " + descriptor.arity() + " arguments, found " + call.arguments.size() + "."));
@@ -2062,6 +2749,35 @@ public final class Resolver {
                 .orElseThrow(() -> new ResolutionError(name, "Unknown field."));
     }
 
+    private PropertyInfo findProperty(final String ownerName, final Token name) {
+        final var owner = classes.get(ownerName);
+        if (owner != null) {
+            return owner.properties().stream()
+                    .filter(property -> property.name().lexeme().equals(name.lexeme()))
+                    .findFirst()
+                    .map(property -> new PropertyInfo(property.type(), property.isPublic(),
+                            property.isMutating()))
+                    .orElse(null);
+        }
+        final var contract = contracts.get(ownerName);
+        if (contract == null) return null;
+        return contract.properties().stream()
+                .filter(property -> property.name().lexeme().equals(name.lexeme()))
+                .findFirst()
+                .map(property -> new PropertyInfo(property.type(), true, property.isMutating()))
+                .orElse(null);
+    }
+
+    private TypeDescriptor resolvedPropertyType(final String ownerName,
+                                                final PropertyInfo property,
+                                                final TypeDescriptor receiverType) {
+        final var owner = classes.get(ownerName);
+        final var parameters = owner != null
+                ? owner.typeParameters()
+                : contracts.get(ownerName).typeParameters();
+        return TypeSubstitution.substitute(property.type(), substitutionsFor(parameters, receiverType));
+    }
+
     private void ensureFieldAccessible(final Token where, final String owner) {
         if (!Objects.equals(currentClassName, owner)) {
             Zeron.resolutionError(new ResolutionError(where, "Field is private."));
@@ -2275,6 +2991,8 @@ public final class Resolver {
             case Expr.Variable variable -> names.contains(variable.name.lexeme());
             case Expr.Assignment assignment -> names.contains(assignment.name.lexeme())
                 || referencesAnyVariable(assignment.value, names);
+            case Expr.CoalesceAssignment assignment -> names.contains(assignment.name.lexeme())
+                || referencesAnyVariable(assignment.value, names);
             case Expr.Binary binary -> referencesAnyVariable(binary.left, names)
                 || referencesAnyVariable(binary.right, names);
             case Expr.Call call -> names.contains(call.callee.lexeme())
@@ -2284,6 +3002,9 @@ public final class Resolver {
             case Expr.Property property -> referencesAnyVariable(property.receiver, names);
             case Expr.PropertyAssignment assignment -> referencesAnyVariable(assignment.property.receiver, names)
                 || referencesAnyVariable(assignment.value, names);
+            case Expr.PropertyCompoundAssignment assignment ->
+                referencesAnyVariable(assignment.property.receiver, names)
+                    || referencesAnyVariable(assignment.value, names);
             case Expr.ArrayLiteral literal ->
                 literal.elements.stream().anyMatch(element -> referencesAnyVariable(element, names));
             case Expr.Index index -> referencesAnyVariable(index.array, names)
@@ -2297,6 +3018,8 @@ public final class Resolver {
                 || referencesAnyVariable(iff.elseExpr, names);
             case Expr.Logical logical -> referencesAnyVariable(logical.left, names)
                 || referencesAnyVariable(logical.right, names);
+            case Expr.Coalesce coalesce -> referencesAnyVariable(coalesce.left, names)
+                || referencesAnyVariable(coalesce.right, names);
             case Expr.Unary unary -> referencesAnyVariable(unary.right, names);
             case Expr.TypeTest test -> referencesAnyVariable(test.value, names);
             case Expr.Cast cast -> referencesAnyVariable(cast.value, names);
@@ -2561,23 +3284,19 @@ public final class Resolver {
                 : type;
         if (arrayType instanceof ArrayDescriptor array) return array.elementType();
         final var baseName = className(arrayType);
-        final var iterableNames = new LinkedHashSet<String>();
-        iterableNames.add("zeron.collections.Iterable");
-        iterableNames.add(packageName.isEmpty() ? "Iterable" : packageName + ".Iterable");
-        for (final var iterableName : iterableNames) {
-            if (baseName.equals(iterableName) && arrayType instanceof GenericDescriptor generic
-                    && generic.typeParameters().size() == 1) {
-                recordIterationProtocol(where, iterableName);
-                return generic.typeParameters().getFirst();
-            }
+        final var iterableName = "zeron.collections.Iterable";
+        if (baseName.equals(iterableName) && arrayType instanceof GenericDescriptor generic
+                && generic.typeParameters().size() == 1) {
+            recordIterationProtocol(where, iterableName);
+            return generic.typeParameters().getFirst();
         }
         final var declaration = classes.get(baseName);
         if (declaration != null) {
             final var substitutions = substitutionsFor(declaration.typeParameters(), arrayType);
             for (final var contractUse : declaration.contractUses()) {
-                if (!iterableNames.contains(contractUse.name().lexeme())
+                if (!iterableName.equals(contractUse.name().lexeme())
                         || contractUse.typeArguments().size() != 1) continue;
-                recordIterationProtocol(where, contractUse.name().lexeme());
+                recordIterationProtocol(where, iterableName);
                 return TypeSubstitution.substitute(contractUse.typeArguments().getFirst(), substitutions);
             }
         }

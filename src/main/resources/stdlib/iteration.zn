@@ -8,3 +8,20 @@ public contract Iterator<T> {
 public contract Iterable<T> {
     iterator(): &Iterator<T>;
 }
+
+public class ArrayIterator<T> is Iterator<T> {
+    arr: Array<T>;
+    current: Int;
+
+    private constructor new;
+
+    public constructor from(arr: Array<T>) = ArrayIterator<T>.new(arr, 0);
+
+    public hasNext(): Boolean = this.current < this.arr.length;
+
+    public mut next(): T {
+        let i = this.current;
+        this.current = if (i >= this.arr.length) then i else i + 1;
+        return this.arr[i];
+    }
+}

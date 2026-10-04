@@ -25,6 +25,7 @@ public final class Scanner {
             entry("contract",    CONTRACT),
             entry("constructor", CONSTRUCTOR),
             entry("continue",    CONTINUE),
+            entry("default",     DEFAULT),
             entry("else",        ELSE),
             entry("external",    EXTERNAL),
             entry("false",       FALSE),
@@ -44,6 +45,7 @@ public final class Scanner {
             entry("null",        NULL),
             entry("or",          OR),
             entry("package",     PACKAGE),
+            entry("property",    PROPERTY),
             entry("public",      PUBLIC),
             entry("private",     PRIVATE),
             entry("return",      RETURN),
@@ -119,8 +121,15 @@ public final class Scanner {
             }
             case '*' -> addToken(match('=') ? STAR_EQUAL : STAR);
             case '!' -> addToken(match('=') ? BANG_EQUAL : BANG);
-            case '?' -> addToken(match('.') ? HUH_DOT : HUH);
-            case '=' -> addToken(match('=') ? EQUAL_EQUAL : EQUAL);
+            case '?' -> {
+                if (match('.')) addToken(HUH_DOT);
+                else if (match('?')) addToken(match('=') ? HUH_HUH_EQUAL : HUH_HUH);
+                else addToken(HUH);
+            }
+            case '=' -> {
+                if (match('=')) addToken(match('=') ? EQUAL_EQUAL_EQUAL : EQUAL_EQUAL);
+                else addToken(EQUAL);
+            }
             case '>' -> {
                 if (source.startsWith(">>=", current)) {
                     advance();

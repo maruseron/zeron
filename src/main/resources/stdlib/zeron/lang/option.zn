@@ -35,7 +35,3 @@ public class None<T> is Option<T> {
     public fold<R>(ifSome: (T) -> R, ifNone: () -> R): R =
         ifNone();
 }
-
-public fn someOf<T>(value: T): Option<T> = Some<T>.from(value);
-
-public fn noneOf<T>(): Option<T> = None<T>.none();

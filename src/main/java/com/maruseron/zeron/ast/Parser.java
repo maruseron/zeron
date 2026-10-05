@@ -292,7 +292,7 @@ public final class Parser {
             final List<Stmt> body;
             if (match(EQUAL)) {
                 if (!hasExplicitReturnType) returnType = TypeDescriptor.ofInfer();
-                body = List.of(new Stmt.Return(expression()));
+                body = List.of(expressionReturn());
                 consume(SEMICOLON, "Expect ';' after expression.");
             } else {
                 consume(LEFT_BRACE, "Expect '{' before function body.");
@@ -499,10 +499,11 @@ public final class Parser {
 
     private List<Stmt> accessorBody(final String accessorName) {
         if (match(EQUAL)) {
+            final var location = peek();
             final var expression = expression();
             consume(SEMICOLON, "Expect ';' after " + accessorName + " expression.");
             return List.of(accessorName.equals("getter")
-                    ? new Stmt.Return(expression)
+                    ? new Stmt.Return(expression, location)
                     : new Stmt.Expression(expression));
         }
         consume(LEFT_BRACE, "Expect '=' or '{' before " + accessorName + " body.");
@@ -536,7 +537,7 @@ public final class Parser {
         try {
             final List<Stmt> body;
             if (match(EQUAL)) {
-                body = List.of(new Stmt.Return(expression()));
+                body = List.of(expressionReturn());
                 consume(SEMICOLON, "Expect ';' after named constructor expression.");
             } else {
                 consume(LEFT_BRACE, "Expect '=' or '{' before named constructor body.");
@@ -659,7 +660,7 @@ public final class Parser {
         levelMarker = new LevelMarker(levelMarker);
         List<Stmt> body;
         if (match(EQUAL)) {
-            body = List.of(new Stmt.Return(expression()));
+            body = List.of(expressionReturn());
             consume(SEMICOLON, "Expect ';' after method expression.");
             levelMarker = levelMarker.enclosing();
             return new ParsedMethod(List.copyOf(parameterNames),
@@ -780,7 +781,10 @@ public final class Parser {
     private Stmt statement() {
         if (match(BREAK)) return new Stmt.Break(break_());
         if (match(CONTINUE)) return new Stmt.Continue(continue_());
-        if (match(RETURN)) return new Stmt.Return(return_());
+        if (match(RETURN)) {
+            final var location = check(SEMICOLON) ? previous() : peek();
+            return new Stmt.Return(return_(), location);
+        }
         if (match(FOR)) return forStatement();
         if (match(IF)) return ifStatement();
         if (match(LOOP, WHILE, UNTIL)) return unboundLoopStatement();
@@ -815,6 +819,11 @@ public final class Parser {
         final var expr = check(SEMICOLON) ? null : expression();
         consume(SEMICOLON, "Expect ';' after return.");
         return expr;
+    }
+
+    private Stmt.Return expressionReturn() {
+        final var location = peek();
+        return new Stmt.Return(expression(), location);
     }
 
     private Stmt forStatement() {
@@ -1496,7 +1505,7 @@ public final class Parser {
         if (match(LEFT_BRACE)) {
             body = block();
         } else {
-            body = List.of(new Stmt.Return(expression()));
+            body = List.of(expressionReturn());
         }
         levelMarker = levelMarker.enclosing();
         final var inferredParameters = params.stream()

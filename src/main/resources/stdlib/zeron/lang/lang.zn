@@ -1,0 +1,5 @@
+package zeron.lang;
+
+public fn someOf<T>(value: T): Option<T> = Some<T>.from(value);
+
+public fn noneOf<T>(): Option<T> = None<T>.none();

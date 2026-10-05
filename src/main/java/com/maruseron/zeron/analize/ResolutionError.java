@@ -2,14 +2,16 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.diagnostic.Diagnostic;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.diagnostic.DiagnosticHelp;
+import com.maruseron.zeron.diagnostic.SourceSpan;
 import com.maruseron.zeron.scan.Token;
 
+import java.util.List;
 import java.util.Objects;
 
 public final class ResolutionError extends RuntimeException {
     public final Token token;
     public final String sourcePath;
-    private final DiagnosticCatalog.Entry catalogEntry;
     private final Diagnostic diagnostic;
 
     public ResolutionError(DiagnosticCatalog.Entry catalogEntry, Token token, String message) {
@@ -20,19 +22,29 @@ public final class ResolutionError extends RuntimeException {
                            Token token,
                            String message,
                            String sourcePath) {
-        super(message);
-        this.catalogEntry = Objects.requireNonNull(catalogEntry);
-        this.token = Objects.requireNonNull(token);
-        this.sourcePath = sourcePath;
-        this.diagnostic = null;
+        this(Diagnostic.atToken(Objects.requireNonNull(catalogEntry),
+                Objects.requireNonNull(token), sourcePath, message), token);
+    }
+
+    private ResolutionError(final Diagnostic diagnostic, final Token token) {
+        super(diagnostic.message());
+        this.diagnostic = Objects.requireNonNull(diagnostic);
+        this.token = token;
+        this.sourcePath = diagnostic.primarySpan().sourcePath();
     }
 
     private ResolutionError(final Diagnostic diagnostic) {
-        super(diagnostic.message());
-        this.token = null;
-        this.sourcePath = diagnostic.primarySpan().sourcePath();
-        this.catalogEntry = null;
-        this.diagnostic = diagnostic;
+        this(diagnostic, null);
+    }
+
+    public static ResolutionError withHelp(final DiagnosticCatalog.Entry catalogEntry,
+                                           final Token token,
+                                           final String message,
+                                           final DiagnosticHelp help) {
+        final var diagnostic = Diagnostic.atToken(
+            Objects.requireNonNull(catalogEntry),
+            Objects.requireNonNull(token), null, message).withHelps(List.of(Objects.requireNonNull(help)));
+        return new ResolutionError(diagnostic, token);
     }
 
     public static ResolutionError fromDiagnostic(final Diagnostic diagnostic) {
@@ -40,8 +52,12 @@ public final class ResolutionError extends RuntimeException {
     }
 
     public Diagnostic toDiagnostic(final String fallbackSourcePath) {
-        if (diagnostic != null) return diagnostic;
-        return Diagnostic.atToken(catalogEntry, token,
-                sourcePath == null ? fallbackSourcePath : sourcePath, getMessage());
+        final var span = diagnostic.primarySpan();
+        final var diagnosticSourcePath = span.sourcePath() == null ? fallbackSourcePath : span.sourcePath();
+        if (Objects.equals(span.sourcePath(), diagnosticSourcePath)) return diagnostic;
+
+        return new Diagnostic(diagnostic.code(), diagnostic.severity(), diagnostic.message(),
+                new SourceSpan(diagnosticSourcePath, span.start(), span.end()),
+                diagnostic.labels(), diagnostic.notes(), diagnostic.helps());
     }
 }

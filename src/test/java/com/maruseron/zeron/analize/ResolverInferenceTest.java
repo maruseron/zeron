@@ -4,10 +4,14 @@ import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.scan.Scanner;
+import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -159,9 +163,21 @@ public final class ResolverInferenceTest {
             final var statements = Parser.of(Scanner.from(source).scanTokens()).parse();
 
             final var error = assertThrows(ResolutionError.class, () -> resolver.resolve(statements));
-            assertEquals("Cannot infer a type from a null value; add an explicit nullable type annotation.",
-                    error.getMessage());
+            assertEquals("Cannot infer a type from a null value.", error.getMessage());
         }
+    }
+
+    @Test
+    public void formatsTypeMismatchDiagnosticsWithSourceTypeNames() {
+        final var compatibility = new TypeCompatibility(Map.of(), Map.of());
+        final var typeParameter = new TypeParameterDescriptor(1, "T");
+        final var where = new Token(TokenType.IDENTIFIER, "value", null, 1);
+
+        final var error = assertThrows(ResolutionError.class,
+                () -> compatibility.ensureAssignable(typeParameter,
+                        TypeDescriptor.ofUnit(), where));
+
+        assertEquals("Expected T, found Unit.", error.getMessage());
     }
 
     @Test

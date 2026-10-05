@@ -6,7 +6,6 @@ import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
-import com.maruseron.zeron.scan.TokenType;
 
 import java.util.*;
 
@@ -198,7 +197,7 @@ final class LambdaResolver {
 
             TypeDescriptor returnType = TypeDescriptor.ofUnit();
             for (final var stmt : lambda.body) {
-                if (stmt instanceof Stmt.Return(Expr value)) {
+                if (stmt instanceof Stmt.Return(Expr value, Token _)) {
                     returnType = value == null ? TypeDescriptor.ofUnit() : ExpressionFlowResolver.resolveExpression(context, value);
                 } else {
                     context.statementResolver.resolve(stmt);
@@ -296,7 +295,7 @@ final class LambdaResolver {
         };
     }
 
-        private static boolean containsInfer(
+        static boolean containsInfer(
                 final ResolutionContext context, final TypeDescriptor descriptor) {
         return switch (descriptor) {
             case InferDescriptor _ -> true;
@@ -385,7 +384,7 @@ final class LambdaResolver {
 
             TypeDescriptor returnType = TypeDescriptor.ofUnit();
             for (final var stmt : lambda.body) {
-                if (stmt instanceof Stmt.Return(Expr value)) {
+                if (stmt instanceof Stmt.Return(Expr value, Token _)) {
                     returnType = value == null ? TypeDescriptor.ofUnit() : ExpressionFlowResolver.resolveExpression(context, value);
                 } else {
                     context.statementResolver.resolve(stmt);

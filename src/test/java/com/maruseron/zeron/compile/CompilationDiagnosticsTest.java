@@ -95,6 +95,29 @@ public final class CompilationDiagnosticsTest {
         }
     }
 
+    @Test
+    public void cliReportsUnresolvedLambdaTypesInsteadOfCrashingInBytecodePlanning() throws IOException {
+        final var source = Path.of("target", "UnresolvedLambda" + UUID.randomUUID().toString().replace("-", "") + ".zn");
+        final var previousOutput = System.out;
+        final var output = new ByteArrayOutputStream();
+        try {
+            Files.writeString(source, "let f = x -> x + x;");
+            deleteTree(Path.of("dist"));
+            System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+
+            assertEquals(71, Zeron.runCli(source.toString()));
+
+            final var diagnostic = output.toString(StandardCharsets.UTF_8);
+            assertTrue(diagnostic.contains("error[ZR2014]: Cannot infer the lambda's function type."));
+            assertTrue(diagnostic.contains("Add an explicit function type annotation to the binding."));
+            assertFalse(diagnostic.contains("Exception in thread"));
+        } finally {
+            System.setOut(previousOutput);
+            Files.deleteIfExists(source);
+            deleteTree(Path.of("dist"));
+        }
+    }
+
     private static CompilationService compiler(final List<CompilationUnit> units,
                                                final String mainClassName,
                                                final Path output) {

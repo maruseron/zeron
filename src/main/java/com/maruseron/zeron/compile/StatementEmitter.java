@@ -86,7 +86,7 @@ final class StatementEmitter {
                     emitPop(context, composer, context.lastEmittedType);
                 }
             }
-            case Stmt.Return(Expr expression) -> {
+            case Stmt.Return(Expr expression, Token _) -> {
                 if (expression == null) {
                     emitUnitValue(context, composer);
                     context.lastEmittedType = TypeDescriptor.ofUnit();

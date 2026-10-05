@@ -51,7 +51,8 @@ final class TypeCompatibility {
         if (canAssign(expectedType, resolvedType)) return expectedType;
 
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, where,
-                "Expected " + expectedType + ", found " + resolvedType + "."));
+                "Expected " + TypeFormatter.format(expectedType)
+                        + ", found " + TypeFormatter.format(resolvedType) + "."));
         return expectedType;
     }
 

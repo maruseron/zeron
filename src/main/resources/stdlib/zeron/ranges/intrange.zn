@@ -6,7 +6,7 @@ import zeron.lang.Option;
 import zeron.lang.Some;
 import zeron.lang.None;
 
-public class IntIterator is Iterator<Int> {
+class IntIterator is Iterator<Int> {
     current: Int;
     end: Int;
     step: Int;

@@ -1,5 +1,6 @@
 package com.maruseron.zeron.analize;
 
+import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
@@ -22,6 +23,8 @@ final class ResolutionContext {
             externalFunctionBindings = new IdentityHashMap<>();
     final Map<Token, TypeDescriptor> iterationElementTypes = new IdentityHashMap<>();
     final Map<Token, Resolver.IterationProtocol> iterationProtocols = new IdentityHashMap<>();
+    final List<Expr.Lambda> resolvedLambdas = new ArrayList<>();
+    private final Set<Expr.Lambda> trackedLambdas = Collections.newSetFromMap(new IdentityHashMap<>());
     final IdentityHashMap<Stmt, String> sourcePathsByDeclaration = new IdentityHashMap<>();
     final IdentityHashMap<Token, String> sourcePathsByToken = new IdentityHashMap<>();
     final TypeCompatibility typeCompatibility = new TypeCompatibility(classes, contracts);
@@ -68,6 +71,10 @@ final class ResolutionContext {
 
     void skipInvalidImportAlias(final String name) {
         if (invalidImportAliases.contains(name)) throw new SkipResolutionUnit();
+    }
+
+    void trackLambda(final Expr.Lambda lambda) {
+        if (trackedLambdas.add(lambda)) resolvedLambdas.add(lambda);
     }
 
     String sourcePath(final Stmt declaration) {

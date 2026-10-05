@@ -171,7 +171,7 @@ final class LambdaCompilationPlan {
                 if (thenBranch != null) collectLambdaShapes(thenBranch);
                 if (elseBranch != null) collectLambdaShapes(elseBranch);
             }
-            case Stmt.Return(Expr value) -> { if (value != null) collectLambdaShapes(value); }
+            case Stmt.Return(Expr value, Token _) -> { if (value != null) collectLambdaShapes(value); }
             case Stmt.Expression(Expr expression) -> collectLambdaShapes(expression);
             case Stmt.Var(Token _, TypeDescriptor type, Expr initializer, BindingMutability _, _) -> {
                 collectFunctionShapes(type);
@@ -376,7 +376,7 @@ final class LambdaCompilationPlan {
                 collectCapturedVariables(iterable, nestedNames, captured, seen);
                 collectCapturedVariables(body, nestedNames, captured, seen);
             }
-            case Stmt.Return(Expr value) -> {
+            case Stmt.Return(Expr value, Token _) -> {
                 if (value != null) collectCapturedVariables(value, localNames, captured, seen);
             }
             case Stmt.Expression(Expr expression) -> collectCapturedVariables(expression, localNames, captured, seen);

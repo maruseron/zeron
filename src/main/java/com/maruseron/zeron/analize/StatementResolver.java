@@ -4,6 +4,7 @@ import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.diagnostic.DiagnosticHelp;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 
@@ -131,14 +132,14 @@ final class StatementResolver {
                 }
                 context.frame.flowState = FlowState.join(thenFlow, elseFlow);
             }
-            case Stmt.Return(Expr value) -> {
+            case Stmt.Return(Expr value, Token location) -> {
                 final var expectedReturnType = context.frame.expectedReturnTypes.peek();
                 final var returnType = value == null
                         ? TypeDescriptor.ofUnit()
                         : MemberInteropResolver.resolveArgument(context, value, expectedReturnType);
                 if (!context.frame.expectedReturnTypes.isEmpty()) {
                     Resolver.ensureAssignable(context, context.frame.expectedReturnTypes.peek(),
-                            returnType, Resolver.SYNTHETIC_IDENTIFIER);
+                            returnType, location);
                 }
                 context.frame.flowState.markUnreachable();
             }
@@ -184,9 +185,11 @@ final class StatementResolver {
             }
             resolvedType = Resolver.ensureAssignable(context, var.type(), resolvedType, var.name());
             if (var.type() instanceof InferDescriptor && resolvedType instanceof NullDescriptor) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                Zeron.resolutionError(ResolutionError.withHelp(
+                        DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
                         var.name(),
-                        "Cannot infer a type from a null value; add an explicit nullable type annotation."));
+                        "Cannot infer a type from a null value.",
+                        new DiagnosticHelp("Add an explicit nullable type annotation.")));
             }
             if (var.type() instanceof InferDescriptor) context.symbols.setResolvedType(symbolName, resolvedType);
         }

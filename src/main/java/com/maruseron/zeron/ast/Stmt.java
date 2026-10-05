@@ -145,7 +145,7 @@ public sealed interface Stmt {
 
     record If(Token paren, Expr condition, Stmt thenBranch, Stmt elseBranch) implements Stmt {}
 
-    record Return(Expr value) implements Stmt {}
+    record Return(Expr value, Token location) implements Stmt {}
 
     record Var(Token name, TypeDescriptor type, Expr initializer,
                BindingMutability mutability, boolean isPublic) implements Stmt, Decl {

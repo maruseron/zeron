@@ -1,0 +1,5 @@
+package zeron.collections;
+
+public contract Iterable<T> {
+    iterator(): &Iterator<T>;
+}

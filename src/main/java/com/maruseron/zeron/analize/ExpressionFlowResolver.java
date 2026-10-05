@@ -381,6 +381,7 @@ final class ExpressionFlowResolver {
             // arity from the parameter count and infer a return type from
             // the body.
             case Expr.Lambda lambda -> {
+                context.trackLambda(lambda);
                 ensureImmutableCaptures(context, lambda);
                 final var resolvedType = LambdaResolver.inferLambdaType(context, lambda);
                 lambda.setType(resolvedType);

@@ -24,6 +24,10 @@ public record Diagnostic(
         helps = List.copyOf(helps);
     }
 
+    public Diagnostic withHelps(List<DiagnosticHelp> helps) {
+        return new Diagnostic(code, severity, message, primarySpan, labels, notes, helps);
+    }
+
     public static Diagnostic atToken(final DiagnosticCatalog.Entry entry,
                                      final Token token,
                                      final String sourcePath,

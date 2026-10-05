@@ -5,6 +5,7 @@ import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.diagnostic.DiagnosticHelp;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
@@ -22,11 +23,13 @@ public final class Resolver {
 
     public static final Token SYNTHETIC_IDENTIFIER = new Token(
             TokenType.IDENTIFIER,"<synthetic>", null, -1);
+
     public static final Stmt SYNTHETIC_VAR = new Stmt.Var(
             SYNTHETIC_IDENTIFIER,
             TypeDescriptor.ofNever(),
             null,
             BindingMutability.IMMUTABLE);
+            
     public static final Stmt SYNTHETIC_FUN = new Stmt.Function(
             SYNTHETIC_IDENTIFIER,
             List.of(),
@@ -54,7 +57,6 @@ public final class Resolver {
                 if (name != null) context.sourcePathsByToken.put(name, unit.sourcePath());
             }
         }
-        final var statements = units.stream().flatMap(unit -> unit.declarations().stream()).toList();
         for (final var unit : units) {
             context.currentSourcePath = unit.sourcePath();
             for (final var declaration : unit.declarations()) {
@@ -146,6 +148,16 @@ public final class Resolver {
                 if (!(statement instanceof Stmt.Var)) {
                     attempt(context, () -> resolve(context, statement));
                 }
+            }
+        }
+        for (final var lambda : context.resolvedLambdas) {
+            if (LambdaResolver.containsInfer(context, lambda.getType())) {
+                context.diagnostics.record(ResolutionError.withHelp(
+                        DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                        lambda.arrow,
+                        "Cannot infer the lambda's function type.",
+                        new DiagnosticHelp("Add an explicit function type annotation to the binding.")),
+                        lambda.arrow.span().sourcePath());
             }
         }
         Zeron.debug("resolution finished successfully with symbol table: \n" + context.symbols);
@@ -338,14 +350,14 @@ public final class Resolver {
                                         final List<Stmt> statements) {
         var currentType = expectedType;
         for (final var statement : statements) {
-            if (statement instanceof Stmt.Return(Expr value)) {
+            if (statement instanceof Stmt.Return(Expr value, Token location)) {
                 final var returnType = value == null
                         ? TypeDescriptor.ofUnit()
                         : resolveArgument(context, value, expectedType);
                 if (currentType instanceof InferDescriptor)
                     currentType = returnType;
                 else
-                    ensureAssignable(context, currentType, returnType, where);
+                    ensureAssignable(context, currentType, returnType, location == null ? where : location);
             }
         }
         return currentType instanceof InferDescriptor ? TypeDescriptor.ofUnit() : currentType;

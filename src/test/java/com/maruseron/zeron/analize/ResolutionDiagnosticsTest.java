@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.diagnostic.DiagnosticHelp;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
@@ -33,6 +34,8 @@ public final class ResolutionDiagnosticsTest {
         assertTrue(result.errors().get(0).message().contains("Unknown import target"));
         assertTrue(result.errors().get(1).message().contains("Cannot infer a type from a null value"));
         assertEquals("ZR2014", result.errors().get(1).code().toString());
+        assertEquals(List.of(new DiagnosticHelp("Add an explicit nullable type annotation.")),
+                result.errors().get(1).helps());
     }
 
     @Test
@@ -82,5 +85,37 @@ public final class ResolutionDiagnosticsTest {
         assertEquals("src/first.zn", result.errors().get(0).primarySpan().sourcePath());
         assertEquals("src/second.zn", result.errors().get(1).primarySpan().sourcePath());
         assertEquals("ZR2003", result.errors().get(0).code().toString());
+    }
+
+    @Test
+    public void locatesReturnTypeMismatchAtReturnedExpression() {
+        final var source = "fn wrong(): Int = \"bad\";";
+        final var unit = Parser.of(Scanner.from(source, "src/main.zn").scanTokens())
+                .parseCompilationUnit("src/main.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(1, result.errors().size());
+        assertEquals("src/main.zn", result.errors().getFirst().primarySpan().sourcePath());
+        assertEquals(1, result.errors().getFirst().primarySpan().start().line());
+        assertEquals(source.indexOf("\"bad\"") + 1,
+                (int) result.errors().getFirst().primarySpan().start().column());
+    }
+
+    @Test
+    public void reportsUnresolvedStandaloneLambdaInsteadOfPassingItToCompilation() {
+        final var source = "let f = x -> x + x;";
+        final var unit = Parser.of(Scanner.from(source, "src/main.zn").scanTokens())
+                .parseCompilationUnit("src/main.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(1, result.errors().size());
+        assertEquals("Cannot infer the lambda's function type.", result.errors().getFirst().message());
+        assertEquals("src/main.zn", result.errors().getFirst().primarySpan().sourcePath());
+        assertEquals("ZR2014", result.errors().getFirst().code().toString());
+        assertEquals(List.of(new DiagnosticHelp(
+                        "Add an explicit function type annotation to the binding.")),
+                result.errors().getFirst().helps());
     }
 }

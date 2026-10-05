@@ -2,7 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.FunctionBindingRegistry;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
@@ -39,7 +39,7 @@ public final class JavaInteropTest {
                 import %s.add as sum;
                 fn result(): Int = sum(19, 23);
                 """.formatted(clientPackage, facadePackage));
-        final var compiler = Compiler.forCompilationUnits(List.of(clientSource, facadeSource),
+        final var compiler = CompilationService.forCompilationUnits(List.of(clientSource, facadeSource),
             className, clientPackage, List.of(), true, List.of(JAVA_FIXTURE_ROOT),
             fixtureAddBinding(facadePackage + ".add"));
 
@@ -63,7 +63,7 @@ public final class JavaInteropTest {
                 package externalFacade;
             external fn add(left: Int, right: Int): String;
                 """);
-        final var compiler = Compiler.forCompilationUnits(List.of(source),
+        final var compiler = CompilationService.forCompilationUnits(List.of(source),
                 "externalFacade.InvalidExternalFacade", "externalFacade",
             List.of(), true, List.of(JAVA_FIXTURE_ROOT), fixtureAddBinding("externalFacade.add"));
         assertThrows(ResolutionError.class, compiler::resolve);
@@ -98,7 +98,7 @@ public final class JavaInteropTest {
                     return ();
                 }
                 """);
-        final var compiler = Compiler.forCompilationUnits(List.of(source), className, "interop",
+        final var compiler = CompilationService.forCompilationUnits(List.of(source), className, "interop",
                 List.of(), true, List.of(JAVA_FIXTURE_ROOT));
 
         try {
@@ -135,7 +135,7 @@ public final class JavaInteropTest {
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
                 fn invalid(value: Fixture): Int = value.current();
                 """);
-        final var compiler = Compiler.forCompilationUnits(List.of(source), "interop.JavaReadonlyClient", "interop",
+        final var compiler = CompilationService.forCompilationUnits(List.of(source), "interop.JavaReadonlyClient", "interop",
                 List.of(), true, List.of(JAVA_FIXTURE_ROOT));
         assertThrows(ResolutionError.class, compiler::resolve);
     }
@@ -150,7 +150,7 @@ public final class JavaInteropTest {
                 "import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture; "
                         + "fn invalid(): Int = Fixture.generic(1);")) {
             final var unit = parse("JavaInvalidClient.zn", "package interop; " + source);
-            final var compiler = Compiler.forCompilationUnits(List.of(unit), "interop.JavaInvalidClient", "interop",
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit), "interop.JavaInvalidClient", "interop",
                     List.of(), true, List.of(JAVA_FIXTURE_ROOT));
             assertThrows(ResolutionError.class, compiler::resolve);
         }

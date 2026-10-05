@@ -2,7 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.FunctionShapeNames;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
@@ -26,7 +26,7 @@ public final class FunctionReferenceProjectionTest {
         final var statements = parse("""
                 fn project(operation: &(Int) -> Int): (Int) -> Int = operation;
                 """);
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
 
         resolver.resolve(statements);
 
@@ -42,7 +42,7 @@ public final class FunctionReferenceProjectionTest {
                 fn upgrade(operation: (Int) -> Int): &(Int) -> Int = operation;
                 """);
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(statements));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(statements));
     }
 
     @Test
@@ -52,7 +52,7 @@ public final class FunctionReferenceProjectionTest {
         final var statements = parse("""
             fn project(operation: &(Boolean) -> String): (Boolean) -> String = operation;
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {

@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 
@@ -26,7 +27,8 @@ final class TypeCompatibility {
         }
         if (typeA.isWellFormed() && typeB.isWellFormed() && typeA.equals(typeB)) return typeA;
 
-        Zeron.resolutionError(new ResolutionError(where, "Types are not exact."));
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                where, "Types are not exact."));
         return typeA instanceof InferDescriptor ? typeB : typeA;
     }
 
@@ -48,7 +50,7 @@ final class TypeCompatibility {
         if (expectedType instanceof InferDescriptor) return resolvedType;
         if (canAssign(expectedType, resolvedType)) return expectedType;
 
-        Zeron.resolutionError(new ResolutionError(where,
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, where,
                 "Expected " + expectedType + ", found " + resolvedType + "."));
         return expectedType;
     }
@@ -148,7 +150,7 @@ final class TypeCompatibility {
 
     void ensureBoolean(final TypeDescriptor type, final Token where) {
         if (type instanceof BooleanDescriptor) return;
-        Zeron.resolutionError(new ResolutionError(where,
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, where,
                 "Condition must have non-null Boolean type."));
     }
 }

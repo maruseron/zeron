@@ -2,7 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
@@ -31,7 +31,7 @@ public final class OperatorTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -56,7 +56,7 @@ public final class OperatorTest {
         for (final var source : List.of(
                 "fn invalid(): Int = -true;",
                 "fn invalid(): String = +\"text\";")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -92,7 +92,7 @@ public final class OperatorTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -126,7 +126,7 @@ public final class OperatorTest {
                 "fn invalid(): Int = 1 | true;",
                 "fn invalid(): String = \"text\" % \"other\";",
                 "fn invalid(): Int = ~1.0;")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 

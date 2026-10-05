@@ -1,7 +1,17 @@
 import zeron.io.println;
-import zeron.collections.Sequence;
+import zeron.lang.Some;
+import zeron.lang.None;
+import zeron.lang.some as someOf;
 
 fn main() {
-    let seq = Sequence<Int>.fromArray([1, 2, 3, 4, 5]);
-    println(seq.map(x -> x * 2).filter(x -> x % 2 == 0).drop(1).fold(0, (a, b) -> a + b));
+    let some = someOf("Hello");
+    let result = match (some) {
+        case Some<String> as s -> s.value() + " world!";
+        case None<String> as n -> ".";
+    };
+    println(result);
+}
+
+fn wrong() {
+    let res = null;
 }

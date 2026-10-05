@@ -3,7 +3,7 @@ package com.maruseron.zeron;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.analize.ResolutionError;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
@@ -234,7 +234,7 @@ public final class StandardLibraryTest {
                     println(null);
                 }
                 """.formatted(packageName));
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
 
         try {
@@ -270,7 +270,7 @@ public final class StandardLibraryTest {
                     println("launched");
                 }
                 """.formatted(packageName));
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
 
         try {
@@ -306,7 +306,7 @@ public final class StandardLibraryTest {
                     println("run command works");
                 }
                 """.formatted(packageName));
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
 
         try {
@@ -343,7 +343,7 @@ public final class StandardLibraryTest {
                 }
                 fn noneIsAbsent(): Boolean = None<String?>.none().isSome() == false;
                 """.formatted(packageName));
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
 
         try {
@@ -408,7 +408,7 @@ public final class StandardLibraryTest {
         final var units = StandardLibrary.withBundledUnits(List.of(userUnit));
 
         try {
-            final var compiler = Compiler.forCompilationUnits(units, className, "app");
+            final var compiler = CompilationService.forCompilationUnits(units, className, "app");
             compiler.resolve();
             compiler.compile();
 
@@ -817,7 +817,7 @@ public final class StandardLibraryTest {
                 package %s;
                 public fn score(): Int = 2;
                 """.formatted(secondPackage));
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(consumer, first, second)),
                 consumerPackage + ".Main", consumerPackage);
 
@@ -845,7 +845,7 @@ public final class StandardLibraryTest {
                 package %s;
                 public class Point { public read(): Int = 2; }
                 """.formatted(secondPackage));
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(consumer, first, second)),
                 consumerPackage + ".Main", consumerPackage);
 
@@ -872,7 +872,7 @@ public final class StandardLibraryTest {
                 package %s;
                 public class Point { public read(): Int = 2; }
                 """.formatted(secondPackage));
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(consumer, first, second)),
                 consumerPackage + ".Main", consumerPackage);
 
@@ -933,7 +933,7 @@ public final class StandardLibraryTest {
                         and values.all(value -> false);
                 }
                 """.formatted(packageName));
-        final var compiler = Compiler.forCompilationUnits(List.of(source), className, packageName);
+        final var compiler = CompilationService.forCompilationUnits(List.of(source), className, packageName);
 
         try {
             deleteTree(Path.of("dist"));
@@ -1002,7 +1002,7 @@ public final class StandardLibraryTest {
                         and iterated == 2;
                 }
                 """.formatted(packageName));
-        final var compiler = Compiler.forCompilationUnits(List.of(source), className, packageName);
+        final var compiler = CompilationService.forCompilationUnits(List.of(source), className, packageName);
 
         try {
             deleteTree(Path.of("dist"));
@@ -1034,7 +1034,7 @@ public final class StandardLibraryTest {
                 }
                 """.formatted(packageName));
 
-        assertThrows(ResolutionError.class, () -> Compiler.forCompilationUnits(
+        assertThrows(ResolutionError.class, () -> CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)),
                 packageName + ".ReadOnlyList", packageName).resolve());
     }
@@ -1053,7 +1053,7 @@ public final class StandardLibraryTest {
 
         try {
             deleteTree(Path.of("dist"));
-            final var libraryCompiler = Compiler.forCompilationUnits(
+            final var libraryCompiler = CompilationService.forCompilationUnits(
                     List.of(libraryUnit), libraryPackage + ".LibraryBuilder", libraryPackage);
             libraryCompiler.resolve();
             libraryCompiler.compile();
@@ -1262,7 +1262,7 @@ public final class StandardLibraryTest {
         final var mainFile = Path.of("dist", "zeron", "ranges", "IntRangeValidation.class");
         final var sourceUnit = Parser.of(Scanner.from(Files.readString(sourcePath)).scanTokens())
                 .parseCompilationUnit(sourcePath.toString());
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                 List.of(sourceUnit, StandardLibrary.iterationUnit()), mainClass, "zeron.ranges");
 
         try {

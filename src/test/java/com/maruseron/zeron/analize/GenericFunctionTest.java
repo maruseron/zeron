@@ -2,7 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.FunctionShapeNames;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
@@ -37,14 +37,14 @@ public final class GenericFunctionTest {
                 let firstValue = first([8, 9]);
                 let transformed = apply(4, number -> number + 1);
                 """);
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
 
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "explicit"));
-        assertEquals(TypeDescriptor.ofString(), bindingType(resolver, statements, "inferred"));
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "firstValue"));
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "transformed"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "explicit"));
+        assertEquals(TypeDescriptor.ofString(), bindingType(result, statements, "inferred"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "firstValue"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "transformed"));
     }
 
     @Test
@@ -77,7 +77,7 @@ public final class GenericFunctionTest {
                     return value.echo<String>("contract");
                 }
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -127,7 +127,7 @@ public final class GenericFunctionTest {
                 "class Box { public constructor new; public mut update<T>(value: T): T = value; } "
                         + "class Other { public constructor new; "
                         + "public call(value: Box): Int = value.update(1); }")) {
-            assertThrows(source, ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(source, ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -141,7 +141,7 @@ public final class GenericFunctionTest {
             "fn identity<T>(value: T): T = value; let value = identity<Missing>(1);",
             "fn use<T>(operation: (T) -> Unit): Unit {} "
                     + "fn test(): Unit { use(value -> { print(value); }); }")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -156,7 +156,7 @@ public final class GenericFunctionTest {
                 "contract Mutable { mut update(): Unit; } "
                         + "fn invalid<T: Mutable>(value: T): Unit = value.update();",
                 "class NotAContract {} fn invalid<T: NotAContract>(value: T): Unit = ();")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -182,7 +182,7 @@ public final class GenericFunctionTest {
                 fn passesBound<T: Named>(value: T): String = readName(value);
                 fn passThrough(): String = passesBound(Person.new("Lin"));
                 """);
-        final var compiler = new Compiler(source, className);
+        final var compiler = new CompilationService(source, className);
         compiler.resolve();
 
         try {
@@ -243,7 +243,7 @@ public final class GenericFunctionTest {
                 }
                 fn localShadowTest(): Int = localShadow(identity::<Int>);
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -284,7 +284,7 @@ public final class GenericFunctionTest {
                 "contract Named { name(): String; } "
                         + "fn display<T: Named>(value: T): String = value.name(); "
                         + "fn invalid(): (String) -> String = display;")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -314,7 +314,7 @@ public final class GenericFunctionTest {
                     return constant("unused");
                 }
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -340,7 +340,7 @@ public final class GenericFunctionTest {
             "fn invalid(): Unit { let mut identity = value -> value; "
                 + "let integer = identity(1); let text = identity(\"text\"); }",
             "fn invalid(): Unit { let identity = value -> value; let mut alias = identity; }")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -370,7 +370,7 @@ public final class GenericFunctionTest {
                     return increment(9);
                 }
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -419,7 +419,7 @@ public final class GenericFunctionTest {
                 fn booleanToFloat(): Float = apply(true, value -> if (value) then 1.5 else 0.5);
                 fn booleanToBoolean(): Boolean = apply(true, value -> value == false);
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -477,7 +477,7 @@ public final class GenericFunctionTest {
                 """;
 
         try {
-            final var firstCompiler = new Compiler(parse(source), className);
+            final var firstCompiler = new CompilationService(parse(source), className);
             firstCompiler.resolve();
             firstCompiler.compile();
             final var firstMainClass = Files.readAllBytes(classFile);
@@ -487,7 +487,7 @@ public final class GenericFunctionTest {
                 assertCapturedCallbackResults(loader, className);
             }
 
-            final var secondCompiler = new Compiler(parse(source), className);
+            final var secondCompiler = new CompilationService(parse(source), className);
             secondCompiler.resolve();
             secondCompiler.compile();
             assertArrayEquals(firstMainClass, Files.readAllBytes(classFile));
@@ -521,7 +521,7 @@ public final class GenericFunctionTest {
                     return callback("returned");
                 }
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -573,7 +573,7 @@ public final class GenericFunctionTest {
                     return echoed(5);
                 }
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -684,7 +684,7 @@ public final class GenericFunctionTest {
                 """.formatted(boxName, contractName, sourceName, contractName,
                 boxName, boxName, boxName, boxName, contractName, sourceName,
                 contractName, sourceName, contractName, sourceName, contractName, sourceName));
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
             try {
                 compiler.resolve();
             } catch (final ResolutionError error) {
@@ -818,7 +818,7 @@ public final class GenericFunctionTest {
                 }
                 """.formatted(nullableBoxName, nestedBoxName, referenceBoxName,
                 nullableBoxName, nullableBoxName, nestedBoxName, referenceBoxName));
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -871,7 +871,7 @@ public final class GenericFunctionTest {
         assertEquals(42, program.getMethod("callerCaptureThroughGenericCallback").invoke(null));
     }
 
-    private static TypeDescriptor bindingType(final Resolver resolver,
+    private static TypeDescriptor bindingType(final ResolutionResult result,
                                              final List<Stmt> statements,
                                              final String name) {
         final var declaration = statements.stream()
@@ -880,6 +880,6 @@ public final class GenericFunctionTest {
                 .filter(variable -> variable.name().lexeme().equals(name))
                 .findFirst()
                 .orElseThrow();
-        return resolver.symbols.getSymbol(declaration.name()).type();
+        return result.globalSymbolTable().getSymbol(declaration.name()).type();
     }
 }

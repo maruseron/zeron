@@ -3,8 +3,8 @@ package com.maruseron.zeron;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.analize.ResolutionError;
-import com.maruseron.zeron.analize.Resolver;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.analize.ResolutionService;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
@@ -70,7 +70,7 @@ public final class CompilationUnitTest {
         final var units = List.of(firstUnit, secondUnit);
 
         try {
-            final var compiler = Compiler.forCompilationUnits(units, mainName, "fixture");
+            final var compiler = CompilationService.forCompilationUnits(units, mainName, "fixture");
             compiler.resolve();
             compiler.compile();
 
@@ -107,7 +107,7 @@ public final class CompilationUnitTest {
                 """);
 
         try {
-            final var compiler = Compiler.forCompilationUnits(List.of(consumer, provider), className, "app");
+            final var compiler = CompilationService.forCompilationUnits(List.of(consumer, provider), className, "app");
             compiler.resolve();
             compiler.compile();
 
@@ -156,7 +156,7 @@ public final class CompilationUnitTest {
 
         try {
             deleteTree(Path.of("dist"));
-            final var compiler = Compiler.forCompilationUnits(
+            final var compiler = CompilationService.forCompilationUnits(
                     List.of(consumer, first, second), className, appPackage);
             compiler.resolve();
             compiler.compile();
@@ -181,7 +181,7 @@ public final class CompilationUnitTest {
                 """);
 
         assertThrows(ResolutionError.class,
-                () -> new Resolver().resolveUnits(List.of(first, second, consumer)));
+                () -> new ResolutionService().resolveUnits(List.of(first, second, consumer)));
     }
 
     @Test
@@ -197,7 +197,7 @@ public final class CompilationUnitTest {
                 """);
 
         assertThrows(ResolutionError.class,
-                () -> new Resolver().resolveUnits(List.of(provider, consumer)));
+                () -> new ResolutionService().resolveUnits(List.of(provider, consumer)));
     }
 
     @Test
@@ -211,7 +211,7 @@ public final class CompilationUnitTest {
                 """);
 
         assertThrows(ResolutionError.class,
-                () -> new Resolver().resolveUnits(List.of(first, second, consumer)));
+                () -> new ResolutionService().resolveUnits(List.of(first, second, consumer)));
     }
 
         @Test
@@ -224,7 +224,7 @@ public final class CompilationUnitTest {
             """);
 
         assertThrows(ResolutionError.class,
-            () -> new Resolver().resolveUnits(List.of(provider, consumer)));
+            () -> new ResolutionService().resolveUnits(List.of(provider, consumer)));
         }
 
         @Test
@@ -240,7 +240,7 @@ public final class CompilationUnitTest {
             """);
 
         assertThrows(ResolutionError.class,
-            () -> new Resolver().resolveUnits(List.of(consumer, provider)));
+            () -> new ResolutionService().resolveUnits(List.of(consumer, provider)));
         }
 
         @Test
@@ -248,7 +248,7 @@ public final class CompilationUnitTest {
         final var entry = parse("Main.zn", "package app; fn main(): Unit = ();");
         final var library = parse("State.zn", "package app; let state = 1;");
 
-        new Resolver().resolveUnits(List.of(entry, library));
+        new ResolutionService().resolveUnits(List.of(entry, library));
         }
 
         @Test
@@ -260,7 +260,7 @@ public final class CompilationUnitTest {
                     fn result(): Int = value;
                     """);
             assertThrows(ResolutionError.class,
-                    () -> new Resolver().resolveUnits(List.of(privateProvider, privateConsumer)));
+                    () -> new ResolutionService().resolveUnits(List.of(privateProvider, privateConsumer)));
 
             final var first = parse("First.zn", "package one; public let score = 1;");
             final var second = parse("Second.zn", "package two; public let score = 2;");
@@ -271,7 +271,7 @@ public final class CompilationUnitTest {
                     fn result(): Int = score;
                     """);
             assertThrows(ResolutionError.class,
-                    () -> new Resolver().resolveUnits(List.of(first, second, ambiguousConsumer)));
+                    () -> new ResolutionService().resolveUnits(List.of(first, second, ambiguousConsumer)));
         }
 
         private static CompilationUnit parse(final String sourcePath, final String source) {

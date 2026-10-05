@@ -3,7 +3,7 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.TokenType;
 import org.junit.Test;
@@ -73,7 +73,7 @@ public final class IdentityEqualityTest {
                         boxName, boxName, contractName);
 
         try {
-            final var compiler = new Compiler(parse(source), className);
+            final var compiler = new CompilationService(parse(source), className);
             compiler.resolve();
             compiler.compile();
 
@@ -131,7 +131,7 @@ public final class IdentityEqualityTest {
                 """,
                 "fn invalid<T>(left: T, right: T): Boolean = left === right;")) {
             assertThrows(source, ResolutionError.class,
-                    () -> new Resolver().resolve(parse(source)));
+                    () -> new ResolutionService().resolve(parse(source)));
         }
     }
 

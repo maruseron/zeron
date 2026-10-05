@@ -3,13 +3,17 @@ package com.maruseron.zeron;
 import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
-import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
+import com.maruseron.zeron.diagnostic.Diagnostic;
+import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.diagnostic.DiagnosticFormatter;
+import com.maruseron.zeron.diagnostic.Severity;
+import com.maruseron.zeron.diagnostic.SourcePosition;
+import com.maruseron.zeron.diagnostic.SourceSpan;
 import com.maruseron.zeron.domain.ZeronLibraryJar;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
-import com.maruseron.zeron.scan.TokenType;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -23,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static java.lang.IO.println;
+import static java.lang.IO.print;
 
 public class Zeron {
     private static final java.util.Set<String> STANDARD_LIBRARY_TYPES = java.util.Set.of(
@@ -31,7 +36,9 @@ public class Zeron {
 
     static boolean hadError = false;
     static boolean hadResolutionError = false;
+    static boolean hadCompilationError = false;
     private static boolean debugEnabled;
+    private static final java.util.Map<String, List<String>> sourceLines = new java.util.HashMap<>();
 
     static void main(final String... args) throws IOException {
         final var exitCode = runCli(args);
@@ -41,7 +48,9 @@ public class Zeron {
     public static int runCli(final String... args) throws IOException {
         hadError = false;
         hadResolutionError = false;
+        hadCompilationError = false;
         debugEnabled = false;
+        sourceLines.clear();
         try {
             return runCliInvocation(args);
         } catch (final ResolutionError _) {
@@ -162,6 +171,7 @@ public class Zeron {
     private static int exitCode() {
         if (hadError) return 65;
         if (hadResolutionError) return 71;
+        if (hadCompilationError) return 70;
         return 0;
     }
 
@@ -247,8 +257,12 @@ public class Zeron {
         for (final var path : paths) {
             final var sourcePath = Paths.get(path);
             final var bytes = Files.readAllBytes(sourcePath);
-            units.add(Parser.of(Scanner.from(new String(bytes, Charset.defaultCharset())).scanTokens())
-                    .parseCompilationUnit(sourcePath.toString()));
+            final var source = new String(bytes, Charset.defaultCharset());
+            rememberSource(sourcePath.toString(), source);
+            final var result = Parser.of(Scanner.from(source, sourcePath.toString()).scanWithDiagnostics())
+                    .parseCompilationUnitWithDiagnostics(sourcePath.toString());
+            reportParseDiagnostics(result.diagnostics());
+            units.add(result.compilationUnit());
         }
         if (hadError) {
             return;
@@ -303,16 +317,26 @@ public class Zeron {
             final var relativeDirectory = relativePath.getParent() == null
                     ? ""
                     : relativePath.getParent().toString().replace('\\', '/').replace('/', '.');
-            final var unit = Parser.of(Scanner.from(Files.readString(sourcePath)).scanTokens())
-                    .parseCompilationUnit("root" + sourceRootIndex + "/"
-                            + relativePath.toString().replace('\\', '/'));
-            if (hadError) return;
+            final var unitSourcePath = "root" + sourceRootIndex + "/"
+                    + relativePath.toString().replace('\\', '/');
+            final var source = Files.readString(sourcePath);
+            rememberSource(unitSourcePath, source);
+            final var result = Parser.of(Scanner.from(source, unitSourcePath)
+                    .scanWithDiagnostics())
+                    .parseCompilationUnitWithDiagnostics(unitSourcePath);
+            reportParseDiagnostics(result.diagnostics());
+            final var unit = result.compilationUnit();
             if (!unit.packageName().equals(relativeDirectory)) {
-                error(1, "Package '" + (unit.packageName().isEmpty() ? "<default>" : unit.packageName())
+                reportParseDiagnostic(new Diagnostic(DiagnosticCatalog.PACKAGE_SOURCE_DIRECTORY_MISMATCH.code(),
+                        Severity.ERROR,
+                        "Package '" + (unit.packageName().isEmpty() ? "<default>" : unit.packageName())
                         + "' in " + sourcePath + " must match its directory under source root '"
                         + absoluteRoots.get(sourceRootIndex) + "' (expected '"
-                        + (relativeDirectory.isEmpty() ? "<default>" : relativeDirectory) + "').");
-                return;
+                        + (relativeDirectory.isEmpty() ? "<default>" : relativeDirectory) + "').",
+                        new SourceSpan(unitSourcePath, new SourcePosition(1, 1, 0),
+                                new SourcePosition(1, 1, 0)),
+                        List.of(), List.of(), List.of()));
+                continue;
             }
             units.add(unit);
         }
@@ -348,11 +372,14 @@ public class Zeron {
     private static void runPrompt() throws IOException {
         try (final var reader = new BufferedReader(new InputStreamReader(System.in))) {
             for (;;) {
-                println("> ");
+                print("> ");
                 final var line = reader.readLine();
                 if (line == null) break;
-                run(line);
                 hadError = false;
+                hadResolutionError = false;
+                hadCompilationError = false;
+                sourceLines.clear();
+                run(line);
             }
         }
     }
@@ -362,10 +389,12 @@ public class Zeron {
     }
 
     private static void run(final String source, final String outputClassName) throws IOException {
+        rememberSource(null, source);
         final var scanner = Scanner.from(source);
-        final var tokens = scanner.scanTokens();
-        final var parser = Parser.of(tokens);
-        final var unit = parser.parseCompilationUnit(null);
+        final var parser = Parser.of(scanner.scanWithDiagnostics());
+        final var result = parser.parseCompilationUnitWithDiagnostics(null);
+        reportParseDiagnostics(result.diagnostics());
+        final var unit = result.compilationUnit();
 
         if (hadError) return;
 
@@ -381,14 +410,15 @@ public class Zeron {
                                  final boolean bundleStandardLibrarySources,
                                  final List<Path> javaClassPathRoots,
                                  final Path outputDirectory) throws IOException {
-        final var compiler = Compiler.forCompilationUnits(
+        final var compiler = CompilationService.forCompilationUnits(
                         units, outputClassName, packageName, libraries,
                         bundleStandardLibrarySources, javaClassPathRoots, outputDirectory);
-        compiler.resolve();
+        final var resolution = compiler.resolveWithDiagnostics();
+        resolution.errors().forEach(Zeron::reportResolutionDiagnostic);
+        if (!resolution.errors().isEmpty()) return;
 
-        if (hadResolutionError) return;
-
-        compiler.compile();
+        final var compilation = compiler.compileWithDiagnostics();
+        compilation.diagnostics().forEach(Zeron::reportCompilationDiagnostic);
     }
 
     private static List<ZeronLibraryIndex> loadLibraries(final List<Path> libraryRoots) throws IOException {
@@ -417,10 +447,11 @@ public class Zeron {
     }
 
     private static void buildStandardLibrary(final Path outputDirectory) throws IOException {
-        final var compiler = Compiler.forStandardLibrary(outputDirectory);
-        compiler.resolve();
-        if (hadResolutionError) return;
-        compiler.compile();
+        final var compiler = CompilationService.forStandardLibrary(outputDirectory);
+        final var resolution = compiler.resolveWithDiagnostics();
+        resolution.errors().forEach(Zeron::reportResolutionDiagnostic);
+        if (!resolution.errors().isEmpty()) return;
+        compiler.compileWithDiagnostics().diagnostics().forEach(Zeron::reportCompilationDiagnostic);
     }
 
     private static void deleteTree(final Path path) throws IOException {
@@ -492,25 +523,67 @@ public class Zeron {
     }
 
     public static void error(final int line, final String message) {
-        report(line, "", message);
+        reportParseDiagnostic(new Diagnostic(DiagnosticCatalog.INVALID_DECLARATION.code(), Severity.ERROR, message,
+                SourceSpan.line(null, line), List.of(), List.of(), List.of()));
     }
 
-    private static void report(final int line, final String where, final String message) {
-        println("[line " + line + "] Error" + where + ": " + message);
-        hadError = true;
+    public static void error(final SourceSpan span, final String message) {
+        reportParseDiagnostic(new Diagnostic(DiagnosticCatalog.INVALID_DECLARATION.code(), Severity.ERROR, message,
+                span, List.of(), List.of(), List.of()));
+    }
+
+    private static void reportParseDiagnostics(final List<Diagnostic> diagnostics) {
+        diagnostics.forEach(Zeron::reportParseDiagnostic);
+    }
+
+    public static void reportDiagnostic(final Diagnostic diagnostic) {
+        println(DiagnosticFormatter.format(diagnostic, Zeron::sourceLine));
+    }
+
+    public static void reportParseDiagnostic(final Diagnostic diagnostic) {
+        reportDiagnostic(diagnostic);
+        if (diagnostic.severity() == Severity.ERROR) hadError = true;
+    }
+
+    public static void reportParseError(final Token token, final String message) {
+        reportParseDiagnostic(new Diagnostic(DiagnosticCatalog.EXPECTED_SYNTAX.code(), Severity.ERROR, message,
+                token.span(), List.of(), List.of(), List.of()));
     }
 
     public static void error(final Token token, final String message) {
-        if (token.type() == TokenType.EOF) {
-            report(token.line(), " at end", message);
-        } else {
-            report(token.line(), " at '" + token.lexeme() + "'", message);
-        }
+        reportParseDiagnostic(Diagnostic.atToken(DiagnosticCatalog.EXPECTED_SYNTAX, token,
+                token.span().sourcePath(), message));
     }
 
     public static void resolutionError(final ResolutionError error) {
-        println(error.getMessage() + "\n[line " + error.token.line() + "]");
-        hadResolutionError = true;
         throw error;
+    }
+
+    public static void reportResolutionError(final ResolutionError error) {
+        reportResolutionDiagnostic(error.toDiagnostic(error.sourcePath));
+    }
+
+    public static void reportResolutionDiagnostic(final Diagnostic diagnostic) {
+        reportStageDiagnostic(diagnostic);
+        if (diagnostic.severity() == Severity.ERROR) hadResolutionError = true;
+    }
+
+    public static void reportCompilationDiagnostic(final Diagnostic diagnostic) {
+        reportStageDiagnostic(diagnostic);
+        if (diagnostic.severity() == Severity.ERROR) hadCompilationError = true;
+    }
+
+    private static void reportStageDiagnostic(final Diagnostic diagnostic) {
+        reportDiagnostic(diagnostic);
+    }
+
+    private static void rememberSource(final String sourcePath, final String source) {
+        sourceLines.put(sourcePath, source.lines().toList());
+    }
+
+    private static String sourceLine(final String sourcePath, final int lineNumber) {
+        final var lines = sourceLines.get(sourcePath);
+        if (lines == null || lineNumber < 1 || lineNumber > lines.size()) return null;
+        return lines.get(lineNumber - 1);
     }
 }

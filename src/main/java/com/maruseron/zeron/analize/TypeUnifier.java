@@ -1,6 +1,7 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 
@@ -20,7 +21,7 @@ final class TypeUnifier {
                 && !acceptsAny(previous, actual)
                 && !(actual instanceof ReferenceDescriptor reference
                     && previous.equals(reference.baseType()))) {
-                Zeron.resolutionError(new ResolutionError(where,
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
                         "Conflicting type inferences for '" + parameter.name() + "': "
                                 + previous + " and " + actual + "."));
             }
@@ -72,7 +73,7 @@ final class TypeUnifier {
         }
         if (!pattern.equals(actual)
                 && !(actual instanceof ReferenceDescriptor reference && pattern.equals(reference.baseType()))) {
-            Zeron.resolutionError(new ResolutionError(where,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
                     "Expected " + pattern + ", found " + actual + "."));
         }
     }

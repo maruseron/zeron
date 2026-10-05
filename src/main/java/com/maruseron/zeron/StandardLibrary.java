@@ -58,7 +58,8 @@ public final class StandardLibrary {
         try (final var stream = StandardLibrary.class.getResourceAsStream(resourcePath)) {
             if (stream == null) throw new IllegalStateException("Missing standard library source " + resourcePath);
             final var source = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-            return Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit(resourcePath);
+            return Parser.of(Scanner.from(source, resourcePath).scanWithDiagnostics())
+                    .parseCompilationUnit(resourcePath);
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);
         }

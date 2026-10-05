@@ -3,7 +3,7 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.TokenType;
 import org.junit.Test;
@@ -75,7 +75,7 @@ public final class SafeNavigationTest {
         final var boxOutput = Path.of("dist", boxName + ".class");
 
         try {
-            final var compiler = new Compiler(parse(source), className);
+            final var compiler = new CompilationService(parse(source), className);
             compiler.resolve();
             compiler.compile();
 
@@ -111,7 +111,7 @@ public final class SafeNavigationTest {
 
     @Test
     public void mutableNullableReferenceRetainsMutatingCapability() {
-        new Resolver().resolve(parse("""
+        new ResolutionService().resolve(parse("""
                 class SafeCounter {
                     value: Int;
                     public constructor new;
@@ -122,7 +122,7 @@ public final class SafeNavigationTest {
                 }
                 """));
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse("""
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 class ReadOnlySafeCounter {
                     value: Int;
                     public constructor new;
@@ -136,7 +136,7 @@ public final class SafeNavigationTest {
 
     @Test
     public void safeNavigationFlowRefinementDoesNotEscapeTheCall() {
-        new Resolver().resolve(parse("""
+        new ResolutionService().resolve(parse("""
                 class SafeFlowBox {
                     value: Int;
                     public constructor new;
@@ -146,7 +146,7 @@ public final class SafeNavigationTest {
                 fn valid(box: SafeFlowBox?): Int? = box?.same(box);
                 """));
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse("""
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 class SafeFlowBox2 {
                     value: Int;
                     public constructor new;

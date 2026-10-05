@@ -1,7 +1,7 @@
 package com.maruseron.zeron.domain;
 
 import com.maruseron.zeron.analize.ResolutionError;
-import com.maruseron.zeron.analize.Resolver;
+import com.maruseron.zeron.analize.ResolutionService;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
@@ -92,23 +92,23 @@ public final class FunctionShapeKeyTest {
 
     @Test
     public void resolvesStandaloneLambdaTypeOnOriginalNode() {
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
         final var statements = Parser.of(Scanner.from("let f = x -> x + 1;").scanTokens()).parse();
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
         final var declaration = (Stmt.Var) statements.getFirst();
         final var lambda = (Expr.Lambda) declaration.initializer();
         final var expected = TypeDescriptor.functionOf("", TypeDescriptor.ofInt(), TypeDescriptor.ofInt());
 
         assertEquals(expected, lambda.getType());
-        assertEquals(expected, resolver.symbols.getSymbol(declaration.name()).type());
+        assertEquals(expected, result.globalSymbolTable().getSymbol(declaration.name()).type());
     }
 
     @Test
     public void resolvesMultiParameterLambdaTypeOnOriginalNode() {
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
         final var statements = Parser.of(Scanner.from("let pair = (left, right) -> 42;").scanTokens()).parse();
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
         final var declaration = (Stmt.Var) statements.getFirst();
         final var lambda = (Expr.Lambda) declaration.initializer();
@@ -120,27 +120,27 @@ public final class FunctionShapeKeyTest {
         assertEquals(2, generalized.typeParameters().size());
         assertEquals(generalized.typeParameters().get(0), generalized.parameters().get(0));
         assertEquals(generalized.typeParameters().get(1), generalized.parameters().get(1));
-        assertEquals(generalized, resolver.symbols.getSymbol(declaration.name()).type());
+        assertEquals(generalized, result.globalSymbolTable().getSymbol(declaration.name()).type());
     }
 
     @Test
     public void resolvesMultiParameterLambdaBindingAfterCallContext() {
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
         final var statements = Parser.of(Scanner.from("let pair = (left, right) -> left + right; let total = pair(3, 7);").scanTokens()).parse();
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
         final var declaration = (Stmt.Var) statements.getFirst();
         final var lambda = (Expr.Lambda) declaration.initializer();
         final var expected = TypeDescriptor.functionOf("", TypeDescriptor.ofInt(), TypeDescriptor.ofInt(), TypeDescriptor.ofInt());
 
         assertEquals(expected, lambda.getType());
-        assertEquals(expected, resolver.symbols.getSymbol(declaration.name()).type());
+        assertEquals(expected, result.globalSymbolTable().getSymbol(declaration.name()).type());
         assertEquals(2, ((FunctionDescriptor) lambda.getType()).arity());
     }
 
     @Test
     public void allowsImmutableCaptureInLambda() {
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
         final var statements = Parser.of(Scanner.from("let base = 3; let add = () -> base + 1;").scanTokens()).parse();
 
         resolver.resolve(statements);
@@ -152,7 +152,7 @@ public final class FunctionShapeKeyTest {
 
     @Test
     public void rejectsMutableCaptureInLambda() {
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
         final var statements = Parser.of(Scanner.from("let mut count = 3; let add = () -> count + 1;").scanTokens()).parse();
 
         assertThrows(ResolutionError.class, () -> resolver.resolve(statements));

@@ -5,6 +5,7 @@ import com.maruseron.zeron.analize.Bind;
 import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.analize.Width;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.ArrayList;
@@ -96,7 +97,7 @@ public final class SymbolTable {
 
     public Bind getFunction(final Token name) {
         if (!functions.containsKey(name.lexeme())) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, name,
                     "Unknown symbol: '" + name.lexeme() + "'"));
         }
 
@@ -105,7 +106,7 @@ public final class SymbolTable {
 
     public FunctionDescriptor getFunctionType(final Token name) {
         if (!functions.containsKey(name.lexeme())) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, name,
                     "Unknown symbol: '" + name.lexeme() + "'"));
         }
 
@@ -114,7 +115,7 @@ public final class SymbolTable {
 
     public Bind getSymbol(final Token name) {
         if (!symbols.containsKey(name.lexeme())) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, name,
                     "Unknown symbol: '" + name.lexeme() + "'"));
         }
 
@@ -123,7 +124,7 @@ public final class SymbolTable {
 
     public Bind getAnySymbol(final Token name) {
         if (!allSymbols.containsKey(name.lexeme())) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, name,
                     "Unknown symbol: '" + name.lexeme() + "'"));
         }
 
@@ -142,7 +143,7 @@ public final class SymbolTable {
                                 final Token name,
                                 final TypeDescriptor type) {
         if (containsFunction(name)) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, name,
                     "Already a function bound to this name."));
             return;
         }
@@ -172,7 +173,7 @@ public final class SymbolTable {
                               final TypeDescriptor type,
                               final BindingMutability mutability) {
         if (containsSymbol(name)) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, name,
                     "Already a symbol bound to this name."));
             return -2;
         }
@@ -194,7 +195,7 @@ public final class SymbolTable {
                              final TypeDescriptor type,
                              final BindingMutability mutability) {
         if (!scope.names.add(name.lexeme())) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, name,
                     "Already a symbol bound to this name."));
             return -2;
         }
@@ -229,7 +230,7 @@ public final class SymbolTable {
 
     public void define(Token name) {
         if (!containsSymbol(name)) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, name,
                     "Unknown symbol: " + name.lexeme()));
             return;
         }
@@ -243,7 +244,7 @@ public final class SymbolTable {
                 && (function.returnType() instanceof InferDescriptor
                     || function.parameters().stream().anyMatch(parameter -> parameter instanceof InferDescriptor));
         if (!containsSymbol(name) || !(currentType instanceof InferDescriptor || isInferredFunction)) {
-            Zeron.resolutionError(new ResolutionError(name,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, name,
                     "Cannot resolve type of non-inferred bind."));
         }
 
@@ -280,6 +281,24 @@ public final class SymbolTable {
         }
         // return to parent
         scope = scope.enclosing;
+    }
+
+    public void unwindScopesTo(final int depth) {
+        while (scopeDepth() > depth) endScope();
+    }
+
+    public int scopeDepth() {
+        var depth = 0;
+        for (var current = scope; current != null; current = current.enclosing) depth++;
+        return depth;
+    }
+
+    public void removeGlobalSymbol(final Token name, final Stmt declaration) {
+        final var binding = symbols.get(name.lexeme());
+        if (binding != null && binding.lvt() == GLOBAL && binding.declaration() == declaration) {
+            symbols.remove(name.lexeme());
+            allSymbols.remove(name.lexeme());
+        }
     }
 
     void verify() {

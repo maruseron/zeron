@@ -4,7 +4,7 @@ import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.StandardLibrary;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
@@ -59,7 +59,7 @@ public final class ControlFlowTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -145,7 +145,7 @@ public final class ControlFlowTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -169,7 +169,7 @@ public final class ControlFlowTest {
     @Test
     public void rejectsNonIterableForSources() {
         assertThrows(ResolutionError.class,
-                () -> new Resolver().resolve(parse("fn invalid() { for (let value in 1) {} }")));
+                () -> new ResolutionService().resolve(parse("fn invalid() { for (let value in 1) {} }")));
     }
 
     @Test
@@ -201,7 +201,7 @@ public final class ControlFlowTest {
                 }
                 """);
 
-        new Resolver().resolveUnits(StandardLibrary.withBundledUnits(List.of(source)));
+        new ResolutionService().resolveUnits(StandardLibrary.withBundledUnits(List.of(source)));
     }
 
     @Test
@@ -225,7 +225,7 @@ public final class ControlFlowTest {
                     for (let value in Counter.new()) {}
                 }
                 """);
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(source));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(source));
     }
 
     @Test
@@ -291,7 +291,7 @@ public final class ControlFlowTest {
                 """);
 
         try {
-            final var compiler = Compiler.forCompilationUnits(
+            final var compiler = CompilationService.forCompilationUnits(
                     StandardLibrary.withBundledUnits(List.of(declarations)), className, "");
             compiler.resolve();
             compiler.compile();
@@ -319,7 +319,7 @@ public final class ControlFlowTest {
                 }
                 """);
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(statements));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(statements));
     }
 
     @Test
@@ -346,7 +346,7 @@ public final class ControlFlowTest {
                 """.formatted(unitReturnerName, unitReturnerName));
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -361,7 +361,7 @@ public final class ControlFlowTest {
             Files.deleteIfExists(Path.of("dist", unitReturnerName + ".class"));
         }
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse("""
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 fn invalid(): Int {
                     return;
                 }
@@ -432,7 +432,7 @@ public final class ControlFlowTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -462,7 +462,7 @@ public final class ControlFlowTest {
                 }
                 """);
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(statements));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(statements));
     }
 
     private static List<Stmt> parse(final String source) {

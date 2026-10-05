@@ -2,7 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
@@ -74,7 +74,7 @@ public final class ClassContractTest {
         final var autoFile = Path.of("dist", "AutoValues.class");
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(
@@ -117,9 +117,9 @@ public final class ClassContractTest {
                 }
                 """;
         assertThrows(ResolutionError.class,
-                () -> new Resolver().resolve(parse(readOnlyPropertyWrite)));
+                () -> new ResolutionService().resolve(parse(readOnlyPropertyWrite)));
         assertThrows(ResolutionError.class,
-                () -> new Resolver().resolve(parse(immutableReceiverWrite)));
+                () -> new ResolutionService().resolve(parse(immutableReceiverWrite)));
     }
 
     @Test
@@ -166,7 +166,7 @@ public final class ClassContractTest {
         final var programFile = Path.of("dist", programName + ".class");
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(
@@ -189,7 +189,7 @@ public final class ClassContractTest {
                 class Allowed is Closed {}
                 class Intruder is Closed {}
                 """);
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(invalidSource));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(invalidSource));
     }
 
     @Test
@@ -250,7 +250,7 @@ public final class ClassContractTest {
                 """.formatted(className, className);
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(
@@ -295,9 +295,9 @@ public final class ClassContractTest {
                 fn invalid(): &FixedField = FixedField.new(1, 2);
                 """;
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(laterFieldRead)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(initializerCall)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(wrongConstructorArity)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(laterFieldRead)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(initializerCall)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(wrongConstructorArity)));
     }
 
     @Test
@@ -350,7 +350,7 @@ public final class ClassContractTest {
                 className, contractName, className, className);
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
 
@@ -409,9 +409,9 @@ public final class ClassContractTest {
                 }
                 """;
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(privateFieldSource)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(readonlyMutationSource)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(mutableCaptureSource)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(privateFieldSource)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(readonlyMutationSource)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(mutableCaptureSource)));
     }
 
     @Test
@@ -462,7 +462,7 @@ public final class ClassContractTest {
                 """.formatted(className, className);
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(
@@ -499,8 +499,8 @@ public final class ClassContractTest {
                 }
                 """;
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(implicitFieldWrite)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(readonlyMutatingCall)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(implicitFieldWrite)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(readonlyMutatingCall)));
     }
 
     @Test
@@ -534,7 +534,7 @@ public final class ClassContractTest {
                 """).scanTokens()).parseCompilationUnit("ImplicitThisPackageMain.zn");
 
         try {
-            final var compiler = Compiler.forCompilationUnits(
+            final var compiler = CompilationService.forCompilationUnits(
                     List.of(appUnit, boxUnit), programName, "app");
             compiler.resolve();
             compiler.compile();
@@ -561,7 +561,7 @@ public final class ClassContractTest {
                 }
                 """;
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
     }
 
     @Test
@@ -602,7 +602,7 @@ public final class ClassContractTest {
                 thirdContract);
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
 
@@ -657,7 +657,7 @@ public final class ClassContractTest {
                 """.formatted(className, className, className);
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
 
@@ -700,8 +700,8 @@ public final class ClassContractTest {
                 }
                 """;
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(rawConstruction)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(rawConstruction)));
     }
 
     @Test
@@ -749,7 +749,7 @@ public final class ClassContractTest {
                 personName, personName, pointName, boxName);
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
 
@@ -806,10 +806,10 @@ public final class ClassContractTest {
                 }
                 """;
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(missingReturn)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(usesThis)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(wrongReturn)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(bypassPrivateCanonical)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(missingReturn)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(usesThis)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(wrongReturn)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(bypassPrivateCanonical)));
     }
 
     @Test
@@ -861,7 +861,7 @@ public final class ClassContractTest {
                 genericClassName, intClassName, stringClassName, genericClassName);
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
 
@@ -899,7 +899,7 @@ public final class ClassContractTest {
                 }
                 """;
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
     }
 
     @Test
@@ -945,7 +945,7 @@ public final class ClassContractTest {
         final var implementationFile = Path.of("dist", implementationName + ".class");
 
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
 
@@ -1009,10 +1009,10 @@ public final class ClassContractTest {
                 }
                 """;
 
-        new Resolver().resolve(parse(nullableRequirement));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(nullableImplementation)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(parameterMismatch)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(primitiveMismatch)));
+        new ResolutionService().resolve(parse(nullableRequirement));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(nullableImplementation)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(parameterMismatch)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(primitiveMismatch)));
     }
 
     @Test
@@ -1083,7 +1083,7 @@ public final class ClassContractTest {
         final var generatedNames = List.of(programName, namedName, personName, overrideName, productName,
                 fancyProductName, makerName, productMakerName, bothMakerName, counterViewName, counterName);
         try {
-            final var compiler = new Compiler(parse(source), programName);
+            final var compiler = new CompilationService(parse(source), programName);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(
@@ -1117,8 +1117,8 @@ public final class ClassContractTest {
                 contract ReadOnlySecond { default value(): Int = 2; }
                 class Ambiguous is MutableFirst, ReadOnlySecond { public constructor new; }
                 """;
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(differingMutability)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(differingMutability)));
     }
 
     @Test
@@ -1139,8 +1139,8 @@ public final class ClassContractTest {
                 }
                 """;
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(duplicate)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(conflicting)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(duplicate)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(conflicting)));
     }
 
     private static List<Stmt> parse(final String source) {
@@ -1151,7 +1151,7 @@ public final class ClassContractTest {
         final var source = Files.readString(Path.of("src/main/resources/test.zn"));
         final var unit = Parser.of(Scanner.from(source).scanTokens())
             .parseCompilationUnit("src/main/resources/test.zn");
-        final var compiler = Compiler.forCompilationUnits(List.of(unit), "test", "");
+        final var compiler = CompilationService.forCompilationUnits(List.of(unit), "test", "");
         compiler.resolve();
         compiler.compile();
     }

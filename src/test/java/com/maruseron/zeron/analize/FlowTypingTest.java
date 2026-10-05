@@ -2,7 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
@@ -38,7 +38,7 @@ public final class FlowTypingTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -62,7 +62,7 @@ public final class FlowTypingTest {
             Files.deleteIfExists(classFile);
         }
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse("""
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 fn invalid(value: Int?): Int {
                     let result = if (value != null) then 1 else 0;
                     return value + 1;
@@ -106,7 +106,7 @@ public final class FlowTypingTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -174,7 +174,7 @@ public final class FlowTypingTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -202,7 +202,7 @@ public final class FlowTypingTest {
                 + "current = \"text\"; } } }",
                 "fn invalid(values: Array<Int>): Int { let mut current: Int? = null; "
                         + "for (let value in values) { current = value; } return current + 1; }")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -221,7 +221,7 @@ public final class FlowTypingTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(
@@ -266,7 +266,7 @@ public final class FlowTypingTest {
                 """.formatted(suffix, suffix, suffix, suffix, suffix, suffix, suffix));
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -298,7 +298,7 @@ public final class FlowTypingTest {
                 + "let value: Int? = null; print(value + 1); } }",
             "let mut shared: Int? = null; "
                 + "fn invalid() { if (shared != null) print(shared + 1); }")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -324,7 +324,7 @@ public final class FlowTypingTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -367,7 +367,7 @@ public final class FlowTypingTest {
         for (final var source : List.of(
                 "fn invalid(value: Int?): Int = value as Int;",
                 "fn invalid(value: Int?): Int { let converted = value as? Int; return value + 1; }")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -378,7 +378,7 @@ public final class FlowTypingTest {
                 "class Box<T> { value: T; } fn invalid(value: Any): Box<Int> = value as Box<Int>;",
                 "fn invalid(value: Any): (Int) -> Int = value as (Int) -> Int;",
                 "fn invalid<T>(value: Any): T = value as T;")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -411,7 +411,7 @@ public final class FlowTypingTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -463,7 +463,7 @@ public final class FlowTypingTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(

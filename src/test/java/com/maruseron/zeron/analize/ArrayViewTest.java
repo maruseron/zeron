@@ -3,7 +3,7 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.IntrinsicDefinition;
 import com.maruseron.zeron.domain.IntrinsicId;
 import com.maruseron.zeron.domain.IntrinsicRegistry;
@@ -34,16 +34,16 @@ public final class ArrayViewTest {
                 let firstValue = first(values);
                 let size = readonly.length;
                 """);
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
 
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
         assertEquals(new ReferenceDescriptor(TypeDescriptor.arrayOf(TypeDescriptor.ofInt())),
-                bindingType(resolver, statements, "values"));
+                bindingType(result, statements, "values"));
         assertEquals(TypeDescriptor.arrayOf(TypeDescriptor.ofInt()),
-                bindingType(resolver, statements, "readonly"));
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "firstValue"));
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "size"));
+                bindingType(result, statements, "readonly"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "firstValue"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "size"));
     }
 
         @Test
@@ -54,7 +54,7 @@ public final class ArrayViewTest {
             fn replace(values: &Array<Int>): Unit { values[0] = 3; }
             fn size(values: Array<Int>): Int { return values.length; }
             """);
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
         resolver.resolve(statements);
 
         final var literal = (Expr.ArrayLiteral) ((Stmt.Var) statements.getFirst()).initializer();
@@ -103,7 +103,7 @@ public final class ArrayViewTest {
                 "fn test() { let mut values: Array<Int> = [1]; values[0] = 2; }",
                 "fn test() { let values: &Array<Int> = [1]; values[0] = \"wrong\"; }",
                 "fn test() { let values: &Array<Int> = [1]; let wrong: Array<String> = values; }")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -133,7 +133,7 @@ public final class ArrayViewTest {
                 """);
 
         try {
-            final var compiler = new Compiler(statements, className);
+            final var compiler = new CompilationService(statements, className);
             compiler.resolve();
             compiler.compile();
 
@@ -158,7 +158,7 @@ public final class ArrayViewTest {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
     }
 
-    private static TypeDescriptor bindingType(final Resolver resolver,
+    private static TypeDescriptor bindingType(final ResolutionResult result,
                                               final List<Stmt> statements,
                                               final String name) {
         final var declaration = statements.stream()
@@ -167,6 +167,6 @@ public final class ArrayViewTest {
                 .filter(variable -> variable.name().lexeme().equals(name))
                 .findFirst()
                 .orElseThrow();
-        return resolver.symbols.getSymbol(declaration.name()).type();
+        return result.globalSymbolTable().getSymbol(declaration.name()).type();
     }
 }

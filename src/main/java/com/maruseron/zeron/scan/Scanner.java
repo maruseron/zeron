@@ -1,6 +1,11 @@
 package com.maruseron.zeron.scan;
 
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.diagnostic.Diagnostic;
+import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.diagnostic.Severity;
+import com.maruseron.zeron.diagnostic.SourcePosition;
+import com.maruseron.zeron.diagnostic.SourceSpan;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,9 +18,14 @@ import static java.util.Map.entry;
 public final class Scanner {
     private final String source;
     private final List<Token> tokens = new ArrayList<>();
+    private final List<Diagnostic> diagnostics = new ArrayList<>();
     private int start = 0;
     private int current = 0;
     private int line = 1;
+    private int column = 1;
+    private final String sourcePath;
+    private SourcePosition tokenStart;
+    private ScanResult scanResult;
 
     private static final Map<String, TokenType> keywords = Map.ofEntries(
             entry("as",          AS),
@@ -61,22 +71,37 @@ public final class Scanner {
             entry("until",       UNTIL),
             entry("while",       WHILE));
 
-    Scanner (String source) {
+    Scanner(final String source, final String sourcePath) {
         this.source = source;
+        this.sourcePath = sourcePath;
     }
 
     public static Scanner from(final String source) {
-        return new Scanner(source);
+        return from(source, null);
     }
 
-    public List<Token> scanTokens() {
+    public static Scanner from(final String source, final String sourcePath) {
+        return new Scanner(source, sourcePath);
+    }
+
+    public ScanResult scanWithDiagnostics() {
+        if (scanResult != null) return scanResult;
         while (!isAtEnd()) {
             start = current;
+            tokenStart = position();
             scanToken();
         }
 
-        tokens.add(new Token(EOF, "", null, line));
-        return tokens;
+        final var eof = position();
+        tokens.add(new Token(EOF, "", null, new SourceSpan(sourcePath, eof, eof)));
+        scanResult = new ScanResult(tokens, diagnostics);
+        return scanResult;
+    }
+
+    public List<Token> scanTokens() {
+        final var result = scanWithDiagnostics();
+        result.diagnostics().forEach(Zeron::reportParseDiagnostic);
+        return result.tokens();
     }
 
     private void scanToken() {
@@ -112,7 +137,7 @@ public final class Scanner {
                 } else if (match('*')) {
                     // matched a /*
                     while (peek() != '*' && peekNext() != '/' && !isAtEnd()) {
-                        if (advance() == '\n') line++;
+                        advance();
                     }
                     advance();
                     advance();
@@ -155,24 +180,24 @@ public final class Scanner {
             case ' ', '\r', '\t' -> {}
             case '\n' -> {
                 // addNewline();
-                line++;
             }
 
             case '"' -> string();
             case char _ when isDigit(c) -> number();
             case char _ when isAlpha(c) -> identifier();
-            default -> Zeron.error(line, "Unexpected character: " + c);
+            default -> recordDiagnostic(DiagnosticCatalog.UNEXPECTED_CHARACTER,
+                    span(tokenStart, position()), "Unexpected character: " + c);
         }
     }
 
     private void string() {
         while (peek() != '"' && !isAtEnd()) {
-            if (peek() == '\n') line++;
             advance();
         }
 
         if (isAtEnd()) {
-            Zeron.error(line, "Unterminated string.");
+            recordDiagnostic(DiagnosticCatalog.UNTERMINATED_STRING,
+                    span(tokenStart, position()), "Unterminated string.");
             return;
         }
 
@@ -213,7 +238,7 @@ public final class Scanner {
         if (isAtEnd()) return false;
         if (source.charAt(current) != expected) return false;
 
-        current++;
+        advance();
         return true;
     }
 
@@ -247,7 +272,14 @@ public final class Scanner {
     }
 
     private char advance() {
-        return source.charAt(current++);
+        final var character = source.charAt(current++);
+        if (character == '\n') {
+            line++;
+            column = 1;
+        } else {
+            column++;
+        }
+        return character;
     }
 
     private void addToken(final TokenType type) {
@@ -259,6 +291,21 @@ public final class Scanner {
                 type,
                 source.substring(start, current),
                 literal,
-                line));
+                span(tokenStart, position())));
+    }
+
+    private SourcePosition position() {
+        return new SourcePosition(line, column, current);
+    }
+
+    private SourceSpan span(final SourcePosition startPosition, final SourcePosition endPosition) {
+        return new SourceSpan(sourcePath, startPosition, endPosition);
+    }
+
+    private void recordDiagnostic(final DiagnosticCatalog.Entry entry,
+                                  final SourceSpan span,
+                                  final String message) {
+        diagnostics.add(new Diagnostic(entry.code(), Severity.ERROR, message, span,
+                List.of(), List.of(), List.of()));
     }
 }

@@ -1,0 +1,329 @@
+# Reported errors
+
+## Scanning
+
+- `Unexpected character: {character}`
+- `Unterminated string.`
+
+## Parsing
+
+- `Bundled declarations cannot override their package.`
+- `Expect qualified import name.`
+- `Star imports cannot have aliases.`
+- `Only values, functions, classes, and contracts may be public.`
+- `Expected declaration at top level.`
+- `Public top-level values must be immutable.`
+- `External JVM functions are only allowed at top level.`
+- `External JVM functions cannot be generic in this implementation.`
+- `Can't have more than 254 parameters.`
+- `Generic functions require an explicit return type.`
+- `Duplicate type parameter.`
+- `Method type parameters cannot shadow enclosing type parameters.`
+- `Type-parameter bounds are supported only on top-level generic functions.`
+- `A generic declaration must declare a type parameter.`
+- `A class can declare only one canonical constructor.`
+- `Constructors must declare 'public' or 'private' visibility.`
+- `Duplicate property getter.`
+- `Duplicate property setter.`
+- `Expect 'get' or 'set' in property accessor block.`
+- `A 'mut' property requires a setter.`
+- `A custom property requires a getter.`
+- `A property setter requires 'mut'.`
+- `A custom setter requires a getter.`
+- `A custom property cannot have an initializer.`
+- `A sealed contract must declare at least one permitted class.`
+- `Only sealed contracts may declare permitted classes.`
+- `Contract properties cannot have default implementations.`
+- `Class and contract methods require an explicit return type.`
+- `Expect '->' after function parameter types.`
+- `Array expects one element type.`
+- `Only nominal types can have type arguments.`
+- `Array requires an element type.`
+- `Can only break inside of a loop.`
+- `Can only continue inside of a loop.`
+- `Can only return inside of a function.`
+- `'??=' can only assign to a mutable local variable.`
+- `Indexed assignment only supports '='.`
+- `Invalid assignment target.`
+- `Only functions and named methods can be called.`
+- `Can't have more than 254 arguments.`
+- `Array literals must initialize at least one element.`
+- `Expect expression.`
+- `A match expression must contain at least one case.`
+- `Expect ';' after package declaration.`
+- `Expect name after '.'.`
+- `Expect import alias.`
+- `Expect ';' after import.`
+- `Only contracts can be sealed.`
+- `Expect binding name.`
+- `Expect ';' after variable declaration.`
+- `Expect function name.`
+- `Expect 'fn' after 'external'.`
+- `Expect external function name.`
+- `Expect '(' after external function name.`
+- `Expect parameter name.`
+- `Expect ':' after parameter name.`
+- `Expect ')' after parameters.`
+- `External JVM functions require an explicit return type.`
+- `Expect ';' after external function declaration.`
+- `Expect '(' after function name.`
+- `Expect type parameter name.`
+- `Expect '>' after type parameters.`
+- `Expect class name.`
+- `Expect contract name after 'is'.`
+- `Expect '>' after contract type arguments.`
+- `Expect '{' before class members.`
+- `Expect 'new' after 'constructor'.`
+- `Expect ';' after canonical constructor declaration.`
+- `Expect property name.`
+- `Expect ':' after property name.`
+- `Expect method name or 'property'.`
+- `Expect field name or explicitly visible method.`
+- `Expect ';' after field declaration.`
+- `Expect '}' after class members.`
+- `Expect '(' after 'set'.`
+- `Expect setter value parameter.`
+- `Expect ')' after setter parameter.`
+- `Expect '}' after property accessors.`
+- `Expect ';' after property declaration.`
+- `Expect '(' after named constructor name.`
+- `Expect ')' after named constructor parameters.`
+- `Expect ';' after named constructor expression.`
+- `Expect '=' or '{' before named constructor body.`
+- `Expect contract name.`
+- `Expect permitted class name.`
+- `Expect '>' after permitted class type arguments.`
+- `Expect '{' before contract members.`
+- `Expect contract method name.`
+- `Expect '}' after contract members.`
+- `Expect '(' after method name.`
+- `Expect ';' after contract method signature.`
+- `Expect ';' after method expression.`
+- `Expect '{' before method body.`
+- `Expect ')' after lambda parameter types.`
+- `Expect bind name.`
+- `Expect '>' after type.`
+- `Expect ';' after break.`
+- `Expect ';' after continue.`
+- `Expect ';' after return.`
+- `Expect '(' after 'for'.`
+- `Expect iteration bind after '('.`
+- `Expect bind name after 'let'.`
+- `Expect 'in' after iteration bind.`
+- `Expect ')' after iterable expression.`
+- `Expect '(' after 'if'.`
+- `Expect ')' after if condition.`
+- `Expect '(' after while.`
+- `Expect ')' after condition.`
+- `Expect '(' after until.`
+- `Expect '}' after block.`
+- `Expect '<' after '::' in a function specialization.`
+- `Expect '>' after function type arguments.`
+- `Expect '>' after class type arguments.`
+- `Expect named constructor after class type arguments.`
+- `Expect named constructor after '.'.`
+- `Expect '(' after constructor name.`
+- `Expect '>' after type arguments.`
+- `Expect '(' after type arguments.`
+- `Expect '>' after method type arguments.`
+- `Expect '(' after method type arguments.`
+- `Expect ']' after array index.`
+- `Expect member name after '.'.`
+- `Expect ')' after arguments.`
+- `Expect ']' after array elements.`
+- `Expect Integer after range operator.`
+- `Expect 'then' after ')'.`
+- `Expect 'else' after expression.`
+- `Expect ')' after lambda parameters.`
+- `Expect ')' after expression.`
+- `Expect '(' after 'match'.`
+- `Expect ')' after match value.`
+- `Expect '{' before match cases.`
+- `Expect binding name after 'as'.`
+- `Expect '->' after match pattern.`
+- `Expect ';' after match arm.`
+- `Expect '}' after match cases.`
+- `Expect '->' after parameters.`
+- `Expect 'else' after expression.`
+- `Expect ')' after lambda parameters`
+- `Expect ':' after field name.`
+- `Expect ';' after contract property requirement.`
+- `Expect ';' after expression.`
+- `Expect '{' before function body.`
+- `Expect Integer after range operator`
+- `Expect iteration bind after '('`
+
+## Project validation
+
+- `Package '{packageName}' in {sourcePath} must match its directory under source root '{sourceRoot}' (expected '{expectedPackage}').`
+
+## Resolution
+
+- `Callee is not a function.`
+- `Unknown function '{name}'.`
+- `This function does not declare type parameters.`
+- `Expected {expected} arguments, found {actual}.`
+- `Expected {expected} type arguments, found {actual}.`
+- `A function value argument requires a function parameter type.`
+- `Cannot infer type parameter '{name}'; provide an explicit type argument.`
+- `Top-level values require an initializer.`
+- `Public top-level values must be immutable.`
+- `Top-level value '{name}' is already declared.`
+- `Function '{name}' is already declared.`
+- `No implementation binding is registered for external function '{name}'.`
+- `External function signature does not match its registered implementation binding.`
+- `Type name '{name}' is already declared.`
+- `External JVM functions cannot be generic.`
+- `External JVM owner '{owner}' was not found on the configured --java-classpath roots.`
+- `External JVM functions on generic classes are not supported.`
+- `Registered JVM static method does not match public class-file metadata.`
+- `Registered JVM method arity does not match the external function signature.`
+- `Registered JVM parameter descriptor does not match the external function signature.`
+- `Registered JVM return descriptor does not match the external function signature.`
+- `Duplicate contract method.`
+- `Duplicate contract member.`
+- `Only sealed contracts may declare permitted classes.`
+- `A sealed contract must declare at least one permitted class.`
+- `Duplicate permitted class.`
+- `Unknown permitted class.`
+- `A permitted class must be in the sealed contract's package.`
+- `A public sealed contract can only permit public classes.`
+- `A permitted class must use the sealed contract's type parameters in order.`
+- `A permitted class must directly conform to the sealed contract.`
+- `A permitted class must conform using its type parameters in order.`
+- `Duplicate class member.`
+- `A writable custom property requires a setter.`
+- `Duplicate contract conformance.`
+- `Unknown contract.`
+- `Expected {expected} contract type arguments, found {actual}.`
+- `Class is not listed in the sealed contract's permits clause.`
+- `A field initializer may read only fields declared earlier.`
+- `Field initializers currently allow only literals, operators, and reads of earlier fields.`
+- `Named constructor must return an instance on every normal path.`
+- `Multiple default contract methods named '{name}' require an explicit class implementation.`
+- `Class does not provide a compatible public contract method '{name}'.`
+- `Class does not provide a compatible public contract property '{name}'.`
+- `Safe navigation cannot be used for property assignment.`
+- `Property assignment requires a mutable reference.`
+- `Property is read-only.`
+- `Property compound assignment requires a mutable reference.`
+- `Compound assignment requires a writable property.`
+- `Cannot infer an array element type from null values.`
+- `Array slot assignment requires a mutable &Array<T> view.`
+- `Unknown value '{name}'.`
+- `Cannot reassign immutable binding '{name}'.`
+- `'===' requires reference-valued operands; nullable primitives and Unit are not supported.`
+- `'===' operands must have compatible reference types.`
+- `Null comparisons require a nullable or reference value.`
+- `Operators on generic type parameters require constraints, which are not supported.`
+- `Nullable operands require a null check before using this operator.`
+- `Relational comparisons require numeric operands.`
+- `Bitwise operators require Int operands.`
+- `Arithmetic operators require numeric operands, except String concatenation with '+'.`
+- `The left operand of '??' must be nullable.`
+- `The result type of 'null ?? null' cannot be inferred.`
+- `Cast is impossible between {sourceType} and {targetType}.`
+- `A checked cast from a nullable value requires a non-null flow proof.`
+- `Unary operators on generic type parameters require constraints, which are not supported.`
+- `Bitwise complement requires an Int operand.`
+- `The 'typeof' operator is not implemented.`
+- `Unary '+' and '-' require a non-null Int or Float operand.`
+- `A generic function value needs explicit type arguments or an expected function type.`
+- `Unknown symbol: '{name}'.`
+- `Can't read local variable in its own initializer.`
+- `Matching nullable values is not supported; prove the value non-null first.`
+- `Match expressions require a sealed contract value.`
+- `The sealed contract type arguments could not be resolved.`
+- `A match case after '_' is unreachable.`
+- `A wildcard case is unreachable because every permitted case is covered.`
+- `Match case types must be non-null class types.`
+- `Match cases must name permitted classes.`
+- `Class '{className}' is not permitted by sealed contract '{contractName}'.`
+- `Duplicate match case for '{className}'.`
+- `Match case type arguments must match the sealed contract's type arguments.`
+- `A wildcard match case cannot bind a value.`
+- `Non-exhaustive match; missing cases: {cases}.`
+- `Type test is impossible between {sourceType} and {targetType}.`
+- `'??=' is currently supported only for mutable local bindings.`
+- `The target of '??=' must have a nullable declared type.`
+- `This type cannot be used as a runtime type-test target.`
+- `Duplicate star import for package '{packageName}'.`
+- `Unknown Zeron package '{packageName}' in star import.`
+- `Unknown import target '{target}'.`
+- `Default-package types cannot be imported into a named package.`
+- `Type '{name}' is not public.`
+- `Generic Java classes are not supported by the current interop slice.`
+- `Type import alias cannot shadow a built-in type.`
+- `Import alias conflicts with a type in the current package.`
+- `Duplicate or ambiguous type import '{name}'.`
+- `Import alias conflicts with an imported function.`
+- `Import alias conflicts with a value in the current package.`
+- `Duplicate or ambiguous value import '{name}'.`
+- `Import alias conflicts with an imported value.`
+- `Duplicate or ambiguous function import '{name}'.`
+- `Expected a non-null Array<T> value.`
+- `The internal array operation requires an array value.`
+- `Cannot capture mutable binding '{name}' in a lambda.`
+- `Cannot infer type parameter '{name}' for polymorphic lambda at this use.`
+- `Function reference does not resolve to a top-level function.`
+- `Cannot infer type parameter '{name}' for function value; provide an explicit type argument.`
+- `Expected {expected} lambda parameters, found {actual}.`
+- `Property is private.`
+- `Unknown property.`
+- `Unknown field.`
+- `Safe navigation cannot be used for constructors or static calls.`
+- `Expected {expected} class type arguments, found {actual}.`
+- `Constructor is private.`
+- `Expected {expected} constructor arguments, found {actual}.`
+- `Unknown named constructor.`
+- `Named constructor is private.`
+- `Expected {expected} arguments, found {actual}.`
+- `Mutating method requires a mutable reference.`
+- `This method does not declare type parameters.`
+- `Unknown method: '{name}'.`
+- `Method is private.`
+- `Safe navigation requires a receiver with a known non-null type.`
+- `Java generic type arguments are not supported by the current interop slice.`
+- `Cannot construct an abstract Java class or interface.`
+- `Java instance method calls require a mutable & receiver.`
+- `Java generic method type arguments are not supported by the current interop slice.`
+- `Java functional-interface callback conversion is not supported by this interop slice.`
+- `Java overload resolution is ambiguous; provide arguments with a more specific type.`
+- `Member access on an unconstrained type parameter is not allowed.`
+- `Method is not provided by the type parameter's contract bound.`
+- `Mutating methods are not available through a generic contract bound.`
+- `Invalid generic contract bound '{name}'.`
+- `Ambiguous type '{name}' from star imports; add an explicit import or alias.`
+- `Ambiguous function '{name}' from star imports; add an explicit import or alias.`
+- `Ambiguous value '{name}' from star imports; add an explicit import or alias.`
+- `Field receiver is not a class.`
+- `Field is private.`
+- `Non-entry compilation-unit functions require an explicit return type.`
+- `A top-level function and value cannot share the name '{name}'.`
+- `For loops require Array<T>, an integer range literal, or a type conforming to Iterable<T>.`
+- `Missing iterator protocol contract '{name}'.`
+- `Iterable contract must declare iterator().`
+- `Iterable.iterator() must return an Iterator<T> reference.`
+- `Can only break inside of a loop.`
+- `Can only continue inside of a loop.`
+- `A variable with no initializer must be of a nullable type.`
+- `Polymorphic function values require an immutable binding.`
+- `Cannot infer a type from a null value; add an explicit nullable type annotation.`
+- `Cannot infer type from declaration.`
+- `Top-level value initialization cycle: {path}.`
+- `Types are not exact.`
+- `Expected {expected}, found {actual}.`
+- `Condition must have non-null Boolean type.`
+- `A generic function bound must be a contract type.`
+- `Type parameter bound '{name}' is not a contract.`
+- `Unknown type '{name}'.`
+- `Type '{name}' requires {count} type arguments.`
+- `Unknown generic type '{name}'.`
+- `Type '{name}' expects {expected} type arguments, found {actual}.`
+- `Conflicting type inferences for '{name}': {first} and {second}.`
+
+## Compilation
+
+- `Contract name conflicts with generated program class: {name}`
+- `Class name conflicts with generated program class: {name}`
+- `Top-level value initialization cycle: {path}.`

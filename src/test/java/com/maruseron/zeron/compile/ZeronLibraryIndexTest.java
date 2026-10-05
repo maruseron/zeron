@@ -2,7 +2,7 @@ package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.StandardLibrary;
 import com.maruseron.zeron.analize.ResolutionError;
-import com.maruseron.zeron.analize.Resolver;
+import com.maruseron.zeron.analize.ResolutionService;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
@@ -52,7 +52,7 @@ public final class ZeronLibraryIndexTest {
         final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v5.bin");
 
         try {
-            final var compiler = Compiler.forCompilationUnits(
+            final var compiler = CompilationService.forCompilationUnits(
                     List.of(entry, library), "app." + entryName, "app");
             compiler.resolve();
             compiler.compile();
@@ -81,7 +81,7 @@ public final class ZeronLibraryIndexTest {
                     """.formatted(libraryPackage));
             final var units = new java.util.ArrayList<>(List.of(consumer));
             units.addAll(index.toCompilationUnits("sealed-api"));
-            assertThrows(ResolutionError.class, () -> new Resolver().resolveUnits(units));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolveUnits(units));
         } finally {
             deleteTree(Path.of("dist"));
         }
@@ -122,7 +122,7 @@ public final class ZeronLibraryIndexTest {
 
         try {
             deleteTree(Path.of("dist"));
-            final var libraryCompiler = Compiler.forCompilationUnits(
+            final var libraryCompiler = CompilationService.forCompilationUnits(
                     List.of(library), libraryPackage + ".LibraryBuilder", libraryPackage);
             libraryCompiler.resolve();
             libraryCompiler.compile();
@@ -132,7 +132,7 @@ public final class ZeronLibraryIndexTest {
 
             final var compiledLibrary = ZeronLibraryIndex.readFromDirectory(libraryRoot);
             deleteTree(Path.of("dist"));
-            final var clientCompiler = Compiler.forCompilationUnits(
+            final var clientCompiler = CompilationService.forCompilationUnits(
                     List.of(client), appPackage + ".Main", appPackage, List.of(compiledLibrary));
             clientCompiler.resolve();
             clientCompiler.compile();
@@ -155,7 +155,7 @@ public final class ZeronLibraryIndexTest {
                         };
                     }
                     """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage));
-            final var matchCompiler = Compiler.forCompilationUnits(
+            final var matchCompiler = CompilationService.forCompilationUnits(
                     List.of(matchClient), appPackage + ".Match", appPackage,
                     List.of(compiledLibrary));
             matchCompiler.resolve();
@@ -174,7 +174,7 @@ public final class ZeronLibraryIndexTest {
                         case Success<Int> -> 42;
                     };
                     """.formatted(appPackage, libraryPackage, libraryPackage));
-            final var incompleteCompiler = Compiler.forCompilationUnits(
+            final var incompleteCompiler = CompilationService.forCompilationUnits(
                     List.of(incompleteClient), appPackage + ".Incomplete", appPackage,
                     List.of(compiledLibrary));
             assertThrows(ResolutionError.class, incompleteCompiler::resolve);
@@ -187,7 +187,7 @@ public final class ZeronLibraryIndexTest {
                         public read(): T = this.payload;
                     }
                     """.formatted(libraryPackage));
-            final var invalidCompiler = Compiler.forCompilationUnits(
+            final var invalidCompiler = CompilationService.forCompilationUnits(
                     List.of(intruder), libraryPackage + ".IntruderMain", libraryPackage,
                     List.of(compiledLibrary));
             assertThrows(ResolutionError.class, invalidCompiler::resolve);
@@ -286,7 +286,7 @@ public final class ZeronLibraryIndexTest {
                 """.formatted(libraryPackage));
 
         try {
-            final var compiler = Compiler.forCompilationUnits(
+            final var compiler = CompilationService.forCompilationUnits(
                     List.of(entry, library), appPackage + "." + entryName, appPackage);
             compiler.resolve();
             compiler.compile();
@@ -407,7 +407,7 @@ public final class ZeronLibraryIndexTest {
                                         iterator(): T;
                                 }
                                 """);
-                final var compiler = Compiler.forCompilationUnits(List.of(override), "Override", "zeron.collections");
+                final var compiler = CompilationService.forCompilationUnits(List.of(override), "Override", "zeron.collections");
                 assertThrows(ResolutionError.class, compiler::resolve);
         }
 
@@ -453,7 +453,7 @@ public final class ZeronLibraryIndexTest {
 
                 try {
                         deleteTree(Path.of("dist"));
-                        final var libraryCompiler = Compiler.forCompilationUnits(
+                        final var libraryCompiler = CompilationService.forCompilationUnits(
                                         List.of(libraryUnit), libraryMainName, libraryPackage);
                         libraryCompiler.resolve();
                         libraryCompiler.compile();
@@ -495,7 +495,7 @@ public final class ZeronLibraryIndexTest {
                                         }
                                                 """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage,
                                         libraryPackage, libraryPackage, libraryPackage));
-                        final var clientCompiler = Compiler.forCompilationUnits(
+                        final var clientCompiler = CompilationService.forCompilationUnits(
                                         List.of(client), clientMainName, appPackage, List.of(library));
                         clientCompiler.resolve();
                         clientCompiler.compile();

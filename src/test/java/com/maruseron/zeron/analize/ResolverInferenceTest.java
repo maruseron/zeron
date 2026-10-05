@@ -10,6 +10,7 @@ import org.junit.Test;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 
 public final class ResolverInferenceTest {
@@ -24,17 +25,17 @@ public final class ResolverInferenceTest {
         let theUnit = ();
         let unit = 42;
         """);
-    final var resolver = new Resolver();
+    final var resolver = new ResolutionService();
 
-    resolver.resolve(statements);
+    final var result = resolver.resolve(statements);
 
-    assertEquals(TypeDescriptor.ofString(), bindingType(resolver, statements, "s"));
-    assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "i"));
-    assertEquals(TypeDescriptor.ofFloat(), bindingType(resolver, statements, "f"));
-    assertEquals(TypeDescriptor.ofBoolean(), bindingType(resolver, statements, "bool"));
-    assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "globalCount"));
-    assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "unit"));
-    assertEquals(TypeDescriptor.ofUnit(), bindingType(resolver, statements, "theUnit"));
+    assertEquals(TypeDescriptor.ofString(), bindingType(result, statements, "s"));
+    assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "i"));
+    assertEquals(TypeDescriptor.ofFloat(), bindingType(result, statements, "f"));
+    assertEquals(TypeDescriptor.ofBoolean(), bindingType(result, statements, "bool"));
+    assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "globalCount"));
+    assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "unit"));
+    assertEquals(TypeDescriptor.ofUnit(), bindingType(result, statements, "theUnit"));
     }
 
     @Test
@@ -48,17 +49,17 @@ public final class ResolverInferenceTest {
         let emptyText: String? = null;
                 let localDefault: Int? = null;
         """);
-    final var resolver = new Resolver();
+    final var resolver = new ResolutionService();
 
-    resolver.resolve(statements);
+    final var result = resolver.resolve(statements);
 
-    assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(resolver, statements, "maybeInt"));
-    assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(resolver, statements, "emptyInt"));
-    assertEquals(TypeDescriptor.ofFloat().toNullable(), bindingType(resolver, statements, "maybeFloat"));
-    assertEquals(TypeDescriptor.ofBoolean().toNullable(), bindingType(resolver, statements, "maybeBool"));
-    assertEquals(TypeDescriptor.ofString().toNullable(), bindingType(resolver, statements, "maybeText"));
-    assertEquals(TypeDescriptor.ofString().toNullable(), bindingType(resolver, statements, "emptyText"));
-    assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(resolver, statements, "localDefault"));
+    assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(result, statements, "maybeInt"));
+    assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(result, statements, "emptyInt"));
+    assertEquals(TypeDescriptor.ofFloat().toNullable(), bindingType(result, statements, "maybeFloat"));
+    assertEquals(TypeDescriptor.ofBoolean().toNullable(), bindingType(result, statements, "maybeBool"));
+    assertEquals(TypeDescriptor.ofString().toNullable(), bindingType(result, statements, "maybeText"));
+    assertEquals(TypeDescriptor.ofString().toNullable(), bindingType(result, statements, "emptyText"));
+    assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(result, statements, "localDefault"));
     }
 
     @Test
@@ -69,11 +70,11 @@ public final class ResolverInferenceTest {
         }
         let passed = passNullableInt(null);
         """);
-    final var resolver = new Resolver();
+    final var resolver = new ResolutionService();
 
-    resolver.resolve(statements);
+    final var result = resolver.resolve(statements);
 
-    assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(resolver, statements, "passed"));
+    assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(result, statements, "passed"));
     }
 
     @Test
@@ -86,20 +87,20 @@ public final class ResolverInferenceTest {
         let incremented = addOne(10);
         let constant = noParam();
         """);
-    final var resolver = new Resolver();
+    final var resolver = new ResolutionService();
 
-    resolver.resolve(statements);
+    final var result = resolver.resolve(statements);
 
     assertEquals(TypeDescriptor.functionOf("", TypeDescriptor.ofInt(), TypeDescriptor.ofInt()),
-        bindingType(resolver, statements, "addOne"));
+        bindingType(result, statements, "addOne"));
     assertEquals(TypeDescriptor.functionOf("", TypeDescriptor.ofInt(),
             TypeDescriptor.ofInt(), TypeDescriptor.ofInt()),
-        bindingType(resolver, statements, "combine"));
+        bindingType(result, statements, "combine"));
     assertEquals(TypeDescriptor.functionOf("", TypeDescriptor.ofInt()),
-        bindingType(resolver, statements, "noParam"));
-    assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "combined"));
-    assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "incremented"));
-    assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "constant"));
+        bindingType(result, statements, "noParam"));
+    assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "combined"));
+    assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "incremented"));
+    assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "constant"));
     }
 
     @Test
@@ -118,13 +119,13 @@ public final class ResolverInferenceTest {
                 let appliedFloat = applyFloat(2.5, number -> number * 2.0);
                 let appliedString = applyString("zeron", text -> text + "!");
                 """);
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
 
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "appliedInt"));
-        assertEquals(TypeDescriptor.ofFloat(), bindingType(resolver, statements, "appliedFloat"));
-        assertEquals(TypeDescriptor.ofString(), bindingType(resolver, statements, "appliedString"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "appliedInt"));
+        assertEquals(TypeDescriptor.ofFloat(), bindingType(result, statements, "appliedFloat"));
+        assertEquals(TypeDescriptor.ofString(), bindingType(result, statements, "appliedString"));
     }
 
     @Test
@@ -137,16 +138,16 @@ public final class ResolverInferenceTest {
                 let added = addBase(5);
                 let decorated = decorate("world");
                 """);
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
 
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
         assertEquals(TypeDescriptor.functionOf("", TypeDescriptor.ofInt(), TypeDescriptor.ofInt()),
-                bindingType(resolver, statements, "addBase"));
+                bindingType(result, statements, "addBase"));
         assertEquals(TypeDescriptor.functionOf("", TypeDescriptor.ofString(), TypeDescriptor.ofString()),
-                bindingType(resolver, statements, "decorate"));
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "added"));
-        assertEquals(TypeDescriptor.ofString(), bindingType(resolver, statements, "decorated"));
+                bindingType(result, statements, "decorate"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "added"));
+        assertEquals(TypeDescriptor.ofString(), bindingType(result, statements, "decorated"));
     }
 
     @Test
@@ -154,7 +155,7 @@ public final class ResolverInferenceTest {
         for (final var source : List.of(
                 "let value = null;",
                 "let value = if (true) then null else null;")) {
-            final var resolver = new Resolver();
+            final var resolver = new ResolutionService();
             final var statements = Parser.of(Scanner.from(source).scanTokens()).parse();
 
             final var error = assertThrows(ResolutionError.class, () -> resolver.resolve(statements));
@@ -165,13 +166,13 @@ public final class ResolverInferenceTest {
 
     @Test
     public void allowsNullInitializerWithNullableType() {
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
         final var statements = Parser.of(Scanner.from("let value: Int? = null;").scanTokens()).parse();
 
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
         assertEquals(TypeDescriptor.ofInt().toNullable(),
-                resolver.symbols.getSymbol(((Stmt.Var) statements.getFirst()).name()).type());
+                result.globalSymbolTable().getSymbol(((Stmt.Var) statements.getFirst()).name()).type());
     }
 
     @Test
@@ -180,33 +181,50 @@ public final class ResolverInferenceTest {
         final var function = (Stmt.Function) statements.getFirst();
 
         assertEquals(TypeDescriptor.ofInt(), function.typeDescriptor().returnType());
-        new Resolver().resolve(statements);
+        new ResolutionService().resolve(statements);
+    }
+
+    @Test
+    public void keepsResolutionStatePerInvocation() {
+        final var resolver = new ResolutionService();
+        final var firstStatements = parse("let first = 1;");
+        final var secondStatements = parse("let second = 2;");
+
+        final var firstResult = resolver.resolve(firstStatements);
+        final var secondResult = resolver.resolve(secondStatements);
+        final var firstName = ((Stmt.Var) firstStatements.getFirst()).name();
+        final var secondName = ((Stmt.Var) secondStatements.getFirst()).name();
+
+        assertEquals(TypeDescriptor.ofInt(), firstResult.globalSymbolTable().getSymbol(firstName).type());
+        assertEquals(TypeDescriptor.ofInt(), secondResult.globalSymbolTable().getSymbol(secondName).type());
+        assertFalse(firstResult.globalSymbolTable().containsSymbol(secondName));
+        assertFalse(secondResult.globalSymbolTable().containsSymbol(firstName));
     }
 
     @Test
     public void rejectsExpressionBodyThatViolatesExplicitReturnType() {
         final var statements = parse("fn count(): Int = \"wrong\";");
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(statements));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(statements));
     }
 
     @Test
     public void infersReturnTypeWhenExpressionBodyHasNoAnnotation() {
         final var statements = parse("fn count() = 1;");
         final var function = (Stmt.Function) statements.getFirst();
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
 
-        resolver.resolve(statements);
+        final var result = resolver.resolve(statements);
 
         assertEquals(TypeDescriptor.ofInt(),
-            ((FunctionDescriptor) resolver.symbols.getFunction(function.name()).type()).returnType());
+            ((FunctionDescriptor) result.globalSymbolTable().getFunction(function.name()).type()).returnType());
     }
 
     private static List<Stmt> parse(final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
     }
 
-    private static TypeDescriptor bindingType(final Resolver resolver,
+    private static TypeDescriptor bindingType(final ResolutionResult result,
                                               final List<Stmt> statements,
                                               final String name) {
         final var declaration = statements.stream()
@@ -215,6 +233,6 @@ public final class ResolverInferenceTest {
                 .filter(variable -> variable.name().lexeme().equals(name))
                 .findFirst()
                 .orElseThrow();
-        return resolver.symbols.getSymbol(declaration.name()).type();
+        return result.globalSymbolTable().getSymbol(declaration.name()).type();
     }
 }

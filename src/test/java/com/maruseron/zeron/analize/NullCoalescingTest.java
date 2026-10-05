@@ -3,7 +3,7 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.TokenType;
@@ -56,27 +56,27 @@ public final class NullCoalescingTest {
                 let nullableCommon = maybeInt ?? maybeString;
                 let anyValue: Any = maybeAny ?? 3;
                 """);
-        final var resolver = new Resolver();
-        resolver.resolve(statements);
+        final var resolver = new ResolutionService();
+        final var result = resolver.resolve(statements);
 
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "nonNull"));
-        assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(resolver, statements, "nullable"));
-        assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "nullLeft"));
-        assertEquals(TypeDescriptor.ofAny(), bindingType(resolver, statements, "common"));
-        assertEquals(TypeDescriptor.ofAny().toNullable(), bindingType(resolver, statements, "nullableCommon"));
-        assertEquals(TypeDescriptor.ofAny(), bindingType(resolver, statements, "anyValue"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "nonNull"));
+        assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(result, statements, "nullable"));
+        assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "nullLeft"));
+        assertEquals(TypeDescriptor.ofAny(), bindingType(result, statements, "common"));
+        assertEquals(TypeDescriptor.ofAny().toNullable(), bindingType(result, statements, "nullableCommon"));
+        assertEquals(TypeDescriptor.ofAny(), bindingType(result, statements, "anyValue"));
     }
 
     @Test
     public void resolvesFallbackUnderItsNullFlowAndJoinsFactsAfterward() {
-        new Resolver().resolve(parse("""
+        new ResolutionService().resolve(parse("""
                 fn fallbackUsesRefinement(value: Int?, other: Int?): Int {
                     if (other == null) return 0;
                     return value ?? other;
                 }
                 """));
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse("""
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 fn doesNotRefineAfterCoalescing(value: Int?): Int {
                     let result = value ?? 0;
                     return value + 1;
@@ -91,7 +91,7 @@ public final class NullCoalescingTest {
                 "fn invalid(value: Int?): Int = if (value != null) then value ?? 0 else 0;",
                 "fn invalid() = null ?? null;",
                 "fn invalid(value: Int?): Unit { let mut count = 0; let callback = () -> value ?? count; }")) {
-            assertThrows(source, ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(source, ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
@@ -123,7 +123,7 @@ public final class NullCoalescingTest {
                 """);
 
         try {
-            final var compiler = new Compiler(source, className);
+            final var compiler = new CompilationService(source, className);
             compiler.resolve();
             compiler.compile();
 
@@ -164,7 +164,7 @@ public final class NullCoalescingTest {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
     }
 
-    private static TypeDescriptor bindingType(final Resolver resolver,
+    private static TypeDescriptor bindingType(final ResolutionResult result,
                                               final List<Stmt> statements,
                                               final String name) {
         final var declaration = statements.stream()
@@ -173,6 +173,6 @@ public final class NullCoalescingTest {
                 .filter(variable -> variable.name().lexeme().equals(name))
                 .findFirst()
                 .orElseThrow();
-        return resolver.symbols.getSymbol(declaration.name()).type();
+        return result.globalSymbolTable().getSymbol(declaration.name()).type();
     }
 }

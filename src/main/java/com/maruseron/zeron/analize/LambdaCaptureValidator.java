@@ -1,6 +1,7 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.BindingMutability;
@@ -147,7 +148,8 @@ final class LambdaCaptureValidator {
                 if (localNames.contains(variable.name.lexeme())) return;
                 if (symbols.containsSymbol(variable.name)
                         && symbols.getSymbol(variable.name).mutability().isReassignable()) {
-                    Zeron.resolutionError(new ResolutionError(variable.name,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                            variable.name,
                             "Cannot capture mutable binding '" + variable.name.lexeme() + "' in a lambda."));
                 }
             }

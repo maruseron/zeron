@@ -2,7 +2,7 @@ package zeron.lang;
 
 public sealed contract Option<T> permits Some<T>, None<T> {
     isSome(): Boolean;
-    valueOr(defaultValue: T): T;
+    getOrElse(defaultValue: T): T;
     fold<R>(ifSome: (T) -> R, ifNone: () -> R): R;
 }
 
@@ -17,7 +17,7 @@ public class Some<T> is Option<T> {
 
     public value(): T = this.item;
 
-    public valueOr(defaultValue: T): T = this.item;
+    public getOrElse(defaultValue: T): T = this.item;
 
     public fold<R>(ifSome: (T) -> R, ifNone: () -> R): R =
         ifSome(this.item);
@@ -30,12 +30,12 @@ public class None<T> is Option<T> {
 
     public isSome(): Boolean = false;
 
-    public valueOr(defaultValue: T): T = defaultValue;
+    public getOrElse(defaultValue: T): T = defaultValue;
 
     public fold<R>(ifSome: (T) -> R, ifNone: () -> R): R =
         ifNone();
 }
 
-public fn some<T>(value: T): Option<T> = Some<T>.from(value);
+public fn someOf<T>(value: T): Option<T> = Some<T>.from(value);
 
-public fn none<T>(): Option<T> = None<T>.none();
+public fn noneOf<T>(): Option<T> = None<T>.none();

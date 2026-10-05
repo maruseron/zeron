@@ -2,7 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
@@ -32,15 +32,15 @@ public final class AnyTypeTest {
                 let mixed = if (true) then 1 else "text";
                 let mixedWithNull = if (true) then null else 1;
                 """);
-        final var resolver = new Resolver();
-        resolver.resolve(statements);
+        final var resolver = new ResolutionService();
+        final var result = resolver.resolve(statements);
 
-        assertEquals(TypeDescriptor.ofAny(), bindingType(resolver, statements, "integer"));
-        assertEquals(TypeDescriptor.ofAny(), bindingType(resolver, statements, "text"));
-        assertEquals(TypeDescriptor.ofAny().toNullable(), bindingType(resolver, statements, "nullable"));
-        assertEquals(TypeDescriptor.ofAny().toNullable(), bindingType(resolver, statements, "nullableValue"));
-        assertEquals(TypeDescriptor.ofAny(), bindingType(resolver, statements, "mixed"));
-        assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(resolver, statements, "mixedWithNull"));
+        assertEquals(TypeDescriptor.ofAny(), bindingType(result, statements, "integer"));
+        assertEquals(TypeDescriptor.ofAny(), bindingType(result, statements, "text"));
+        assertEquals(TypeDescriptor.ofAny().toNullable(), bindingType(result, statements, "nullable"));
+        assertEquals(TypeDescriptor.ofAny().toNullable(), bindingType(result, statements, "nullableValue"));
+        assertEquals(TypeDescriptor.ofAny(), bindingType(result, statements, "mixed"));
+        assertEquals(TypeDescriptor.ofInt().toNullable(), bindingType(result, statements, "mixedWithNull"));
     }
 
     @Test
@@ -48,13 +48,13 @@ public final class AnyTypeTest {
         for (final var source : List.of(
                 "let value: Any = null;",
                 "let value: Any? = null; let narrowed: Int = value;")) {
-            assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }
 
     @Test
     public void reservesAnyAsABuiltInType() {
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse("""
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 class Any {
                     public constructor new;
                 }
@@ -89,7 +89,7 @@ public final class AnyTypeTest {
                     return first == second;
                 }
                 """);
-        final var compiler = new Compiler(statements, className);
+        final var compiler = new CompilationService(statements, className);
         compiler.resolve();
 
         try {
@@ -128,7 +128,7 @@ public final class AnyTypeTest {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
     }
 
-    private static TypeDescriptor bindingType(final Resolver resolver,
+    private static TypeDescriptor bindingType(final ResolutionResult result,
                                               final List<Stmt> statements,
                                               final String name) {
         final var declaration = statements.stream()
@@ -137,6 +137,6 @@ public final class AnyTypeTest {
                 .filter(variable -> variable.name().lexeme().equals(name))
                 .findFirst()
                 .orElseThrow();
-        return resolver.symbols.getSymbol(declaration.name()).type();
+        return result.globalSymbolTable().getSymbol(declaration.name()).type();
     }
 }

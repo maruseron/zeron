@@ -3,7 +3,7 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
-import com.maruseron.zeron.compile.Compiler;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.TokenType;
@@ -67,7 +67,7 @@ public final class NullCoalescingAssignmentTest {
                 """;
 
         try {
-            final var compiler = new Compiler(parse(source), className);
+            final var compiler = new CompilationService(parse(source), className);
             compiler.resolve();
             compiler.compile();
 
@@ -99,20 +99,20 @@ public final class NullCoalescingAssignmentTest {
                     return value + 1;
                 }
                 """);
-        final var resolver = new Resolver();
+        final var resolver = new ResolutionService();
         resolver.resolve(valid);
         final var function = (Stmt.Function) valid.getFirst();
         final var returned = (Stmt.Return) function.body().getLast();
         assertEquals(TypeDescriptor.ofInt(), returned.value().getType());
 
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse("""
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 fn maybeNull(initial: Int?, fallback: Int?): Int {
                     let mut value: Int? = initial;
                     value ??= fallback;
                     return value + 1;
                 }
                 """)));
-        assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse("""
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 fn remainsNull(): Int {
                     let mut value: Int? = null;
                     value ??= null;
@@ -128,7 +128,7 @@ public final class NullCoalescingAssignmentTest {
                 "fn nonNullable(): Int { let mut value = 1; value ??= 2; return value; }",
                 "let mut global: Int? = null; fn unsupported(): Int? = global ??= 1;")) {
             assertThrows(source, ResolutionError.class,
-                    () -> new Resolver().resolve(parse(source)));
+                    () -> new ResolutionService().resolve(parse(source)));
         }
     }
 

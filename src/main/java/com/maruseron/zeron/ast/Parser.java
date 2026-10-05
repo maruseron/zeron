@@ -2,6 +2,10 @@ package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.UnitLiteral;
+import com.maruseron.zeron.diagnostic.Diagnostic;
+import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.diagnostic.DiagnosticLabel;
+import com.maruseron.zeron.diagnostic.SourceSpan;
 import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
@@ -9,6 +13,7 @@ import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
+import com.maruseron.zeron.scan.ScanResult;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,8 +28,10 @@ public final class Parser {
     private static class ParseError extends RuntimeException {}
 
     private final List<Token> tokens;
+    private final List<Diagnostic> diagnostics = new ArrayList<>();
     private int current = 0;
     private String packageName = "";
+    private String sourcePath;
     private final List<ImportDeclaration> imports = new ArrayList<>();
     private final Map<String, String> importedTypes = new LinkedHashMap<>();
     private final List<String> onDemandImports = new ArrayList<>();
@@ -46,6 +53,12 @@ public final class Parser {
         return new Parser(tokens);
     }
 
+    public static Parser of(final ScanResult scanResult) {
+        final var parser = new Parser(scanResult.tokens());
+        parser.diagnostics.addAll(scanResult.diagnostics());
+        return parser;
+    }
+
     public List<Stmt> parse() {
         return parseCompilationUnit(null).declarations();
     }
@@ -56,35 +69,57 @@ public final class Parser {
 
     public CompilationUnit parseCompilationUnit(final String sourcePath,
                                                 final String inheritedPackageName) {
+        final var result = parseCompilationUnitWithDiagnostics(sourcePath, inheritedPackageName);
+        result.diagnostics().forEach(com.maruseron.zeron.Zeron::reportParseDiagnostic);
+        return result.compilationUnit();
+    }
+
+    public ParseResult parseCompilationUnitWithDiagnostics(final String sourcePath) {
+        return parseCompilationUnitWithDiagnostics(sourcePath, "");
+    }
+
+    public ParseResult parseCompilationUnitWithDiagnostics(final String sourcePath,
+                                                            final String inheritedPackageName) {
+        this.sourcePath = sourcePath;
         packageName = inheritedPackageName == null ? "" : inheritedPackageName;
         if (match(PACKAGE)) {
-            if (!packageName.isEmpty()) error(previous(), "Bundled declarations cannot override their package.");
-            packageName = parseQualifiedName("Expect package name.");
-            consume(SEMICOLON, "Expect ';' after package declaration.");
+            try {
+                if (!packageName.isEmpty()) error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Bundled declarations cannot override their package.");
+                packageName = parseQualifiedName("Expect package name.");
+                consume(SEMICOLON, "Expect ';' after package declaration.");
+            } catch (ParseError _) {
+                synchronizeHeader();
+            }
         }
         while (match(IMPORT)) {
-            final var target = advance();
-            if (target.type() != IDENTIFIER) error(target, "Expect qualified import name.");
-            final var qualifiedName = new StringBuilder(target.lexeme());
-            var onDemand = false;
-            while (match(DOT)) {
-                if (match(STAR)) {
-                    onDemand = true;
-                    break;
+            try {
+                final var target = advance();
+                if (target.type() != IDENTIFIER) error(target, "Expect qualified import name.");
+                final var qualifiedName = new StringBuilder(target.lexeme());
+                var onDemand = false;
+                while (match(DOT)) {
+                    if (match(STAR)) {
+                        onDemand = true;
+                        break;
+                    }
+                    qualifiedName.append('.').append(
+                            consume(IDENTIFIER, "Expect name after '.'.").lexeme());
                 }
-                qualifiedName.append('.').append(
-                        consume(IDENTIFIER, "Expect name after '.'.").lexeme());
+                final var localName = onDemand ? ""
+                        : match(AS)
+                            ? consume(IDENTIFIER, "Expect import alias.").lexeme()
+                            : qualifiedName.substring(qualifiedName.lastIndexOf(".") + 1);
+                if (onDemand && match(AS)) error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Star imports cannot have aliases.");
+                consume(SEMICOLON, "Expect ';' after import.");
+                final var imported = new ImportDeclaration(qualifiedName.toString(), localName, target, onDemand);
+                imports.add(imported);
+                if (onDemand) onDemandImports.add(qualifiedName.toString());
+                else importedTypes.putIfAbsent(localName, qualifiedName.toString());
+            } catch (ParseError _) {
+                synchronizeHeader();
             }
-            final var localName = onDemand ? ""
-                    : match(AS)
-                        ? consume(IDENTIFIER, "Expect import alias.").lexeme()
-                        : qualifiedName.substring(qualifiedName.lastIndexOf(".") + 1);
-            if (onDemand && match(AS)) error(previous(), "Star imports cannot have aliases.");
-            consume(SEMICOLON, "Expect ';' after import.");
-            final var imported = new ImportDeclaration(qualifiedName.toString(), localName, target, onDemand);
-            imports.add(imported);
-            if (onDemand) onDemandImports.add(qualifiedName.toString());
-            else importedTypes.putIfAbsent(localName, qualifiedName.toString());
         }
         collectLocalTypeNames();
         final var statements = new ArrayList<Stmt>();
@@ -93,7 +128,7 @@ public final class Parser {
         }
         statements.removeIf(statement -> statement == null);
 
-        return new CompilationUnit(sourcePath, packageName, imports, statements);
+        return new ParseResult(new CompilationUnit(sourcePath, packageName, imports, statements), diagnostics);
     }
 
     private void collectLocalTypeNames() {
@@ -119,22 +154,26 @@ public final class Parser {
                 if (match(CLASS)) return classDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
                 if (match(SEALED)) {
-                    consume(CONTRACT, "Only contracts can be sealed.");
+                    consume(CONTRACT, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION,
+                            "Only contracts can be sealed.");
                     return contractDeclaration(true, true);
                 }
                 if (match(EXTERNAL)) return externalFunctionDeclaration(true);
                 if (match(FN)) return fnDeclaration(true);
-                throw error(previous(), "Only values, functions, classes, and contracts may be public.");
+                throw error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
+                        "Only values, functions, classes, and contracts may be public.");
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
             if (levelMarker == null && match(SEALED)) {
-                consume(CONTRACT, "Only contracts can be sealed.");
+                consume(CONTRACT, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION,
+                        "Only contracts can be sealed.");
                 return contractDeclaration(false, true);
             }
 
             if (levelMarker != null) return statement();
-            throw error(peek(), "Expected declaration at top level.");
+            throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    "Expected declaration at top level.");
         } catch (ParseError error) {
             synchronize();
             return null;
@@ -150,7 +189,7 @@ public final class Parser {
             ? BindingMutability.REASSIGNABLE
             : BindingMutability.IMMUTABLE;
         if (isPublic && mutability.isReassignable()) {
-            error(peek(), "Public top-level values must be immutable.");
+            error(peek(), DiagnosticCatalog.INVALID_VISIBILITY, "Public top-level values must be immutable.");
         }
         final var name = consume(IDENTIFIER, "Expect binding name.");
 
@@ -186,19 +225,22 @@ public final class Parser {
 
     private Stmt.ExternalFunction externalFunctionDeclaration(final boolean isPublic) {
         if (levelMarker != null) {
-            throw error(previous(), "External JVM functions are only allowed at top level.");
+            throw error(previous(), DiagnosticCatalog.INVALID_EXTERNAL_FUNCTION_DECLARATION,
+                    "External JVM functions are only allowed at top level.");
         }
         consume(FN, "Expect 'fn' after 'external'.");
         final var name = consume(IDENTIFIER, "Expect external function name.");
         if (check(LESS)) {
-            throw error(peek(), "External JVM functions cannot be generic in this implementation.");
+            throw error(peek(), DiagnosticCatalog.INVALID_EXTERNAL_FUNCTION_DECLARATION,
+                    "External JVM functions cannot be generic in this implementation.");
         }
         consume(LEFT_PAREN, "Expect '(' after external function name.");
         final var parameterNames = new ArrayList<Token>();
         final var parameterTypes = new ArrayList<TypeDescriptor>();
         if (!check(RIGHT_PAREN)) {
             do {
-                if (parameterNames.size() >= 254) error(peek(), "Can't have more than 254 parameters.");
+                if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                        "Can't have more than 254 parameters.");
                 parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 consume(COLON, "Expect ':' after parameter name.");
                 parameterTypes.add(collectType());
@@ -227,7 +269,8 @@ public final class Parser {
             if (!check(RIGHT_PAREN)) {
                 do {
                     if (parameterNames.size() >= 254) {
-                        error(peek(), "Can't have more than 254 parameters.");
+                        error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                                "Can't have more than 254 parameters.");
                     }
                     parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                     consume(COLON, "Expect ':' after parameter name.");
@@ -242,7 +285,8 @@ public final class Parser {
                 returnType = collectType();
             }
             if (!typeParameters.isEmpty() && !hasExplicitReturnType) {
-                error(name, "Generic functions require an explicit return type.");
+                error(name, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                        "Generic functions require an explicit return type.");
             }
 
             final List<Stmt> body;
@@ -277,16 +321,18 @@ public final class Parser {
         do {
             final var parameter = consume(IDENTIFIER, "Expect type parameter name.");
             if (parameters.containsKey(parameter.lexeme())) {
-                error(parameter, "Duplicate type parameter.");
+                error(parameter, DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT, "Duplicate type parameter.");
             }
             if (rejectShadowing && activeTypeParameters.containsKey(parameter.lexeme())) {
-                error(parameter, "Method type parameters cannot shadow enclosing type parameters.");
+                error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                        "Method type parameters cannot shadow enclosing type parameters.");
             }
             var descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme());
             parameters.put(parameter.lexeme(), descriptor);
             if (match(COLON)) {
                 if (!allowBounds) {
-                    error(parameter, "Type-parameter bounds are supported only on top-level generic functions.");
+                    error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                            "Type-parameter bounds are supported only on top-level generic functions.");
                 }
                 final var enclosingTypeParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(parameters);
@@ -297,7 +343,8 @@ public final class Parser {
             }
         } while (match(COMMA));
         consume(GREATER, "Expect '>' after type parameters.");
-        if (parameters.isEmpty()) error(declarationName, "A generic declaration must declare a type parameter.");
+        if (parameters.isEmpty()) error(declarationName, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                "A generic declaration must declare a type parameter.");
         return parameters;
     }
 
@@ -333,7 +380,9 @@ public final class Parser {
                     if (match(CONSTRUCTOR)) {
                         final var constructorName = consume(IDENTIFIER, "Expect 'new' after 'constructor'.");
                         if (constructorName.lexeme().equals("new")) {
-                            if (constructor != null) error(constructorName, "A class can declare only one canonical constructor.");
+                            if (constructor != null) error(constructorName,
+                                    DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
+                                    "A class can declare only one canonical constructor.");
                             consume(SEMICOLON, "Expect ';' after canonical constructor declaration.");
                             constructor = new Stmt.Constructor(constructorName, isPublic);
                         } else {
@@ -352,7 +401,8 @@ public final class Parser {
                         }
                     }
                 } else if (match(CONSTRUCTOR)) {
-                    error(previous(), "Constructors must declare 'public' or 'private' visibility.");
+                    error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
+                            "Constructors must declare 'public' or 'private' visibility.");
                 } else {
                     final var fieldName = consume(IDENTIFIER, "Expect field name or explicitly visible method.");
                     consume(COLON, "Expect ':' after field name.");
@@ -364,7 +414,7 @@ public final class Parser {
             }
             consume(RIGHT_BRACE, "Expect '}' after class members.");
                 if (constructor == null) {
-                final var canonicalName = new Token(IDENTIFIER, "new", null, name.line());
+                final var canonicalName = new Token(IDENTIFIER, "new", null, name.span());
                 constructor = new Stmt.Constructor(canonicalName, true);
                 }
             return new Stmt.ClassDecl(name, List.copyOf(typeParameters.values()), List.copyOf(contractUses),
@@ -407,10 +457,12 @@ public final class Parser {
             try {
                 while (!check(RIGHT_BRACE) && !isAtEnd()) {
                     if (match(GET)) {
-                        if (getterBody != null) error(previous(), "Duplicate property getter.");
+                        if (getterBody != null) error(previous(), DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
+                                "Duplicate property getter.");
                         getterBody = accessorBody("getter");
                     } else if (match(SET)) {
-                        if (setterBody != null) error(previous(), "Duplicate property setter.");
+                        if (setterBody != null) error(previous(), DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
+                                "Duplicate property setter.");
                         consume(LEFT_PAREN, "Expect '(' after 'set'.");
                         setterParameter = consume(IDENTIFIER, "Expect setter value parameter.");
                         consume(RIGHT_PAREN, "Expect ')' after setter parameter.");
@@ -427,19 +479,19 @@ public final class Parser {
             consume(SEMICOLON, "Expect ';' after property declaration.");
         }
         if (getterBody != null && setterBody == null && isMutating) {
-            error(name, "A 'mut' property requires a setter.");
+            error(name, DiagnosticCatalog.INVALID_PROPERTY_DECLARATION, "A 'mut' property requires a setter.");
         }
         if ((getterBody != null || setterBody != null) && getterBody == null) {
-            error(name, "A custom property requires a getter.");
+            error(name, DiagnosticCatalog.INVALID_PROPERTY_DECLARATION, "A custom property requires a getter.");
         }
         if (!isMutating && setterBody != null) {
-            error(name, "A property setter requires 'mut'.");
+            error(name, DiagnosticCatalog.INVALID_PROPERTY_DECLARATION, "A property setter requires 'mut'.");
         }
         if (getterBody == null && setterBody != null) {
-            error(name, "A custom setter requires a getter.");
+            error(name, DiagnosticCatalog.INVALID_PROPERTY_DECLARATION, "A custom setter requires a getter.");
         }
         if (initializer != null && getterBody != null) {
-            error(name, "A custom property cannot have an initializer.");
+            error(name, DiagnosticCatalog.INVALID_PROPERTY_DECLARATION, "A custom property cannot have an initializer.");
         }
         return new Stmt.Property(name, type, initializer, isPublic, isMutating,
                 getterBody, setterParameter, setterBody);
@@ -466,7 +518,8 @@ public final class Parser {
         final var parameterTypes = new ArrayList<TypeDescriptor>();
         if (!check(RIGHT_PAREN)) {
             do {
-                if (parameterNames.size() >= 254) error(peek(), "Can't have more than 254 parameters.");
+                if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                        "Can't have more than 254 parameters.");
                 parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 consume(COLON, "Expect ':' after parameter name.");
                 parameterTypes.add(collectType());
@@ -528,7 +581,7 @@ public final class Parser {
                 } while (match(COMMA));
             }
             if (isSealed != !permittedClasses.isEmpty()) {
-                error(name, isSealed
+                error(name, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION, isSealed
                         ? "A sealed contract must declare at least one permitted class."
                         : "Only sealed contracts may declare permitted classes.");
             }
@@ -539,7 +592,8 @@ public final class Parser {
                 final var isDefault = match(DEFAULT);
                 final var isMutating = match(MUT);
                 if (match(PROPERTY)) {
-                    if (isDefault) error(previous(), "Contract properties cannot have default implementations.");
+                    if (isDefault) error(previous(), DiagnosticCatalog.INVALID_PROPERTY_DECLARATION,
+                            "Contract properties cannot have default implementations.");
                     final var propertyName = consume(IDENTIFIER, "Expect property name.");
                     consume(COLON, "Expect ':' after property name.");
                     properties.add(new Stmt.ContractProperty(propertyName, collectType(), isMutating));
@@ -581,7 +635,8 @@ public final class Parser {
         final var parameterTypes = new ArrayList<TypeDescriptor>();
         if (!check(RIGHT_PAREN)) {
             do {
-                if (parameterNames.size() >= 254) error(peek(), "Can't have more than 254 parameters.");
+                if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                        "Can't have more than 254 parameters.");
                 parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 consume(COLON, "Expect ':' after parameter name.");
                 parameterTypes.add(collectType());
@@ -591,7 +646,8 @@ public final class Parser {
 
         final var hasReturnType = match(COLON);
         final var returnType = hasReturnType ? collectType() : TypeDescriptor.ofUnit();
-        if (!hasReturnType) error(name, "Class and contract methods require an explicit return type.");
+        if (!hasReturnType) error(name, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                "Class and contract methods require an explicit return type.");
 
         final var descriptor = TypeDescriptor.genericFunctionOf(name.lexeme(), returnType,
                 parameterTypes, typeParameters);
@@ -636,7 +692,8 @@ public final class Parser {
             } else if (parameters.size() == 1) {
                 type = parameters.getFirst();
             } else {
-                error(previous(), "Expect '->' after function parameter types.");
+                error(previous(), DiagnosticCatalog.EXPECTED_SYNTAX,
+                        "Expect '->' after function parameter types.");
                 type = TypeDescriptor.ofInfer();
             }
         } else {
@@ -657,15 +714,18 @@ public final class Parser {
                 if (type == null) type = TypeDescriptor.of(qualifiedTypeName.lexeme());
             if (isGeneric) {
                 if (type.name().equals("Array")) {
-                    if (inner.size() != 1) error(firstTypeName, "Array expects one element type.");
+                    if (inner.size() != 1) error(firstTypeName, DiagnosticCatalog.INVALID_ARRAY_TYPE_OR_LITERAL,
+                            "Array expects one element type.");
                     type = TypeDescriptor.arrayOf(inner.getFirst());
                 } else if (type instanceof NominalDescriptor nominal) {
                     type = TypeDescriptor.genericOf(nominal, inner);
                 } else {
-                    error(firstTypeName, "Only nominal types can have type arguments.");
+                    error(firstTypeName, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                            "Only nominal types can have type arguments.");
                 }
             } else if (type.name().equals("Array")) {
-                error(firstTypeName, "Array requires an element type.");
+                error(firstTypeName, DiagnosticCatalog.INVALID_ARRAY_TYPE_OR_LITERAL,
+                        "Array requires an element type.");
             }
         }
 
@@ -714,7 +774,7 @@ public final class Parser {
     }
 
     private Token withLexeme(final Token token, final String lexeme) {
-        return new Token(token.type(), lexeme, token.literal(), token.line());
+        return new Token(token.type(), lexeme, token.literal(), token.span());
     }
 
     private Stmt statement() {
@@ -731,7 +791,8 @@ public final class Parser {
 
     private Token break_() {
         if (loopMarker == null)
-            error(previous(), "Can only break inside of a loop.");
+            error(previous(), DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT,
+                    "Can only break inside of a loop.");
 
         consume(SEMICOLON, "Expect ';' after break.");
         return previous();
@@ -739,7 +800,8 @@ public final class Parser {
 
     private Token continue_() {
         if (loopMarker == null)
-            error(previous(), "Can only continue inside of a loop.");
+            error(previous(), DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT,
+                    "Can only continue inside of a loop.");
 
         consume(SEMICOLON, "Expect ';' after continue.");
         return previous();
@@ -747,7 +809,8 @@ public final class Parser {
 
     private Expr return_() {
         if (levelMarker == null)
-            error(previous(), "Can only return inside of a function.");
+            error(previous(), DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT,
+                    "Can only return inside of a function.");
 
         final var expr = check(SEMICOLON) ? null : expression();
         consume(SEMICOLON, "Expect ';' after return.");
@@ -804,7 +867,7 @@ public final class Parser {
                 // UNTIL generates a synthetic negation for while.
                 // It uses a fake NOT operator with "until" as lexeme
                 final var res = new Expr.Unary(
-                        new Token(NOT, previous().lexeme(), null, previous().line()),
+                        new Token(NOT, previous().lexeme(), null, previous().span()),
                         expression(),
                         TypeDescriptor.ofInfer());
                 consume(RIGHT_PAREN, "Expect ')' after condition.");
@@ -848,7 +911,8 @@ public final class Parser {
             if (expr instanceof Expr.Variable variable) {
                 return new Expr.CoalesceAssignment(variable.name, value);
             }
-            error(operator, "'??=' can only assign to a mutable local variable.");
+            error(operator, DiagnosticCatalog.INVALID_ASSIGNMENT_FORM,
+                    "'??=' can only assign to a mutable local variable.");
         }
 
         if (match(PLUS_EQUAL, MINUS_EQUAL, STAR_EQUAL, SLASH_EQUAL, PERCENT_EQUAL,
@@ -866,7 +930,8 @@ public final class Parser {
             }
 
             if (expr instanceof Expr.Index index) {
-                if (operator.type() != EQUAL) error(operator, "Indexed assignment only supports '='.");
+                if (operator.type() != EQUAL) error(operator, DiagnosticCatalog.INVALID_ASSIGNMENT_FORM,
+                        "Indexed assignment only supports '='.");
                 return new Expr.IndexAssignment(index.array, index.index, value, TypeDescriptor.ofUnit());
             }
 
@@ -880,7 +945,7 @@ public final class Parser {
                             new Expr.Binary(
                                     expr,
                                     // synthetic plus token from plus_equal
-                                    new Token(PLUS, "+", null, operator.line()),
+                                    new Token(PLUS, "+", null, operator.span()),
                                     value,
                                     TypeDescriptor.ofInfer()),
                             TypeDescriptor.ofInfer());
@@ -889,7 +954,7 @@ public final class Parser {
                             new Expr.Binary(
                                     expr,
                                     // synthetic minus token from minus_equal
-                                    new Token(MINUS, "-", null, operator.line()),
+                                    new Token(MINUS, "-", null, operator.span()),
                                     value,
                                     TypeDescriptor.ofInfer()),
                             TypeDescriptor.ofInfer());
@@ -898,7 +963,7 @@ public final class Parser {
                             new Expr.Binary(
                                     expr,
                                     // synthetic star token from star_equal
-                                    new Token(STAR, "*", null, operator.line()),
+                                    new Token(STAR, "*", null, operator.span()),
                                     value,
                                     TypeDescriptor.ofInfer()),
                             TypeDescriptor.ofInfer());
@@ -907,7 +972,7 @@ public final class Parser {
                             new Expr.Binary(
                                     expr,
                                     // synthetic slash token from slash_equal
-                                    new Token(SLASH, "/", null, operator.line()),
+                                    new Token(SLASH, "/", null, operator.span()),
                                     value,
                                     TypeDescriptor.ofInfer()),
                             TypeDescriptor.ofInfer());
@@ -923,7 +988,7 @@ public final class Parser {
                 };
             }
 
-            error(operator, "Invalid assignment target.");
+            error(operator, DiagnosticCatalog.INVALID_ASSIGNMENT_FORM, "Invalid assignment target.");
         }
 
         return expr;
@@ -945,7 +1010,7 @@ public final class Parser {
             default -> throw new IllegalArgumentException("Not a compound assignment operator.");
         };
         return new Token(operator, assignmentOperator.lexeme().substring(
-                0, assignmentOperator.lexeme().length() - 1), null, assignmentOperator.line());
+                0, assignmentOperator.lexeme().length() - 1), null, assignmentOperator.span());
     }
 
     private Expr coalesce() {
@@ -965,7 +1030,7 @@ public final class Parser {
                                     final Token assignmentOperator) {
         return new Expr.Assignment(name,
                 new Expr.Binary(target,
-                        new Token(operatorType, operatorLexeme, null, assignmentOperator.line()),
+                        new Token(operatorType, operatorLexeme, null, assignmentOperator.span()),
                         value, TypeDescriptor.ofInfer()),
                 TypeDescriptor.ofInfer());
     }
@@ -1066,9 +1131,9 @@ public final class Parser {
                 final var first = advance();
                 advance();
                 if (match(GREATER)) {
-                    operator = new Token(UNSIGNED_SHIFT_RIGHT, ">>>", null, first.line());
+                    operator = new Token(UNSIGNED_SHIFT_RIGHT, ">>>", null, first.span());
                 } else {
-                    operator = new Token(SHIFT_RIGHT, ">>", null, first.line());
+                    operator = new Token(SHIFT_RIGHT, ">>", null, first.span());
                 }
             }
             expr = new Expr.Binary(expr, operator, term(), TypeDescriptor.ofInfer());
@@ -1155,7 +1220,8 @@ public final class Parser {
                 } else if (expr instanceof Expr.Property property) {
                     expr = finishMemberCall(property);
                 } else {
-                    error(previous(), "Only functions and named methods can be called.");
+                    error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "Only functions and named methods can be called.");
                 }
             } else if (match(LEFT_BRACKET)) {
                 final var index = expression();
@@ -1178,7 +1244,8 @@ public final class Parser {
         if (!check(RIGHT_PAREN)) {
             do {
                 if (arguments.size() >= 254) {
-                    error(peek(), "Can't have more than 254 arguments.");
+                    error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                            "Can't have more than 254 arguments.");
                 }
                 arguments.add(expression());
                 Zeron.debug("added argument to call: " + arguments.getLast());
@@ -1210,7 +1277,8 @@ public final class Parser {
         final var arguments = new ArrayList<Expr>();
         if (!check(RIGHT_PAREN)) {
             do {
-                if (arguments.size() >= 254) error(peek(), "Can't have more than 254 arguments.");
+                if (arguments.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                        "Can't have more than 254 arguments.");
                 arguments.add(expression());
             } while (match(COMMA));
         }
@@ -1239,7 +1307,8 @@ public final class Parser {
 
         if (match(LEFT_BRACKET)) {
             final var elements = new ArrayList<Expr>();
-            if (check(RIGHT_BRACKET)) error(peek(), "Array literals must initialize at least one element.");
+            if (check(RIGHT_BRACKET)) error(peek(), DiagnosticCatalog.INVALID_ARRAY_TYPE_OR_LITERAL,
+                    "Array literals must initialize at least one element.");
             do {
                 elements.add(expression());
             } while (match(COMMA));
@@ -1257,8 +1326,8 @@ public final class Parser {
             if (match(DOT_DOT)) {
             final var operator = previous();
             final var end = consume(INT, "Expect Integer after range operator");
-            final var className = new Token(IDENTIFIER, "zeron.ranges.IntRange", null, number.line());
-            final var factoryName = new Token(IDENTIFIER, "closed", null, operator.line());
+            final var className = new Token(IDENTIFIER, "zeron.ranges.IntRange", null, number.span());
+            final var factoryName = new Token(IDENTIFIER, "closed", null, operator.span());
             final var receiver = new Expr.Variable(className, TypeDescriptor.ofInfer());
             final var arguments = List.<Expr>of(
                 new Expr.Literal(number.literal(), TypeDescriptor.ofInt()),
@@ -1311,7 +1380,8 @@ public final class Parser {
                 final var params = new ArrayList<Token>();
                 do {
                     if (params.size() >= 254) {
-                        error(peek(), "Can't have more than 254 parameters.");
+                        error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                                "Can't have more than 254 parameters.");
                     }
                     params.add(consume(IDENTIFIER, "Expect parameter name."));
                 } while (match(COMMA));
@@ -1338,7 +1408,8 @@ public final class Parser {
                     list.add(ident);
                     do {
                         if (list.size() >= 254) {
-                            error(peek(), "Can't have more than 254 arguments.");
+                            error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                                    "Can't have more than 254 arguments.");
                         }
                         list.add(consume(IDENTIFIER, "Expect parameter name."));
                     } while (match(COMMA));
@@ -1398,7 +1469,8 @@ public final class Parser {
             arms.add(new Expr.MatchArm(caseKeyword, patternType, alias, wildcard, body));
         }
         consume(RIGHT_BRACE, "Expect '}' after match cases.");
-        if (arms.isEmpty()) error(keyword, "A match expression must contain at least one case.");
+        if (arms.isEmpty()) error(keyword, DiagnosticCatalog.INVALID_MATCH_EXPRESSION,
+                "A match expression must contain at least one case.");
         return new Expr.Match(keyword, scrutinee, arms);
     }
 
@@ -1446,9 +1518,15 @@ public final class Parser {
     }
 
     private Token consume(final TokenType type, final String message) {
+        return consume(type, DiagnosticCatalog.EXPECTED_SYNTAX, message);
+    }
+
+    private Token consume(final TokenType type,
+                          final DiagnosticCatalog.Entry entry,
+                          final String message) {
         if (check(type)) return advance();
 
-        throw error(peek(), message);
+        throw error(peek(), entry, message);
     }
 
     private boolean check(final TokenType type) {
@@ -1478,8 +1556,30 @@ public final class Parser {
     }
 
     private ParseError error(final Token token, final String message) {
-        Zeron.error(token, message);
+        return error(token, DiagnosticCatalog.EXPECTED_SYNTAX, message);
+    }
+
+    private ParseError error(final Token token,
+                             final DiagnosticCatalog.Entry entry,
+                             final String message) {
+        final var tokenSpan = token.span();
+        final var span = tokenSpan.sourcePath() != null || sourcePath == null
+                ? tokenSpan
+                : new SourceSpan(sourcePath, tokenSpan.start(), tokenSpan.end());
+        final var location = token.type() == EOF ? "at end" : "at '" + token.lexeme() + "'";
+        diagnostics.add(new Diagnostic(entry.code(), entry.severity(), message, span,
+                List.of(new DiagnosticLabel(span, location)),
+                List.of(), List.of()));
         return new ParseError();
+    }
+
+    private void synchronizeHeader() {
+        while (!isAtEnd()) {
+            if (previous().type() == SEMICOLON) return;
+            if (check(IMPORT) || check(LET) || check(FN) || check(EXTERNAL)
+                    || check(CLASS) || check(CONTRACT) || check(PUBLIC) || check(SEALED)) return;
+            advance();
+        }
     }
 
     private void synchronize() {

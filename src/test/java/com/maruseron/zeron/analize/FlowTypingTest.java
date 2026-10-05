@@ -331,8 +331,8 @@ public final class FlowTypingTest {
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 final var generated = loader.loadClass(className);
-                final var unitValueClass = loader.loadClass("com.maruseron.zeron.runtime.UnitValue");
-                final var unitValue = unitValueClass.getField("INSTANCE").get(null);
+                final var unitClass = loader.loadClass("zeron.lang.Unit");
+                final var unitValue = unitClass.getField("INSTANCE").get(null);
                 final var targetNames = List.of("Int", "Float", "Boolean", "String", "Unit");
                 final Object[] runtimeValues = {42, 2.5d, true, "text", unitValue};
                 for (int target = 0; target < targetNames.size(); target++) {

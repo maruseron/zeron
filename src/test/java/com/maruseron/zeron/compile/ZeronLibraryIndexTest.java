@@ -15,6 +15,8 @@ import java.net.URLClassLoader;
 import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -82,6 +84,151 @@ public final class ZeronLibraryIndexTest {
             assertThrows(ResolutionError.class, () -> new Resolver().resolveUnits(units));
         } finally {
             deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void compiledLibraryEnforcesSealedPermitsInSeparateConsumerCompilation() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "sealedartifact" + suffix;
+        final var appPackage = "sealedclient" + suffix;
+        final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-sealed-library-");
+        final var indexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v5.bin"));
+        final var library = parse("Outcome.zn", """
+                package %s;
+                public sealed contract Outcome<T> permits Success<T>, Failure<T> {
+                    read(): T;
+                }
+                public class Success<T> is Outcome<T> {
+                    payload: T;
+                    public constructor new;
+                    public read(): T = this.payload;
+                }
+                public class Failure<T> is Outcome<T> {
+                    payload: T;
+                    public constructor new;
+                    public read(): T = this.payload;
+                }
+                """.formatted(libraryPackage));
+        final var client = parse("Main.zn", """
+                package %s;
+                import %s.Outcome;
+                import %s.Success;
+                fn result(): Int {
+                    let outcome: Outcome<Int> = Success<Int>.new(42);
+                    return outcome.read();
+                }
+                """.formatted(appPackage, libraryPackage, libraryPackage));
+
+        try {
+            deleteTree(Path.of("dist"));
+            final var libraryCompiler = Compiler.forCompilationUnits(
+                    List.of(library), libraryPackage + ".LibraryBuilder", libraryPackage);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
+            Files.createDirectories(indexPath.getParent());
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v5.bin"), indexPath);
+
+            final var compiledLibrary = ZeronLibraryIndex.readFromDirectory(libraryRoot);
+            deleteTree(Path.of("dist"));
+            final var clientCompiler = Compiler.forCompilationUnits(
+                    List.of(client), appPackage + ".Main", appPackage, List.of(compiledLibrary));
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(appPackage + ".Main").getMethod("result").invoke(null));
+            }
+
+            final var matchClient = parse("Match.zn", """
+                    package %s;
+                    import %s.Outcome;
+                    import %s.Success;
+                    import %s.Failure;
+                    fn result(): Int {
+                        let value: Outcome<Int> = Success<Int>.new(42);
+                        return match (value) {
+                            case Success<Int> as success -> success.read();
+                            case Failure<Int> as failure -> failure.read();
+                        };
+                    }
+                    """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage));
+            final var matchCompiler = Compiler.forCompilationUnits(
+                    List.of(matchClient), appPackage + ".Match", appPackage,
+                    List.of(compiledLibrary));
+            matchCompiler.resolve();
+            matchCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(appPackage + ".Match").getMethod("result").invoke(null));
+            }
+
+            final var incompleteClient = parse("Incomplete.zn", """
+                    package %s;
+                    import %s.Outcome;
+                    import %s.Success;
+                    fn result(value: Outcome<Int>): Int = match (value) {
+                        case Success<Int> -> 42;
+                    };
+                    """.formatted(appPackage, libraryPackage, libraryPackage));
+            final var incompleteCompiler = Compiler.forCompilationUnits(
+                    List.of(incompleteClient), appPackage + ".Incomplete", appPackage,
+                    List.of(compiledLibrary));
+            assertThrows(ResolutionError.class, incompleteCompiler::resolve);
+
+            final var intruder = parse("Intruder.zn", """
+                    package %s;
+                    public class Intruder<T> is Outcome<T> {
+                        payload: T;
+                        public constructor new;
+                        public read(): T = this.payload;
+                    }
+                    """.formatted(libraryPackage));
+            final var invalidCompiler = Compiler.forCompilationUnits(
+                    List.of(intruder), libraryPackage + ".IntruderMain", libraryPackage,
+                    List.of(compiledLibrary));
+            assertThrows(ResolutionError.class, invalidCompiler::resolve);
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(libraryRoot);
+        }
+    }
+
+    @Test
+    public void readsJarIndexesAndRejectsMissingOrIncompatibleMetadata() throws Exception {
+        final var temporaryRoot = Files.createTempDirectory(Path.of("target"), "zeron-library-jar-index-");
+        final var indexPath = temporaryRoot.resolve("api.bin");
+        final var validJar = temporaryRoot.resolve("valid.jar");
+        final var wrongSchemaJar = temporaryRoot.resolve("wrong-schema.jar");
+        final var wrongStandardLibraryJar = temporaryRoot.resolve("wrong-stdlib.jar");
+        final var missingIndexJar = temporaryRoot.resolve("missing-index.jar");
+
+        try {
+            new ZeronLibraryIndex(StandardLibrary.API_VERSION, List.of()).writeTo(indexPath);
+            writeJarWithIndex(validJar, Files.readAllBytes(indexPath));
+            assertEquals(StandardLibrary.API_VERSION,
+                    ZeronLibraryIndex.readFromJar(validJar).standardLibraryApiVersion());
+
+            final var incompatibleSchema = Files.readAllBytes(indexPath);
+            java.nio.ByteBuffer.wrap(incompatibleSchema).putInt(Integer.BYTES, ZeronLibraryIndex.VERSION + 1);
+            writeJarWithIndex(wrongSchemaJar, incompatibleSchema);
+            assertThrows(IOException.class, () -> ZeronLibraryIndex.readFromJar(wrongSchemaJar));
+
+            new ZeronLibraryIndex(StandardLibrary.API_VERSION + 1, List.of()).writeTo(indexPath);
+            writeJarWithIndex(wrongStandardLibraryJar, Files.readAllBytes(indexPath));
+            assertThrows(IOException.class, () -> ZeronLibraryIndex.readFromJar(wrongStandardLibraryJar));
+
+            try (final var output = new JarOutputStream(Files.newOutputStream(missingIndexJar))) {
+                output.putNextEntry(new JarEntry("unrelated.txt"));
+                output.write(new byte[]{1});
+                output.closeEntry();
+            }
+            assertThrows(IOException.class, () -> ZeronLibraryIndex.readFromJar(missingIndexJar));
+        } finally {
+            deleteTree(temporaryRoot);
         }
     }
 
@@ -384,6 +531,14 @@ public final class ZeronLibraryIndexTest {
                                 if (Files.isDirectory(path)) Files.createDirectories(destination);
                                 else Files.copy(path, destination);
                         }
+                }
+        }
+
+        private static void writeJarWithIndex(final Path jarPath, final byte[] indexBytes) throws IOException {
+                try (final var output = new JarOutputStream(Files.newOutputStream(jarPath))) {
+                        output.putNextEntry(new JarEntry("META-INF/zeron/api-v5.bin"));
+                        output.write(indexBytes);
+                        output.closeEntry();
                 }
         }
 

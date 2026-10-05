@@ -30,13 +30,15 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v5.bin|class-directory>");
+            System.err.println("Usage: ZeronLibraryIndexDump <api-v5.bin|class-directory|library.jar>");
             return;
         }
         final var path = Path.of(args[0]);
         final var index = Files.isDirectory(path)
                 ? ZeronLibraryIndex.readFromDirectory(path)
-                : ZeronLibraryIndex.readFrom(path);
+                : path.getFileName().toString().endsWith(".jar")
+                    ? ZeronLibraryIndex.readFromJar(path)
+                    : ZeronLibraryIndex.readFrom(path);
         print(index);
     }
 

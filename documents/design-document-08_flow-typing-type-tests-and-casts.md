@@ -17,7 +17,8 @@ first-class union types. Flow typing is static type checking, not general error 
   for direct local/parameter checks is implemented in statement-form branches and `if` expressions.
 - `Any` is implemented as a non-null top type. Non-null values widen to `Any`; nullable values and
   `null` widen to `Any?`. Supported `is` tests narrow `Any` and `Any?` on proven paths.
-- `Unit` uses a shared generated `UnitValue` singleton in `dist`, so `Unit` remains distinct from
+- `Unit` uses a shared generated `zeron.lang.Unit` singleton in compiler output and the bundled
+  standard-library artifact, so `Unit` remains distinct from
   `null` and can widen to `Any`.
 - Classes are final and can conform to multiple contracts. Invariant generic classes/contracts are
   supported with raw JVM erasure. There is no class inheritance, general subtype lattice, or

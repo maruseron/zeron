@@ -42,14 +42,18 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - `for` loops over arrays, inline integer ranges, and user-defined types conforming to the bundled
     `Iterable<T>` and `Iterator<T>` contracts. Arrays retain specialized lowering; ranges are
     ordinary `zeron.ranges.IntRange` values and use protocol dispatch.
-- Callable `zeron.io.print` and `zeron.io.println` standard-library functions, lowered through
-    registered intrinsic IDs. The former print statement syntax has been removed.
+- Callable `zeron.io.print` and `zeron.io.println` standard-library functions, backed by typed
+    external function bindings. The former print statement syntax has been removed.
 - `zeron.lang.Option<T>` as a sealed contract implemented by `Some<T>` and `None<T>`, with `fold` for
     consuming either case without exceptions. `Iterator<T>.next()` returns this type, using `None`
     for exhaustion and `Some` for yielded values.
+- Exhaustive `match` expressions over non-null sealed-contract values. Cases name permitted classes
+    and may bind the value with `as`; a final `_` case covers any remaining variants.
+- Compiled Zeron libraries can be packaged as JARs and loaded from either JARs or class directories;
+    consumers validate both API-index schema and standard-library API compatibility.
 - Initial Java class-directory interop for public constructors and methods, including expanded
-    varargs calls with supported component types. JARs, JDK module discovery, fields, and ordinary
-    Java array signatures remain unsupported.
+    varargs calls with supported component types. Java JARs, JDK module discovery, fields, and
+    ordinary Java array signatures remain unsupported.
 - Binding reassignment as a declaration property: `let` bindings are immutable and `let mut`
     bindings may be reassigned.
 - Reference mutation capability (`&T`) is distinct from binding reassignment and is enforced for
@@ -95,15 +99,62 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     declaration's scope, and lower omitted suffixes through generated overloads that delegate to the
     full-arity implementation. Interactions with methods, contracts, external functions, and
     separately compiled libraries need further design.
-- Signature-only external/expected declarations remain to be designed; see the
-    [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
-    Algebraic data types, discriminated unions, and structural or nominal tuples are also future work.
+- Typed signature-only external functions are implemented for registered JVM targets; external
+    classes, instance-method declarations, and expected-class declarations remain future work. See
+    the [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
+    Native algebraic data-type declarations, discriminated unions beyond sealed contracts, and
+    structural or nominal tuples are also future work.
 - Immutable collection types, list comprehensions, and explicit resource management.
-- Null-aware navigation (`?.`), null-fallback assignment (`??=`), and explicit structural/referential
-    equality semantics remain future work; null coalescing (`??`) is implemented. See the
+- Safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`), and explicit
+    reference identity (`===`) are implemented. Structural equality remains future work; existing
+    `==`/`!=` behavior is unchanged. See the
     [small language features discussion](design-document-10_small-miscelaneous.md).
-- Extension methods.
-- First-class effect handling and any monadic syntax; the semantics and surface syntax are open.
+- Variadic parameters: permit one trailing `T...` parameter, exposed as `Array<T>` in the function
+    body; calls pack zero or more trailing arguments. Spread calls, defaults, and overload-resolution
+    details remain to be designed.
+- Trailing-lambda syntax: allow one block lambda after a call, as in `repeat(3) { index ->
+    println(index) }`, with parentheses optional when the lambda is the only argument (`run {
+    initialize() }`). Use unparenthesized comma-separated parameter names; a body without `->`
+    denotes a zero-parameter lambda. Multiline call chains and nested trailing lambdas need
+    readability evaluation; ordinary parenthesized lambdas remain an escape hatch. Multiple
+    trailing lambdas per call are out of scope.
+- Extension methods: explicitly imported, statically resolved functions callable with receiver syntax
+    and using implicit `this`. Declared instance methods take precedence; extensions cannot access
+    private members or add runtime dispatch. The first slice targets Zeron classes and contracts,
+    including compiled libraries; Java and intrinsic types remain deferred.
+- Import-scoped contract conformances represented by explicit witnesses. A type satisfies a contract
+    only where the matching witness is imported; witnesses travel with generic and library APIs, and
+    conflicting witnesses require disambiguation or are rejected. Witnesses are separate from object
+    identity; adapter wrappers may be an implementation detail, not the language's model.
+- Richer pattern matching, including payload destructuring, nested patterns, guards, and OR-patterns.
+- Named object patterns that define explicit, potentially partial views for matching; overlap,
+    match-failure signaling, purity, and exhaustiveness rules remain to be designed.
+- Low priority: anonymous objects that explicitly implement a named contract, for one-off adapters
+    and test doubles. Anonymous record values are excluded because they would introduce structural
+    typing; capture, identity, and lowering rules remain to be designed.
+- Pattern assignment and derived creation.
+- Typed failure and effects: distinguish ordinary `Result<T, E>` values from declared raised effects,
+    proposed with a `raises E` signature clause and handled by `case raised E` arms in `match`.
+    Matching must cover or propagate the declared raised effects; effects raised by arm bodies remain
+    visible to the enclosing function. The Java interop boundary and any broader effect system remain
+    to be designed.
+- Low priority: optional `do` notation for sequencing short-circuiting `Option`/`Result` values.
+    A block may mix ordinary statements with `<-` binds; a bind short-circuits on the context's
+    failure case, and all binds in the initial design use the same context and `Result` error type.
+    The final expression must explicitly construct its `Option`/`Result` value; plain results are
+    not implicitly lifted. This sequences value-level failures and does not handle declared
+    `raises` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
+- Low priority: operator overloading resolved only through explicitly imported algebraic conformance
+    witnesses, not arbitrary type members. A witness supplies operations appropriate to a structure,
+    including its `identity` (for example, `0` for an additive group and `1` for a multiplicative
+    group); one type may have different witnesses in different contexts. Existing intrinsic numeric
+    operators remain unchanged. Duplicate applicable witnesses require disambiguation or are errors.
+    The design is open and difficult: the compiler can check signatures, but algebraic laws such as
+    associativity and identity remain unenforced.
+- Low priority: an explicit pipe operator where `value |> f` means `f(value)` and
+    `value |> f(option)` means `f(value, option)`. The piped value becomes the first argument;
+    stages evaluate left to right. No partial application, method lookup, or implicit nullable/result
+    propagation is intended.
 
 ---
 
@@ -130,7 +181,7 @@ be written as ordinary declared types.
 | --- | --- | --- |
 | `Never` | Bottom type: an expression that does not produce a value or return normally. | Descriptor exists; throw expressions and complete control-flow integration are not implemented. |
 | `Any` | Top type for all non-null values. | Implicit widening is implemented; it lowers to JVM `Object`. `Any?` also accepts nullable values and `null`. `is`-based narrowing and checked/safe casts are implemented for supported targets. |
-| `Unit` | The single unit value, used when a computation has no useful result. | Supported as a type and literal. It is distinct from `Never` and has a shared non-null runtime singleton. |
+| `Unit` | The single unit value, used when a computation has no useful result. | Supported as a type; the `()` literal is distinct from `Never` and has a shared non-null runtime singleton. |
 | `Int` | Integer values. | Supported. |
 | `Float` | Floating-point values. | Supported. |
 | `Boolean` | Truth values. | Supported. |
@@ -178,7 +229,7 @@ distinct from the non-nullable type.
 `Any` is the non-null top type and accepts implicit widening from every non-null source type,
 including `Unit`; scalar values are boxed as needed. `Any?` accepts all source types, including
 nullable types and `null`, while `Any?` cannot implicitly narrow to `Any` or another specific type.
-All Unit values use a shared generated `UnitValue` singleton, so widening Unit to `Any` preserves the
+All Unit values use a shared generated `zeron.lang.Unit` singleton, so widening Unit to `Any` preserves the
 non-null distinction from `null`. Conditional `is` tests are implemented for supported runtime
 types. `as T` performs a checked cast whose failure propagates as a JVM runtime exception; `as? T`
 returns null on mismatch or null. Casts to erased generic, array-element, and function-shape types

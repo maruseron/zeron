@@ -16,7 +16,9 @@ The goal is to establish useful object semantics before adding inheritance or ad
 - Sealed contracts declare a closed set of permitted classes with `sealed contract C permits A, B`.
   Permitted classes must be in the contract package, conform directly, and use matching generic
   parameters in declaration order. The compiler records permits in library metadata and the JVM
-  `PermittedSubclasses` attribute. `Option<T>` is the bundled example.
+  `PermittedSubclasses` attribute. `Option<T>` is the bundled example. Exhaustive `match`
+  expressions check the permitted set explicitly; sealing alone does not make arbitrary branches
+  exhaustive.
 - Parameterized nominal types retain source-level identity but erase to one raw JVM class or interface per declaration. Generic contract bridges adapt differing erased signatures.
 - Named constructors are static factories with expression or block bodies and an implicit mutable class-reference result. Omitted canonical declarations synthesize public construction; `private constructor new;` restricts it.
 - `Iterator<T>` and `Iterable<T>` are ordinary bundled contracts. `Iterator<T>.next()` returns
@@ -48,8 +50,30 @@ language, so a permitted class cannot open the sealed set through subclassing.
 The compiler enforces the permits list during resolution and emits the JVM `PermittedSubclasses`
 attribute. Compiled-library metadata carries the sealed flag and permits templates so separate
 consumer compilations enforce the same rule. A permits-list change is a public API change. Sealing
-does not by itself make branches exhaustive; future pattern-matching rules must define exhaustiveness
-separately.
+does not by itself make branches exhaustive; the match resolver separately checks coverage using the
+sealed permits list, including when contract metadata comes from a compiled library.
+
+### Matching sealed contracts
+
+`match` is an expression over a non-null sealed-contract value:
+
+```zeron
+match (option) {
+    case Some<T> as some -> some.value();
+    case None<T> -> defaultValue;
+}
+```
+
+Each arm is an expression followed by `;`. A type case must name one of the contract's directly
+permitted classes, and its generic arguments must match the scrutinee contract's arguments. `as`
+introduces an immutable, arm-scoped value narrowed to that class. A `_` case is an optional final
+catch-all; without it, every permitted class must appear exactly once. Duplicate cases and cases
+after `_` are errors. The arms must have a common result type, and the scrutinee is evaluated once.
+
+Nullable values must be proven non-null before matching. The initial pattern set does not include
+payload destructuring, nested patterns, guards, or OR-patterns. At runtime the compiler dispatches
+with `instanceof` and casts. A runtime null injected through Java interop is rejected before dispatch,
+and a non-wildcard match has a defensive `IllegalStateException` fallback.
 
 ### Nominal identity
 
@@ -290,7 +314,7 @@ class Person is Named, Closeable {
     displayName: String;
     public constructor new;
     public name(): String = this.displayName;
-    public close(): Unit = unit;
+    public close(): Unit = ();
 }
 ```
 

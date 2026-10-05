@@ -6,11 +6,13 @@ import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.compile.Compiler;
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
+import com.maruseron.zeron.domain.ZeronLibraryJar;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
@@ -54,6 +56,10 @@ public class Zeron {
         final var javaClassPathRoots = new ArrayList<Path>();
         Path entry = null;
         Path standardLibraryOutput = null;
+        Path jarOutput = null;
+        Path runClassFile = null;
+        Path standardLibraryJar = Paths.get("target", "zeron-stdlib.jar");
+        var customStandardLibraryJar = false;
         var bundleStandardLibrarySources = true;
         for (var index = 0; index < args.length; index++) {
             final var argument = args[index];
@@ -66,7 +72,7 @@ public class Zeron {
                 if (++index >= args.length) throw new IllegalArgumentException("--entry requires a source file.");
                 entry = Paths.get(args[index]);
             } else if (argument.equals("--library")) {
-                if (++index >= args.length) throw new IllegalArgumentException("--library requires a class directory.");
+                if (++index >= args.length) throw new IllegalArgumentException("--library requires a class directory or JAR.");
                 libraryRoots.add(Paths.get(args[index]));
             } else if (argument.equals("--java-classpath")) {
                 if (++index >= args.length) throw new IllegalArgumentException("--java-classpath requires a class directory.");
@@ -74,6 +80,16 @@ public class Zeron {
             } else if (argument.equals("--build-stdlib")) {
                 if (++index >= args.length) throw new IllegalArgumentException("--build-stdlib requires an output directory.");
                 standardLibraryOutput = Paths.get(args[index]);
+            } else if (argument.equals("--jar-output")) {
+                if (++index >= args.length) throw new IllegalArgumentException("--jar-output requires a JAR file.");
+                jarOutput = Paths.get(args[index]);
+            } else if (argument.equals("--run-class")) {
+                if (++index >= args.length) throw new IllegalArgumentException("--run-class requires a .class file.");
+                runClassFile = Paths.get(args[index]);
+            } else if (argument.equals("--stdlib-jar")) {
+                if (++index >= args.length) throw new IllegalArgumentException("--stdlib-jar requires a JAR file.");
+                standardLibraryJar = Paths.get(args[index]);
+                customStandardLibraryJar = true;
             } else if (argument.equals("--stdlib")) {
                 if (++index >= args.length) throw new IllegalArgumentException("--stdlib requires 'source' or 'compiled'.");
                 if (args[index].equals("source")) bundleStandardLibrarySources = true;
@@ -83,32 +99,136 @@ public class Zeron {
                 scriptPaths.add(argument);
             }
         }
+        if (runClassFile != null) {
+            if (entry != null || !sourceRoots.isEmpty() || !scriptPaths.isEmpty()
+                    || standardLibraryOutput != null || jarOutput != null || !javaClassPathRoots.isEmpty()
+                    || !bundleStandardLibrarySources) {
+                throw new IllegalArgumentException("--run-class cannot be combined with compilation options.");
+            }
+            return runGeneratedClass(runClassFile, standardLibraryJar, libraryRoots);
+        }
+        if (customStandardLibraryJar) {
+            throw new IllegalArgumentException("--stdlib-jar can only be used with --run-class.");
+        }
         if (standardLibraryOutput != null) {
-                if (entry != null || !sourceRoots.isEmpty() || !scriptPaths.isEmpty()
+            if (entry != null || !sourceRoots.isEmpty() || !scriptPaths.isEmpty()
                     || !libraryRoots.isEmpty() || !javaClassPathRoots.isEmpty()) {
                 throw new IllegalArgumentException("--build-stdlib cannot be combined with source or library inputs.");
             }
             buildStandardLibrary(standardLibraryOutput);
+            if (jarOutput != null && exitCode() == 0) {
+                ZeronLibraryJar.write(standardLibraryOutput, jarOutput);
+            }
             return exitCode();
         }
-        if (entry != null || !sourceRoots.isEmpty()) {
-            if (entry == null || sourceRoots.isEmpty()) {
-                throw new IllegalArgumentException("Project compilation requires both --root and --entry.");
-            }
-            runProject(sourceRoots, entry, libraryRoots, javaClassPathRoots, bundleStandardLibrarySources);
-        } else if (scriptPaths.isEmpty()) {
+        if (entry == null && sourceRoots.isEmpty() && scriptPaths.isEmpty()) {
+            if (jarOutput != null) throw new IllegalArgumentException("--jar-output requires compilation input.");
             if (!libraryRoots.isEmpty() || !javaClassPathRoots.isEmpty() || !bundleStandardLibrarySources) {
                 throw new IllegalArgumentException("Library options require source files or a project entry.");
             }
             runPrompt();
-        } else runFiles(scriptPaths, libraryRoots, javaClassPathRoots, bundleStandardLibrarySources);
-        return exitCode();
+            return exitCode();
+        }
+
+        if (entry != null || !sourceRoots.isEmpty()) {
+            if (entry == null || sourceRoots.isEmpty()) {
+                throw new IllegalArgumentException("Project compilation requires both --root and --entry.");
+            }
+        }
+        if (jarOutput != null) {
+            validateJarOutputDoesNotReplaceInputs(jarOutput, scriptPaths, sourceRoots, entry, libraryRoots);
+        }
+
+        final var outputDirectory = jarOutput == null
+                ? Paths.get("dist")
+                : Files.createTempDirectory("zeron-jar-stage-");
+        try {
+            if (entry != null || !sourceRoots.isEmpty()) {
+                runProject(sourceRoots, entry, libraryRoots, javaClassPathRoots,
+                        bundleStandardLibrarySources, outputDirectory);
+            } else {
+                runFiles(scriptPaths, libraryRoots, javaClassPathRoots,
+                        bundleStandardLibrarySources, outputDirectory);
+            }
+            if (jarOutput != null && exitCode() == 0) {
+                ZeronLibraryJar.write(outputDirectory, jarOutput);
+            }
+            return exitCode();
+        } finally {
+            if (jarOutput != null) deleteTree(outputDirectory);
+        }
     }
 
     private static int exitCode() {
         if (hadError) return 65;
         if (hadResolutionError) return 71;
         return 0;
+    }
+
+    private static int runGeneratedClass(final Path classFile,
+                                         final Path standardLibraryJar,
+                                         final List<Path> libraries) throws IOException {
+        final var outputRoot = Paths.get("dist").toAbsolutePath().normalize();
+        final var absoluteClassFile = classFile.toAbsolutePath().normalize();
+        if (!absoluteClassFile.startsWith(outputRoot)
+                || !absoluteClassFile.getFileName().toString().endsWith(".class")
+                || !Files.isRegularFile(absoluteClassFile)) {
+            throw new IllegalArgumentException("--run-class requires an existing .class file under dist/.");
+        }
+        if (!Files.exists(standardLibraryJar)) {
+            buildStandardLibraryJar(standardLibraryJar);
+        } else {
+            ZeronLibraryIndex.readFromJar(standardLibraryJar);
+        }
+        loadLibraries(libraries);
+        final var relativeClassFile = outputRoot.relativize(absoluteClassFile).toString()
+                .replace(File.separatorChar, '.');
+        final var className = relativeClassFile.substring(0, relativeClassFile.length() - ".class".length());
+        final Path runtimeLocation;
+        try {
+            runtimeLocation = Path.of(Zeron.class.getProtectionDomain().getCodeSource()
+                    .getLocation().toURI()).toAbsolutePath().normalize();
+        } catch (final java.net.URISyntaxException exception) {
+            throw new IOException("Could not resolve the Zeron runtime classpath location.", exception);
+        }
+        final var classPathEntries = new ArrayList<String>();
+        classPathEntries.add(outputRoot.toString());
+        classPathEntries.add(standardLibraryJar.toAbsolutePath().normalize().toString());
+        classPathEntries.add(runtimeLocation.toString());
+        for (final var library : libraries) {
+            classPathEntries.add(library.toAbsolutePath().normalize().toString());
+        }
+        final var javaExecutable = Paths.get(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java");
+        final var command = new ArrayList<String>();
+        command.add(javaExecutable.toString());
+        command.add("--enable-preview");
+        command.add("-cp");
+        command.add(String.join(File.pathSeparator, classPathEntries));
+        command.add(className);
+        try {
+            return new ProcessBuilder(command).inheritIO().start().waitFor();
+        } catch (final InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while running generated class " + className + ".", exception);
+        }
+    }
+
+    private static void buildStandardLibraryJar(final Path jarPath) throws IOException {
+        final var absoluteJarPath = jarPath.toAbsolutePath().normalize();
+        final var parent = absoluteJarPath.getParent();
+        if (parent == null) throw new IOException("Standard-library JAR path must have a parent: " + jarPath);
+        Files.createDirectories(parent);
+        final var stagingDirectory = Files.createTempDirectory(parent, "zeron-stdlib-stage-");
+        try {
+            buildStandardLibrary(stagingDirectory);
+            if (exitCode() != 0) {
+                throw new IOException("Could not build the standard library required to run generated classes.");
+            }
+            ZeronLibraryJar.write(stagingDirectory, absoluteJarPath);
+        } finally {
+            deleteTree(stagingDirectory);
+        }
     }
 
     public static void debug(final String message) {
@@ -118,7 +238,8 @@ public class Zeron {
     private static void runFiles(final List<String> paths,
                                  final List<Path> libraryRoots,
                                  final List<Path> javaClassPathRoots,
-                                 final boolean bundleStandardLibrarySources) throws IOException {
+                                 final boolean bundleStandardLibrarySources,
+                                 final Path outputDirectory) throws IOException {
         final var libraries = loadLibraries(libraryRoots);
         validateJavaClassPathRoots(javaClassPathRoots);
         validateStandardLibraryMode(libraries, bundleStandardLibrarySources);
@@ -133,27 +254,19 @@ public class Zeron {
             return;
         }
         final var packageName = units.getFirst().packageName();
-        for (final var unit : units) {
-            if (unit.packageName().equals(packageName)) continue;
-            final var hasTopLevelValues = unit.declarations().stream()
-                    .anyMatch(Stmt.Var.class::isInstance);
-            if (hasTopLevelValues) {
-                error(1, "Cross-package top-level values are deferred until initialization order is specified.");
-                return;
-            }
-        }
         final var programName = packageName.isEmpty()
                 ? sourceClassName(Paths.get(paths.getFirst()))
                 : packageName + "." + sourceClassName(Paths.get(paths.getFirst()));
         runUnits(units, programName, packageName, libraries,
-            bundleStandardLibrarySources, javaClassPathRoots);
+            bundleStandardLibrarySources, javaClassPathRoots, outputDirectory);
     }
 
     private static void runProject(final List<Path> roots,
                                    final Path entry,
                                    final List<Path> libraryRoots,
                                    final List<Path> javaClassPathRoots,
-                                   final boolean bundleStandardLibrarySources) throws IOException {
+                                   final boolean bundleStandardLibrarySources,
+                                   final Path outputDirectory) throws IOException {
         final var libraries = loadLibraries(libraryRoots);
         validateJavaClassPathRoots(javaClassPathRoots);
         validateStandardLibraryMode(libraries, bundleStandardLibrarySources);
@@ -211,7 +324,7 @@ public class Zeron {
                 ? sourceClassName(absoluteEntry)
                 : entryUnit.packageName() + "." + sourceClassName(absoluteEntry);
         runUnits(units, programName, entryUnit.packageName(), libraries,
-            bundleStandardLibrarySources, javaClassPathRoots);
+            bundleStandardLibrarySources, javaClassPathRoots, outputDirectory);
     }
 
     private static int sourceRootIndex(final List<Path> roots, final Path sourcePath) {
@@ -258,7 +371,7 @@ public class Zeron {
 
         runUnits(List.of(unit),
             unit.packageName().isEmpty() ? outputClassName : unit.packageName() + "." + outputClassName,
-            unit.packageName(), List.of(), true, List.of());
+            unit.packageName(), List.of(), true, List.of(), Paths.get("dist"));
     }
 
     private static void runUnits(final List<CompilationUnit> units,
@@ -266,10 +379,11 @@ public class Zeron {
                                  final String packageName,
                      final List<ZeronLibraryIndex> libraries,
                                  final boolean bundleStandardLibrarySources,
-                                 final List<Path> javaClassPathRoots) throws IOException {
+                                 final List<Path> javaClassPathRoots,
+                                 final Path outputDirectory) throws IOException {
         final var compiler = Compiler.forCompilationUnits(
                         units, outputClassName, packageName, libraries,
-                        bundleStandardLibrarySources, javaClassPathRoots);
+                        bundleStandardLibrarySources, javaClassPathRoots, outputDirectory);
         compiler.resolve();
 
         if (hadResolutionError) return;
@@ -280,10 +394,9 @@ public class Zeron {
     private static List<ZeronLibraryIndex> loadLibraries(final List<Path> libraryRoots) throws IOException {
         final var libraries = new ArrayList<ZeronLibraryIndex>();
         for (final var root : libraryRoots) {
-            if (!Files.isDirectory(root)) {
-                throw new IllegalArgumentException("Zeron library root must be a class directory; JAR loading is not implemented: " + root);
-            }
-            libraries.add(ZeronLibraryIndex.readFromDirectory(root));
+            libraries.add(Files.isDirectory(root)
+                    ? ZeronLibraryIndex.readFromDirectory(root)
+                    : ZeronLibraryIndex.readFromJar(root));
         }
         return List.copyOf(libraries);
     }
@@ -308,6 +421,54 @@ public class Zeron {
         compiler.resolve();
         if (hadResolutionError) return;
         compiler.compile();
+    }
+
+    private static void deleteTree(final Path path) throws IOException {
+        if (!Files.exists(path)) return;
+        try (final var paths = Files.walk(path)) {
+            for (final var file : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(file);
+            }
+        }
+    }
+
+    private static void validateJarOutputDoesNotReplaceInputs(final Path jarOutput,
+                                                              final List<String> sourcePaths,
+                                                              final List<Path> sourceRoots,
+                                                              final Path entry,
+                                                              final List<Path> libraryRoots) throws IOException {
+        final var outputPath = jarOutput.toAbsolutePath().normalize();
+        for (final var sourcePath : sourcePaths) {
+            if (outputPath.equals(Paths.get(sourcePath).toAbsolutePath().normalize())) {
+                throw new IllegalArgumentException("--jar-output must not replace a source file.");
+            }
+        }
+        if (entry != null) {
+            final var entryPath = entry.isAbsolute()
+                    ? entry.normalize()
+                    : sourceRoots.getFirst().toAbsolutePath().normalize().resolve(entry).normalize();
+            if (outputPath.equals(entryPath)) {
+                throw new IllegalArgumentException("--jar-output must not replace the project entry.");
+            }
+            for (final var root : sourceRoots) {
+                if (outputPath.equals(root.toAbsolutePath().normalize())) {
+                    throw new IllegalArgumentException("--jar-output must not replace a project source root.");
+                }
+                if (!Files.isDirectory(root)) continue;
+                try (final var paths = Files.walk(root)) {
+                    if (paths.filter(path -> path.getFileName().toString().endsWith(".zn"))
+                            .map(path -> path.toAbsolutePath().normalize())
+                            .anyMatch(outputPath::equals)) {
+                        throw new IllegalArgumentException("--jar-output must not replace a project source file.");
+                    }
+                }
+            }
+        }
+        for (final var libraryRoot : libraryRoots) {
+            if (outputPath.equals(libraryRoot.toAbsolutePath().normalize())) {
+                throw new IllegalArgumentException("--jar-output must not replace a library input.");
+            }
+        }
     }
 
     private static void validateJavaClassPathRoots(final List<Path> roots) {

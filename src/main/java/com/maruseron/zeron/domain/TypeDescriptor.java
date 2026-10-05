@@ -138,7 +138,7 @@ public sealed interface TypeDescriptor
                     throw new IllegalArgumentException(
                             "Infer is not a valid concrete type");
             case NeverDescriptor         _ -> ConstantDescs.CD_void;
-            case UnitDescriptor          _ -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+            case UnitDescriptor          _ -> ClassDesc.of("zeron.lang.Unit");
             case AnyDescriptor           _ -> ConstantDescs.CD_Object;
             case IntDescriptor           _ -> ConstantDescs.CD_int;
             case FloatDescriptor         _ -> ConstantDescs.CD_double;
@@ -151,7 +151,7 @@ public sealed interface TypeDescriptor
             case ArrayDescriptor         _ -> ConstantDescs.CD_Object.arrayType();
             case ReferenceDescriptor    rd -> toJavaClassDesc(rd.baseType());
             case NullableDescriptor     nd -> switch (nd.baseType()) {
-                case UnitDescriptor    _ -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+                case UnitDescriptor    _ -> ClassDesc.of("zeron.lang.Unit");
                 case IntDescriptor     _ -> ConstantDescs.CD_Integer;
                 case FloatDescriptor   _ -> ConstantDescs.CD_Double;
                 case BooleanDescriptor _ -> ConstantDescs.CD_Boolean;
@@ -171,7 +171,7 @@ public sealed interface TypeDescriptor
             case NeverDescriptor         _ ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: NeverDescriptor to java.constant.ClassDesc");
-            case UnitDescriptor          _ -> ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+            case UnitDescriptor          _ -> ClassDesc.of("zeron.lang.Unit");
             case AnyDescriptor           _ -> ConstantDescs.CD_Object;
             case IntDescriptor           _ -> ConstantDescs.CD_Integer;
             case FloatDescriptor         _ -> ConstantDescs.CD_Double;

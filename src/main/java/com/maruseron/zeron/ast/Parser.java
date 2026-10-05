@@ -115,6 +115,7 @@ public final class Parser {
             if (match(FN))  return fnDeclaration();
             if (match(EXTERNAL)) return externalFunctionDeclaration(false);
             if (levelMarker == null && match(PUBLIC)) {
+                if (match(LET)) return letDeclaration(true);
                 if (match(CLASS)) return classDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
                 if (match(SEALED)) {
@@ -123,7 +124,7 @@ public final class Parser {
                 }
                 if (match(EXTERNAL)) return externalFunctionDeclaration(true);
                 if (match(FN)) return fnDeclaration(true);
-                throw error(previous(), "Only functions, classes, and contracts may be public.");
+                throw error(previous(), "Only values, functions, classes, and contracts may be public.");
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
@@ -141,9 +142,16 @@ public final class Parser {
     }
 
     private Stmt letDeclaration() {
+        return letDeclaration(false);
+    }
+
+    private Stmt letDeclaration(final boolean isPublic) {
         final var mutability = match(MUT)
             ? BindingMutability.REASSIGNABLE
             : BindingMutability.IMMUTABLE;
+        if (isPublic && mutability.isReassignable()) {
+            error(peek(), "Public top-level values must be immutable.");
+        }
         final var name = consume(IDENTIFIER, "Expect binding name.");
 
         TypeDescriptor type = TypeDescriptor.ofInfer();
@@ -157,7 +165,7 @@ public final class Parser {
         }
 
         consume(SEMICOLON, "Expect ';' after variable declaration.");
-        return new Stmt.Var(name, type, initializer, mutability);
+        return new Stmt.Var(name, type, initializer, mutability, isPublic);
     }
 
     private Stmt.Function fnDeclaration() {
@@ -1227,6 +1235,8 @@ public final class Parser {
     }
 
     private Expr primary() {
+        if (match(MATCH)) return matchExpression(previous());
+
         if (match(LEFT_BRACKET)) {
             final var elements = new ArrayList<Expr>();
             if (check(RIGHT_BRACKET)) error(peek(), "Array literals must initialize at least one element.");
@@ -1240,7 +1250,6 @@ public final class Parser {
         if (match(FALSE)) return new Expr.Literal(false, TypeDescriptor.ofBoolean());
         if (match(TRUE))  return new Expr.Literal(true,  TypeDescriptor.ofBoolean());
         if (match(NULL))  return new Expr.Literal(null, TypeDescriptor.ofNull());
-        if (match(UNIT))  return new Expr.Literal(new UnitLiteral(), TypeDescriptor.ofUnit());
         if (match(THIS))  return new Expr.Variable(previous(), TypeDescriptor.ofInfer());
 
         if (match(INT)) {
@@ -1288,12 +1297,14 @@ public final class Parser {
             return new Expr.Variable(ident, TypeDescriptor.ofInfer());
         }
 
-        // ( can be `() ->`, `(a, b) ->`, or `(a + b)`
+        // Parentheses may start a lambda, a Unit literal, or a grouped expression.
         if (match(LEFT_PAREN)) {
             final var paren = previous();
             if (check(RIGHT_PAREN)) {
                 advance();
-                return finishLambda(List.of());
+                return check(ARROW)
+                        ? finishLambda(List.of())
+                        : new Expr.Literal(new UnitLiteral(), TypeDescriptor.ofUnit());
             }
 
             if (looksLikeParenthesizedLambda()) {
@@ -1360,6 +1371,35 @@ public final class Parser {
          */
 
         throw error(peek(), "Expect expression.");
+    }
+
+    private Expr matchExpression(final Token keyword) {
+        consume(LEFT_PAREN, "Expect '(' after 'match'.");
+        final var scrutinee = expression();
+        consume(RIGHT_PAREN, "Expect ')' after match value.");
+        consume(LEFT_BRACE, "Expect '{' before match cases.");
+        final var arms = new ArrayList<Expr.MatchArm>();
+        while (match(CASE)) {
+            final var caseKeyword = previous();
+            final boolean wildcard = check(IDENTIFIER) && peek().lexeme().equals("_");
+            final TypeDescriptor patternType;
+            final Token alias;
+            if (wildcard) {
+                advance();
+                patternType = null;
+                alias = null;
+            } else {
+                patternType = collectType();
+                alias = match(AS) ? consume(IDENTIFIER, "Expect binding name after 'as'.") : null;
+            }
+            consume(ARROW, "Expect '->' after match pattern.");
+            final var body = expression();
+            consume(SEMICOLON, "Expect ';' after match arm.");
+            arms.add(new Expr.MatchArm(caseKeyword, patternType, alias, wildcard, body));
+        }
+        consume(RIGHT_BRACE, "Expect '}' after match cases.");
+        if (arms.isEmpty()) error(keyword, "A match expression must contain at least one case.");
+        return new Expr.Match(keyword, scrutinee, arms);
     }
 
     private boolean looksLikeParenthesizedLambda() {

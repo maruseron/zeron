@@ -1,19 +1,7 @@
 import zeron.io.println;
-
-class Box {
-    value: String;
-
-    private readValue(): String = value;
-
-    public doSomething(): Unit {
-        let x = () -> {
-            println(readValue());
-        };
-        x();
-    }
-}
+import zeron.collections.Sequence;
 
 fn main() {
-    let box = Box.new("hello world");
-    box.doSomething();
+    let seq = Sequence<Int>.fromArray([1, 2, 3, 4, 5]);
+    println(seq.map(x -> x * 2).filter(x -> x % 2 == 0).drop(1).fold(0, (a, b) -> a + b));
 }

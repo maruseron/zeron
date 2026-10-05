@@ -14,7 +14,6 @@ import com.maruseron.zeron.scan.TokenType;
 
 import java.io.IOException;
 import java.lang.classfile.*;
-import java.lang.classfile.attribute.ConstantValueAttribute;
 import java.lang.classfile.attribute.NestHostAttribute;
 import java.lang.classfile.attribute.NestMembersAttribute;
 import java.lang.classfile.attribute.PermittedSubclassesAttribute;
@@ -32,7 +31,7 @@ import java.util.*;
 
 public final class Compiler {
     private static final Path DEFAULT_OUTPUT_DIRECTORY = Paths.get("dist");
-    private static final ClassDesc UNIT_VALUE_CLASS = ClassDesc.of("com.maruseron.zeron.runtime.UnitValue");
+    private static final ClassDesc UNIT_CLASS = ClassDesc.of("zeron.lang.Unit");
 
     private final ClassFile classFile = ClassFile.of();
     private final Resolver resolver;
@@ -42,11 +41,13 @@ public final class Compiler {
     private final boolean includeBundledSourcesInIndex;
     private final boolean libraryBuild;
     private final IdentityHashMap<Stmt, String> declarationOwners = new IdentityHashMap<>();
+    private final IdentityHashMap<Stmt.Var, String> topLevelInitializerNames = new IdentityHashMap<>();
     private final Map<String, String> functionOwners = new HashMap<>();
     private final Set<String> metadataTypeNames = new HashSet<>();
     private final List<Path> javaClassPathRoots;
     private final FunctionBindingRegistry functionBindings;
     private LambdaCompilationPlan lambdaPlan;
+    private List<Stmt.Var> initializationOrder = List.of();
     private final String mainClassName;
     private final String packageName;
     private String currentHolderName;
@@ -93,27 +94,50 @@ public final class Compiler {
                                                final String packageName,
                                                final List<ZeronLibraryIndex> libraries,
                                                final boolean bundleStandardLibrarySources) {
-                            return forCompilationUnits(units, mainClassName, packageName, libraries,
-                                bundleStandardLibrarySources, List.of());
-                            }
+        return forCompilationUnits(units, mainClassName, packageName, libraries,
+                bundleStandardLibrarySources, List.of());
+    }
 
-                            public static Compiler forCompilationUnits(final List<CompilationUnit> units,
-                                                   final String mainClassName,
-                                                   final String packageName,
-                                                   final List<ZeronLibraryIndex> libraries,
-                                                   final boolean bundleStandardLibrarySources,
-                                                   final List<Path> javaClassPathRoots) {
-                                return forCompilationUnits(units, mainClassName, packageName, libraries,
-                                    bundleStandardLibrarySources, javaClassPathRoots, FunctionBindingRegistry.standard());
-                                }
+    public static Compiler forCompilationUnits(final List<CompilationUnit> units,
+                                               final String mainClassName,
+                                               final String packageName,
+                                               final List<ZeronLibraryIndex> libraries,
+                                               final boolean bundleStandardLibrarySources,
+                                               final List<Path> javaClassPathRoots) {
+        return forCompilationUnits(units, mainClassName, packageName, libraries,
+                bundleStandardLibrarySources, javaClassPathRoots, FunctionBindingRegistry.standard());
+    }
 
-                                public static Compiler forCompilationUnits(final List<CompilationUnit> units,
-                                                       final String mainClassName,
-                                                       final String packageName,
-                                                       final List<ZeronLibraryIndex> libraries,
-                                                       final boolean bundleStandardLibrarySources,
-                                                       final List<Path> javaClassPathRoots,
-                                                       final FunctionBindingRegistry functionBindings) {
+    public static Compiler forCompilationUnits(final List<CompilationUnit> units,
+                                               final String mainClassName,
+                                               final String packageName,
+                                               final List<ZeronLibraryIndex> libraries,
+                                               final boolean bundleStandardLibrarySources,
+                                               final List<Path> javaClassPathRoots,
+                                               final FunctionBindingRegistry functionBindings) {
+        return forCompilationUnits(units, mainClassName, packageName, libraries,
+                bundleStandardLibrarySources, javaClassPathRoots, functionBindings, DEFAULT_OUTPUT_DIRECTORY);
+    }
+
+    public static Compiler forCompilationUnits(final List<CompilationUnit> units,
+                                               final String mainClassName,
+                                               final String packageName,
+                                               final List<ZeronLibraryIndex> libraries,
+                                               final boolean bundleStandardLibrarySources,
+                                               final List<Path> javaClassPathRoots,
+                                               final Path outputDirectory) {
+        return forCompilationUnits(units, mainClassName, packageName, libraries,
+                bundleStandardLibrarySources, javaClassPathRoots, FunctionBindingRegistry.standard(), outputDirectory);
+    }
+
+    private static Compiler forCompilationUnits(final List<CompilationUnit> units,
+                                                final String mainClassName,
+                                                final String packageName,
+                                                final List<ZeronLibraryIndex> libraries,
+                                                final boolean bundleStandardLibrarySources,
+                                                final List<Path> javaClassPathRoots,
+                                                final FunctionBindingRegistry functionBindings,
+                                                final Path outputDirectory) {
         final var combinedUnits = new ArrayList<>(units);
         for (int i = 0; i < libraries.size(); i++) {
             combinedUnits.addAll(libraries.get(i).toCompilationUnits("library-index-" + i));
@@ -122,7 +146,7 @@ public final class Compiler {
                 ? StandardLibrary.withBundledUnits(combinedUnits)
                 : List.copyOf(combinedUnits);
         return new Compiler(compilationUnits, mainClassName,
-            packageName, true, libraries, DEFAULT_OUTPUT_DIRECTORY, false, false, javaClassPathRoots,
+            packageName, true, libraries, outputDirectory, false, false, javaClassPathRoots,
             functionBindings);
     }
 
@@ -175,11 +199,180 @@ public final class Compiler {
     public void resolve() {
         resolver.resolveUnits(compilationUnits);
         symbols = resolver.symbols;
+        initializationOrder = planTopLevelInitialization();
+    }
+
+    private List<Stmt.Var> planTopLevelInitialization() {
+        final var values = declarations.stream().filter(Stmt.Var.class::isInstance)
+                .map(Stmt.Var.class::cast).toList();
+        final var stableKeys = new IdentityHashMap<Stmt.Var, String>();
+        for (final var unit : compilationUnits) {
+            for (var index = 0; index < unit.declarations().size(); index++) {
+                final var declaration = unit.declarations().get(index);
+                if (declaration instanceof Stmt.Var variable) {
+                    stableKeys.put(variable, unit.packageName() + "\u0000"
+                            + sourceRootOrder(unit.sourcePath()) + "\u0000"
+                            + Objects.toString(unit.sourcePath(), "") + "\u0000" + index);
+                    topLevelInitializerNames.put(variable,
+                            "$zeron$init$" + variable.name().lexeme());
+                }
+            }
+        }
+        final var orderedValues = values.stream()
+                .sorted(Comparator.comparing(stableKeys::get))
+                .toList();
+        final var valueSet = Collections.newSetFromMap(new IdentityHashMap<Stmt.Var, Boolean>());
+        valueSet.addAll(values);
+        final var functions = new LinkedHashMap<String, Stmt.Function>();
+        for (final var unit : compilationUnits) {
+            for (final var declaration : unit.declarations()) {
+                if (declaration instanceof Stmt.Function function) {
+                    functions.put(resolverQualifiedName(unit.packageName(), function.name().lexeme()), function);
+                }
+            }
+        }
+
+        final var dependencies = new IdentityHashMap<Stmt.Var, Set<Stmt.Var>>();
+        for (final var value : values) {
+            final var valueDependencies = Collections.newSetFromMap(new IdentityHashMap<Stmt.Var, Boolean>());
+            collectInitializationDependencies(value.initializer(), valueDependencies, functions,
+                    new HashSet<>(), valueSet);
+            dependencies.put(value, valueDependencies);
+        }
+        final var state = new IdentityHashMap<Stmt.Var, Integer>();
+        final var result = new ArrayList<Stmt.Var>();
+        final var stack = new ArrayDeque<Stmt.Var>();
+        for (final var value : orderedValues) {
+            visitInitializationValue(value, dependencies, stableKeys, state, stack, result);
+        }
+        return List.copyOf(result);
+    }
+
+    private static int sourceRootOrder(final String sourcePath) {
+        if (sourcePath == null || !sourcePath.startsWith("root")) return Integer.MAX_VALUE;
+        final var separator = sourcePath.indexOf('/');
+        if (separator < 5) return Integer.MAX_VALUE;
+        try {
+            return Integer.parseInt(sourcePath.substring(4, separator));
+        } catch (NumberFormatException ignored) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    private void visitInitializationValue(
+            final Stmt.Var value,
+            final Map<Stmt.Var, Set<Stmt.Var>> dependencies,
+            final Map<Stmt.Var, String> stableKeys,
+            final IdentityHashMap<Stmt.Var, Integer> state,
+            final Deque<Stmt.Var> stack,
+            final List<Stmt.Var> result) {
+        final var currentState = state.getOrDefault(value, 0);
+        if (currentState == 2) return;
+        if (currentState == 1) {
+            final var cycle = new ArrayList<String>();
+            for (final var member : stack) {
+                cycle.add(member.name().lexeme());
+                if (member == value) break;
+            }
+            Collections.reverse(cycle);
+            cycle.add(value.name().lexeme());
+            Zeron.resolutionError(new com.maruseron.zeron.analize.ResolutionError(value.name(),
+                    "Top-level value initialization cycle: " + String.join(" -> ", cycle) + "."));
+        }
+        state.put(value, 1);
+        stack.push(value);
+        dependencies.getOrDefault(value, Set.of()).stream()
+                .sorted(Comparator.comparing(stableKeys::get))
+                .forEach(dependency ->
+                        visitInitializationValue(dependency, dependencies, stableKeys, state, stack, result));
+        stack.pop();
+        state.put(value, 2);
+        result.add(value);
+    }
+
+    private void collectInitializationDependencies(
+            final Expr expression,
+            final Set<Stmt.Var> dependencies,
+            final Map<String, Stmt.Function> functions,
+            final Set<String> visitedFunctions,
+            final Set<Stmt.Var> projectValues) {
+        if (expression == null) return;
+        if (expression instanceof Expr.Variable variable
+                && variable.resolvedValueDeclaration() != null
+                && projectValues.contains(variable.resolvedValueDeclaration())) {
+            dependencies.add(variable.resolvedValueDeclaration());
+        }
+        if (expression instanceof Expr.Call call && call.resolvedFunctionName() != null
+                && visitedFunctions.add(call.resolvedFunctionName())) {
+            final var function = functions.get(call.resolvedFunctionName());
+            if (function != null) {
+                for (final var statement : function.body()) {
+                    collectInitializationDependencies(statement, dependencies, functions,
+                            visitedFunctions, projectValues);
+                }
+            }
+        }
+        for (final var field : expression.getClass().getFields()) {
+            try {
+                final var child = field.get(expression);
+                if (child instanceof Expr childExpression) {
+                    collectInitializationDependencies(childExpression, dependencies, functions,
+                            visitedFunctions, projectValues);
+                } else if (child instanceof List<?> children) {
+                    for (final var item : children) {
+                        if (item instanceof Expr childExpression) {
+                            collectInitializationDependencies(childExpression, dependencies, functions,
+                                    visitedFunctions, projectValues);
+                        } else if (item instanceof Stmt statement) {
+                            collectInitializationDependencies(statement, dependencies, functions,
+                                    visitedFunctions, projectValues);
+                        }
+                    }
+                }
+            } catch (IllegalAccessException exception) {
+                throw new IllegalStateException("Unable to inspect expression for value dependencies.", exception);
+            }
+        }
+    }
+
+    private void collectInitializationDependencies(
+            final Stmt statement,
+            final Set<Stmt.Var> dependencies,
+            final Map<String, Stmt.Function> functions,
+            final Set<String> visitedFunctions,
+            final Set<Stmt.Var> projectValues) {
+        if (statement == null) return;
+        if (statement.getClass().isRecord()) {
+            for (final var component : statement.getClass().getRecordComponents()) {
+                try {
+                    final var child = component.getAccessor().invoke(statement);
+                    if (child instanceof Expr expression) {
+                        collectInitializationDependencies(expression, dependencies, functions,
+                                visitedFunctions, projectValues);
+                    } else if (child instanceof Stmt childStatement) {
+                        collectInitializationDependencies(childStatement, dependencies, functions,
+                                visitedFunctions, projectValues);
+                    } else if (child instanceof List<?> children) {
+                        for (final var item : children) {
+                            if (item instanceof Expr expression) {
+                                collectInitializationDependencies(expression, dependencies, functions,
+                                        visitedFunctions, projectValues);
+                            } else if (item instanceof Stmt childStatement) {
+                                collectInitializationDependencies(childStatement, dependencies, functions,
+                                        visitedFunctions, projectValues);
+                            }
+                        }
+                    }
+                } catch (ReflectiveOperationException exception) {
+                    throw new IllegalStateException("Unable to inspect statement for value dependencies.", exception);
+                }
+            }
+        }
     }
 
     public void compile() throws IOException {
         Files.createDirectories(outputDirectory);
-        generateUnitValueClass();
+        generateUnitClass();
         final var signatureDeclarations = compilationUnits.stream()
                 .flatMap(unit -> unit.declarations().stream()).toList();
         lambdaPlan = new LambdaCompilationPlan(declarations, signatureDeclarations, symbols);
@@ -255,12 +448,12 @@ public final class Compiler {
         return ownerPackage == null || ownerPackage.isEmpty() ? name : ownerPackage + "." + name;
     }
 
-    private void generateUnitValueClass() throws IOException {
-        final var output = outputDirectory.resolve(Path.of("com", "maruseron", "zeron", "runtime", "UnitValue.class"));
+    private void generateUnitClass() throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "lang", "Unit.class"));
         Files.createDirectories(output.getParent());
-        ClassFile.of().buildTo(output, UNIT_VALUE_CLASS, builder -> {
+        ClassFile.of().buildTo(output, UNIT_CLASS, builder -> {
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
-            builder.withField("INSTANCE", UNIT_VALUE_CLASS,
+            builder.withField("INSTANCE", UNIT_CLASS,
                     field -> field.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL));
             builder.withMethodBody("<init>", emptyVoidMethod(), ClassFile.ACC_PRIVATE, code -> {
                 code.aload(0);
@@ -268,10 +461,10 @@ public final class Compiler {
                 code.return_();
             });
             builder.withMethodBody("<clinit>", emptyVoidMethod(), ClassFile.ACC_STATIC, code -> {
-                code.new_(UNIT_VALUE_CLASS);
+                code.new_(UNIT_CLASS);
                 code.dup();
-                code.invokespecial(UNIT_VALUE_CLASS, "<init>", emptyVoidMethod());
-                code.putstatic(UNIT_VALUE_CLASS, "INSTANCE", UNIT_VALUE_CLASS);
+                code.invokespecial(UNIT_CLASS, "<init>", emptyVoidMethod());
+                code.putstatic(UNIT_CLASS, "INSTANCE", UNIT_CLASS);
                 code.return_();
             });
             builder.withMethodBody("toString", MethodTypeDesc.of(ConstantDescs.CD_String),
@@ -916,31 +1109,21 @@ public final class Compiler {
     private void generateClass(final ClassBuilder classBuilder,
                                final List<Stmt> declarations,
                                final boolean entryHolder) {
-        record Initializer(Token name, TypeDescriptor type, Expr initializer) {}
-
-        var hasMain = false;
-        final var initializers = new ArrayList<Initializer>();
+        var hasLaunchableMain = false;
         for (final var declaration : declarations) {
             switch (declaration) {
-                case Stmt.Var(Token name, _, Expr initializer, BindingMutability mutability) -> {
-                    final var type = symbols.getSymbol(name).type();
-                    final var foldedValue = ConstantFolder.fold(initializer);
-                    final ConstantDesc value = ConstantFolder.isConstantFieldValue(type, foldedValue)
-                            ? foldedValue
-                            : null;
+                case Stmt.Var(Token name, _, _, _, _) -> {
+                    final var type = symbols.getSymbol(resolver.topLevelValueSymbol(
+                            (Stmt.Var) declaration)).type();
                     classBuilder.withField(
                             name.lexeme(),
                             TypeDescriptor.toJavaClassDesc(type),
-                            fieldBuilder -> {
-                                fieldBuilder.withFlags(mutability == BindingMutability.IMMUTABLE
-                                        ? ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL
-                                        : ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC);
-                                if (value != null) {
-                                    fieldBuilder.with(ConstantValueAttribute.of(value));
-                                } else {
-                                    initializers.add(new Initializer(name, type, initializer));
-                                }
-                            });
+                            fieldBuilder -> fieldBuilder.withFlags(
+                                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC));
+                    classBuilder.withField(initializedFlagFieldName(name.lexeme()), ConstantDescs.CD_boolean,
+                            fieldBuilder -> fieldBuilder.withFlags(
+                                    ClassFile.ACC_PRIVATE | ClassFile.ACC_STATIC));
+                    generateTopLevelValueMethods(classBuilder, (Stmt.Var) declaration, type);
                 }
                 case Stmt.FunctionDeclaration function -> {
                     final var name = function.name();
@@ -950,9 +1133,13 @@ public final class Compiler {
                     final var externalFunction = function instanceof Stmt.ExternalFunction external
                             ? external
                             : null;
-                    if (entryHolder && name.lexeme().equals("main")) hasMain = true;
                     final var functionToken = resolver.functionSymbolToken(name);
                     final var functionType = symbols.getFunctionType(functionToken);
+                    if (entryHolder && name.lexeme().equals("main")
+                            && functionType.parameters().isEmpty()
+                            && functionType.returnType() instanceof UnitDescriptor) {
+                        hasLaunchableMain = true;
+                    }
                     classBuilder.withMethod(
                             name.lexeme(),
                             toJavaMethodDescriptor(functionType),
@@ -1006,35 +1193,30 @@ public final class Compiler {
             }
         }
 
-        if (entryHolder && hasMain) {
+        if (entryHolder && hasLaunchableMain) {
             classBuilder.withMethodBody(
                     "main",
-                    emptyVoidMethod(),
-                    ClassFile.ACC_STATIC,
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String.arrayType()),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC,
                     composer -> {
                         composer.invokestatic(composer.constantPool().methodRefEntry(
                                 ClassDesc.of(currentHolderName),
                                 "main",
-                                MethodTypeDesc.of(UNIT_VALUE_CLASS)));
+                                MethodTypeDesc.of(UNIT_CLASS)));
                         composer.pop();
                         composer.return_();
                     });
         }
 
-        if (!initializers.isEmpty()) {
+        if (entryHolder && !initializationOrder.isEmpty()) {
             classBuilder.withMethodBody(
                     "<clinit>",
                     emptyVoidMethod(),
                     ClassFile.ACC_STATIC,
                     composer -> {
-                        for (final var pair : initializers) {
-                            final var name = pair.name();
-                            final var type = pair.type();
-                            final var initializer = pair.initializer();
-                            emitExpr(composer, initializer);
-                            emitConversion(composer, lastEmittedType, type);
-                            composer.putstatic(ClassDesc.of(currentHolderName), name.lexeme(),
-                                    TypeDescriptor.toJavaClassDesc(type));
+                        for (final var value : initializationOrder) {
+                            composer.invokestatic(ClassDesc.of(declarationOwners.get(value)),
+                                    topLevelInitializerNames.get(value), emptyVoidMethod());
                         }
                         composer.return_();
                     });
@@ -1085,6 +1267,50 @@ public final class Compiler {
                                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                                 composer -> emitFunctionReferenceImplementation(composer, reference));
                     }
+    }
+
+    private void generateTopLevelValueMethods(final ClassBuilder classBuilder,
+                                              final Stmt.Var variable,
+                                              final TypeDescriptor type) {
+        final var owner = ClassDesc.of(currentHolderName);
+        final var fieldName = variable.name().lexeme();
+        final var initializedFlag = initializedFlagFieldName(fieldName);
+        final var initializerName = topLevelInitializerNames.get(variable);
+        classBuilder.withMethodBody(initializerName, emptyVoidMethod(),
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, composer -> {
+                    emitExpr(composer, variable.initializer());
+                    emitConversion(composer, lastEmittedType, type);
+                    composer.putstatic(owner, fieldName, TypeDescriptor.toJavaClassDesc(type));
+                    composer.iconst_1();
+                    composer.putstatic(owner, initializedFlag, ConstantDescs.CD_boolean);
+                    composer.return_();
+                });
+        classBuilder.withMethodBody(topLevelValueAccessorName(fieldName),
+                MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(type)),
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, composer -> {
+                    final var ready = composer.newLabel();
+                    composer.getstatic(owner, initializedFlag, ConstantDescs.CD_boolean);
+                    composer.ifne(ready);
+                    final var exception = ClassDesc.of("java.lang.IllegalStateException");
+                    composer.new_(exception);
+                    composer.dup();
+                    composer.ldc("Top-level value '" + fieldName + "' was read before initialization.");
+                    composer.invokespecial(exception, "<init>",
+                            MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+                    composer.athrow();
+                    composer.labelBinding(ready);
+                    composer.getstatic(owner, fieldName, TypeDescriptor.toJavaClassDesc(type));
+                    composer.return_(TypeKind.fromDescriptor(
+                            TypeDescriptor.toJavaClassDesc(type).descriptorString()));
+                });
+    }
+
+    private static String initializedFlagFieldName(final String fieldName) {
+        return "$zeron$initialized$" + fieldName;
+    }
+
+    private static String topLevelValueAccessorName(final String fieldName) {
+        return "$zeron$get$" + fieldName;
     }
 
     public void emitStmts(final CodeBuilder builder, final List<Stmt> statements) {
@@ -1168,7 +1394,8 @@ public final class Compiler {
                 emitConversion(composer, lastEmittedType, currentReturnType);
                 composer.return_(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(currentReturnType).descriptorString()));
             }
-            case Stmt.Var(Token name, TypeDescriptor type, Expr initializer, BindingMutability mutability) -> {
+            case Stmt.Var(Token name, TypeDescriptor type, Expr initializer,
+                    BindingMutability mutability, _) -> {
                 if (initializer != null) {
                     final ConstantDesc value = ConstantFolder.fold(initializer);
                     if (value != null) {
@@ -1584,12 +1811,13 @@ public final class Compiler {
             case Expr.Index index -> emitIntrinsicOperation(composer, index, true);
             case Expr.IndexAssignment assignment -> emitIntrinsicOperation(composer, assignment, true);
             case Expr.Assignment assignment -> {
-                final var binding = symbols.getSymbol(assignment.name);
+                final var binding = symbols.getSymbol(assignment.resolvedSymbolToken());
                 emitExpr(composer, assignment.value);
                 emitConversion(composer, lastEmittedType, binding.type());
                 duplicateValue(composer, binding.type());
                 if (binding.lvt() == SymbolTable.GLOBAL) {
-                    composer.putstatic(ClassDesc.of(holderForDeclaration(binding.declaration())), assignment.name.lexeme(),
+                    composer.putstatic(ClassDesc.of(holderForDeclaration(binding.declaration())),
+                            globalFieldName(binding, assignment.name),
                             TypeDescriptor.toJavaClassDesc(binding.type()));
                 } else {
                     composer.storeLocal(
@@ -1661,6 +1889,7 @@ public final class Compiler {
             }
             case Expr.Grouping grouping -> emitExpr(composer, grouping.expression);
             case Expr.If iff -> emitIfExpression(composer, iff);
+            case Expr.Match match -> emitMatchExpression(composer, match);
             case Expr.Logical logical -> emitLogical(composer, logical);
             case Expr.Coalesce coalesce -> emitCoalesce(composer, coalesce);
             case Expr.TypeTest test -> emitTypeTest(composer, test);
@@ -1781,7 +2010,7 @@ public final class Compiler {
                     emitConversion(composer, erasedFieldType, variable.getType());
                     lastEmittedType = variable.getType();
                 } else {
-                    emitVariable(composer, variable.name);
+                    emitVariable(composer, variable.resolvedSymbolToken());
                     if (!(variable.getType() instanceof InferDescriptor)
                             && !lastEmittedType.equals(variable.getType())) {
                         emitConversion(composer, lastEmittedType, variable.getType());
@@ -1863,6 +2092,64 @@ public final class Compiler {
         emitConversion(composer, lastEmittedType, iff.getType());
         composer.labelBinding(doneLabel);
         lastEmittedType = iff.getType();
+    }
+
+    private void emitMatchExpression(final CodeBuilder composer, final Expr.Match match) {
+        final var done = composer.newLabel();
+        var aliasScopeCount = 0;
+        try {
+            emitExpr(composer, match.scrutinee);
+            final var failure = composer.newLabel();
+            composer.dup();
+            composer.ifnull(failure);
+            for (final var arm : match.arms) {
+                if (arm.wildcard()) {
+                    composer.pop();
+                    emitExpr(composer, arm.expression());
+                    emitConversion(composer, lastEmittedType, match.getType());
+                    composer.goto_(done);
+                    break;
+                }
+
+                final var next = composer.newLabel();
+                final var targetClass = TypeDescriptor.toJavaClassDesc(arm.patternType());
+                composer.dup();
+                composer.instanceOf(targetClass);
+                composer.ifeq(next);
+                if (arm.alias() == null) {
+                    composer.pop();
+                    emitExpr(composer, arm.expression());
+                    emitConversion(composer, lastEmittedType, match.getType());
+                    composer.goto_(done);
+                } else {
+                    beginScope();
+                    aliasScopeCount++;
+                    final var aliasSlot = symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.alias(),
+                            arm.patternType(), BindingMutability.IMMUTABLE);
+                    symbols.define(arm.alias());
+                    composer.checkcast(targetClass);
+                    composer.storeLocal(TypeKind.REFERENCE, aliasSlot + localSlotOffset);
+                    emitExpr(composer, arm.expression());
+                    emitConversion(composer, lastEmittedType, match.getType());
+                    composer.goto_(done);
+                }
+                composer.labelBinding(next);
+            }
+
+            composer.labelBinding(failure);
+            composer.pop();
+            final var exception = ClassDesc.of("java.lang.IllegalStateException");
+            composer.new_(exception);
+            composer.dup();
+            composer.ldc("No match case accepted the runtime value.");
+            composer.invokespecial(exception, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            composer.athrow();
+            composer.labelBinding(done);
+            lastEmittedType = match.getType();
+        } finally {
+            for (var i = 0; i < aliasScopeCount; i++) endScope();
+        }
     }
 
     private void emitTypeTest(final CodeBuilder composer, final Expr.TypeTest test) {
@@ -2015,7 +2302,7 @@ public final class Compiler {
             return;
         }
 
-        final var binding = symbols.getSymbol(call.callee);
+        final var binding = symbols.getSymbol(call.resolvedSymbolToken());
         final var bindingType = binding.type() instanceof ReferenceDescriptor reference
             ? reference.baseType()
             : binding.type();
@@ -2026,7 +2313,7 @@ public final class Compiler {
         final var runtimeType = functionType.isGeneric()
                 ? (FunctionDescriptor) TypeSubstitution.erase(functionType)
                 : functionType;
-        emitVariable(composer, call.callee);
+        emitVariable(composer, call.resolvedSymbolToken());
         for (int i = 0; i < call.arguments.size(); i++) {
             emitExpr(composer, call.arguments.get(i));
             emitConversion(composer, lastEmittedType, runtimeType.parameters().get(i));
@@ -2510,8 +2797,15 @@ public final class Compiler {
             if (symbols.containsAnySymbol(name)) {
                 final var binding = symbols.getAnySymbol(name);
                 if (binding.lvt() == SymbolTable.GLOBAL) {
-                    composer.getstatic(ClassDesc.of(holderForDeclaration(binding.declaration())), name.lexeme(),
-                            TypeDescriptor.toJavaClassDesc(binding.type()));
+                    final var owner = ClassDesc.of(holderForDeclaration(binding.declaration()));
+                    if (binding.declaration() instanceof Stmt.Var variable
+                            && topLevelInitializerNames.containsKey(variable)) {
+                        composer.invokestatic(owner, topLevelValueAccessorName(variable.name().lexeme()),
+                                MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(binding.type())));
+                    } else {
+                        composer.getstatic(owner, globalFieldName(binding, name),
+                                TypeDescriptor.toJavaClassDesc(binding.type()));
+                    }
                     lastEmittedType = binding.type();
                     return;
                 }
@@ -2520,14 +2814,21 @@ public final class Compiler {
             throw new IllegalStateException("Unknown symbol: " + name.lexeme());
         }
         final var binding = symbols.getSymbol(name);
-        if (binding.type() instanceof FunctionDescriptor) {
+        if (binding.type() instanceof FunctionDescriptor && binding.lvt() != SymbolTable.GLOBAL) {
             composer.aload(binding.lvt());
             lastEmittedType = binding.type();
             return;
         }
         if (binding.lvt() == SymbolTable.GLOBAL) {
-            composer.getstatic(ClassDesc.of(holderForDeclaration(binding.declaration())), name.lexeme(),
-                    TypeDescriptor.toJavaClassDesc(binding.type()));
+            final var owner = ClassDesc.of(holderForDeclaration(binding.declaration()));
+            if (binding.declaration() instanceof Stmt.Var variable
+                    && topLevelInitializerNames.containsKey(variable)) {
+                composer.invokestatic(owner, topLevelValueAccessorName(variable.name().lexeme()),
+                        MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(binding.type())));
+            } else {
+                composer.getstatic(owner, globalFieldName(binding, name),
+                        TypeDescriptor.toJavaClassDesc(binding.type()));
+            }
         } else {
             switch (TypeDescriptor.toJavaClassDesc(binding.type()).descriptorString()) {
                 case "I", "Z" -> composer.iload(binding.lvt() + localSlotOffset);
@@ -2536,6 +2837,12 @@ public final class Compiler {
             }
         }
         lastEmittedType = binding.type();
+    }
+
+    private static String globalFieldName(final Bind binding, final Token fallback) {
+        return binding.declaration() instanceof Stmt.Var variable
+                ? variable.name().lexeme()
+                : fallback.lexeme();
     }
 
     private String holderForDeclaration(final Stmt declaration) {
@@ -2556,7 +2863,7 @@ public final class Compiler {
     }
 
     private void emitUnitValue(final CodeBuilder composer) {
-        composer.getstatic(UNIT_VALUE_CLASS, "INSTANCE", UNIT_VALUE_CLASS);
+        composer.getstatic(UNIT_CLASS, "INSTANCE", UNIT_CLASS);
     }
 
     private void emitPop(final CodeBuilder composer, final TypeDescriptor type) {
@@ -2912,7 +3219,7 @@ public final class Compiler {
             case FloatDescriptor _ -> typeArgument ? "Ljava/lang/Double;" : "D";
             case BooleanDescriptor _ -> typeArgument ? "Ljava/lang/Boolean;" : "Z";
             case NeverDescriptor _ -> "V";
-            case UnitDescriptor _ -> "Lcom/maruseron/zeron/runtime/UnitValue;";
+            case UnitDescriptor _ -> "Lzeron/lang/Unit;";
             case StringDescriptor _ -> "Ljava/lang/String;";
             case NominalDescriptor nominal -> referenceDescriptorSignature(
                     TypeDescriptor.toJavaClassDesc(nominal).descriptorString());

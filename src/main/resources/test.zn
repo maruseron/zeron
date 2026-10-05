@@ -9,7 +9,7 @@ let f = 5.3;
 let bool = true;
 let mut globalCount = 1;
 
-let theUnit = unit;
+let theUnit = ();
 
 let maybeInt: Int? = 7;
 let emptyInt: Int? = null;
@@ -198,7 +198,7 @@ fn main() {
     println(applyGeneric(23, identity));
     println(identity::<Int>(24));
     println(echoAny(42));
-    let unitAsAny: Any = unit;
+    let unitAsAny: Any = ();
     let nullAsAny: Any? = null;
     println(unitAsAny);
     println(nullAsAny);

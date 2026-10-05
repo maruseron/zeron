@@ -13,6 +13,7 @@ import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
@@ -122,6 +123,68 @@ public final class CompilationUnitTest {
     }
 
     @Test
+    public void compilesStarImportsWithExplicitImportsTakingPrecedence() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var firstPackage = "starone" + suffix;
+        final var secondPackage = "startwo" + suffix;
+        final var appPackage = "starapp" + suffix;
+        final var className = appPackage + ".ImportMain";
+        final var first = parse("First.zn", """
+                package %s;
+                public class Item {
+                    public constructor new;
+                    public value(): Int = 20;
+                }
+                public fn answer(): Int = 22;
+                """.formatted(firstPackage));
+        final var second = parse("Second.zn", """
+                package %s;
+                public class Item {
+                    public constructor new;
+                    public value(): Int = 1;
+                }
+                public fn answer(): Int = 2;
+                """.formatted(secondPackage));
+        final var consumer = parse("Main.zn", """
+                package %s;
+                import %s.*;
+                import %s.*;
+                import %s.Item;
+                import %s.answer;
+                fn result(): Int = Item.new().value() + answer();
+                """.formatted(appPackage, firstPackage, secondPackage, firstPackage, firstPackage));
+
+        try {
+            deleteTree(Path.of("dist"));
+            final var compiler = Compiler.forCompilationUnits(
+                    List.of(consumer, first, second), className, appPackage);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(className).getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void rejectsAmbiguousNamesFromStarImportsWhenUsed() {
+        final var first = parse("First.zn", "package one; public fn answer(): Int = 1;");
+        final var second = parse("Second.zn", "package two; public fn answer(): Int = 2;");
+        final var consumer = parse("Main.zn", """
+                package app;
+                import one.*;
+                import two.*;
+                fn result(): Int = answer();
+                """);
+
+        assertThrows(ResolutionError.class,
+                () -> new Resolver().resolveUnits(List.of(first, second, consumer)));
+    }
+
+    @Test
     public void rejectsImportOfPackagePrivateType() {
         final var provider = parse("Hidden.zn", """
                 package geometry;
@@ -130,7 +193,7 @@ public final class CompilationUnitTest {
         final var consumer = parse("Main.zn", """
                 package app;
                 import geometry.Hidden;
-                fn result(): Hidden = unit;
+                fn result(): Hidden = ();
                 """);
 
         assertThrows(ResolutionError.class,
@@ -181,15 +244,46 @@ public final class CompilationUnitTest {
         }
 
         @Test
-        public void rejectsNonEntryTopLevelValuesUntilInitializationIsSpecified() {
-        final var entry = parse("Main.zn", "package app; fn main(): Unit = unit;");
+        public void acceptsInitializedTopLevelValuesOutsideEntryUnit() {
+        final var entry = parse("Main.zn", "package app; fn main(): Unit = ();");
         final var library = parse("State.zn", "package app; let state = 1;");
 
-        assertThrows(ResolutionError.class,
-            () -> new Resolver().resolveUnits(List.of(entry, library)));
+        new Resolver().resolveUnits(List.of(entry, library));
         }
 
-    private static CompilationUnit parse(final String sourcePath, final String source) {
+        @Test
+        public void valueImportsEnforceVisibilityAndStarImportAmbiguity() {
+            final var privateProvider = parse("Hidden.zn", "package hidden; let value = 1;");
+            final var privateConsumer = parse("PrivateConsumer.zn", """
+                    package app;
+                    import hidden.value;
+                    fn result(): Int = value;
+                    """);
+            assertThrows(ResolutionError.class,
+                    () -> new Resolver().resolveUnits(List.of(privateProvider, privateConsumer)));
+
+            final var first = parse("First.zn", "package one; public let score = 1;");
+            final var second = parse("Second.zn", "package two; public let score = 2;");
+            final var ambiguousConsumer = parse("Main.zn", """
+                    package app;
+                    import one.*;
+                    import two.*;
+                    fn result(): Int = score;
+                    """);
+            assertThrows(ResolutionError.class,
+                    () -> new Resolver().resolveUnits(List.of(first, second, ambiguousConsumer)));
+        }
+
+        private static CompilationUnit parse(final String sourcePath, final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit(sourcePath);
+    }
+
+    private static void deleteTree(final Path path) throws Exception {
+        if (!Files.exists(path)) return;
+        try (final var paths = Files.walk(path)) {
+            for (final var file : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(file);
+            }
+        }
     }
 }

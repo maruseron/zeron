@@ -173,7 +173,7 @@ final class LambdaCompilationPlan {
             }
             case Stmt.Return(Expr value) -> { if (value != null) collectLambdaShapes(value); }
             case Stmt.Expression(Expr expression) -> collectLambdaShapes(expression);
-            case Stmt.Var(Token _, TypeDescriptor type, Expr initializer, BindingMutability _) -> {
+            case Stmt.Var(Token _, TypeDescriptor type, Expr initializer, BindingMutability _, _) -> {
                 collectFunctionShapes(type);
                 if (initializer != null) collectLambdaShapes(initializer);
             }
@@ -285,6 +285,10 @@ final class LambdaCompilationPlan {
                 collectLambdaShapes(iff.thenExpr);
                 collectLambdaShapes(iff.elseExpr);
             }
+            case Expr.Match match -> {
+                collectLambdaShapes(match.scrutinee);
+                for (final var arm : match.arms) collectLambdaShapes(arm.expression());
+            }
             case Expr.Assignment assignment -> collectLambdaShapes(assignment.value);
             case Expr.Unary unary -> collectLambdaShapes(unary.right);
             case Expr.Variable variable -> {
@@ -376,7 +380,7 @@ final class LambdaCompilationPlan {
                 if (value != null) collectCapturedVariables(value, localNames, captured, seen);
             }
             case Stmt.Expression(Expr expression) -> collectCapturedVariables(expression, localNames, captured, seen);
-            case Stmt.Var(Token name, TypeDescriptor _, Expr initializer, BindingMutability _) -> {
+            case Stmt.Var(Token name, TypeDescriptor _, Expr initializer, BindingMutability _, _) -> {
                 final var nestedNames = new HashSet<>(localNames);
                 nestedNames.add(name.lexeme());
                 if (initializer != null) collectCapturedVariables(initializer, nestedNames, captured, seen);
@@ -463,6 +467,14 @@ final class LambdaCompilationPlan {
                 collectCapturedVariables(iff.condition, localNames, captured, seen);
                 collectCapturedVariables(iff.thenExpr, localNames, captured, seen);
                 collectCapturedVariables(iff.elseExpr, localNames, captured, seen);
+            }
+            case Expr.Match match -> {
+                collectCapturedVariables(match.scrutinee, localNames, captured, seen);
+                for (final var arm : match.arms) {
+                    final var armNames = new HashSet<>(localNames);
+                    if (arm.alias() != null) armNames.add(arm.alias().lexeme());
+                    collectCapturedVariables(arm.expression(), armNames, captured, seen);
+                }
             }
             case Expr.Lambda lambda -> {
                 final var nestedNames = new HashSet<>(localNames);

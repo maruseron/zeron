@@ -129,11 +129,14 @@ cycles, `Any`, and generic constraints remain open design questions for that sep
 
 1. **Null coalescing: implemented.** Keep short-circuit typing and flow behavior aligned with `if`
    expression joins.
-2. Define a coherent equality contract alongside any future data/value-type design; avoid changing
-   existing `==` behavior until compatibility is understood.
-3. **Safe navigation: implemented.** Add `?.` for properties and method calls, reusing nullable branch joins and enforcing receiver
-   mutability.
-4. Add `??=` for mutable variable bindings once its expression result and flow effects are settled.
+2. **Safe navigation: implemented.** `?.` supports property reads and method calls, reusing nullable
+   branch joins and enforcing receiver mutability.
+3. **Null-fallback assignment: implemented.** `??=` is limited to mutable local bindings, with its
+   expression result and flow effects specified above.
+4. **Reference identity: implemented.** `===` compares compatible reference values without calling
+   `equals`; `==` and `!=` retain their existing behavior.
+5. Define a coherent structural-equality contract alongside any future data/value-type design; do
+   not change existing `==` behavior until compatibility is understood.
 
 The order can change if a concrete use case emerges. These features should reuse nullable and flow
 analysis rather than add independent null-state rules.

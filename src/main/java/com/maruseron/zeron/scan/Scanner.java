@@ -21,6 +21,7 @@ public final class Scanner {
             entry("as",          AS),
             entry("and",         AND),
             entry("break",       BREAK),
+            entry("case",        CASE),
             entry("class",       CLASS),
             entry("contract",    CONTRACT),
             entry("constructor", CONSTRUCTOR),
@@ -57,7 +58,6 @@ public final class Scanner {
             entry("true",        TRUE),
             entry("type",        TYPE),
             entry("typeof",      TYPEOF),
-            entry("unit",        UNIT),
             entry("until",       UNTIL),
             entry("while",       WHILE));
 

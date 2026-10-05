@@ -81,14 +81,18 @@ ImportDeclaration     ::= "import" QualifiedName ["as" Identifier] ";"
                          | "import" QualifiedName "." "*" ";"
 QualifiedName         ::= Identifier {"." Identifier}
 TopLevelDeclaration  ::= VariableDeclaration | FunctionDeclaration | ClassDeclaration
-                         | ContractDeclaration | "public" (FunctionDeclaration
-                         | ClassDeclaration | ContractDeclaration)
+                         | ContractDeclaration | "public" (VariableDeclaration
+                         | FunctionDeclaration | ClassDeclaration | ContractDeclaration)
 ```
 
-Imports resolve class, contract, and function targets. Star imports enumerate public Zeron
+Imports resolve class, contract, function, and top-level value targets. Star imports enumerate public Zeron
 declarations in a known package; Java package enumeration is unsupported. Non-entry functions
 require explicit return types so their signatures are available before bodies are resolved.
-Non-entry top-level values remain unsupported until initialization order is specified.
+Every project top-level value requires an initializer. Project-local values are predeclared for
+cross-unit resolution; inferred values can depend on earlier inferred values and on explicit-type
+forward dependencies. Public immutable values may be imported explicitly or through star imports.
+Private values are available to units in the same package but cannot be imported from another
+package. Public mutable values and compiled-library value exports remain deferred.
 
 Example producer:
 
@@ -120,13 +124,28 @@ fn main(): Unit {
 ```
 
 Imports are file-scoped and name declarations, not expressions. Explicit and star imports resolve
-public classes, contracts, and top-level functions; function imports participate in ordinary calls
-and function-value resolution. Explicit imports take precedence over star imports. Multiple star
-imports that provide the same unqualified name are ambiguous when that name is used; an explicit
-import or alias disambiguates it. In a type annotation, explicitly import a type when multiple
-star-imported packages are in scope so its qualified type identity is unambiguous. Star imports are
-not re-exports. Top-level value imports and fully qualified value expressions remain deferred. Dot
-remains the receiver-member operator.
+public classes, contracts, functions, and immutable top-level values; function imports participate in
+ordinary calls and function-value resolution. Explicit imports take precedence over star imports.
+Multiple star imports that provide the same unqualified name are ambiguous when that name is used;
+an explicit import or alias disambiguates it. In a type annotation, explicitly import a type when
+multiple star-imported packages are in scope so its qualified type identity is unambiguous. Star
+imports are not re-exports. Dot remains the receiver-member operator.
+
+### Project value initialization
+
+All initialized project top-level values, including values in the entry source unit, initialize
+eagerly once when the generated entry class is initialized, before its `main` method can run.
+Dependencies are initialized before dependents. The compiler finds direct value reads and reads
+through statically resolved Zeron function calls; ties are ordered by package name, configured source
+root order, normalized root-relative source path, and declaration order. Standalone explicit-file
+compilation uses source-path order after package name.
+
+Statically discoverable dependency cycles are compile-time errors. Generated value accessors also
+guard against a read before its value is initialized and throw `IllegalStateException` instead of
+exposing a JVM default field value. If an initializer throws, JVM class initialization fails with
+`ExceptionInInitializerError` preserving the original cause; later initializers and entry `main` do
+not run. This source-project initialization contract does not export values through compiled-library
+indexes.
 
 ## Namespaces and Resolution
 

@@ -21,7 +21,8 @@ public final class ResolverInferenceTest {
         let f = 5.3;
         let bool = true;
         let mut globalCount = 1;
-        let theUnit = unit;
+        let theUnit = ();
+        let unit = 42;
         """);
     final var resolver = new Resolver();
 
@@ -32,6 +33,7 @@ public final class ResolverInferenceTest {
     assertEquals(TypeDescriptor.ofFloat(), bindingType(resolver, statements, "f"));
     assertEquals(TypeDescriptor.ofBoolean(), bindingType(resolver, statements, "bool"));
     assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "globalCount"));
+    assertEquals(TypeDescriptor.ofInt(), bindingType(resolver, statements, "unit"));
     assertEquals(TypeDescriptor.ofUnit(), bindingType(resolver, statements, "theUnit"));
     }
 
@@ -44,7 +46,7 @@ public final class ResolverInferenceTest {
         let maybeBool: Boolean? = true;
         let maybeText: String? = "present";
         let emptyText: String? = null;
-                let localDefault: Int?;
+                let localDefault: Int? = null;
         """);
     final var resolver = new Resolver();
 

@@ -113,12 +113,17 @@ primary                 : INT
                         | IDENTIFIER
                         | arrayLiteral
                         | lambda
-                        | "true" | "false" | "null" | "unit" | "this"
+                        | "true" | "false" | "null" | "this"
                         | ifExpr
+                        | matchExpr
+                        | "(" ")"
                         | "(" expression ")"
                         | range ;
 arrayLiteral            : "[" expression {"," expression} "]" ;
 ifExpr                  : "if" "(" expression ")" "then" expression "else" expression ;
+matchExpr               : "match" "(" expression ")" "{" matchArm+ "}" ;
+matchArm                : "case" matchPattern "->" expression ";" ;
+matchPattern            : type ["as" IDENTIFIER] | "_" ;
 lambda                  : IDENTIFIER "->" lambdaBody
                         | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
 lambdaBody              : expression | block ;
@@ -129,6 +134,10 @@ range                   : INT ".." INT ;
 # - Sealed contracts require a non-empty permits list. Permitted classes must be in the contract's
 #   package; public sealed contracts permit only public classes. Generic arity and type parameters
 #   correspond by position. Permitted implementation classes are final.
+# - Match expressions require a non-null sealed-contract value. Every permitted class must be named
+#   exactly once, unless a final `_` case covers the remaining values. Case generic arguments must
+#   match the scrutinee's contract arguments. Type cases may bind an immutable alias with `as`.
+#   Nullable matches, destructuring, guards, and nested patterns are not supported.
 # - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
 #   An explicit `private constructor new;` makes canonical construction private.
 # - Fields and auto-properties may have initializers. Initialized members are omitted from canonical

@@ -130,6 +130,7 @@ public sealed interface Expr {
         public final Token name;
         public final Expr value;
         private TypeDescriptor type;
+        private Token resolvedSymbolToken;
 
         public Assignment(Token name, Expr value, TypeDescriptor type) {
             this.name = name;
@@ -144,6 +145,8 @@ public sealed interface Expr {
         public void setType(TypeDescriptor type) {
             this.type = type;
         }
+        public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? name : resolvedSymbolToken; }
+        public void setResolvedSymbolToken(final Token token) { resolvedSymbolToken = token; }
 
         public boolean equals(Object obj) {
             if (obj == this) return true;
@@ -322,6 +325,25 @@ public sealed interface Expr {
         }
     }
 
+    record MatchArm(Token keyword, TypeDescriptor patternType, Token alias,
+                    boolean wildcard, Expr expression) {}
+
+    final class Match implements Expr {
+        public final Token keyword;
+        public final Expr scrutinee;
+        public final List<MatchArm> arms;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+
+        public Match(final Token keyword, final Expr scrutinee, final List<MatchArm> arms) {
+            this.keyword = keyword;
+            this.scrutinee = scrutinee;
+            this.arms = List.copyOf(arms);
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor resolvedType) { type = resolvedType; }
+    }
+
     final class Call implements Expr {
         public final Token callee;
         public final Token paren;
@@ -330,6 +352,7 @@ public sealed interface Expr {
         private TypeDescriptor type;
         private FunctionDescriptor genericFunctionType;
         private String resolvedFunctionName;
+        private Token resolvedSymbolToken;
         private MemberCall implicitMemberCall;
         private ResolvedIntrinsicOperation intrinsicOperation;
 
@@ -356,6 +379,8 @@ public sealed interface Expr {
 
         public String resolvedFunctionName() { return resolvedFunctionName; }
         public void setResolvedFunctionName(final String name) { resolvedFunctionName = name; }
+        public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? callee : resolvedSymbolToken; }
+        public void setResolvedSymbolToken(final Token token) { resolvedSymbolToken = token; }
         public MemberCall implicitMemberCall() { return implicitMemberCall; }
         public void setImplicitMemberCall(final MemberCall call) { implicitMemberCall = call; }
         public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }
@@ -661,6 +686,8 @@ public sealed interface Expr {
         private FunctionDescriptor sourceFunctionType;
         private FunctionDescriptor specializedFunctionType;
         private FunctionDescriptor storedFunctionType;
+        private Token resolvedSymbolToken;
+        private Stmt.Var resolvedValueDeclaration;
         private Expr implicitFieldReceiver;
         private String implicitFieldOwner;
         private TypeDescriptor implicitFieldType;
@@ -691,6 +718,12 @@ public sealed interface Expr {
         public void setSpecializedFunctionType(final FunctionDescriptor type) { specializedFunctionType = type; }
         public FunctionDescriptor storedFunctionType() { return storedFunctionType; }
         public void setStoredFunctionType(final FunctionDescriptor type) { storedFunctionType = type; }
+        public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? name : resolvedSymbolToken; }
+        public void setResolvedValue(final Token symbolToken, final Stmt.Var declaration) {
+            resolvedSymbolToken = symbolToken;
+            resolvedValueDeclaration = declaration;
+        }
+        public Stmt.Var resolvedValueDeclaration() { return resolvedValueDeclaration; }
         public Expr implicitFieldReceiver() { return implicitFieldReceiver; }
         public String implicitFieldOwner() { return implicitFieldOwner; }
         public TypeDescriptor implicitFieldType() { return implicitFieldType; }

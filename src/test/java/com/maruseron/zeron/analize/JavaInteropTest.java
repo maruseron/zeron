@@ -95,7 +95,7 @@ public final class JavaInteropTest {
                 fn voidReturn(): Unit {
                     let fixture: &Fixture = Fixture.new(12);
                     fixture.reset();
-                    return unit;
+                    return ();
                 }
                 """);
         final var compiler = Compiler.forCompilationUnits(List.of(source), className, "interop",

@@ -67,7 +67,7 @@ public final class AnyTypeTest {
         final var classFile = Path.of("dist", className + ".class");
         final var statements = parse("""
                 fn identity<T>(value: T): T = value;
-            let globalUnit: Any = unit;
+            let globalUnit: Any = ();
                 fn echoAny(value: Any): Any = value;
                 fn anyInt(): Any = 42;
                 fn anyIntThroughParameter(): Any = echoAny(43);
@@ -76,16 +76,16 @@ public final class AnyTypeTest {
                 fn anyString(): Any = "value";
                 fn anyArray(): Any = [1, 2];
                 fn anyLambda(): Any = () -> 7;
-                fn anyUnit(): Any = unit;
+                fn anyUnit(): Any = ();
                 fn anyGlobalUnit(): Any = globalUnit;
-                fn anyUnitViaGeneric(): Any = identity<Any>(unit);
+                fn anyUnitViaGeneric(): Any = identity<Any>(());
                 fn nullableUnit(value: Unit?): Any? = value;
                 fn nullableInt(value: Int?): Any? = value;
                 fn anyNull(): Any? = null;
                 fn anyNullViaGeneric(): Any? = identity<Any?>(null);
                 fn sameUnit(): Boolean {
-                    let first: Any = unit;
-                    let second: Any = unit;
+                    let first: Any = ();
+                    let second: Any = ();
                     return first == second;
                 }
                 """);
@@ -109,9 +109,9 @@ public final class AnyTypeTest {
                 assertNotNull(unit);
                 assertSame(unit, program.getMethod("anyGlobalUnit").invoke(null));
                 assertSame(unit, program.getMethod("anyUnitViaGeneric").invoke(null));
-                final var unitValueClass = loader.loadClass("com.maruseron.zeron.runtime.UnitValue");
-                assertNull(program.getMethod("nullableUnit", unitValueClass).invoke(null, new Object[]{null}));
-                assertSame(unit, program.getMethod("nullableUnit", unitValueClass).invoke(null, unit));
+                final var unitClass = loader.loadClass("zeron.lang.Unit");
+                assertNull(program.getMethod("nullableUnit", unitClass).invoke(null, new Object[]{null}));
+                assertSame(unit, program.getMethod("nullableUnit", unitClass).invoke(null, unit));
                 assertNull(program.getMethod("nullableInt", Integer.class).invoke(null, new Object[]{null}));
                 assertEquals(12, program.getMethod("nullableInt", Integer.class).invoke(null, 12));
                 assertNull(program.getMethod("anyNull").invoke(null));

@@ -155,7 +155,7 @@ public final class GenericFunctionTest {
                         + "fn invalid(): String = display(42);",
                 "contract Mutable { mut update(): Unit; } "
                         + "fn invalid<T: Mutable>(value: T): Unit = value.update();",
-                "class NotAContract {} fn invalid<T: NotAContract>(value: T): Unit = unit;")) {
+                "class NotAContract {} fn invalid<T: NotAContract>(value: T): Unit = ();")) {
             assertThrows(ResolutionError.class, () -> new Resolver().resolve(parse(source)));
         }
     }

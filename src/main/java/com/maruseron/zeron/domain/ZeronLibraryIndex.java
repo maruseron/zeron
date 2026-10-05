@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.jar.JarFile;
 
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
@@ -277,16 +278,38 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     public static ZeronLibraryIndex readFrom(final Path path) throws IOException {
         try (final var input = new DataInputStream(Files.newInputStream(path))) {
-            if (input.readInt() != MAGIC) throw new IOException("Not a Zeron library index.");
-            final var version = input.readInt();
-            if (version != VERSION) throw new IOException("Unsupported Zeron library index version: " + version);
-            final var standardLibraryApiVersion = input.readInt();
-            final var count = readCount(input);
-            final var declarations = new ArrayList<ExportedDeclaration>(count);
-            for (int i = 0; i < count; i++) declarations.add(readDeclaration(input));
-            if (input.read() != -1) throw new IOException("Trailing data in Zeron library index.");
-            return new ZeronLibraryIndex(standardLibraryApiVersion, declarations);
+            return readFrom(input);
         }
+    }
+
+    public static ZeronLibraryIndex readFromJar(final Path path) throws IOException {
+        final var index = readJarIndex(path);
+        validateStandardLibraryCompatibility(index);
+        return index;
+    }
+
+    private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
+        try (final var jar = new JarFile(path.toFile())) {
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v5.bin");
+            if (indexEntry == null || indexEntry.isDirectory()) {
+                throw new IOException("Missing Zeron API index in library JAR: " + path);
+            }
+            try (final var input = new DataInputStream(jar.getInputStream(indexEntry))) {
+                return readFrom(input);
+            }
+        }
+    }
+
+    private static ZeronLibraryIndex readFrom(final DataInputStream input) throws IOException {
+        if (input.readInt() != MAGIC) throw new IOException("Not a Zeron library index.");
+        final var version = input.readInt();
+        if (version != VERSION) throw new IOException("Unsupported Zeron library index version: " + version);
+        final var standardLibraryApiVersion = input.readInt();
+        final var count = readCount(input);
+        final var declarations = new ArrayList<ExportedDeclaration>(count);
+        for (int i = 0; i < count; i++) declarations.add(readDeclaration(input));
+        if (input.read() != -1) throw new IOException("Trailing data in Zeron library index.");
+        return new ZeronLibraryIndex(standardLibraryApiVersion, declarations);
     }
 
     public static ZeronLibraryIndex readFromDirectory(final Path root) throws IOException {
@@ -298,12 +321,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
         final var index = readFrom(indexPath);
+        validateStandardLibraryCompatibility(index);
+        return index;
+    }
+
+    private static void validateStandardLibraryCompatibility(final ZeronLibraryIndex index) throws IOException {
         if (index.standardLibraryApiVersion() != StandardLibrary.API_VERSION) {
             throw new IOException("Zeron library requires standard-library API version "
                     + index.standardLibraryApiVersion() + ", but this compiler provides version "
                     + StandardLibrary.API_VERSION + ".");
         }
-        return index;
     }
 
     private static void writeDeclaration(final DataOutputStream output,

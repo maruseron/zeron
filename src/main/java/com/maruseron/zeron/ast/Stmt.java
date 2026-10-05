@@ -148,7 +148,12 @@ public sealed interface Stmt {
     record Return(Expr value) implements Stmt {}
 
     record Var(Token name, TypeDescriptor type, Expr initializer,
-               BindingMutability mutability) implements Stmt, Decl {}
+               BindingMutability mutability, boolean isPublic) implements Stmt, Decl {
+        public Var(final Token name, final TypeDescriptor type, final Expr initializer,
+                   final BindingMutability mutability) {
+            this(name, type, initializer, mutability, false);
+        }
+    }
 
     record While(Token keyword, Expr condition, Stmt body) implements Stmt {}
 }

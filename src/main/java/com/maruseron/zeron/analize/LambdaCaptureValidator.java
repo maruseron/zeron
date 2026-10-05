@@ -50,7 +50,7 @@ final class LambdaCaptureValidator {
                 if (value != null) walkCaptureUsage(value, localNames);
             }
             case Stmt.Expression(Expr expression) -> walkCaptureUsage(expression, localNames);
-            case Stmt.Var(Token _, TypeDescriptor _, Expr initializer, BindingMutability _) -> {
+            case Stmt.Var(Token _, TypeDescriptor _, Expr initializer, BindingMutability _, _) -> {
                 if (initializer != null) walkCaptureUsage(initializer, localNames);
             }
             case Stmt.While(Token _, Expr condition, Stmt body) -> {
@@ -119,6 +119,14 @@ final class LambdaCaptureValidator {
                 walkCaptureUsage(iff.condition, localNames);
                 walkCaptureUsage(iff.thenExpr, localNames);
                 walkCaptureUsage(iff.elseExpr, localNames);
+            }
+            case Expr.Match match -> {
+                walkCaptureUsage(match.scrutinee, localNames);
+                for (final var arm : match.arms) {
+                    final var armNames = new HashSet<>(localNames);
+                    if (arm.alias() != null) armNames.add(arm.alias().lexeme());
+                    walkCaptureUsage(arm.expression(), armNames);
+                }
             }
             case Expr.Lambda lambda -> validate(lambda, localNames);
             case Expr.Literal _ -> {}

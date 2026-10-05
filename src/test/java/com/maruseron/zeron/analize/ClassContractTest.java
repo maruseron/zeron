@@ -198,7 +198,7 @@ public final class ClassContractTest {
     final var program = ClassFile.of().parse(Path.of("dist", "test.class"));
     final var main = program.methods().stream()
         .filter(method -> method.methodName().equalsString("main")
-            && method.methodType().equalsString("()Lcom/maruseron/zeron/runtime/UnitValue;"))
+            && method.methodType().equalsString("()Lzeron/lang/Unit;"))
         .findFirst()
         .orElseThrow();
     final var invocations = main.code().orElseThrow().elementStream()

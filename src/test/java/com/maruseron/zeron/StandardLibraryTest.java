@@ -19,13 +19,127 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import java.util.ArrayList;
+import java.util.jar.JarFile;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public final class StandardLibraryTest {
+
+    @Test
+    public void matchExhaustivelySelectsOptionCasesAndEvaluatesScrutineeOnce() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "matchFixture" + suffix;
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-match-");
+        final var entry = sourceRoot.resolve(packageName).resolve("Main.zn");
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, """
+                package %s;
+                import zeron.lang.Option;
+                import zeron.lang.Some;
+                import zeron.lang.None;
+                let mut calls = 0;
+                fn next(): Option<Int> {
+                    calls += 1;
+                    return Some<Int>.from(42);
+                }
+                fn someResult(): Int = match (next()) {
+                    case Some<Int> as some -> some.value();
+                    case None<Int> -> -1;
+                };
+                fn noneResult(): Int {
+                    let value: Option<Int> = None<Int>.none();
+                    return match (value) {
+                        case Some<Int> as some -> some.value();
+                        case None<Int> -> -1;
+                    };
+                }
+                fn wildcardResult(): Int {
+                    let value: Option<Int> = None<Int>.none();
+                    return match (value) {
+                        case Some<Int> as some -> some.value();
+                        case _ -> 7;
+                    };
+                }
+                fn acceptsExternalNull(value: Option<Int>): Int = match (value) {
+                    case Some<Int> as some -> some.value();
+                    case _ -> 7;
+                };
+                fn callCount(): Int = calls;
+                """.formatted(packageName));
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of(packageName, "Main.zn").toString()));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + ".Main");
+                assertEquals(42, main.getMethod("someResult").invoke(null));
+                assertEquals(1, main.getMethod("callCount").invoke(null));
+                assertEquals(-1, main.getMethod("noneResult").invoke(null));
+                assertEquals(7, main.getMethod("wildcardResult").invoke(null));
+                final var optionClass = loader.loadClass("zeron.lang.Option");
+                final var nullFailure = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                        () -> main.getMethod("acceptsExternalNull", optionClass)
+                                .invoke(null, new Object[]{null}));
+                assertTrue(nullFailure.getCause() instanceof IllegalStateException);
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(sourceRoot);
+        }
+    }
+
+    @Test
+    public void matchRejectsMissingDuplicateAndUnreachableCases() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "invalidMatch" + suffix;
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-match-invalid-");
+        final var entry = sourceRoot.resolve(packageName).resolve("Main.zn");
+        Files.createDirectories(entry.getParent());
+        final var header = """
+                package %s;
+                import zeron.lang.Option;
+                import zeron.lang.Some;
+                import zeron.lang.None;
+                fn result(value: Option<Int>): Int =
+                """.formatted(packageName);
+
+        try {
+            for (final var match : List.of(
+                    "match (value) { case Some<Int> -> 1; }",
+                    "match (value) { case Some<Int> -> 1; case Some<Int> -> 2; case None<Int> -> 3; }",
+                    "match (value) { case _ -> 1; case Some<Int> -> 2; }",
+                    "match (value) { case Some<Int> -> 1; case None<Int> -> 2; case _ -> 3; }",
+                    "match (value) { case Option<Int> -> 1; }",
+                    "match (value) { case Some<String> -> 1; case None<Int> -> 2; }")) {
+                Files.writeString(entry, header + match + ";");
+                deleteTree(Path.of("dist"));
+                assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
+                        "--entry", Path.of(packageName, "Main.zn").toString()) != 0);
+            }
+            Files.writeString(entry, """
+                    package %s;
+                    import zeron.lang.Option;
+                    import zeron.lang.Some;
+                    import zeron.lang.None;
+                    fn result(value: Option<Int>?): Int = match (value) {
+                        case Some<Int> -> 1;
+                        case None<Int> -> 2;
+                    };
+                    """.formatted(packageName));
+            deleteTree(Path.of("dist"));
+            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of(packageName, "Main.zn").toString()) != 0);
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(sourceRoot);
+        }
+    }
 
     @Test
     public void bundledSourcesFollowTheirPackageDirectoryStructure() throws Exception {
@@ -58,6 +172,47 @@ public final class StandardLibraryTest {
             Files.deleteIfExists(invalidSource);
             Files.deleteIfExists(validSource);
             Files.deleteIfExists(generatedClass);
+        }
+    }
+
+    @Test
+    public void cliCompilesProjectRootsAndEnforcesPackageDirectoryLayout() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-project-" + suffix);
+        final var packageDirectory = sourceRoot.resolve("app");
+        final var mainSource = packageDirectory.resolve("Main.zn");
+        final var helperSource = packageDirectory.resolve("Helper.zn");
+        final var className = "app.Main";
+        final var mainClass = Path.of("dist", "app", "Main.class");
+        Files.createDirectories(packageDirectory);
+        Files.writeString(mainSource, """
+                package app;
+                fn result(): Int = answer();
+                """);
+        Files.writeString(helperSource, """
+                package app;
+                fn answer(): Int = 42;
+                """);
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(), "--entry", "app/Main.zn"));
+            assertTrue(Files.exists(mainClass));
+            try (final var generatedClasses = Files.list(Path.of("dist", "app"))) {
+                assertTrue(generatedClasses.filter(path -> path.toString().endsWith(".class")).count() >= 2);
+            }
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(className).getMethod("result").invoke(null));
+            }
+
+            deleteTree(Path.of("dist"));
+            Files.writeString(helperSource, "package wrong; fn answer(): Int = 42;");
+            assertEquals(65, Zeron.runCli("--root", sourceRoot.toString(), "--entry", "app/Main.zn"));
+            assertFalse(Files.exists(mainClass));
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(sourceRoot);
         }
     }
 
@@ -100,6 +255,71 @@ public final class StandardLibraryTest {
                     output.toString(StandardCharsets.UTF_8));
         } finally {
             deleteTree(outputDirectory);
+        }
+    }
+
+    @Test
+    public void generatedUnitMainCanBeLaunchedByJava() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "launchClient" + suffix;
+        final var className = packageName + ".Main";
+        final var source = parse("Main.zn", """
+                package %s;
+                import zeron.io.println;
+                fn main(): Unit {
+                    println("launched");
+                }
+                """.formatted(packageName));
+        final var compiler = Compiler.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            compiler.resolve();
+            compiler.compile();
+
+            final var javaCommand = Path.of(System.getProperty("java.home"), "bin",
+                    System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java");
+            final var process = new ProcessBuilder(javaCommand.toString(), "-cp",
+                    Path.of("dist").toAbsolutePath().toString(), className)
+                    .redirectErrorStream(true)
+                    .start();
+            final var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertEquals(0, process.waitFor());
+            assertEquals("launched" + System.lineSeparator(), output);
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void cliRunsGeneratedClassAndBuildsMissingStandardLibraryJar() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "runClient" + suffix;
+        final var className = packageName + ".Main";
+        final var classFile = Path.of("dist", packageName, "Main.class");
+        final var standardLibraryJar = Path.of("target", "zeron-stdlib-run-" + suffix + ".jar");
+        final var source = parse("Main.zn", """
+                package %s;
+                import zeron.io.println;
+                fn main(): Unit {
+                    println("run command works");
+                }
+                """.formatted(packageName));
+        final var compiler = Compiler.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            compiler.resolve();
+            compiler.compile();
+            assertFalse(Files.exists(standardLibraryJar));
+            assertEquals(0, Zeron.runCli("--run-class", classFile.toString(),
+                    "--stdlib-jar", standardLibraryJar.toString()));
+            assertTrue(Files.exists(standardLibraryJar));
+        } finally {
+            deleteTree(Path.of("dist"));
+            Files.deleteIfExists(standardLibraryJar);
         }
     }
 
@@ -295,6 +515,217 @@ public final class StandardLibraryTest {
     }
 
     @Test
+    public void projectValuesImportAcrossRootsAndInitializeDependenciesFirst() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var appPackage = "app" + suffix;
+        final var configPackage = "config" + suffix;
+        final var appRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-app-");
+        final var configRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-config-");
+        final var entry = appRoot.resolve(appPackage).resolve("Main.zn");
+        final var values = configRoot.resolve(configPackage).resolve("Values.zn");
+        Files.createDirectories(entry.getParent());
+        Files.createDirectories(values.getParent());
+        Files.writeString(entry, """
+                package %s;
+                import %s.answer as importedAnswer;
+                import %s.*;
+                let resultValue = importedAnswer + 2;
+                fn result(): Int = resultValue;
+                fn starImportedValue(): Int = answer;
+                """.formatted(appPackage, configPackage, configPackage));
+        Files.writeString(values, """
+                package %s;
+                public let answer = 40;
+                """.formatted(configPackage));
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli("--root", appRoot.toString(),
+                    "--root", configRoot.toString(), "--entry", Path.of(appPackage, "Main.zn").toString()));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(appPackage + ".Main").getMethod("result").invoke(null));
+                assertEquals(40, loader.loadClass(appPackage + ".Main")
+                        .getMethod("starImportedValue").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(appRoot);
+            deleteTree(configRoot);
+        }
+    }
+
+    @Test
+    public void rejectsDirectAndFunctionMediatedProjectValueCycles() throws Exception {
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-cycle-");
+        final var entry = sourceRoot.resolve("app").resolve("Main.zn");
+        final var second = sourceRoot.resolve("app").resolve("Second.zn");
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, """
+                package app;
+                let first: Int = readSecond();
+                fn readSecond(): Int = second;
+                fn result(): Int = first;
+                """);
+        Files.writeString(second, "package app; let second: Int = first;");
+
+        try {
+            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of("app", "Main.zn").toString()) != 0);
+            Files.writeString(entry, """
+                    package app;
+                    let first: Int = second;
+                    fn result(): Int = first;
+                    """);
+            Files.writeString(second, "package app; let second: Int = first;");
+            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of("app", "Main.zn").toString()) != 0);
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(sourceRoot);
+        }
+    }
+
+    @Test
+    public void independentProjectValuesInitializeInStableSourceOrder() throws Exception {
+        final var firstRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-order-first-");
+        final var secondRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-order-second-");
+        final var entry = firstRoot.resolve("app").resolve("Main.zn");
+        final var second = secondRoot.resolve("app").resolve("Second.zn");
+        Files.createDirectories(entry.getParent());
+        Files.createDirectories(second.getParent());
+        Files.writeString(entry, """
+                package app;
+                import zeron.io.println;
+                let first: Int = markFirst();
+                fn markFirst(): Int {
+                    println("first");
+                    return 1;
+                }
+                fn result(): Int = first + second;
+                """);
+        Files.writeString(second, """
+                package app;
+                import zeron.io.println;
+                let second: Int = markSecond();
+                fn markSecond(): Int {
+                    println("second");
+                    return 2;
+                }
+                """);
+
+        try {
+            assertEquals(0, Zeron.runCli("--root", firstRoot.toString(),
+                    "--root", secondRoot.toString(), "--entry", Path.of("app", "Main.zn").toString()));
+            final var output = new ByteArrayOutputStream();
+            final var originalOutput = System.out;
+            try (final var capture = new PrintStream(output, true, StandardCharsets.UTF_8);
+                 final var loader = new URLClassLoader(
+                         new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                System.setOut(capture);
+                assertEquals(3, loader.loadClass("app.Main").getMethod("result").invoke(null));
+            } finally {
+                System.setOut(originalOutput);
+            }
+            assertEquals("first" + System.lineSeparator() + "second" + System.lineSeparator(),
+                    output.toString(StandardCharsets.UTF_8));
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(firstRoot);
+            deleteTree(secondRoot);
+        }
+    }
+
+    @Test
+    public void initializerFailurePreventsEntryMainFromRunning() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "initializerFailure" + suffix;
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-failure-");
+        final var entry = sourceRoot.resolve(packageName).resolve("Main.zn");
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, """
+                package %s;
+                import zeron.io.println;
+                let broken: Int = 1 / 0;
+                fn main(): Unit {
+                    println("main");
+                }
+                """.formatted(packageName));
+
+        try {
+            assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of(packageName, "Main.zn").toString()));
+            final var output = new ByteArrayOutputStream();
+            final var originalOutput = System.out;
+            try (final var capture = new PrintStream(output, true, StandardCharsets.UTF_8);
+                 final var loader = new URLClassLoader(
+                         new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                System.setOut(capture);
+                final var mainClass = loader.loadClass(packageName + ".Main");
+                final var failure = assertThrows(ExceptionInInitializerError.class,
+                        () -> mainClass.getMethod("main", String[].class).invoke(null, (Object) new String[0]));
+                assertTrue(failure.getCause() instanceof ArithmeticException);
+            } finally {
+                System.setOut(originalOutput);
+            }
+            assertEquals("", output.toString(StandardCharsets.UTF_8));
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(sourceRoot);
+        }
+    }
+
+    @Test
+    public void dynamicReadBeforeInitializationFailsInsteadOfReturningDefault() throws Exception {
+        final var packageName = "dynamicInitialization";
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-dynamic-");
+        final var entry = sourceRoot.resolve(packageName).resolve("Main.zn");
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, """
+                package %s;
+                let first: Int = reader();
+                let reader = () -> second;
+                let second: Int = first;
+                fn result(): Int = first;
+                """.formatted(packageName));
+
+        try {
+            assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of(packageName, "Main.zn").toString()));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var mainClass = loader.loadClass(packageName + ".Main");
+                final var failure = assertThrows(ExceptionInInitializerError.class,
+                        () -> mainClass.getMethod("result").invoke(null));
+                assertTrue(failure.getCause() instanceof IllegalStateException);
+                assertTrue(failure.getCause().getMessage().contains("reader"));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(sourceRoot);
+        }
+    }
+
+    @Test
+    public void projectValuesRequireInitializersAndPublicMutabilityIsRejected() throws Exception {
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-validation-");
+        final var entry = sourceRoot.resolve("app").resolve("Main.zn");
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, "package app; let value: Int?;");
+
+        try {
+            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of("app", "Main.zn").toString()) != 0);
+            Files.writeString(entry, "package app; public let mut value: Int = 1;");
+            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of("app", "Main.zn").toString()) != 0);
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(sourceRoot);
+        }
+    }
+
+    @Test
     public void projectRootRejectsPackageDirectoryMismatch() throws Exception {
         final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-package-path-");
         final var entry = projectRoot.resolve("app").resolve("Main.zn");
@@ -456,6 +887,16 @@ public final class StandardLibraryTest {
         final var source = parse("SequenceTest.zn", """
                 package %s;
                 import zeron.collections.Sequence;
+                class Total {
+                    value: Int;
+                    public constructor new;
+                    public mut add(next: Int): Unit { this.value = this.value + next; }
+                    public mut record(value: Int): Int {
+                        this.value = this.value + 1;
+                        return value;
+                    }
+                    public read(): Int = this.value;
+                }
                 fn transformed(): Int {
                     let values = Sequence<Int>.fromArray([1, 2, 3, 4, 5, 6])
                         .map(value -> value * 2)
@@ -473,6 +914,24 @@ public final class StandardLibraryTest {
                     return values.any(value -> value == 4) and values.all(value -> value > 0);
                 }
                 fn count(): Int = Sequence<Int>.fromArray([1, 2, 3]).filter(value -> value > 1).count();
+                fn forEachTotal(): Int {
+                    let total = Total.new(0);
+                    Sequence<Int>.fromArray([3, 5, 7]).forEach(value -> total.add(value));
+                    return total.read();
+                }
+                fn lazyEvaluation(): Int {
+                    let calls = Total.new(0);
+                    let values = Sequence<Int>.fromArray([4, 5, 6])
+                        .map(value -> calls.record(value));
+                    let beforeConsumption = calls.read();
+                    let first = values.take(1).fold(0, (sum, value) -> sum + value);
+                    return beforeConsumption * 100 + first * 10 + calls.read();
+                }
+                fn emptySequencePredicates(): Boolean {
+                    let values = Sequence<Int>.fromArray([1, 2, 3]).filter(value -> false);
+                    return values.count() == 0 and not values.any(value -> true)
+                        and values.all(value -> false);
+                }
                 """.formatted(packageName));
         final var compiler = Compiler.forCompilationUnits(List.of(source), className, packageName);
 
@@ -487,6 +946,9 @@ public final class StandardLibraryTest {
                 assertEquals(10, test.getMethod("folded").invoke(null));
                 assertEquals(true, test.getMethod("predicates").invoke(null));
                 assertEquals(2, test.getMethod("count").invoke(null));
+                assertEquals(15, test.getMethod("forEachTotal").invoke(null));
+                assertEquals(41, test.getMethod("lazyEvaluation").invoke(null));
+                assertEquals(true, test.getMethod("emptySequencePredicates").invoke(null));
             }
         } finally {
             deleteTree(Path.of("dist"));
@@ -623,10 +1085,63 @@ public final class StandardLibraryTest {
     }
 
     @Test
+    public void cliPackagesAndLoadsZeronLibraryJar() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "jarlibrary" + suffix;
+        final var appPackage = "jarclient" + suffix;
+        final var librarySource = Files.createTempFile(Path.of("target"), "ZeronJarLibrary" + suffix, ".zn");
+        final var clientSource = Files.createTempFile(Path.of("target"), "ZeronJarClient" + suffix, ".zn");
+        final var libraryJar = Path.of("target", "zeron-library-" + suffix + ".jar");
+        final var secondLibraryJar = Path.of("target", "zeron-library-repeat-" + suffix + ".jar");
+        final var clientClass = appPackage + "." + clientSource.getFileName().toString().replaceFirst("\\.zn$", "");
+        Files.writeString(librarySource, """
+                package %s;
+                public class Answer {
+                    value: Int;
+                    public constructor new;
+                    public read(): Int = this.value;
+                }
+                public fn answer(): Int = Answer.new(42).read();
+                """.formatted(libraryPackage));
+        Files.writeString(clientSource, """
+                package %s;
+                import %s.answer;
+                fn result(): Int = answer();
+                """.formatted(appPackage, libraryPackage));
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli(librarySource.toString(), "--jar-output", libraryJar.toString()));
+            assertFalse(Files.exists(Path.of("dist")));
+            assertEquals(0, Zeron.runCli(librarySource.toString(), "--jar-output", secondLibraryJar.toString()));
+            assertArrayEquals(Files.readAllBytes(libraryJar), Files.readAllBytes(secondLibraryJar));
+            try (final var jar = new JarFile(libraryJar.toFile())) {
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v5.bin") != null);
+                assertTrue(jar.stream().anyMatch(entry -> entry.getName().equals(
+                        libraryPackage.replace('.', '/') + "/Answer.class")));
+            }
+
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli(clientSource.toString(), "--library", libraryJar.toString()));
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), libraryJar.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(clientClass).getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            Files.deleteIfExists(librarySource);
+            Files.deleteIfExists(clientSource);
+            Files.deleteIfExists(libraryJar);
+            Files.deleteIfExists(secondLibraryJar);
+        }
+    }
+
+    @Test
     public void buildsBundledStandardLibraryAndUsesItWithoutSourceInjection() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var appPackage = "compiledStdlibClient" + suffix;
         final var libraryOutput = Path.of("target", "zeron-stdlib-" + suffix);
+        final var libraryJar = Path.of("target", "zeron-stdlib-" + suffix + ".jar");
         final var sourceFile = Path.of("target", "CompiledStdlibClient" + suffix + ".zn");
         final var entryName = sourceFile.getFileName().toString().replaceFirst("\\.zn$", "");
         final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v5.bin"));
@@ -635,6 +1150,7 @@ public final class StandardLibraryTest {
         final var arrayIteratorClass = libraryOutput.resolve(
                 Path.of("zeron", "collections", "ArrayIterator.class"));
         final var rangeClass = libraryOutput.resolve(Path.of("zeron", "ranges", "IntRange.class"));
+        final var unitClass = libraryOutput.resolve(Path.of("zeron", "lang", "Unit.class"));
         Files.createDirectories(sourceFile.getParent());
         Files.writeString(sourceFile, """
                 package %s;
@@ -666,22 +1182,29 @@ public final class StandardLibraryTest {
 
         try {
             deleteTree(Path.of("dist"));
-            assertEquals(0, Zeron.runCli("--build-stdlib", libraryOutput.toString()));
+            assertEquals(0, Zeron.runCli("--build-stdlib", libraryOutput.toString(),
+                    "--jar-output", libraryJar.toString()));
             assertTrue(Files.exists(apiIndex));
             assertTrue(Files.exists(iterableClass));
             assertTrue(Files.exists(iteratorClass));
             assertTrue(Files.exists(arrayIteratorClass));
             assertTrue(Files.exists(rangeClass));
+            assertTrue(Files.exists(unitClass));
+            try (final var jar = new JarFile(libraryJar.toFile())) {
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v5.bin") != null);
+                assertTrue(jar.getJarEntry("zeron/collections/Sequence.class") != null);
+                assertTrue(jar.getJarEntry("zeron/lang/Unit.class") != null);
+            }
 
             deleteTree(Path.of("dist"));
             assertEquals(0, Zeron.runCli(sourceFile.toString(), "--stdlib", "compiled",
-                    "--library", libraryOutput.toString()));
+                    "--library", libraryJar.toString()));
             final var output = new ByteArrayOutputStream();
             final var originalOutput = System.out;
             try (final var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {
                 System.setOut(capture);
                 try (final var loader = new URLClassLoader(new java.net.URL[]{
-                        Path.of("dist").toUri().toURL(), libraryOutput.toUri().toURL()}, getClass().getClassLoader())) {
+                        Path.of("dist").toUri().toURL(), libraryJar.toUri().toURL()}, getClass().getClassLoader())) {
                     final var client = loader.loadClass(appPackage + "." + entryName);
                     assertEquals(6, client.getMethod("result").invoke(null));
                     assertEquals(10, client.getMethod("arrayIteratorResult").invoke(null));
@@ -694,6 +1217,7 @@ public final class StandardLibraryTest {
         } finally {
             deleteTree(Path.of("dist"));
             deleteTree(libraryOutput);
+            Files.deleteIfExists(libraryJar);
             Files.deleteIfExists(sourceFile);
         }
     }

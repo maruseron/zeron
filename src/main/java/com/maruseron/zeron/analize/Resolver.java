@@ -3,6 +3,7 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Expr;
+import com.maruseron.zeron.ast.ImportDeclaration;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
@@ -114,6 +115,9 @@ public final class Resolver {
     private final Map<String, Stmt.ClassDecl> classes = new LinkedHashMap<>();
     private final Map<String, Stmt.ContractDecl> contracts = new LinkedHashMap<>();
         private final Map<String, Stmt.FunctionDeclaration> functions = new LinkedHashMap<>();
+    private final Map<String, Stmt.Var> topLevelValues = new LinkedHashMap<>();
+    private final Map<String, Token> topLevelValueSymbols = new LinkedHashMap<>();
+    private final IdentityHashMap<Stmt.Var, Token> topLevelTokensByDeclaration = new IdentityHashMap<>();
     private final Map<String, Token> functionSymbolTokens = new LinkedHashMap<>();
     private final IdentityHashMap<Token, String> functionNamesByDeclaration = new IdentityHashMap<>();
         private final IdentityHashMap<Stmt.ExternalFunction, FunctionBindingRegistry.Binding> externalFunctionBindings =
@@ -127,6 +131,7 @@ public final class Resolver {
     private String packageName;
     private Map<String, String> currentTypeImports = Map.of();
     private Map<String, String> currentFunctionImports = Map.of();
+    private Map<String, String> currentValueImports = Map.of();
     private List<String> currentOnDemandImports = List.of();
     private final Deque<Set<Token>> flowWriteScopes = new ArrayDeque<>();
     private final Deque<LoopFlow> loopFlows = new ArrayDeque<>();
@@ -181,9 +186,8 @@ public final class Resolver {
         for (var unitIndex = 0; unitIndex < units.size(); unitIndex++) {
             final var unit = units.get(unitIndex);
             for (final var declaration : unit.declarations()) {
-                if (unitIndex > 0 && declaration instanceof Stmt.Var variable) {
-                    Zeron.resolutionError(new ResolutionError(variable.name(),
-                            "Top-level values outside the entry source unit are deferred until initialization order is specified."));
+                if (declaration instanceof Stmt.Var variable) {
+                    registerTopLevelValue(unit, variable);
                 }
                 if (!(declaration instanceof Stmt.FunctionDeclaration function)) continue;
                 if (unitIndex > 0 && function.typeDescriptor().returnType() instanceof InferDescriptor) {
@@ -195,24 +199,208 @@ public final class Resolver {
                 }
             }
         }
+        for (final var value : topLevelValues.entrySet()) {
+            if (functions.containsKey(value.getKey())) {
+                Zeron.resolutionError(new ResolutionError(value.getValue().name(),
+                        "A top-level function and value cannot share the name '" + value.getKey() + "'."));
+            }
+        }
+        for (final var unit : units) {
+            packageName = unit.packageName();
+            final var imports = validateImports(unit);
+            currentTypeImports = imports.types();
+            currentFunctionImports = imports.functions();
+            currentValueImports = imports.values();
+            currentOnDemandImports = imports.onDemandPackages();
+            for (final var declaration : unit.declarations()) {
+                if (!(declaration instanceof Stmt.Var variable)) continue;
+                if (variable.type() instanceof InferDescriptor) continue;
+                final var symbol = topLevelTokensByDeclaration.get(variable);
+                if (!symbols.containsSymbol(symbol)) {
+                    symbols.declareSymbol(variable, symbol, variable.type(), variable.mutability());
+                }
+            }
+        }
+        for (final var sourceValue : topLevelValueResolutionOrder(units)) {
+            final var unit = sourceValue.unit();
+            packageName = unit.packageName();
+            final var imports = validateImports(unit);
+            currentTypeImports = imports.types();
+            currentFunctionImports = imports.functions();
+            currentValueImports = imports.values();
+            currentOnDemandImports = imports.onDemandPackages();
+            resolve(sourceValue.declaration());
+        }
         for (final var unit : units) {
             packageName = unit.packageName();
             if (unit.metadataOnly()) continue;
             final var imports = validateImports(unit);
             currentTypeImports = imports.types();
             currentFunctionImports = imports.functions();
+            currentValueImports = imports.values();
             currentOnDemandImports = imports.onDemandPackages();
-            for (final var statement : unit.declarations()) resolve(statement);
+            for (final var statement : unit.declarations()) {
+                if (!(statement instanceof Stmt.Var)) resolve(statement);
+            }
         }
         Zeron.debug("resolution finished successfully with symbol table: \n" + symbols);
     }
 
+    public Token topLevelValueSymbol(final Stmt.Var declaration) {
+        return topLevelTokensByDeclaration.get(declaration);
+    }
+
+    private List<SourceValue> topLevelValueResolutionOrder(final List<CompilationUnit> units) {
+        final var values = new ArrayList<SourceValue>();
+        for (final var unit : units) {
+            if (unit.metadataOnly()) continue;
+            for (final var declaration : unit.declarations()) {
+                if (declaration instanceof Stmt.Var variable) values.add(new SourceValue(unit, variable));
+            }
+        }
+        final var valueByDeclaration = new IdentityHashMap<Stmt.Var, SourceValue>();
+        values.forEach(value -> valueByDeclaration.put(value.declaration(), value));
+        final var dependencies = new IdentityHashMap<Stmt.Var, Set<Stmt.Var>>();
+        for (final var value : values) {
+            final var names = new LinkedHashSet<String>();
+            collectVariableNames(value.declaration().initializer(), names);
+            final var dependenciesForValue = Collections.newSetFromMap(new IdentityHashMap<Stmt.Var, Boolean>());
+            for (final var name : names) {
+                final var targetName = importedValueName(value.unit(), name);
+                if (targetName == null) continue;
+                final var target = topLevelValues.get(targetName);
+                if (target != null && target.type() instanceof InferDescriptor) {
+                    dependenciesForValue.add(target);
+                }
+            }
+            dependencies.put(value.declaration(), dependenciesForValue);
+        }
+        final var states = new IdentityHashMap<Stmt.Var, Integer>();
+        final var stack = new ArrayDeque<Stmt.Var>();
+        final var result = new ArrayList<SourceValue>();
+        for (final var value : values) {
+            visitTopLevelValue(value.declaration(), valueByDeclaration, dependencies, states, stack, result);
+        }
+        return List.copyOf(result);
+    }
+
+    private String importedValueName(final CompilationUnit unit, final String simpleName) {
+        final var localQualifiedName = qualify(unit.packageName(), simpleName);
+        if (topLevelValues.containsKey(localQualifiedName)) return localQualifiedName;
+        for (final var imported : unit.imports()) {
+            if (!imported.onDemand() && imported.localName().equals(simpleName)
+                    && topLevelValues.containsKey(imported.qualifiedName())) {
+                return imported.qualifiedName();
+            }
+        }
+        final var starCandidates = unit.imports().stream()
+                .filter(ImportDeclaration::onDemand)
+                .map(imported -> qualify(imported.qualifiedName(), simpleName))
+                .filter(topLevelValues::containsKey)
+                .filter(candidate -> topLevelValues.get(candidate).isPublic())
+                .distinct()
+                .toList();
+        return starCandidates.size() == 1 ? starCandidates.getFirst() : null;
+    }
+
+    private void visitTopLevelValue(
+            final Stmt.Var declaration,
+            final Map<Stmt.Var, SourceValue> valueByDeclaration,
+            final Map<Stmt.Var, Set<Stmt.Var>> dependencies,
+            final IdentityHashMap<Stmt.Var, Integer> states,
+            final Deque<Stmt.Var> stack,
+            final List<SourceValue> result) {
+        final var state = states.getOrDefault(declaration, 0);
+        if (state == 2) return;
+        if (state == 1) {
+            final var cycle = new ArrayList<String>();
+            for (final var member : stack) {
+                cycle.add(member.name().lexeme());
+                if (member == declaration) break;
+            }
+            Collections.reverse(cycle);
+            cycle.add(declaration.name().lexeme());
+            Zeron.resolutionError(new ResolutionError(declaration.name(),
+                    "Top-level value initialization cycle: " + String.join(" -> ", cycle) + "."));
+        }
+        states.put(declaration, 1);
+        stack.push(declaration);
+        dependencies.getOrDefault(declaration, Set.of()).forEach(dependency ->
+                visitTopLevelValue(dependency, valueByDeclaration, dependencies, states, stack, result));
+        stack.pop();
+        states.put(declaration, 2);
+        result.add(valueByDeclaration.get(declaration));
+    }
+
+    private void collectVariableNames(final Expr expression, final Set<String> names) {
+        if (expression == null) return;
+        if (expression instanceof Expr.Variable variable) names.add(variable.name.lexeme());
+        if (expression instanceof Expr.Call call) names.add(call.callee.lexeme());
+        for (final var field : expression.getClass().getFields()) {
+            try {
+                final var child = field.get(expression);
+                if (child instanceof Expr childExpression) {
+                    collectVariableNames(childExpression, names);
+                } else if (child instanceof List<?> children) {
+                    for (final var item : children) {
+                        if (item instanceof Expr childExpression) collectVariableNames(childExpression, names);
+                        else if (item instanceof Stmt statement) collectVariableNames(statement, names);
+                    }
+                }
+            } catch (IllegalAccessException exception) {
+                throw new IllegalStateException("Unable to inspect value initializer.", exception);
+            }
+        }
+    }
+
+    private void collectVariableNames(final Stmt statement, final Set<String> names) {
+        if (statement == null || !statement.getClass().isRecord()) return;
+        for (final var component : statement.getClass().getRecordComponents()) {
+            try {
+                final var child = component.getAccessor().invoke(statement);
+                if (child instanceof Expr expression) collectVariableNames(expression, names);
+                else if (child instanceof Stmt childStatement) collectVariableNames(childStatement, names);
+                else if (child instanceof List<?> children) {
+                    for (final var item : children) {
+                        if (item instanceof Expr expression) collectVariableNames(expression, names);
+                        else if (item instanceof Stmt childStatement) collectVariableNames(childStatement, names);
+                    }
+                }
+            } catch (ReflectiveOperationException exception) {
+                throw new IllegalStateException("Unable to inspect value initializer.", exception);
+            }
+        }
+    }
+
     private record ImportEnvironment(Map<String, String> types, Map<String, String> functions,
-                                     List<String> onDemandPackages) {}
+                                     Map<String, String> values, List<String> onDemandPackages) {}
+    private record SourceValue(CompilationUnit unit, Stmt.Var declaration) {}
+
+    private void registerTopLevelValue(final CompilationUnit unit, final Stmt.Var variable) {
+        if (variable.initializer() == null) {
+            Zeron.resolutionError(new ResolutionError(variable.name(),
+                    "Top-level values require an initializer."));
+        }
+        if (variable.isPublic() && variable.mutability().isReassignable()) {
+            Zeron.resolutionError(new ResolutionError(variable.name(),
+                    "Public top-level values must be immutable."));
+        }
+        final var qualifiedName = qualify(unit.packageName(), variable.name().lexeme());
+        if (topLevelValues.putIfAbsent(qualifiedName, variable) != null) {
+            Zeron.resolutionError(new ResolutionError(variable.name(),
+                    "Top-level value '" + qualifiedName + "' is already declared."));
+            return;
+        }
+        final var symbol = new Token(variable.name().type(), qualifiedName,
+                variable.name().literal(), variable.name().line());
+        topLevelValueSymbols.put(qualifiedName, symbol);
+        topLevelTokensByDeclaration.put(variable, symbol);
+    }
 
     private ImportEnvironment validateImports(final CompilationUnit unit) {
         final var importedTypes = new LinkedHashMap<String, String>();
         final var importedFunctions = new LinkedHashMap<String, String>();
+        final var importedValues = new LinkedHashMap<String, String>();
         final var onDemandPackages = new ArrayList<String>();
         final var localTypeNames = new HashSet<String>();
         final var localValueNames = new HashSet<String>();
@@ -222,6 +410,8 @@ public final class Resolver {
                 .map(Resolver::simpleName).forEach(localTypeNames::add);
         functions.keySet().stream().filter(name -> packageOf(name).equals(unit.packageName()))
             .map(Resolver::simpleName).forEach(localValueNames::add);
+        topLevelValues.keySet().stream().filter(name -> packageOf(name).equals(unit.packageName()))
+                .map(Resolver::simpleName).forEach(localValueNames::add);
         unit.declarations().stream().filter(Stmt.Var.class::isInstance).map(Stmt.Var.class::cast)
             .map(variable -> variable.name().lexeme()).forEach(localValueNames::add);
 
@@ -234,7 +424,8 @@ public final class Resolver {
                 }
                 final var packageExists = classes.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
                         || contracts.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
-                        || functions.keySet().stream().anyMatch(name -> packageOf(name).equals(target));
+                        || functions.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
+                        || topLevelValues.keySet().stream().anyMatch(name -> packageOf(name).equals(target));
                 if (!packageExists) {
                     Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
                             "Unknown Zeron package '" + target + "' in star import."));
@@ -245,9 +436,10 @@ public final class Resolver {
             final var classDeclaration = classes.get(target);
             final var contractDeclaration = contracts.get(target);
             final var functionDeclaration = functions.get(target);
+            final var valueDeclaration = topLevelValues.get(target);
             final var javaClass = javaClassPath.find(target);
             if (classDeclaration == null && contractDeclaration == null
-                    && functionDeclaration == null && javaClass == null) {
+                    && functionDeclaration == null && valueDeclaration == null && javaClass == null) {
                 Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
                         "Unknown import target '" + target + "'."));
             }
@@ -258,10 +450,11 @@ public final class Resolver {
             final var isPublic = classDeclaration != null ? classDeclaration.isPublic()
                     : contractDeclaration != null ? contractDeclaration.isPublic()
                     : functionDeclaration != null ? functionDeclaration.isPublic()
+                    : valueDeclaration != null ? valueDeclaration.isPublic()
                     : true;
             if (!packageOf(target).equals(unit.packageName()) && !isPublic) {
                 Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
-                        "Type '" + target + "' is not public."));
+                        (valueDeclaration == null ? "Type '" : "Value '") + target + "' is not public."));
             }
             if (classDeclaration != null || contractDeclaration != null || javaClass != null) {
                 if (javaClass != null && javaClass.hasGenericSignature()) {
@@ -281,7 +474,24 @@ public final class Resolver {
                     Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
                             "Duplicate or ambiguous type import '" + importDeclaration.localName() + "'."));
                 }
+            } else if (valueDeclaration != null) {
+                if (importedFunctions.containsKey(importDeclaration.localName())) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Import alias conflicts with an imported function."));
+                }
+                if (localValueNames.contains(importDeclaration.localName())) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Import alias conflicts with a value in the current package."));
+                }
+                if (importedValues.putIfAbsent(importDeclaration.localName(), target) != null) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Duplicate or ambiguous value import '" + importDeclaration.localName() + "'."));
+                }
             } else {
+                if (importedValues.containsKey(importDeclaration.localName())) {
+                    Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
+                            "Import alias conflicts with an imported value."));
+                }
                 if (localValueNames.contains(importDeclaration.localName())) {
                     Zeron.resolutionError(new ResolutionError(importDeclaration.location(),
                             "Import alias conflicts with a value in the current package."));
@@ -293,7 +503,7 @@ public final class Resolver {
             }
         }
         return new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions),
-                List.copyOf(onDemandPackages));
+                Map.copyOf(importedValues), List.copyOf(onDemandPackages));
     }
 
     private void registerFunction(final String ownerPackage, final Stmt.FunctionDeclaration function) {
@@ -1139,7 +1349,11 @@ public final class Resolver {
                 Zeron.debug("resolving variable       " + var.name().lexeme() + " " + var.type());
                 if (!(var.type() instanceof InferDescriptor)) validateType(var.type(), var.name());
 
-                declare(var, var.name(), var.type(), var.mutability());
+                final var globalToken = topLevelTokensByDeclaration.get(var);
+                final var symbolName = globalToken == null ? var.name() : globalToken;
+                if (globalToken == null || !symbols.containsSymbol(symbolName)) {
+                    declare(var, symbolName, var.type(), var.mutability());
+                }
                 TypeDescriptor resolvedType = var.type();
 
                 // let i: Int;
@@ -1176,7 +1390,7 @@ public final class Resolver {
                     }
                     // replaces <infer> with resolved type for the symbol
                     if (var.type() instanceof InferDescriptor)
-                        symbols.setResolvedType(var.name(), resolvedType);
+                        symbols.setResolvedType(symbolName, resolvedType);
                 }
 
                 // if initializer ends up as <infer>, it means expectedType was <infer> as well
@@ -1193,7 +1407,7 @@ public final class Resolver {
                             + resolvedType + " from initializer");
                 }
 
-                define(var.name());
+                define(symbolName);
             }
             case Stmt.While(Token keyword, Expr condition, Stmt body) -> {
                 final var incoming = flowState.copy();
@@ -1369,7 +1583,15 @@ public final class Resolver {
             // resolve the expression, ensure it's assignable
             // return the assigned type (the resolved one)
             case Expr.Assignment assignment -> {
-                final var binding = symbols.getSymbol(assignment.name);
+                final var symbolName = symbols.containsSymbol(assignment.name)
+                        ? assignment.name : resolveTopLevelValueSymbol(assignment.name);
+                if (symbolName == null) {
+                    Zeron.resolutionError(new ResolutionError(assignment.name,
+                            "Unknown value '" + assignment.name.lexeme() + "'."));
+                    yield TypeDescriptor.ofInfer();
+                }
+                assignment.setResolvedSymbolToken(symbolName);
+                final var binding = symbols.getSymbol(symbolName);
                 if (!binding.mutability().isReassignable()) {
                     Zeron.resolutionError(new ResolutionError(assignment.name,
                             "Cannot reassign immutable binding '" + assignment.name.lexeme() + "'."));
@@ -1382,7 +1604,7 @@ public final class Resolver {
                     flowState.remove(binding.name());
                     for (final var writeScope : flowWriteScopes) writeScope.add(binding.name());
                 }
-                symbols.define(assignment.name);
+                symbols.define(symbolName);
                 assignment.setType(expectedType);
                 yield expectedType;
             }
@@ -1506,8 +1728,11 @@ public final class Resolver {
                 // must disambiguate call between lambda (variable) and function (global)
                 FunctionDescriptor descriptor;
                 // check locally first, since lambdas shadow functions
-                if (symbols.containsSymbol(call.callee)) {
-                    final var symbol = getSymbol(call.callee);
+                final var callableSymbol = symbols.containsSymbol(call.callee)
+                        ? call.callee : resolveTopLevelValueSymbol(call.callee);
+                if (callableSymbol != null && symbols.containsSymbol(callableSymbol)) {
+                    call.setResolvedSymbolToken(callableSymbol);
+                    final var symbol = getSymbol(callableSymbol);
                     if (symbol instanceof FunctionDescriptor f) {
                         descriptor = f;
                     } else if (symbol instanceof ReferenceDescriptor reference
@@ -1620,6 +1845,7 @@ public final class Resolver {
                 iff.setType(commonType);
                 yield commonType;
             }
+            case Expr.Match match -> resolveMatch(match);
             case Expr.Coalesce coalesce -> {
                 final var leftType = resolve(coalesce.left);
                 final var afterLeft = flowState.copy();
@@ -1759,7 +1985,9 @@ public final class Resolver {
                     }
                     yield fieldType;
                 }
-                if (!symbols.containsSymbol(name)) {
+                final var valueSymbol = resolveTopLevelValueSymbol(name);
+                final var resolvedSymbol = symbols.containsSymbol(name) ? name : valueSymbol;
+                if (resolvedSymbol == null) {
                     final var functionName = resolveFunctionName(name.lexeme(), name);
                     if (functionName != null) {
                         final var functionType = (FunctionDescriptor) symbols
@@ -1772,19 +2000,146 @@ public final class Resolver {
                     }
                     final var implicitFieldType = resolveImplicitFieldRead(variable);
                     if (implicitFieldType != null) yield implicitFieldType;
+                    Zeron.resolutionError(new ResolutionError(name,
+                            "Unknown symbol: '" + name.lexeme() + "'."));
+                    yield TypeDescriptor.ofInfer();
                 }
                 Zeron.debug("resolving variable lookup   " + name.lexeme());
-                if (symbols.containsSymbol(name) && !symbols.getSymbol(name).isInit()) {
+                if (!symbols.getSymbol(resolvedSymbol).isInit()
+                        && symbols.getSymbol(resolvedSymbol).lvt() != SymbolTable.GLOBAL) {
                     Zeron.resolutionError(new ResolutionError(name,
                             "Can't read local variable in its own initializer."));
                 }
 
-                final var resolvedType = effectiveType(symbols.getSymbol(name));
+                final var binding = symbols.getSymbol(resolvedSymbol);
+                final var resolvedType = effectiveType(binding);
+                if (binding.declaration() instanceof Stmt.Var value
+                        && topLevelTokensByDeclaration.containsKey(value)) {
+                    variable.setResolvedValue(resolvedSymbol, value);
+                }
                 variable.setType(resolvedType);
                 Zeron.debug(" -> " + resolvedType);
                 yield resolvedType;
             }
         };
+    }
+
+    private TypeDescriptor resolveMatch(final Expr.Match match) {
+        var scrutineeType = resolve(match.scrutinee);
+        if (scrutineeType instanceof ReferenceDescriptor reference) {
+            scrutineeType = reference.baseType();
+        }
+        if (scrutineeType instanceof NullableDescriptor) {
+            Zeron.resolutionError(new ResolutionError(match.keyword,
+                    "Matching nullable values is not supported; prove the value non-null first."));
+        }
+        if (!(scrutineeType instanceof NominalDescriptor || scrutineeType instanceof GenericDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(match.keyword,
+                    "Match expressions require a sealed contract value."));
+        }
+
+        final var sealedContract = contracts.get(scrutineeType.name());
+        if (sealedContract == null || !sealedContract.isSealed()) {
+            Zeron.resolutionError(new ResolutionError(match.keyword,
+                    "Match expressions require a sealed contract value."));
+        }
+        final var contractArguments = scrutineeType instanceof GenericDescriptor generic
+                ? generic.typeParameters()
+                : List.<TypeDescriptor>of();
+        if (contractArguments.size() != sealedContract.typeParameters().size()) {
+            Zeron.resolutionError(new ResolutionError(match.keyword,
+                    "The sealed contract type arguments could not be resolved."));
+        }
+
+        final var permittedNames = sealedContract.permittedClasses().stream()
+                .map(permitted -> permitted.name().lexeme())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        final var matchedNames = new LinkedHashSet<String>();
+        boolean wildcardSeen = false;
+        final var incomingFlow = flowState.copy();
+        final var armFlows = new ArrayList<FlowState>();
+        TypeDescriptor resultType = null;
+
+        for (final var arm : match.arms) {
+            if (wildcardSeen) {
+                Zeron.resolutionError(new ResolutionError(arm.keyword(),
+                        "A match case after '_' is unreachable."));
+            }
+
+            TypeDescriptor armType = null;
+            if (arm.wildcard()) {
+                if (matchedNames.containsAll(permittedNames)) {
+                    Zeron.resolutionError(new ResolutionError(arm.keyword(),
+                            "A wildcard case is unreachable because every permitted case is covered."));
+                }
+                wildcardSeen = true;
+            } else {
+                armType = arm.patternType();
+                validateType(armType, arm.keyword());
+                if (armType instanceof NullableDescriptor || armType instanceof ReferenceDescriptor) {
+                    Zeron.resolutionError(new ResolutionError(arm.keyword(),
+                            "Match case types must be non-null class types."));
+                }
+                final var classDeclaration = classes.get(armType.name());
+                if (classDeclaration == null) {
+                    Zeron.resolutionError(new ResolutionError(arm.keyword(),
+                            "Match cases must name permitted classes."));
+                }
+                if (!permittedNames.contains(armType.name())) {
+                    Zeron.resolutionError(new ResolutionError(arm.keyword(),
+                            "Class '" + armType.name() + "' is not permitted by sealed contract '"
+                                    + sealedContract.name().lexeme() + "'."));
+                }
+                if (!matchedNames.add(armType.name())) {
+                    Zeron.resolutionError(new ResolutionError(arm.keyword(),
+                            "Duplicate match case for '" + armType.name() + "'."));
+                }
+                final var classArguments = armType instanceof GenericDescriptor generic
+                        ? generic.typeParameters()
+                        : List.<TypeDescriptor>of();
+                if (!classArguments.equals(contractArguments)) {
+                    Zeron.resolutionError(new ResolutionError(arm.keyword(),
+                            "Match case type arguments must match the sealed contract's type arguments."));
+                }
+            }
+
+            flowState = incomingFlow.copy();
+            beginScope();
+            try {
+                if (arm.alias() != null) {
+                    if (arm.wildcard()) {
+                        Zeron.resolutionError(new ResolutionError(arm.keyword(),
+                                "A wildcard match case cannot bind a value."));
+                    }
+                    declare(new Stmt.Var(arm.alias(), armType, null,
+                                    BindingMutability.IMMUTABLE, false),
+                            arm.alias(), armType, BindingMutability.IMMUTABLE);
+                    define(arm.alias());
+                }
+                final var armResultType = resolve(arm.expression());
+                resultType = resultType == null
+                        ? armResultType
+                        : ensureCommonParent(arm.keyword(), resultType, armResultType);
+                armFlows.add(flowState.copy());
+            } finally {
+                endScope();
+            }
+        }
+
+        if (!wildcardSeen && !matchedNames.containsAll(permittedNames)) {
+            final var missing = permittedNames.stream()
+                    .filter(name -> !matchedNames.contains(name))
+                    .map(Resolver::simpleName)
+                    .collect(java.util.stream.Collectors.joining(", "));
+            Zeron.resolutionError(new ResolutionError(match.keyword,
+                    "Non-exhaustive match; missing cases: " + missing + "."));
+        }
+
+        var joinedFlow = FlowState.unreachable();
+        for (final var armFlow : armFlows) joinedFlow = FlowState.join(joinedFlow, armFlow);
+        flowState = joinedFlow;
+        match.setType(resultType);
+        return resultType;
     }
 
     private TypeDescriptor resolveTypeTest(final Expr.TypeTest test) {
@@ -2672,6 +3027,26 @@ public final class Resolver {
         return candidates.isEmpty() ? null : candidates.getFirst();
     }
 
+    private Token resolveTopLevelValueSymbol(final Token name) {
+        final var localName = qualify(packageName, name.lexeme());
+        if (topLevelValues.containsKey(localName)) return topLevelValueSymbols.get(localName);
+        final var explicitImport = currentValueImports.get(name.lexeme());
+        if (explicitImport != null) return topLevelValueSymbols.get(explicitImport);
+        final var candidates = currentOnDemandImports.stream()
+                .filter(importedPackage -> !importedPackage.equals(packageName))
+                .map(importedPackage -> qualify(importedPackage, name.lexeme()))
+                .filter(topLevelValues::containsKey)
+                .filter(valueName -> topLevelValues.get(valueName).isPublic())
+                .distinct()
+                .toList();
+        if (candidates.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(name,
+                    "Ambiguous value '" + name.lexeme()
+                            + "' from star imports; add an explicit import or alias."));
+        }
+        return candidates.isEmpty() ? null : topLevelValueSymbols.get(candidates.getFirst());
+    }
+
     private TypeDescriptor resolveArgument(final Expr argument,
                                            final TypeDescriptor expectedType) {
         if (argument instanceof Expr.Variable variable && symbols.containsSymbol(variable.name)) {
@@ -3180,6 +3555,12 @@ public final class Resolver {
             case Expr.If iff -> referencesAnyVariable(iff.condition, names)
                 || referencesAnyVariable(iff.thenExpr, names)
                 || referencesAnyVariable(iff.elseExpr, names);
+            case Expr.Match match -> referencesAnyVariable(match.scrutinee, names)
+                || match.arms.stream().anyMatch(arm -> {
+                    final var armNames = new HashSet<>(names);
+                    if (arm.alias() != null) armNames.remove(arm.alias().lexeme());
+                    return referencesAnyVariable(arm.expression(), armNames);
+                });
             case Expr.Logical logical -> referencesAnyVariable(logical.left, names)
                 || referencesAnyVariable(logical.right, names);
             case Expr.Coalesce coalesce -> referencesAnyVariable(coalesce.left, names)

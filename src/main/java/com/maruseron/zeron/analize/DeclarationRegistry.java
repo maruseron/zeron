@@ -173,6 +173,13 @@ final class DeclarationRegistry {
                 ? qualify(ownerPackage, function.name().lexeme())
                 : NamespaceMembers.qualifiedName(ownerPackage, namespaceName, function.name().lexeme());
         final var overloads = functionOverloads.computeIfAbsent(qualifiedName, _ -> new ArrayList<>());
+        if (!overloads.isEmpty()
+                && overloads.getFirst() instanceof Stmt.ExtensionMethod
+                    != function instanceof Stmt.ExtensionMethod) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                    function.name(), "An extension method and a namespace function cannot share '"
+                            + qualifiedName + "'."));
+        }
         if (overloads.stream().anyMatch(existing ->
                 canonicalParameterSignature(existing.typeDescriptor())
                         .equals(canonicalParameterSignature(function.typeDescriptor()))

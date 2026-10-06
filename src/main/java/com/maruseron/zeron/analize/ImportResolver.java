@@ -15,6 +15,7 @@ final class ImportResolver {
     record ImportEnvironment(Map<String, String> types,
                              Map<String, String> functions,
                              Map<String, String> values,
+                             Map<String, String> extensions,
                              List<String> onDemandPackages) {}
 
     private static final Set<String> BUILTIN_TYPES = Set.of(
@@ -48,6 +49,7 @@ final class ImportResolver {
         final var importedTypes = new LinkedHashMap<String, String>();
         final var importedFunctions = new LinkedHashMap<String, String>();
         final var importedValues = new LinkedHashMap<String, String>();
+        final var importedExtensions = new LinkedHashMap<String, String>();
         final var onDemandPackages = new ArrayList<String>();
         final var localTypeNames = new HashSet<String>();
         final var localValueNames = new HashSet<String>();
@@ -90,6 +92,11 @@ final class ImportResolver {
             final var functionDeclaration = functions.get(target);
             final var functionFamily = functionOverloads.getOrDefault(target,
                     functionDeclaration == null ? List.of() : List.of(functionDeclaration));
+            final var extensionFamily = functionFamily.stream()
+                    .filter(Stmt.ExtensionMethod.class::isInstance)
+                    .map(Stmt.ExtensionMethod.class::cast).toList();
+            final var ordinaryFunctionFamily = functionFamily.stream()
+                    .filter(candidate -> !(candidate instanceof Stmt.ExtensionMethod)).toList();
             final var valueDeclaration = topLevelValues.get(target);
             final var javaClass = javaClassPath.find(target);
             if (classDeclaration == null && contractDeclaration == null
@@ -106,7 +113,10 @@ final class ImportResolver {
             }
             final var isPublic = classDeclaration != null ? classDeclaration.isPublic()
                     : contractDeclaration != null ? contractDeclaration.isPublic()
-                    : !functionFamily.isEmpty() ? functionFamily.stream().anyMatch(Stmt.FunctionDeclaration::isPublic)
+                    : !extensionFamily.isEmpty()
+                        ? extensionFamily.stream().anyMatch(Stmt.ExtensionMethod::isPublic)
+                    : !ordinaryFunctionFamily.isEmpty()
+                        ? ordinaryFunctionFamily.stream().anyMatch(Stmt.FunctionDeclaration::isPublic)
                     : valueDeclaration != null ? valueDeclaration.isPublic()
                     : true;
             if (!targetPackage.equals(unit.packageName()) && !isPublic) {
@@ -151,6 +161,12 @@ final class ImportResolver {
                             importDeclaration.location(),
                             "Duplicate or ambiguous value import '" + importDeclaration.localName() + "'."));
                 }
+            } else if (!extensionFamily.isEmpty()) {
+                if (importedExtensions.putIfAbsent(importDeclaration.localName(), target) != null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                            importDeclaration.location(),
+                            "Duplicate or ambiguous extension import '" + importDeclaration.localName() + "'."));
+                }
             } else {
                 if (importedValues.containsKey(importDeclaration.localName())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
@@ -174,7 +190,8 @@ final class ImportResolver {
             }
         }
         return new Validation(new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions),
-                Map.copyOf(importedValues), List.copyOf(onDemandPackages)), List.copyOf(errors),
+                Map.copyOf(importedValues), Map.copyOf(importedExtensions), List.copyOf(onDemandPackages)),
+                List.copyOf(errors),
                 Set.copyOf(invalidAliases));
     }
 

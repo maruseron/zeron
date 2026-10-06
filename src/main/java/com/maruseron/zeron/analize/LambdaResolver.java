@@ -50,7 +50,8 @@ final class LambdaResolver {
                     "Function reference does not resolve to a top-level function."));
         }
         final var functionToken = context.functionSymbolTokens.get(functionName);
-        final var declarations = context.functionOverloads.getOrDefault(functionName, List.of());
+        final var declarations = context.functionOverloads.getOrDefault(functionName, List.of()).stream()
+                .filter(candidate -> !(candidate instanceof Stmt.ExtensionMethod)).toList();
         final var selectedDeclaration = declarations.size() > 1
                 ? selectFunctionReferenceOverload(context, reference, expectedType, declarations)
                 : declarations.isEmpty() ? null : declarations.getFirst();
@@ -509,9 +510,31 @@ final class LambdaResolver {
                 context.symbols.setResolvedReturnType(
                         MemberInteropResolver.functionSymbolToken(context, function.name()), resolvedType);
             }
+
                 Zeron.debug(" resolved function " + function.name().lexeme()
                     + " -> " + context.symbols.getFunction(
                             MemberInteropResolver.functionSymbolToken(context, function.name())).type());
+        } finally {
+            context.frame.expectedReturnTypes.pop();
+            endScope(context);
+            context.frame.loopDepth = enclosingLoopDepth;
+            context.frame.flowState = enclosingFlow;
+        }
+    }
+
+    static void resolveExtensionMethod(final ResolutionContext context,
+                                       final Stmt.ExtensionMethod extension) {
+        final var enclosingLoopDepth = context.frame.loopDepth;
+        final var enclosingFlow = context.frame.flowState;
+        context.frame.loopDepth = 0;
+        context.frame.flowState = new FlowState();
+        beginScope(context);
+        context.frame.expectedReturnTypes.push(extension.typeDescriptor().returnType());
+        try {
+            resolveParametersAndDefaults(context, extension, extension.parameters(),
+                    extension.typeDescriptor(), extension.defaultValues(), extension.minimumArity());
+            resolveStmts(context, extension.body());
+            ensureReturns(context, extension.name(), extension.typeDescriptor().returnType(), extension.body());
         } finally {
             context.frame.expectedReturnTypes.pop();
             endScope(context);

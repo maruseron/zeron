@@ -31,7 +31,7 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v12.bin|class-directory|library.jar>");
+            System.err.println("Usage: ZeronLibraryIndexDump <api-v13.bin|class-directory|library.jar>");
             return;
         }
         final var path = Path.of(args[0]);
@@ -61,6 +61,17 @@ public final class ZeronLibraryIndexDump {
                     System.out.println("  JVM owner: " + function.jvmOwner());
                     printMinimumArity(function.signature(), function.minimumArity(), function.variadic());
                     printVariadic(function.variadic());
+                }
+                case ZeronLibraryIndex.ExtensionExport extension -> {
+                    System.out.println("extension " + extension.qualifiedName()
+                            + formatTypeParameters(extension.signature().typeParameters())
+                            + formatParameters(extension.signature(), extension.variadic()) + ": "
+                            + formatType(extension.signature().returnType()));
+                    System.out.println("  Receiver: " + formatType(extension.receiverType()));
+                    System.out.println("  Mutating: " + extension.mutating());
+                    System.out.println("  JVM owner: " + extension.jvmOwner());
+                    printMinimumArity(extension.signature(), extension.minimumArity(), extension.variadic());
+                    printVariadic(extension.variadic());
                 }
                 case ZeronLibraryIndex.ValueExport value -> {
                     System.out.println("value " + value.qualifiedName() + ": " + formatType(value.type()));

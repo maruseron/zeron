@@ -151,6 +151,7 @@ final class CallResolver {
     private Stmt.FunctionDeclaration selectFunctionOverload(final Expr.Call call, final String functionName) {
             final var packageName = context.declarationPackages.getOrDefault(functionName, "");
             final var candidates = context.functionOverloads.getOrDefault(functionName, List.of()).stream()
+                    .filter(candidate -> !(candidate instanceof Stmt.ExtensionMethod))
                     .filter(candidate -> packageName.equals(context.packageName) || candidate.isPublic())
                     .toList();
             if (candidates.isEmpty()) throw new IllegalStateException("Resolved function disappeared.");

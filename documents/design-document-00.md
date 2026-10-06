@@ -34,6 +34,10 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Higher-order function calls and lambda values, including zero- and multi-parameter lambdas.
 - Nominal classes and contracts with private fields, declaration-ordered field initialization,
     canonical construction, methods, static conformance checking, and contract dispatch.
+- Explicitly imported extension methods for Zeron classes and contracts. Extensions resolve
+    statically, lower to receiver-first static functions, and cannot access private members.
+    Instance-method overloads (including contract defaults) take precedence when applicable;
+    otherwise imported extension overloads are considered. Mutating extensions require `&T`.
 - Invariant generic classes and contracts with explicit construction arguments, member substitution,
     declaration-site conformance, raw JVM erasure, erased-signature bridges, and callback adaptation
     across erased nominal fields and members.
@@ -133,10 +137,6 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     denotes a zero-parameter lambda. Multiline call chains and nested trailing lambdas need
     readability evaluation; ordinary parenthesized lambdas remain an escape hatch. Multiple
     trailing lambdas per call are out of scope.
-- Extension methods: explicitly imported, statically resolved functions callable with receiver syntax
-    and using implicit `this`. Declared instance methods take precedence; extensions cannot access
-    private members or add runtime dispatch. The first slice targets Zeron classes and contracts,
-    including compiled libraries; Java and intrinsic types remain deferred.
 - Import-scoped contract conformances represented by explicit witnesses. A type satisfies a contract
     only where the matching witness is imported; witnesses travel with generic and library APIs, and
     conflicting witnesses require disambiguation or are rejected. Witnesses are separate from object

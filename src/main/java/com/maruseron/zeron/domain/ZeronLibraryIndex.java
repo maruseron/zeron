@@ -27,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 12;
+    public static final int VERSION = 13;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -53,6 +53,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         for (final var exported : declarations) {
             final var packageName = switch (exported) {
                 case FunctionExport function -> packageName(function.jvmOwner());
+                case ExtensionExport extension -> packageName(extension.jvmOwner());
                 case ValueExport value -> packageName(value.jvmOwner());
                 default -> packageName(exported.qualifiedName());
             };
@@ -69,6 +70,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 } else {
                     addNamespaceMember(statements, function.namespaceName(), declaration);
                 }
+            }
+            case ExtensionExport extension -> {
+                final var name = token(simpleName(extension.qualifiedName()));
+                final var receiverParameterCount = extension.receiverTypeParameterCount();
+                final var typeParameters = extension.signature().typeParameters();
+                final var declaration = new Stmt.ExtensionMethod(name,
+                        parameterNames(extension.signature(), name.line()), extension.signature(),
+                        true, extension.mutating(), List.of(), List.of(),
+                        extension.minimumArity() + 1, extension.variadic(), extension.receiverType(),
+                        typeParameters.subList(0, receiverParameterCount),
+                        typeParameters.subList(receiverParameterCount, typeParameters.size()));
+                addNamespaceMember(statements, extension.namespaceName(), declaration);
             }
             case ValueExport value -> {
                 final var valueName = token(simpleName(value.qualifiedName()));
@@ -132,8 +145,31 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             .toList();
         }
 
-    public sealed interface ExportedDeclaration permits FunctionExport, ValueExport, ClassExport, ContractExport {
+    public sealed interface ExportedDeclaration permits FunctionExport, ExtensionExport,
+            ValueExport, ClassExport, ContractExport {
         String qualifiedName();
+    }
+
+    public record ExtensionExport(String qualifiedName, String jvmOwner, String namespaceName,
+                                 TypeDescriptor receiverType, int receiverTypeParameterCount,
+                                 FunctionDescriptor signature, boolean mutating, int minimumArity,
+                                 boolean variadic) implements ExportedDeclaration {
+        public ExtensionExport {
+            Objects.requireNonNull(qualifiedName);
+            Objects.requireNonNull(jvmOwner);
+            Objects.requireNonNull(namespaceName);
+            Objects.requireNonNull(receiverType);
+            Objects.requireNonNull(signature);
+            if (signature.parameters().isEmpty()
+                    || receiverTypeParameterCount < 0
+                    || receiverTypeParameterCount > signature.typeParameters().size()) {
+                throw new IllegalArgumentException("Invalid extension export.");
+            }
+            validateMinimumArity(TypeDescriptor.functionOf(signature.name(), signature.returnType(),
+                    signature.parameters().subList(1, signature.parameters().size())
+                            .toArray(TypeDescriptor[]::new)),
+                    minimumArity, variadic);
+        }
     }
 
     public record FunctionExport(String qualifiedName,
@@ -277,6 +313,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             for (final var member : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = member.declaration();
                 switch (declaration) {
+                    case Stmt.ExtensionMethod extension when extension.isPublic() -> {
+                        final var name = NamespaceMembers.qualifiedName(unit.packageName(),
+                                member.namespaceName(), extension.name().lexeme());
+                        final var owner = functionOwners.apply(extension);
+                        if (owner == null) {
+                            throw new IllegalStateException("Missing resolved owner for extension " + name);
+                        }
+                        exports.add(new ExtensionExport(name, owner, member.namespaceName(),
+                                extension.receiverType(), extension.receiverTypeParameters().size(),
+                                functionTypes.apply(extension), extension.isMutating(),
+                                extension.minimumCallArity(), extension.variadic()));
+                    }
                     case Stmt.FunctionDeclaration function when function.isPublic() -> {
                         final var name = member.namespaceName() == null
                                 ? qualify(unit.packageName(), function.name().lexeme())
@@ -382,7 +430,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v12.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v13.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -408,7 +456,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v13.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -436,6 +484,19 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 writeFunction(output, function.signature(), new WriteContext());
                 output.writeInt(function.minimumArity());
                 output.writeBoolean(function.variadic());
+            }
+            case ExtensionExport extension -> {
+                output.writeByte(5);
+                output.writeUTF(extension.qualifiedName());
+                output.writeUTF(extension.jvmOwner());
+                output.writeUTF(extension.namespaceName());
+                final var context = new WriteContext();
+                writeFunction(output, extension.signature(), context);
+                writeType(output, extension.receiverType(), context);
+                output.writeInt(extension.receiverTypeParameterCount());
+                output.writeBoolean(extension.mutating());
+                output.writeInt(extension.minimumArity());
+                output.writeBoolean(extension.variadic());
             }
             case ValueExport value -> {
                 output.writeByte(4);
@@ -490,6 +551,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         return switch (input.readUnsignedByte()) {
             case 1 -> new FunctionExport(input.readUTF(), input.readUTF(), readOptionalString(input),
                     readFunction(input, new ReadContext()), input.readInt(), input.readBoolean());
+            case 5 -> {
+                final var name = input.readUTF();
+                final var owner = input.readUTF();
+                final var namespace = input.readUTF();
+                final var context = new ReadContext();
+                final var signature = readFunction(input, context);
+                final var receiverType = readType(input, context);
+                yield new ExtensionExport(name, owner, namespace, receiverType, input.readInt(),
+                        signature, input.readBoolean(), input.readInt(), input.readBoolean());
+            }
             case 4 -> new ValueExport(input.readUTF(), input.readUTF(), input.readUTF(),
                     readOptionalString(input), readType(input, new ReadContext()));
             case 2 -> {

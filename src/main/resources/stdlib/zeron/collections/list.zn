@@ -32,8 +32,6 @@ public class List<T> is Iterable<T> {
 
     private constructor new;
 
-    public constructor of() = List<T>.empty();
-
     public constructor of(elements: T...) = List<T>.fromArray(elements);
 
     public constructor empty() = List<T>.new(allocateArray<T>(4), 0);

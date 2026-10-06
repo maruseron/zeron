@@ -100,7 +100,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v12.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v13.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -797,6 +797,11 @@ final class BytecodeEmitter {
                 }
             }
 
+        if (call.resolvedExtensionMethod() != null) {
+            emitExtensionCall(context, composer, call, receiverOnStack);
+            return;
+        }
+
         final var ownerName = call.resolvedOwnerName() != null
             ? call.resolvedOwnerName()
             : nominalName(context, call.receiver.getType());
@@ -858,6 +863,46 @@ final class BytecodeEmitter {
         final var erasedReturnType = TypeSubstitution.erase(descriptor.returnType());
         emitConversion(context, composer, erasedReturnType, resolvedDescriptor.returnType());
         context.lastEmittedType = resolvedDescriptor.returnType();
+    }
+
+    private static void emitExtensionCall(final CompilationContext context,
+                                          final CodeBuilder composer,
+                                          final Expr.MemberCall call,
+                                          final boolean receiverOnStack) {
+        final var extension = call.resolvedExtensionMethod();
+        final var owner = context.metadata.functionOwner(extension);
+        if (owner == null) throw new IllegalStateException("Resolved extension has no JVM owner.");
+        final var sourceType = extension.typeDescriptor();
+        final var resolvedType = call.resolvedDescriptor();
+        final var runtimeType = (FunctionDescriptor) TypeSubstitution.erase(sourceType);
+        final var resolvedRuntimeType = (FunctionDescriptor) TypeSubstitution.erase(resolvedType);
+        if (!receiverOnStack) emitExpr(context, composer, call.receiver);
+        emitConversion(context, composer, context.lastEmittedType,
+                TypeSubstitution.erase(resolvedRuntimeType.parameters().getFirst()));
+        if (call.variadicElementType() != null) {
+            final var callableArguments = TypeDescriptor.functionOf(sourceType.name(),
+                    sourceType.returnType(),
+                    sourceType.parameters().subList(1, sourceType.arity()).toArray(TypeDescriptor[]::new));
+            emitVariadicArguments(context, composer, call.arguments,
+                    (FunctionDescriptor) TypeSubstitution.erase(callableArguments),
+                    call.variadicFixedArity(),
+                    TypeSubstitution.erase(call.variadicElementType()));
+        } else {
+            for (int i = 0; i < call.arguments.size(); i++) {
+                emitExpr(context, composer, call.arguments.get(i));
+                emitConversion(context, composer, context.lastEmittedType,
+                        sourceType.parameters().get(i + 1));
+            }
+        }
+        final var invokedType = call.variadicElementType() != null
+                ? call.arguments.size() < call.variadicFixedArity()
+                    ? prefixFunctionType(runtimeType, call.arguments.size() + 1)
+                    : runtimeType
+                : prefixFunctionType(runtimeType, call.arguments.size() + 1);
+        composer.invokestatic(ClassDesc.of(owner), extension.name().lexeme(),
+                toJavaMethodDescriptor(invokedType));
+        emitConversion(context, composer, runtimeType.returnType(), call.getType());
+        context.lastEmittedType = call.getType();
     }
 
     private static FunctionDescriptor prefixFunctionType(final FunctionDescriptor functionType,

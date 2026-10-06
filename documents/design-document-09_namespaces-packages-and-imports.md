@@ -3,7 +3,8 @@
 ## Status
 
 Package headers, package-qualified nominal identities, explicit and star imports, aliases, and
-public versus package-visible declarations are implemented. Named source namespaces group functions
+public versus package-visible declarations are implemented. Explicit imports also select extension
+method families for receiver syntax. Named source namespaces group functions
 and immutable values within a package, independent of project directory layout. Namespace sealing,
 re-exports, and module-level visibility remain deferred. Project source discovery, library artifacts,
 Java interop, and compiler intrinsic bindings are covered separately in
@@ -32,7 +33,8 @@ package without imposing a source-directory convention.
 - `SymbolTable` keys functions and values by source spelling; class and contract types live in separate resolver maps.
 - Package and declaration identities are source-level names; the chosen JVM owners and output paths
     do not participate in name resolution. Build and output behavior is specified in doc 11.
-- Imports resolve public classes, contracts, function overload families, and immutable values.
+- Imports resolve public classes, contracts, function overload families, immutable values, and
+    explicitly named extension method families.
     An explicit function import names the family; call-site argument types select one public
     signature from it. Package-private
     declarations remain available within their package.
@@ -71,7 +73,7 @@ Goals for the source-language layer:
 Non-goals for this language-design document:
 
 - JPMS `module-info`, module-path resolution, services, or `opens`.
-- Re-exports, extension imports, or a dependency repository.
+- Re-exports or a dependency repository.
 - File-local visibility, friend modules, or a general build-system manifest.
 - Project source discovery, compiled-library distribution, Java interop, and intrinsic implementation
     binding; see [doc 11](design-document-11_compilation-libraries-and-host-integration.md).
@@ -94,11 +96,15 @@ ImportDeclaration     ::= "import" QualifiedName ["as" Identifier] ";"
                          | "import" QualifiedName "." "*" ";"
 QualifiedName         ::= Identifier {"." Identifier}
 TopLevelDeclaration  ::= VariableDeclaration | FunctionDeclaration | ClassDeclaration
-                         | ContractDeclaration | NamespaceDeclaration
+                         | ContractDeclaration | NamespaceDeclaration | ExtensionDeclaration
                          | "public" (VariableDeclaration | FunctionDeclaration | ClassDeclaration
-                         | ContractDeclaration)
+                         | ContractDeclaration | ExtensionDeclaration)
 NamespaceDeclaration ::= "namespace" Identifier "{" NamespaceMember* "}"
 NamespaceMember      ::= ["public"] (FunctionDeclaration | VariableDeclaration)
+ExtensionDeclaration ::= ["public"] "extension" [TypeParameters] Type "{"
+                         ExtensionMethod* "}"
+ExtensionMethod      ::= ["public"] ["mut"] "fn" Identifier [TypeParameters]
+                         "(" [ParameterList] ")" ":" Type MethodBody
 ```
 
 ### Named namespaces
@@ -178,6 +184,49 @@ an explicit import or alias disambiguates it. In a type annotation, explicitly i
 multiple star-imported packages are in scope so its qualified type identity is unambiguous. Star
 imports are not re-exports. Dot remains the receiver-member operator.
 
+Extension method families are imported explicitly with the package of the extension declaration,
+the receiver type's simple name, and the method name:
+
+```zeron
+package collections.extensions;
+
+import zeron.collections.List;
+
+public extension<T> List<T> {
+    public fn firstOr(fallback: T): T = ...;
+    public mut fn append(value: T): Unit = ...;
+}
+```
+
+A consumer imports each method family directly; aliases rename the extension name used after the
+receiver dot:
+
+```zeron
+import collections.extensions.List.firstOr as first;
+
+let value = values.first(defaultValue);
+```
+
+Importing the receiver type or star-importing its package does not activate extensions. An extension
+import does not make the function callable as a top-level function. Public use across packages
+requires both a public extension declaration and a public extension method; omitted visibility is
+package-visible.
+
+Member lookup first resolves visible class or contract instance-method overloads, including contract
+default methods. If that tier has an applicable best candidate, it wins; ambiguity in that tier is
+reported rather than hidden by an extension. Only when no visible instance candidate applies does
+resolution consider explicitly imported extensions with the matching local method name. Extension
+overloads use receiver and ordinary argument types for generic inference and specificity; defaults
+and variadic parameters affect applicability. Return types do not select an overload. An alias
+changes only the extension method name recognized at the receiver dot.
+
+An extension body receives an implicit `this` with read-only receiver capability unless its method
+is marked `mut`, in which case the receiver is `&T`. Mutating extensions can be called only through
+a mutable receiver view. Extension bodies can use public receiver members only: they are not class
+members, do not gain private access even in the receiver's package, and add no virtual dispatch.
+The compiler lowers each extension to a receiver-first static function. Extensions target only
+Zeron classes and contracts in this slice; Java and intrinsic receivers remain deferred.
+
 ### Project value initialization
 
 All initialized project top-level values, including values in the entry source unit, initialize
@@ -220,8 +269,9 @@ packages. Unmarked declarations are package-visible. The initial design has no t
 or `internal` modifier; package-private defaults avoid accidentally exporting a package's
 implementation. Existing default-package scripts remain mutually visible as before.
 
-Explicit imports target individual classes, contracts, functions, and immutable values, with aliases.
-Star imports, re-exports, and value imports are distinct; imports do not re-export declarations.
+Explicit imports target individual classes, contracts, functions, immutable values, and extension
+method families, with aliases. Star imports, re-exports, and value imports are distinct; imports do
+not re-export declarations.
 Built-in types remain
 implicitly available, but there is no implicit wildcard import of a standard library or `java.lang`.
 The CLI compiles the bundled
@@ -245,8 +295,8 @@ described in [design-document-11_compilation-libraries-and-host-integration.md](
 4. **Named namespaces: implemented first slice.** Reopenable compile-time groups of functions and
    immutable values, package-qualified but independent of file and directory layout. Qualified member
    access and individual member imports are supported; namespaces have no runtime identity.
-5. **Deferred language-level imports and ownership.** Re-exports, extension imports, and friend/module
-   visibility require separate semantics.
+5. **Deferred language-level imports and ownership.** Re-exports and friend/module visibility require
+   separate semantics.
 6. **Namespace sealing: deferred.** Define library ownership and contribution boundaries before
    preventing downstream namespace augmentation.
 
@@ -257,5 +307,7 @@ The following are acceptance criteria for the source naming and import model:
 - Same-simple-name classes/contracts in different packages have distinct source identities and generated binary names.
 - Same-package declarations are available without imports; only public declarations are imported across packages.
 - Explicit and star imports resolve public classes, contracts, and top-level functions; ambiguous star-import uses fail deterministically, and explicit imports disambiguate them.
+- Extension methods are available only through explicit imports, resolve statically after applicable
+  instance methods, enforce receiver mutability, and cannot access private members.
 - Package-qualified type identity propagates through generic substitution, contract projection, and `FunctionShapeKey`.
 - Imports and aliases are compile-time bindings; they do not by themselves load code or change source identity.

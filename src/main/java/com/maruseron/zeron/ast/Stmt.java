@@ -3,6 +3,7 @@ package com.maruseron.zeron.ast;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.ArrayDescriptor;
+import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.scan.Token;
@@ -25,7 +26,7 @@ public sealed interface Stmt {
     sealed interface Decl {}
 
     sealed interface FunctionDeclaration extends Stmt, Decl
-            permits Function, ExternalFunction {
+            permits Function, ExternalFunction, ExtensionMethod {
         Token name();
         List<Token> parameters();
         List<Expr> defaultValues();
@@ -33,6 +34,38 @@ public sealed interface Stmt {
         boolean variadic();
         FunctionDescriptor typeDescriptor();
         boolean isPublic();
+    }
+
+    record ExtensionMethod(Token name, List<Token> parameters,
+                           FunctionDescriptor typeDescriptor, boolean isPublic,
+                           boolean isMutating, List<Stmt> body, List<Expr> defaultValues,
+                           int minimumArity, boolean variadic, TypeDescriptor receiverType,
+                           List<TypeParameterDescriptor> receiverTypeParameters,
+                           List<TypeParameterDescriptor> methodTypeParameters)
+            implements FunctionDeclaration {
+        public ExtensionMethod {
+            parameters = List.copyOf(parameters);
+            body = List.copyOf(body);
+            defaultValues = List.copyOf(defaultValues);
+            receiverTypeParameters = List.copyOf(receiverTypeParameters);
+            methodTypeParameters = List.copyOf(methodTypeParameters);
+            Stmt.validateVariadic(parameters, typeDescriptor, variadic);
+            final var fixedArity = Stmt.fixedArity(parameters, variadic);
+            if (parameters.isEmpty() || minimumArity < 1 || minimumArity > fixedArity
+                    || defaultValues.size() > fixedArity - minimumArity
+                    || !(typeDescriptor.parameters().getFirst() instanceof ReferenceDescriptor reference
+                        ? reference.baseType() : typeDescriptor.parameters().getFirst()).equals(receiverType)) {
+                throw new IllegalArgumentException("Invalid extension method signature.");
+            }
+        }
+
+        public int minimumCallArity() {
+            return minimumArity - 1;
+        }
+
+        public int fixedCallArity() {
+            return Stmt.fixedArity(parameters, variadic) - 1;
+        }
     }
 
     static int minimumArity(final List<Token> parameters, final List<Expr> defaultValues) {

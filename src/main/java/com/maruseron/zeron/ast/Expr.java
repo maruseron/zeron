@@ -26,6 +26,7 @@ public sealed interface Expr {
         private FunctionDescriptor resolvedDescriptor;
         private Stmt.Method resolvedSourceMethod;
         private Stmt.ContractMethod resolvedContractMethod;
+        private Stmt.ExtensionMethod resolvedExtensionMethod;
         private Call namespaceCall;
         private String resolvedClassName;
         private String resolvedOwnerName;
@@ -60,6 +61,10 @@ public sealed interface Expr {
         public void setResolvedSourceMethod(final Stmt.Method method) { resolvedSourceMethod = method; }
         public Stmt.ContractMethod resolvedContractMethod() { return resolvedContractMethod; }
         public void setResolvedContractMethod(final Stmt.ContractMethod method) { resolvedContractMethod = method; }
+        public Stmt.ExtensionMethod resolvedExtensionMethod() { return resolvedExtensionMethod; }
+        public void setResolvedExtensionMethod(final Stmt.ExtensionMethod method) {
+            resolvedExtensionMethod = method;
+        }
         public Call namespaceCall() { return namespaceCall; }
         public void setNamespaceCall(final Call call) { namespaceCall = call; }
         public String resolvedClassName() { return resolvedClassName; }

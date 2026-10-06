@@ -38,6 +38,7 @@ public final class Scanner {
             entry("continue",    CONTINUE),
             entry("default",     DEFAULT),
             entry("else",        ELSE),
+            entry("extension",   EXTENSION),
             entry("external",    EXTERNAL),
             entry("false",       FALSE),
             entry("fn",          FN),

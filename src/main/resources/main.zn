@@ -1,9 +1,34 @@
 import zeron.io.println;
 
 import zeron.collections.List;
+import List.map;
 
-let fact = a -> List<Int>.fromArray(a);
+namespace List {
+    public fn sort<T>(list: &List<T>): Unit = ();
+}
+
+public extension<T> List<T> {
+    public fn map<U>(f: (T) -> U): &List<U> {
+        let result = List<U>.empty();
+        for (let t in this) {
+            result.add(f(t));
+        }
+        return result;
+    }
+}
+
+class Person {
+    public property name: String;
+    public property age: Int;
+}
 
 fn main() {
-    
+    let people = List<Person>.of(Person.new("netanyahu", 76), Person.new("epstein", 73));
+    let names = people.map(x -> x.name);
+
+    List.sort(names);
+
+    for (let name in names) {
+        println(name);
+    }
 }

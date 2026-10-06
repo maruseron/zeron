@@ -37,6 +37,8 @@ final class CompilationMetadata {
             for (final var declaration : library.declarations()) {
                 if (declaration instanceof ZeronLibraryIndex.FunctionExport function) {
                     functionOwners.putIfAbsent(function.qualifiedName(), function.jvmOwner());
+                } else if (declaration instanceof ZeronLibraryIndex.ExtensionExport extension) {
+                    functionOwners.putIfAbsent(extension.qualifiedName(), extension.jvmOwner());
                 } else if (declaration instanceof ZeronLibraryIndex.ValueExport value) {
                     valueOwners.putIfAbsent(value.qualifiedName(), value.jvmOwner());
                     valueInitializationOwners.putIfAbsent(value.qualifiedName(), value.initializationOwner());
@@ -49,12 +51,24 @@ final class CompilationMetadata {
                                 ? qualifiedName(unit.packageName(), function.name().lexeme())
                                 : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
                                         function.name().lexeme());
-                        libraries.stream().flatMap(libraryIndex -> libraryIndex.declarations().stream())
-                                .filter(ZeronLibraryIndex.FunctionExport.class::isInstance)
-                                .map(ZeronLibraryIndex.FunctionExport.class::cast)
-                                .filter(export -> export.qualifiedName().equals(qualifiedName)
-                                        && export.signature().equals(function.typeDescriptor()))
-                                .findFirst().ifPresent(export -> declarationOwners.put(function, export.jvmOwner()));
+                        final var owner = libraries.stream().flatMap(libraryIndex -> libraryIndex.declarations().stream())
+                                .filter(export -> export.qualifiedName().equals(qualifiedName))
+                                .filter(export -> switch (export) {
+                                    case ZeronLibraryIndex.FunctionExport functionExport ->
+                                            !(function instanceof Stmt.ExtensionMethod)
+                                                    && functionExport.signature().equals(function.typeDescriptor());
+                                    case ZeronLibraryIndex.ExtensionExport extensionExport ->
+                                            function instanceof Stmt.ExtensionMethod
+                                                    && extensionExport.signature().equals(function.typeDescriptor());
+                                    default -> false;
+                                })
+                                .map(export -> switch (export) {
+                                    case ZeronLibraryIndex.FunctionExport functionExport -> functionExport.jvmOwner();
+                                    case ZeronLibraryIndex.ExtensionExport extensionExport -> extensionExport.jvmOwner();
+                                    default -> null;
+                                })
+                                .findFirst().orElse(null);
+                        if (owner != null) declarationOwners.put(function, owner);
                     }
                 }
             }

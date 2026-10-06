@@ -66,6 +66,22 @@ final class StatementResolver {
                 }
                 LambdaResolver.resolveFunction(context, fn);
             }
+            case Stmt.ExtensionMethod extension -> {
+                TypeResolver.validateFunctionTypes(context, extension.typeDescriptor(), extension.name());
+                TypeResolver.validateTypeParameterBounds(context, extension.typeDescriptor(), extension.name());
+                final var receiverName = Resolver.className(context, extension.receiverType());
+                if (!context.classes.containsKey(receiverName) && !context.contracts.containsKey(receiverName)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                            extension.name(), "Extensions can target only Zeron classes and contracts."));
+                }
+                final var receiverDeclaration = context.classes.containsKey(receiverName)
+                        ? context.classes.get(receiverName) : context.contracts.get(receiverName);
+                Resolver.ensureTypeAccessible(context, receiverName, extension.name(),
+                        receiverDeclaration instanceof Stmt.ClassDecl classDeclaration
+                                ? classDeclaration.isPublic()
+                                : ((Stmt.ContractDecl) receiverDeclaration).isPublic());
+                LambdaResolver.resolveExtensionMethod(context, extension);
+            }
             case Stmt.ExternalFunction externalFunction -> {
                 TypeResolver.validateFunctionTypes(context, externalFunction.typeDescriptor(), externalFunction.name());
                 if (!context.functionNamesByDeclaration.containsKey(externalFunction.name())) {

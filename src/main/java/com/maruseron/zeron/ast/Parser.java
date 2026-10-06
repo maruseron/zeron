@@ -7,6 +7,7 @@ import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.diagnostic.DiagnosticLabel;
 import com.maruseron.zeron.diagnostic.SourceSpan;
 import com.maruseron.zeron.domain.NominalDescriptor;
+import com.maruseron.zeron.domain.GenericDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
@@ -149,6 +150,7 @@ public final class Parser {
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
             if (match(NAMESPACE)) return namespaceDeclaration();
+            if (match(EXTENSION)) return extensionDeclaration(false);
             if (match(EXTERNAL)) {
                 if (match(CLASS)) return externalClassDeclaration(false);
                 return externalFunctionDeclaration(false);
@@ -168,8 +170,9 @@ public final class Parser {
                     return externalFunctionDeclaration(true);
                 }
                 if (match(FN)) return fnDeclaration(true);
+                if (match(EXTENSION)) return extensionDeclaration(true);
                 throw error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
-                        "Only values, functions, classes, and contracts may be public.");
+                        "Only values, functions, classes, contracts, and extensions may be public.");
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
@@ -205,6 +208,66 @@ public final class Parser {
         }
         consume(RIGHT_BRACE, "Expect '}' after namespace members.");
         return new Stmt.Namespace(name, members);
+    }
+
+    private Stmt.Namespace extensionDeclaration(final boolean isPublic) {
+        final var declarationName = previous();
+        final var extensionTypeParameters = typeParameterDeclaration(declarationName, true);
+        final var enclosingTypeParameters = activeTypeParameters;
+        activeTypeParameters = extensionTypeParameters;
+        try {
+            final var receiverType = collectType();
+            final var receiverBase = receiverType instanceof GenericDescriptor generic
+                    ? generic.baseType() : receiverType;
+            if (!(receiverBase instanceof NominalDescriptor)) {
+                error(declarationName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Extensions can target only Zeron classes and contracts.");
+            }
+            final var receiverName = ((NominalDescriptor) receiverBase).name();
+            final var simpleReceiverName = receiverName.substring(receiverName.lastIndexOf('.') + 1);
+            consume(LEFT_BRACE, "Expect '{' before extension methods.");
+            final var methods = new ArrayList<Stmt>();
+            while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                final var methodPublic = match(PUBLIC);
+                final var isMutating = match(MUT);
+                consume(FN, "Extension methods must be declared with 'fn'.");
+                final var methodName = consume(IDENTIFIER, "Expect extension method name.");
+                final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
+                final var enclosingMethodParameters = activeTypeParameters;
+                activeTypeParameters = new LinkedHashMap<>(enclosingMethodParameters);
+                activeTypeParameters.putAll(methodTypeParameters);
+                try {
+                    final var parsed = methodSignature(methodName, false,
+                            List.copyOf(methodTypeParameters.values()));
+                    final var functionParameters = new ArrayList<TypeDescriptor>();
+                    final TypeDescriptor callReceiverType = isMutating
+                            ? new ReferenceDescriptor(receiverType) : receiverType;
+                    functionParameters.add(callReceiverType);
+                    functionParameters.addAll(parsed.typeDescriptor().parameters());
+                    final var allTypeParameters = new ArrayList<TypeParameterDescriptor>(
+                            extensionTypeParameters.values());
+                    allTypeParameters.addAll(methodTypeParameters.values());
+                    final var functionType = TypeDescriptor.genericFunctionOf(methodName.lexeme(),
+                            parsed.typeDescriptor().returnType(), functionParameters, allTypeParameters);
+                    final var parameterTokens = new ArrayList<Token>();
+                    parameterTokens.add(new Token(THIS, "this", null, methodName.span()));
+                    parameterTokens.addAll(parsed.parameters());
+                    methods.add(new Stmt.ExtensionMethod(methodName, parameterTokens, functionType,
+                            isPublic && methodPublic, isMutating, parsed.body(), parsed.defaultValues(),
+                            parsed.parameters().size() + 1 - parsed.defaultValues().size(),
+                            parsed.variadic(), receiverType,
+                            List.copyOf(extensionTypeParameters.values()),
+                            List.copyOf(methodTypeParameters.values())));
+                } finally {
+                    activeTypeParameters = enclosingMethodParameters;
+                }
+            }
+            consume(RIGHT_BRACE, "Expect '}' after extension methods.");
+            return new Stmt.Namespace(new Token(IDENTIFIER, simpleReceiverName, null, declarationName.span()),
+                    methods);
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
+        }
     }
 
     private Stmt letDeclaration() {

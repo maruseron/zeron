@@ -37,6 +37,8 @@ final class DeclarationEmitter {
                     final var parameters = function.parameters();
                     final var typeDescriptor = function.typeDescriptor();
                     final var sourceFunction = function instanceof Stmt.Function source ? source : null;
+                    final var extensionMethod = function instanceof Stmt.ExtensionMethod extension
+                            ? extension : null;
                     final var externalFunction = function instanceof Stmt.ExternalFunction external
                             ? external
                             : null;
@@ -82,6 +84,8 @@ final class DeclarationEmitter {
                                         builder -> {
                                             if (externalFunction != null) {
                                                 emitExternalFunction(context, builder, externalFunction.typeDescriptor(), binding);
+                                            } else if (extensionMethod != null) {
+                                                StatementEmitter.emitStmts(context, builder, extensionMethod.body());
                                             } else {
                                                 StatementEmitter.emitStmts(context, builder, sourceFunction.body());
                                             }

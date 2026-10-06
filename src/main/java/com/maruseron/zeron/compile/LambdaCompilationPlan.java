@@ -545,6 +545,25 @@ final class LambdaCompilationPlan {
     }
 
     private void collectMemberCallAdapters(final Expr.MemberCall call) {
+        final var extensionMethod = call.resolvedExtensionMethod();
+        if (extensionMethod != null) {
+            final var parameters = extensionMethod.typeDescriptor().parameters();
+            final var variadic = extensionMethod.variadic();
+            final var fixedArity = extensionMethod.fixedCallArity();
+            for (int i = 0; i < call.arguments.size(); i++) {
+                final var expected = variadic && i >= fixedArity
+                        ? ((ArrayDescriptor) parameters.getLast()).elementType()
+                        : parameters.get(i + 1);
+                collectFunctionAdapters(call.arguments.get(i).getType(), TypeSubstitution.erase(expected));
+            }
+            if (call.resolvedDescriptor() != null
+                    && TypeSubstitution.containsTypeParameter(extensionMethod.typeDescriptor().returnType())) {
+                collectFunctionAdapters(TypeSubstitution.erase(extensionMethod.typeDescriptor().returnType()),
+                        call.resolvedDescriptor().returnType());
+            }
+            return;
+        }
+
         if (call.name.lexeme().equals("new") && call.receiver instanceof Expr.Variable typeName) {
             final var declaration = classes.get(typeName.name.lexeme());
             if (declaration == null) return;

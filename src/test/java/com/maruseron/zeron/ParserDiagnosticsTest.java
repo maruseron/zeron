@@ -46,4 +46,19 @@ public final class ParserDiagnosticsTest {
                 .parseCompilationUnitWithDiagnostics("syntax.zn");
         assertEquals("ZR1101", syntaxResult.diagnostics().getFirst().code().toString());
     }
+
+    @Test
+    public void reportsSyntaxErrorsInsideFunctionBodiesWithoutCrashing() {
+        final var result = Parser.of(Scanner.from("""
+                fn main(): Unit {
+                    match (value) {
+                        case Some<Int> item -> item;
+                    }
+                }
+                """).scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("match.zn");
+
+        assertFalse(result.diagnostics().isEmpty());
+        assertEquals("ZR1101", result.diagnostics().getFirst().code().toString());
+    }
 }

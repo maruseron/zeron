@@ -59,21 +59,28 @@ sealed permits list, including when contract metadata comes from a compiled libr
 
 ```zeron
 match (option) {
-    case Some<T> as some -> some.value;
+    case Some<T>.value(value) if value > 0 -> value;
+    case Some<T>.value(_) as some -> 0;
     case None<T> -> defaultValue;
 }
 ```
 
 Each arm is an expression followed by `;`. A type case must name one of the contract's directly
-permitted classes, and its generic arguments must match the scrutinee contract's arguments. `as`
-introduces an immutable, arm-scoped value narrowed to that class. A `_` case is an optional final
-catch-all; without it, every permitted class must appear exactly once. Duplicate cases and cases
-after `_` are errors. The arms must have a common result type, and the scrutinee is evaluated once.
+permitted classes, and its generic arguments must match the scrutinee contract's arguments. The
+initial named-pattern form is `Type.property(binding)` or `Type.property(_)`; it reads one public
+property of the matched class. A binding and an optional `as` alias are immutable and arm-scoped.
+An optional `if` guard follows the pattern and alias and must have type `Boolean`. A false guard
+continues matching later arms. Multiple guarded cases for one variant are allowed, but only an
+unguarded case covers that variant for exhaustiveness. A guarded `_` is invalid; an unguarded `_`
+is an optional final catch-all. Duplicate covered cases and cases after `_` are errors. The arms
+must have a common result type, and the scrutinee is evaluated once.
 
-Nullable values must be proven non-null before matching. The initial pattern set does not include
-payload destructuring, nested patterns, guards, or OR-patterns. At runtime the compiler dispatches
-with `instanceof` and casts. A runtime null injected through Java interop is rejected before dispatch,
-and a non-wildcard match has a defensive `IllegalStateException` fallback.
+Nullable values must be proven non-null before matching. Named-pattern property types are substituted
+statically from the matched generic class type; JVM dispatch remains based on erased class identity.
+At runtime the compiler dispatches with `instanceof`, reads the selected property through its getter,
+then evaluates the guard and arm. A runtime null injected through Java interop is rejected before
+dispatch, and a non-wildcard match has a defensive `IllegalStateException` fallback. Multiple
+properties, nested patterns, and OR-patterns remain deferred.
 
 ### Nominal identity
 
@@ -151,14 +158,32 @@ A named constructor has the implicit result type `&Class`; every reachable norma
 must return a value of that type. It has no implicit `this` because it runs as a static factory. To
 work with a constructed object, bind the result of the canonical constructor to a local and use that
 receiver explicitly. Returning an expression of type `&Class` is allowed; it need not be a direct
-`Class.new(...)` expression. Generic class arguments remain explicit at the call site. Named
-constructors do not overload, and their names share the class member namespace with fields and
-methods. Methods may overload by parameter signature, but not by return type or receiver mutability.
+`Class.new(...)` expression. Named constructors do not overload, and their names share the class
+member namespace with fields and methods. Methods may overload by parameter signature, but not by
+return type or receiver mutability.
 They lower to static factory methods; only canonical `new` lowers to JVM `<init>`.
 Named-constructor parameters may end in one variadic `T...` parameter. The factory body receives
 that parameter as `Array<T>`, and direct factory calls pack all positional arguments after the
 fixed prefix. Defaults and spread arguments are not supported on named constructors. Canonical
 `new` parameters are still derived from fields and properties and do not support variadics.
+
+Generic class arguments may be inferred at canonical and named-constructor calls:
+
+```zeron
+let values = List.of(1, 2, 3);
+let empty: List<Int> = List.empty();
+fn names(): List<String> = List.empty();
+```
+
+Inference structurally matches constructor parameter types against supplied argument types;
+variadic arguments each contribute a constraint. Lambdas are resolved against the partially
+substituted constructor parameter types, and their result types can infer remaining class parameters.
+An expected type for the constructed class can fill parameters not determined by arguments, including
+in a typed binding, function return, or argument position. Argument and expected-type constraints
+must agree; inference does not choose a common supertype. If a parameter remains unknown, an explicit
+class type argument or a more informative expected type is required. Explicit class arguments remain
+supported and are checked against constructor arguments. This inference applies to constructor calls,
+not standalone class references or arbitrary generic expressions.
 
 ### Mutation and references
 
@@ -277,7 +302,15 @@ working base model and should not be prerequisites for ordinary classes or simpl
 
 ### Invariant generic classes and contracts
 
-Class and contract type parameters are scoped to their declaration. Methods may declare their own unbounded type parameters after the method name; those parameters are scoped to that method and cannot shadow enclosing class or contract parameters. Member calls infer method arguments from their values and contextual lambdas, or accept explicit arguments before the call argument list. Contract implementations must match generic method signatures up to renaming of method type parameters. Generic nominal types are invariant: `Box<Int>` is distinct from `Box<String>`, and a parameterized class or contract must be used with exactly its declared number of type arguments. Construction supplies explicit arguments on the class type before `.new`; constructor inference is not performed.
+Class and contract type parameters are scoped to their declaration. Methods may declare their own
+unbounded type parameters after the method name; those parameters are scoped to that method and
+cannot shadow enclosing class or contract parameters. Member calls infer method arguments from their
+values and contextual lambdas, or accept explicit arguments before the call argument list. Contract
+implementations must match generic method signatures up to renaming of method type parameters.
+Generic nominal types are invariant: `Box<Int>` is distinct from `Box<String>`, and a parameterized
+class or contract must be used with exactly its declared number of type arguments. Constructor calls
+infer class arguments from constructor arguments or an available expected constructed type; explicit
+arguments remain valid.
 
 Fields, method parameters, method results, `this`, and constructor fields are substituted from the receiver or construction type. Type parameters remain opaque inside generic bodies; operations requiring constraints are rejected. Each declaration emits one JVM class or interface regardless of its source type arguments. Type variables erase to `java.lang.Object`, while parameterized nominal types erase to their raw JVM class.
 
@@ -285,7 +318,7 @@ Generic contracts use declaration-site conformance with explicit contract argume
 
 Callback adaptation across erased generic nominal boundaries is implemented. Lambdas are contextually resolved against substituted constructor and member signatures; the compiler plans adapters for callback-valued fields, member arguments/results, and erased contract bridges. Generated bridge methods can call the public synthetic static adapters in the program class. Resolver, runtime, and ABI tests cover primitive/reference specializations, field reads/writes, method arguments/results, nested and nullable callbacks, mutable function views, and both contract bridge directions. Broader shape combinations and adapter reuse remain follow-up coverage.
 
-Bounds, variance, constructor inference, raw generic uses, and advanced contract composition remain outside this slice.
+Bounds, variance, raw generic uses, and advanced contract composition remain outside this slice.
 
 ```zeron
 contract Readable<T> {
@@ -354,7 +387,7 @@ Fields, properties, methods, and named constructors share one member namespace; 
 1. **V1 implemented.** The parser, resolver, JVM class/interface lowering, constructor calls, fields,
     methods, multiple-contract conformance, receiver mutability, and immutable-reference lambda capture
     are implemented and tested.
-2. **Invariant generic classes and contracts implemented.** Explicit construction arguments,
+2. **Invariant generic classes and contracts implemented.** Inferred or explicit construction arguments,
     member substitution, invariant identity, raw JVM erasure, substituted conformance, and erased
     signature bridges are covered by resolver and runtime tests.
 3. **Named constructors implemented.** Named factories support expression and block bodies, implicit

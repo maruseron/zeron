@@ -680,7 +680,7 @@ public final class ClassContractTest {
     }
 
     @Test
-    public void genericClassArgumentsAreRequiredAndInvariant() {
+    public void genericClassArgumentsInferAndRemainInvariant() {
         final var source = """
                 class Box<T> {
                     value: T;
@@ -690,18 +690,18 @@ public final class ClassContractTest {
                     let box: Box<String> = Box<Int>.new(1);
                 }
                 """;
-        final var rawConstruction = """
-                class Box<T> {
-                    value: T;
+        final var unconstrainedConstruction = """
+                class Empty<T> {
                     public constructor new;
                 }
                 fn missingTypeArgument(): Unit {
-                    let box = Box.new(1);
+                    let empty = Empty.new();
                 }
                 """;
 
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
-        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(rawConstruction)));
+        assertThrows(ResolutionError.class,
+                () -> new ResolutionService().resolve(parse(unconstrainedConstruction)));
     }
 
     @Test

@@ -289,7 +289,10 @@ final class LambdaCompilationPlan {
             }
             case Expr.Match match -> {
                 collectLambdaShapes(match.scrutinee);
-                for (final var arm : match.arms) collectLambdaShapes(arm.expression());
+                for (final var arm : match.arms) {
+                    if (arm.guard() != null) collectLambdaShapes(arm.guard());
+                    collectLambdaShapes(arm.expression());
+                }
             }
             case Expr.Assignment assignment -> collectLambdaShapes(assignment.value);
             case Expr.Unary unary -> collectLambdaShapes(unary.right);
@@ -478,6 +481,8 @@ final class LambdaCompilationPlan {
                 for (final var arm : match.arms) {
                     final var armNames = new HashSet<>(localNames);
                     if (arm.alias() != null) armNames.add(arm.alias().lexeme());
+                    if (arm.binding() != null) armNames.add(arm.binding().lexeme());
+                    if (arm.guard() != null) collectCapturedVariables(arm.guard(), armNames, captured, seen);
                     collectCapturedVariables(arm.expression(), armNames, captured, seen);
                 }
             }
@@ -583,9 +588,7 @@ final class LambdaCompilationPlan {
                         .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
                         .findFirst().orElse(null);
             if (constructor != null) {
-                final var parameters = call.resolvedDescriptor() == null
-                        ? constructor.typeDescriptor().parameters()
-                        : call.resolvedDescriptor().parameters();
+                final var parameters = constructor.typeDescriptor().parameters();
                 final var fixedArity = parameters.size() - (constructor.variadic() ? 1 : 0);
                 for (int i = 0; i < call.arguments.size(); i++) {
                     final var expected = constructor.variadic() && i >= fixedArity

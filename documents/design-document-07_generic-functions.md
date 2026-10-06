@@ -24,6 +24,12 @@ generic method type parameters is implemented. Variance, nested schemes, explici
 `forall`, and polymorphic values stored in mutable bindings remain deferred. This is not a complete
 generic type system.
 
+Generic class type arguments are inferred at canonical and named-constructor calls. Inference uses
+constructor arguments, including each element passed to a variadic named constructor, and an expected
+constructed type when one is available. Lambda argument results can contribute constraints after
+other arguments and expected types have partially instantiated the constructor signature. This does
+not infer standalone class references or use later statements as constraints.
+
 ## Language Contract
 
 A generic function declares its type parameters after its name and must state its return type:
@@ -51,6 +57,14 @@ type arguments. Class bounds, bounds on generic classes/contracts, and mutating 
 unsupported. Type parameters may appear recursively in parameters, results, function signatures,
 nullable and reference types, and the built-in `Array<T>` descriptor. Function type annotations
 accept zero or multiple parameters.
+
+Class factory calls use the same bounded structural unification rules for class type parameters.
+`List.of(1, 2)` infers `List<Int>`, while `let items: List<Int> = List.empty()` obtains its type
+argument from the expected type. Expected types only fill unresolved parameters; they cannot override
+conflicting constructor-argument inferences. No common supertype is inferred, and a class type
+parameter absent from both argument constraints and the expected type requires an explicit class
+type argument. Constructor calls that collide with a namespace function are ambiguous when both
+candidates accept the call.
 
 Let-bound lambda generalization remains limited to unresolved identity and constant-result forms.
 It does not infer contract bounds from member calls or carry implicit constraints into a scheme;

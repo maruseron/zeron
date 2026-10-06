@@ -153,6 +153,11 @@ final class MemberInteropResolver {
     }
 
     static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call) {
+        return resolveMemberCall(context, call, null);
+    }
+
+    private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
+                                                     final TypeDescriptor expectedType) {
         if (call.safeNavigation()) {
             final var receiverType = ExpressionFlowResolver.resolveExpression(context, call.receiver);
             final var safeFlows = beginSafeNavigation(context, call.receiver, call.name, receiverType);
@@ -160,22 +165,55 @@ final class MemberInteropResolver {
                     ? nullable.baseType()
                     : receiverType;
             context.frame.flowState = safeFlows.nonNull().copy();
-            final var resultType = resolveMemberCall(context, call, memberReceiverType);
+            final var resultType = resolveMemberCall(context, call, memberReceiverType, expectedType);
             finishSafeNavigation(context, safeFlows);
             final var nullableResult = resultType.toNullable();
             call.setType(nullableResult);
             return nullableResult;
         }
-        return resolveMemberCall(context, call, null);
+        return resolveMemberCall(context, call, null, expectedType);
     }
 
     private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
-                                             final TypeDescriptor alreadyResolvedReceiverType) {
+                                             final TypeDescriptor alreadyResolvedReceiverType,
+                                             final TypeDescriptor expectedType) {
         Zeron.debug("resolving member call       " + call.name.lexeme() + " for " + call.receiver);
+        final var classOwnerName = call.receiver instanceof Expr.Variable typeName
+                ? resolveClassName(context, typeName.name.lexeme(), typeName.name)
+                : null;
+        final var classDeclaration = classOwnerName == null ? null : context.classes.get(classOwnerName);
+        final var classFactory = classDeclaration == null ? null
+                : findClassFactory(classDeclaration, call.name.lexeme());
+        final var namespaceFunctionName = !call.safeNavigation()
+                ? namespaceMemberName(context, call.receiver, call.name.lexeme())
+                : null;
+        final var namespaceFunction = namespaceFunctionName == null
+                ? null : context.functions.get(namespaceFunctionName);
+        if (classFactory != null) {
+            List<TypeDescriptor> priorArgumentTypes = null;
+            if (namespaceFunction != null && !(namespaceFunction instanceof Stmt.ExtensionMethod)) {
+                priorArgumentTypes = resolvePotentialCallArgumentTypes(context, call);
+                final var namespaceApplicable =
+                        namespaceCallIsApplicable(context, call, namespaceFunctionName, priorArgumentTypes);
+                final var classApplicable = classFactoryIsApplicable(
+                        context, call, classDeclaration, classFactory, expectedType, priorArgumentTypes);
+                if (namespaceApplicable && classApplicable) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                            call.name, "Ambiguous call: both a class constructor and namespace function match."));
+                }
+                if (namespaceApplicable && !classApplicable) {
+                    if (!isNamespaceMemberAccessible(
+                            context, namespaceFunctionName, namespaceFunction.isPublic())) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                                call.name, "Namespace function '" + namespaceFunctionName + "' is private."));
+                    }
+                    return context.callResolver.resolveNamespaceCall(call, namespaceFunctionName);
+                }
+            }
+            return resolveClassFactoryCall(context, call, classDeclaration, classOwnerName,
+                    classFactory, expectedType, priorArgumentTypes);
+        }
         if (!call.safeNavigation()) {
-            final var namespaceFunctionName = namespaceMemberName(context, call.receiver, call.name.lexeme());
-            final var namespaceFunction = namespaceFunctionName == null
-                    ? null : context.functions.get(namespaceFunctionName);
             if (namespaceFunction != null && !(namespaceFunction instanceof Stmt.ExtensionMethod)) {
                 if (!isNamespaceMemberAccessible(context, namespaceFunctionName, namespaceFunction.isPublic())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
@@ -184,9 +222,6 @@ final class MemberInteropResolver {
                 return context.callResolver.resolveNamespaceCall(call, namespaceFunctionName);
             }
         }
-        final var classOwnerName = call.receiver instanceof Expr.Variable typeName
-            ? resolveClassName(context, typeName.name.lexeme(), typeName.name)
-            : null;
         if (call.safeNavigation() && classOwnerName != null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "Safe navigation cannot be used for constructors or static calls."));
@@ -197,87 +232,10 @@ final class MemberInteropResolver {
                 final var javaClass = context.javaClassPath.find(classOwnerName);
                 if (javaClass != null) return resolveJavaTypeCall(context, call, javaClass);
             }
-            call.setResolvedClassName(classOwnerName);
-            if (declaration.typeParameters().size() != call.explicitTypeArguments.size()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                        call.name,
-                        "Expected " + declaration.typeParameters().size() + " class type arguments, found "
-                                + call.explicitTypeArguments.size() + "."));
-            }
-            call.explicitTypeArguments.forEach(type -> TypeResolver.validateType(context, type, call.name));
-            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-            for (int i = 0; i < declaration.typeParameters().size(); i++) {
-                substitutions.put(declaration.typeParameters().get(i), call.explicitTypeArguments.get(i));
-            }
-                if (call.name.lexeme().equals("new")) {
-                if (!declaration.constructor().isPublic()
-                    && !Objects.equals(context.frame.currentClassName, declaration.name().lexeme())) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
-                            call.name, "Constructor is private."));
-                }
-                final var constructorTypes = declaration.canonicalConstructorTypes();
-                if (call.arguments.size() != constructorTypes.size()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                            call.name,
-                        "Expected " + constructorTypes.size() + " constructor arguments, found "
-                            + call.arguments.size() + "."));
-                }
-                for (int i = 0; i < call.arguments.size(); i++) {
-                    final var expectedType = TypeSubstitution.substitute(
-                        constructorTypes.get(i), substitutions);
-                    ensureAssignable(context, expectedType,
-                        resolveArgument(context, call.arguments.get(i), expectedType), call.name);
-                }
-                final TypeDescriptor constructedType = declaration.typeParameters().isEmpty()
-                    ? TypeDescriptor.of(declaration.name().lexeme())
-                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(declaration.name().lexeme()),
-                        call.explicitTypeArguments);
-                final var result = new ReferenceDescriptor(constructedType);
-                call.setType(result);
-                return result;
-            }
-
-                final var namedConstructor = declaration.namedConstructors().stream()
-                    .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
-                    .findFirst()
-                    .orElse(null);
-                if (namedConstructor == null) {
+            if (declaration != null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                         call.name, "Unknown named constructor."));
-                }
-                if (!namedConstructor.isPublic()
-                    && !Objects.equals(context.frame.currentClassName, declaration.name().lexeme())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
-                        call.name, "Named constructor is private."));
-                }
-                final var instantiatedFactory = (FunctionDescriptor) TypeSubstitution.substitute(
-                    namedConstructor.typeDescriptor(), substitutions);
-                final var variadic = namedConstructor.variadic();
-                final var fixedArity = Stmt.fixedArity(namedConstructor.parameters(), variadic);
-                if (variadic) {
-                    call.setVariadic(((ArrayDescriptor) instantiatedFactory.parameters().getLast()).elementType(),
-                            fixedArity);
-                }
-                if (variadic
-                        ? call.arguments.size() < fixedArity
-                        : instantiatedFactory.arity() != call.arguments.size()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                        call.name,
-                    variadic
-                            ? "Expected at least " + fixedArity + " arguments, found " + call.arguments.size() + "."
-                            : "Expected " + instantiatedFactory.arity() + " arguments, found "
-                                    + call.arguments.size() + "."));
-                }
-                for (int i = 0; i < call.arguments.size(); i++) {
-                final var expectedType = variadic && i >= fixedArity
-                        ? call.variadicElementType()
-                        : instantiatedFactory.parameters().get(i);
-                ensureAssignable(context, expectedType,
-                    resolveArgument(context, call.arguments.get(i), expectedType), call.name);
-                }
-                call.setResolvedDescriptor(instantiatedFactory);
-                call.setType(instantiatedFactory.returnType());
-                return instantiatedFactory.returnType();
+            }
         }
 
         final var receiverType = alreadyResolvedReceiverType == null
@@ -850,6 +808,339 @@ final class MemberInteropResolver {
         }
     }
 
+    private record ClassFactory(Stmt.NamedConstructor named, boolean canonical) {}
+
+    private static ClassFactory findClassFactory(final Stmt.ClassDecl declaration, final String name) {
+        if (name.equals("new")) return new ClassFactory(null, true);
+        final var named = declaration.namedConstructors().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(name))
+                .findFirst()
+                .orElse(null);
+        return named == null ? null : new ClassFactory(named, false);
+    }
+
+    private static boolean classFactoryArityMatches(final ClassFactory factory,
+                                                     final Stmt.ClassDecl declaration,
+                                                     final Expr.MemberCall call) {
+        if (factory.canonical()) {
+            return call.arguments.size() == declaration.canonicalConstructorTypes().size();
+        }
+        final var named = factory.named();
+        final var fixedArity = Stmt.fixedArity(named.parameters(), named.variadic());
+        return named.variadic()
+                ? call.arguments.size() >= fixedArity
+                : call.arguments.size() == named.typeDescriptor().arity();
+    }
+
+    private static TypeDescriptor resolveClassFactoryCall(final ResolutionContext context,
+                                                           final Expr.MemberCall call,
+                                                           final Stmt.ClassDecl declaration,
+                                                           final String className,
+                                                           final ClassFactory factory,
+                                                           final TypeDescriptor expectedType,
+                                                           final List<TypeDescriptor> priorArgumentTypes) {
+        call.setResolvedClassName(className);
+        final var typeParameters = declaration.typeParameters();
+        if (!call.explicitTypeArguments.isEmpty()
+                && typeParameters.size() != call.explicitTypeArguments.size()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    call.name, "Expected " + typeParameters.size() + " class type arguments, found "
+                            + call.explicitTypeArguments.size() + "."));
+        }
+        for (final var explicitType : call.explicitTypeArguments) {
+            TypeResolver.validateType(context, explicitType, call.name);
+        }
+
+        final var signature = factory.canonical()
+                ? canonicalFactoryDescriptor(declaration)
+                : factory.named().typeDescriptor();
+        final boolean variadic = !factory.canonical() && factory.named().variadic();
+        final int fixedArity = factory.canonical()
+                ? signature.arity()
+                : Stmt.fixedArity(factory.named().parameters(), variadic);
+        final int minimumArity = factory.canonical() ? signature.arity() : fixedArity;
+        if (!classFactoryArityMatches(factory, declaration, call)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    call.name, variadic
+                            ? "Expected at least " + minimumArity + " arguments, found "
+                                    + call.arguments.size() + "."
+                            : "Expected " + signature.arity() + " constructor arguments, found "
+                                    + call.arguments.size() + "."));
+        }
+        if (factory.canonical() && !declaration.constructor().isPublic()
+                && !Objects.equals(context.frame.currentClassName, declaration.name().lexeme())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                    call.name, "Constructor is private."));
+        }
+        if (!factory.canonical() && !factory.named().isPublic()
+                && !Objects.equals(context.frame.currentClassName, declaration.name().lexeme())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                    call.name, "Named constructor is private."));
+        }
+
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
+            substitutions.put(typeParameters.get(i), call.explicitTypeArguments.get(i));
+        }
+        final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var argument = call.arguments.get(i);
+            if (isDeferredConstructorArgument(context, argument)) continue;
+            final var priorType = priorArgumentTypes == null ? null : priorArgumentTypes.get(i);
+            resolvedArguments[i] = priorType == null
+                    ? ExpressionFlowResolver.resolveExpression(context, argument) : priorType;
+            final var formal = classFactoryParameterType(signature, i, fixedArity, variadic);
+            if (containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
+                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+            }
+        }
+
+        inferClassArgumentsFromExpectedType(declaration, substitutions, expectedType, call.name);
+
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var argument = call.arguments.get(i);
+            if (!isDeferredConstructorArgument(context, argument)) continue;
+            final var formal = classFactoryParameterType(signature, i, fixedArity, variadic);
+            final var expected = TypeSubstitution.substitute(formal, substitutions);
+            if (!(argument instanceof Expr.MemberCall)
+                    && !acceptsDeferredArrayArgument(argument, expected)
+                    && LambdaResolver.functionType(context, expected) == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        call.name, "A function value argument requires a function parameter type."));
+            }
+            resolvedArguments[i] = resolveArgument(context, argument, expected);
+            if (containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
+                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+            }
+        }
+
+        for (final var parameter : typeParameters) {
+            if (!substitutions.containsKey(parameter)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        call.name, "Cannot infer class type parameter '" + parameter.name()
+                                + "'; provide an explicit type argument or an expected type."));
+            }
+        }
+
+        final var instantiatedParameters = signature.parameters().stream()
+                .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
+                .toList();
+        for (int i = 0; i < resolvedArguments.length; i++) {
+            final var expected = classFactoryParameterType(instantiatedParameters, i, fixedArity, variadic);
+            ensureAssignable(context, expected, resolvedArguments[i], call.name);
+        }
+        if (variadic) {
+            call.setVariadic(((ArrayDescriptor) instantiatedParameters.getLast()).elementType(), fixedArity);
+        }
+
+        final TypeDescriptor constructedType = typeParameters.isEmpty()
+                ? TypeDescriptor.of(declaration.name().lexeme())
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(declaration.name().lexeme()),
+                        typeParameters.stream().map(substitutions::get).toList());
+        final TypeDescriptor result;
+        if (factory.canonical()) {
+            result = new ReferenceDescriptor(constructedType);
+        } else {
+            final var instantiatedFactory = (FunctionDescriptor) TypeSubstitution.substitute(signature, substitutions);
+            call.setResolvedDescriptor(instantiatedFactory);
+            result = instantiatedFactory.returnType();
+        }
+        call.setType(result);
+        return result;
+    }
+
+    private static FunctionDescriptor canonicalFactoryDescriptor(final Stmt.ClassDecl declaration) {
+        final var constructorTypes = declaration.canonicalConstructorTypes();
+        return TypeDescriptor.functionOf("new", new ReferenceDescriptor(classType(declaration)),
+                constructorTypes.toArray(TypeDescriptor[]::new));
+    }
+
+    private static TypeDescriptor classType(final Stmt.ClassDecl declaration) {
+        final var base = TypeDescriptor.ofName(declaration.name().lexeme());
+        return declaration.typeParameters().isEmpty()
+                ? base : TypeDescriptor.genericOf(base,
+                        declaration.typeParameters().stream().map(parameter -> (TypeDescriptor) parameter).toList());
+    }
+
+    private static TypeDescriptor classFactoryParameterType(final FunctionDescriptor signature,
+                                                              final int index,
+                                                              final int fixedArity,
+                                                              final boolean variadic) {
+        return classFactoryParameterType(signature.parameters(), index, fixedArity, variadic);
+    }
+
+    private static TypeDescriptor classFactoryParameterType(final List<TypeDescriptor> parameters,
+                                                              final int index,
+                                                              final int fixedArity,
+                                                              final boolean variadic) {
+        return variadic && index >= fixedArity
+                ? ((ArrayDescriptor) parameters.getLast()).elementType()
+                : parameters.get(index);
+    }
+
+    private static boolean isDeferredConstructorArgument(final ResolutionContext context, final Expr argument) {
+        return argument instanceof Expr.Lambda
+                || LambdaResolver.isFunctionReferenceCandidate(context, argument)
+                || argument instanceof Expr.MemberCall
+                || argument instanceof Expr.ArrayLiteral literal && literal.elements.isEmpty();
+    }
+
+    private static boolean acceptsDeferredArrayArgument(final Expr argument, final TypeDescriptor expected) {
+        return argument instanceof Expr.ArrayLiteral literal && literal.elements.isEmpty()
+                && expected instanceof ArrayDescriptor;
+    }
+
+    private static boolean containsUninferredClassTypeParameter(
+            final TypeDescriptor type,
+            final List<TypeParameterDescriptor> classParameters,
+            final Map<TypeParameterDescriptor, TypeDescriptor> substitutions) {
+        return switch (type) {
+            case TypeParameterDescriptor parameter ->
+                    classParameters.contains(parameter) && !substitutions.containsKey(parameter);
+            case NullableDescriptor nullable ->
+                    containsUninferredClassTypeParameter(nullable.baseType(), classParameters, substitutions);
+            case ReferenceDescriptor reference ->
+                    containsUninferredClassTypeParameter(reference.baseType(), classParameters, substitutions);
+            case ArrayDescriptor array ->
+                    containsUninferredClassTypeParameter(array.elementType(), classParameters, substitutions);
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .anyMatch(argument -> containsUninferredClassTypeParameter(
+                            argument, classParameters, substitutions));
+            case FunctionDescriptor function -> function.parameters().stream()
+                    .anyMatch(parameter -> containsUninferredClassTypeParameter(
+                            parameter, classParameters, substitutions))
+                    || containsUninferredClassTypeParameter(
+                            function.returnType(), classParameters, substitutions);
+            default -> false;
+        };
+    }
+
+    private static void inferClassArgumentsFromExpectedType(final Stmt.ClassDecl declaration,
+                                                             final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                                                             TypeDescriptor expectedType,
+                                                             final Token where) {
+        if (expectedType instanceof ReferenceDescriptor reference) expectedType = reference.baseType();
+        if (expectedType instanceof NullableDescriptor nullable) expectedType = nullable.baseType();
+        if (!(expectedType instanceof GenericDescriptor || expectedType instanceof NominalDescriptor)
+                || !expectedType.name().equals(declaration.name().lexeme())) return;
+        final var pattern = classType(declaration);
+        if (pattern instanceof GenericDescriptor) TypeUnifier.unify(pattern, expectedType, substitutions, where);
+    }
+
+    private static List<TypeDescriptor> resolvePotentialCallArgumentTypes(
+            final ResolutionContext context, final Expr.MemberCall call) {
+        final var actualTypes = new ArrayList<TypeDescriptor>(call.arguments.size());
+        for (final var argument : call.arguments) {
+            actualTypes.add(isDeferredConstructorArgument(context, argument)
+                    ? null : ExpressionFlowResolver.resolveExpression(context, argument));
+        }
+        return actualTypes;
+    }
+
+    private static boolean namespaceCallIsApplicable(final ResolutionContext context,
+                                                      final Expr.MemberCall call,
+                                                      final String functionName,
+                                                      final List<TypeDescriptor> actualTypes) {
+        for (final var candidate : context.functionOverloads.getOrDefault(functionName, List.of())) {
+            if (candidate instanceof Stmt.ExtensionMethod
+                    || !isNamespaceMemberAccessible(context, functionName, candidate.isPublic())) continue;
+            final var signature = candidate.typeDescriptor();
+            final var variadic = candidate.variadic();
+            final var fixedArity = Stmt.fixedArity(candidate.parameters(), variadic);
+            if ((!call.explicitTypeArguments.isEmpty()
+                    && call.explicitTypeArguments.size() != signature.typeParameters().size())
+                    || call.arguments.size() < candidate.minimumArity()
+                    || !variadic && call.arguments.size() > signature.arity()) continue;
+            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            var applicable = true;
+            try {
+                for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
+                    substitutions.put(signature.typeParameters().get(i), call.explicitTypeArguments.get(i));
+                }
+                for (int i = 0; i < actualTypes.size(); i++) {
+                    if (actualTypes.get(i) == null) continue;
+                    final var formal = memberParameterType(signature.parameters(), i, fixedArity, variadic);
+                    if (TypeSubstitution.containsTypeParameter(formal)) {
+                        TypeUnifier.unify(formal, actualTypes.get(i), substitutions, call.name);
+                    }
+                }
+            } catch (final ResolutionError _) {
+                applicable = false;
+            }
+            if (!applicable || signature.typeParameters().stream()
+                    .anyMatch(parameter -> !substitutions.containsKey(parameter))) continue;
+            final var parameters = signature.parameters().stream()
+                    .map(parameter -> TypeSubstitution.substitute(parameter, substitutions)).toList();
+            for (int i = 0; i < actualTypes.size(); i++) {
+                final var expected = memberParameterType(parameters, i, fixedArity, variadic);
+                if (actualTypes.get(i) != null && !context.typeCompatibility.canAssign(expected, actualTypes.get(i))
+                        || actualTypes.get(i) == null
+                                && !acceptsDeferredArrayArgument(call.arguments.get(i), expected)
+                                && LambdaResolver.functionType(context, expected) == null) {
+                    applicable = false;
+                    break;
+                }
+            }
+            if (applicable) return true;
+        }
+        return false;
+    }
+
+    private static boolean classFactoryIsApplicable(final ResolutionContext context,
+                                                     final Expr.MemberCall call,
+                                                     final Stmt.ClassDecl declaration,
+                                                     final ClassFactory factory,
+                                                     final TypeDescriptor expectedType,
+                                                     final List<TypeDescriptor> actualTypes) {
+        final var typeParameters = declaration.typeParameters();
+        if (!call.explicitTypeArguments.isEmpty()
+                && call.explicitTypeArguments.size() != typeParameters.size()
+                || !classFactoryArityMatches(factory, declaration, call)) return false;
+        if (factory.canonical() && !declaration.constructor().isPublic()
+                && !Objects.equals(context.frame.currentClassName, declaration.name().lexeme())
+                || !factory.canonical() && !factory.named().isPublic()
+                && !Objects.equals(context.frame.currentClassName, declaration.name().lexeme())) return false;
+        final var signature = factory.canonical()
+                ? canonicalFactoryDescriptor(declaration)
+                : factory.named().typeDescriptor();
+        final var variadic = !factory.canonical() && factory.named().variadic();
+        final var fixedArity = factory.canonical()
+                ? signature.arity() : Stmt.fixedArity(factory.named().parameters(), variadic);
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        try {
+            for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
+                substitutions.put(typeParameters.get(i), call.explicitTypeArguments.get(i));
+            }
+            for (int i = 0; i < actualTypes.size(); i++) {
+                final var actual = actualTypes.get(i);
+                if (actual == null) continue;
+                final var formal = classFactoryParameterType(signature, i, fixedArity, variadic);
+                if (containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
+                    TypeUnifier.unify(formal, actual, substitutions, call.name);
+                }
+            }
+            inferClassArgumentsFromExpectedType(declaration, substitutions, expectedType, call.name);
+        } catch (final ResolutionError _) {
+            return false;
+        }
+        final var hasDeferredFunctionArgument = call.arguments.stream().anyMatch(argument ->
+                isDeferredConstructorArgument(context, argument));
+        if (typeParameters.stream().anyMatch(parameter -> !substitutions.containsKey(parameter))
+                && !hasDeferredFunctionArgument) return false;
+        final var parameters = signature.parameters().stream()
+                .map(parameter -> TypeSubstitution.substitute(parameter, substitutions)).toList();
+        for (int i = 0; i < actualTypes.size(); i++) {
+            final var actual = actualTypes.get(i);
+            final var expected = classFactoryParameterType(parameters, i, fixedArity, variadic);
+            if (actual != null && !TypeSubstitution.containsTypeParameter(expected)
+                    && !context.typeCompatibility.canAssign(expected, actual)) return false;
+            if (actual == null && !(call.arguments.get(i) instanceof Expr.MemberCall)
+                    && !acceptsDeferredArrayArgument(call.arguments.get(i), expected)
+                    && LambdaResolver.functionType(context, expected) == null) return false;
+        }
+        return true;
+    }
+
     private static TypeDescriptor resolveGenericMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                                     final FunctionDescriptor genericType, final int minimumArity,
                                                     final boolean variadic, final int fixedArity) {
@@ -1304,6 +1595,9 @@ final class MemberInteropResolver {
 
     static TypeDescriptor resolveArgument(final ResolutionContext context, final Expr argument,
                                            final TypeDescriptor expectedType) {
+        if (argument instanceof Expr.MemberCall call) {
+            return resolveMemberCall(context, call, expectedType);
+        }
         if (argument instanceof Expr.ArrayLiteral literal && literal.elements.isEmpty()) {
             return ExpressionFlowResolver.resolveEmptyArrayLiteral(context, literal, expectedType);
         }

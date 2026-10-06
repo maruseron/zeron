@@ -39,6 +39,7 @@ public final class Parser {
     private final Set<String> localTypeNames = new java.util.HashSet<>();
     private static final AtomicInteger TYPE_PARAMETER_SCOPES = new AtomicInteger();
     private Map<String, TypeParameterDescriptor> activeTypeParameters = Map.of();
+    private boolean stopQualifiedTypeAtNamedPattern;
 
     private record LoopMarker(LoopMarker enclosing) {}
     private record LevelMarker(LevelMarker enclosing) {}
@@ -979,8 +980,18 @@ public final class Parser {
 
     private Token qualifyTypeToken(final Token token) {
         final var name = new StringBuilder(token.lexeme());
-        while (match(DOT)) name.append('.').append(consume(IDENTIFIER, "Expect name after '.'.").lexeme());
+        while (check(DOT) && !isNamedPatternSuffix()) {
+            advance();
+            name.append('.').append(consume(IDENTIFIER, "Expect name after '.'.").lexeme());
+        }
         return withLexeme(token, qualifyTypeName(name.toString()));
+    }
+
+    private boolean isNamedPatternSuffix() {
+        return stopQualifiedTypeAtNamedPattern
+                && current + 2 < tokens.size()
+                && tokens.get(current + 1).type() == IDENTIFIER
+                && tokens.get(current + 2).type() == LEFT_PAREN;
     }
 
     private String qualifyTypeName(final String name) {
@@ -1123,7 +1134,8 @@ public final class Parser {
         final var statements = new ArrayList<Stmt>();
 
         while (!check(RIGHT_BRACE) && !isAtEnd()) {
-            statements.add(declaration());
+            final var statement = declaration();
+            if (statement != null) statements.add(statement);
         }
 
         consume(RIGHT_BRACE, "Expect '}' after block.");
@@ -1687,18 +1699,39 @@ public final class Parser {
             final boolean wildcard = check(IDENTIFIER) && peek().lexeme().equals("_");
             final TypeDescriptor patternType;
             final Token alias;
+            Token namedPattern = null;
+            Token binding = null;
+            Expr guard = null;
             if (wildcard) {
                 advance();
                 patternType = null;
                 alias = null;
             } else {
-                patternType = collectType();
+                final var previousStop = stopQualifiedTypeAtNamedPattern;
+                stopQualifiedTypeAtNamedPattern = true;
+                try {
+                    patternType = collectType();
+                } finally {
+                    stopQualifiedTypeAtNamedPattern = previousStop;
+                }
+                if (match(DOT)) {
+                    namedPattern = consume(IDENTIFIER, "Expect named pattern after '.'.");
+                    consume(LEFT_PAREN, "Expect '(' after named pattern.");
+                    if (check(IDENTIFIER) && peek().lexeme().equals("_")) {
+                        advance();
+                    } else {
+                        binding = consume(IDENTIFIER, "Expect binding name or '_' in named pattern.");
+                    }
+                    consume(RIGHT_PAREN, "Expect ')' after named pattern argument.");
+                }
                 alias = match(AS) ? consume(IDENTIFIER, "Expect binding name after 'as'.") : null;
             }
+            if (match(IF)) guard = expression();
             consume(ARROW, "Expect '->' after match pattern.");
             final var body = expression();
             consume(SEMICOLON, "Expect ';' after match arm.");
-            arms.add(new Expr.MatchArm(caseKeyword, patternType, alias, wildcard, body));
+            arms.add(new Expr.MatchArm(caseKeyword, patternType, alias,
+                    namedPattern, binding, guard, wildcard, body));
         }
         consume(RIGHT_BRACE, "Expect '}' after match cases.");
         if (arms.isEmpty()) error(keyword, DiagnosticCatalog.INVALID_MATCH_EXPRESSION,

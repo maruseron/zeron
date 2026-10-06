@@ -95,6 +95,237 @@ public final class StandardLibraryTest {
     }
 
     @Test
+    public void matchClassHierarchyIncludesBundledTypesAlongsideLambdaShapes() throws Exception {
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-match-hierarchy-");
+        final var source = parse("Main.zn", """
+                import zeron.collections.List;
+                import zeron.lang.Option;
+                import zeron.lang.Some;
+                import zeron.lang.None;
+                import List.map;
+                namespace List {
+                    public fn sort<T>(list: &List<T>): Unit = ();
+                }
+                public extension<T> List<T> {
+                    public fn map<U>(f: (T) -> U): &List<U> {
+                        let result = List<U>.empty();
+                        for (let value in this) result.add(f(value));
+                        return result;
+                    }
+                }
+                fn result(): Int {
+                    let values = List<Int>.of(1, 2);
+                    let mapped = values.map(value -> value + 1);
+                    List.sort(mapped);
+                    let option: Option<Int> = Option.some(5);
+                    return match (option) {
+                        case Some<Int> as some -> some.value;
+                        case None<Int> -> -1;
+                    };
+                }
+                """);
+        final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                "MatchHierarchyRegression", "", List.of(), true, List.of(), output);
+
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(5, loader.loadClass("MatchHierarchyRegression").getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void genericClassFactoryCallsInferArgumentsFromValuesAndContext() throws Exception {
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-class-inference-");
+        final var source = parse("Main.zn", """
+                import zeron.collections.List;
+                class Cell<T> {
+                    public property value: T;
+                    public constructor new;
+                    public constructor from(value: T) = Cell<T>.new(value);
+                }
+                class Generated<T> {
+                    public property value: T;
+                    public constructor new;
+                    public constructor create(make: () -> T) = Generated<T>.new(make());
+                }
+                fn inferredFromValues(): Int {
+                    let values = List.of(1, 2, 3);
+                    return values.size;
+                }
+                fn inferredFromAnnotation(): Int {
+                    let values: List<Int> = List.empty();
+                    return values.size;
+                }
+                fn returnsInferredList(): List<Int> = List.empty();
+                fn acceptsList(values: List<Int>): Int = values.size;
+                fn inferredFromArgument(): Int = acceptsList(List.empty());
+                fn inferredCanonicalConstructor(): Int = Cell.new(7).value;
+                fn inferredNamedConstructor(): Int = Cell.from(9).value;
+                fn inferredFromLambdaResult(): Int = Generated.create(() -> 13).value;
+                """);
+
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                    "ClassInferenceRegression", "", List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass("ClassInferenceRegression");
+                assertEquals(3, main.getMethod("inferredFromValues").invoke(null));
+                assertEquals(0, main.getMethod("inferredFromAnnotation").invoke(null));
+                final var returnedList = main.getMethod("returnsInferredList").invoke(null);
+                assertEquals(0, returnedList.getClass().getMethod("$zeron$get$size").invoke(returnedList));
+                assertEquals(0, main.getMethod("inferredFromArgument").invoke(null));
+                assertEquals(7, main.getMethod("inferredCanonicalConstructor").invoke(null));
+                assertEquals(9, main.getMethod("inferredNamedConstructor").invoke(null));
+                assertEquals(13, main.getMethod("inferredFromLambdaResult").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void genericClassFactoryInferenceRejectsMissingAndConflictingEvidence() {
+        final var noEvidence = parse("Main.zn", """
+                import zeron.collections.List;
+                fn result() = List.empty();
+                """);
+        final var noEvidenceCompiler = CompilationService.forCompilationUnits(
+                List.of(noEvidence), "ClassInferenceMissing", "");
+        assertThrows(ResolutionError.class, noEvidenceCompiler::resolve);
+
+        final var conflicting = parse("Main.zn", """
+                import zeron.collections.List;
+                fn result() = List.of(1, "text");
+                """);
+        final var conflictingCompiler = CompilationService.forCompilationUnits(
+                List.of(conflicting), "ClassInferenceConflict", "");
+        assertThrows(ResolutionError.class, conflictingCompiler::resolve);
+
+        final var incompatibleExpectedType = parse("ExpectedType.zn", """
+                import zeron.collections.List;
+                fn result(): List<String> = List.of(1);
+                """);
+        final var incompatibleExpectedTypeCompiler = CompilationService.forCompilationUnits(
+                List.of(incompatibleExpectedType), "ClassInferenceExpectedConflict", "");
+        assertThrows(ResolutionError.class, incompatibleExpectedTypeCompiler::resolve);
+
+        final var incompatibleExplicitType = parse("ExplicitType.zn", """
+                import zeron.collections.List;
+                fn result() = List<String>.of(1);
+                """);
+        final var incompatibleExplicitTypeCompiler = CompilationService.forCompilationUnits(
+                List.of(incompatibleExplicitType), "ClassInferenceExplicitConflict", "");
+        assertThrows(ResolutionError.class, incompatibleExplicitTypeCompiler::resolve);
+    }
+
+    @Test
+    public void genericClassFactoryAndNamespaceFunctionCollisionIsAmbiguousWhenApplicable() {
+        final var source = parse("Main.zn", """
+                class Box<T> {
+                    value: T;
+                    public constructor new;
+                    public constructor make(value: T) = Box<T>.new(value);
+                }
+                namespace Box {
+                    public fn make(value: Int): &Box<Int> = Box<Int>.new(value);
+                }
+                fn result() = Box.make(1);
+                """);
+        final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                "ClassNamespaceAmbiguity", "");
+
+        final var error = assertThrows(ResolutionError.class, compiler::resolve);
+
+        assertTrue(error.getMessage().contains("Ambiguous call"));
+
+        final var nonMatchingFactory = parse("NonMatchingFactory.zn", """
+                class Factory<T> {
+                    public constructor new;
+                    public constructor create(value: Int) = Factory<T>.new();
+                }
+                namespace Factory {
+                    public fn create(value: String): &Factory<String> = Factory<String>.new();
+                }
+                fn result(): &Factory<String> = Factory.create("value");
+                """);
+        final var nonMatchingCompiler = CompilationService.forCompilationUnits(List.of(nonMatchingFactory),
+                "ClassNamespaceSelection", "");
+        nonMatchingCompiler.resolve();
+    }
+
+    @Test
+    public void matchDestructuresGenericOptionAndResultPropertiesWithGuards() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "matchPayload" + suffix;
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-match-payload-");
+        final var entry = sourceRoot.resolve(packageName).resolve("Main.zn");
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, """
+                package %s;
+                import zeron.lang.Option;
+                import zeron.lang.Some;
+                import zeron.lang.None;
+                import zeron.lang.Result;
+                import zeron.lang.Ok;
+                import zeron.lang.Err;
+                fn optionValue(value: Option<Int>): Int = match (value) {
+                    case Some<Int>.value(item) as some if item > 0 -> some.value;
+                    case Some<Int>.value(_) -> 0;
+                    case None<Int> -> -1;
+                };
+                fn resultValue(value: Result<Int, String>): Int = match (value) {
+                    case Ok<Int, String>.value(item) if item > 0 -> item;
+                    case Ok<Int, String>.value(_) -> 0;
+                    case Err<Int, String>.error(message) -> if (message == "bad") then 7 else -1;
+                };
+                fn some(): Option<Int> = Some<Int>.from(42);
+                fn negative(): Option<Int> = Some<Int>.from(-2);
+                fn none(): Option<Int> = None<Int>.none();
+                fn ok(): Result<Int, String> = Ok<Int, String>.from(9);
+                fn bad(): Result<Int, String> = Err<Int, String>.from("bad");
+                """.formatted(packageName));
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of(packageName, "Main.zn").toString()));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + ".Main");
+                final var some = main.getMethod("some").invoke(null);
+                final var negative = main.getMethod("negative").invoke(null);
+                final var none = main.getMethod("none").invoke(null);
+                final var ok = main.getMethod("ok").invoke(null);
+                final var bad = main.getMethod("bad").invoke(null);
+                final var optionClass = loader.loadClass("zeron.lang.Option");
+                final var resultClass = loader.loadClass("zeron.lang.Result");
+                assertEquals(42, main.getMethod("optionValue", optionClass)
+                        .invoke(null, some));
+                assertEquals(0, main.getMethod("optionValue", optionClass)
+                        .invoke(null, negative));
+                assertEquals(-1, main.getMethod("optionValue", optionClass)
+                        .invoke(null, none));
+                assertEquals(9, main.getMethod("resultValue", resultClass)
+                        .invoke(null, ok));
+                assertEquals(7, main.getMethod("resultValue", resultClass)
+                        .invoke(null, bad));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(sourceRoot);
+        }
+    }
+
+    @Test
     public void matchRejectsMissingDuplicateAndUnreachableCases() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var packageName = "invalidMatch" + suffix;
@@ -113,6 +344,12 @@ public final class StandardLibraryTest {
             for (final var match : List.of(
                     "match (value) { case Some<Int> -> 1; }",
                     "match (value) { case Some<Int> -> 1; case Some<Int> -> 2; case None<Int> -> 3; }",
+                    "match (value) { case Some<Int> if true -> 1; case None<Int> -> 2; }",
+                    "match (value) { case Some<Int> -> 1; case None<Int> if true -> 2; }",
+                    "match (value) { case _ if true -> 1; }",
+                    "match (value) { case Some<Int> if 1 -> 1; case None<Int> -> 2; }",
+                    "match (value) { case Some<Int>.missing(item) -> 1; case None<Int> -> 2; }",
+                    "match (value) { case Some<Int>.item(item) -> 1; case None<Int> -> 2; }",
                     "match (value) { case _ -> 1; case Some<Int> -> 2; }",
                     "match (value) { case Some<Int> -> 1; case None<Int> -> 2; case _ -> 3; }",
                     "match (value) { case Option<Int> -> 1; }",

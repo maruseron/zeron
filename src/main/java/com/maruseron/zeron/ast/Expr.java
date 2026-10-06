@@ -359,8 +359,47 @@ public sealed interface Expr {
         }
     }
 
-    record MatchArm(Token keyword, TypeDescriptor patternType, Token alias,
-                    boolean wildcard, Expr expression) {}
+    final class MatchArm {
+        private final Token keyword;
+        private final TypeDescriptor patternType;
+        private final Token alias;
+        private final Token namedPattern;
+        private final Token binding;
+        private final Expr guard;
+        private final boolean wildcard;
+        private final Expr expression;
+        private TypeDescriptor declaredPatternType;
+        private TypeDescriptor resolvedPatternType;
+
+        public MatchArm(Token keyword, TypeDescriptor patternType, Token alias,
+                        Token namedPattern, Token binding, Expr guard,
+                        boolean wildcard, Expr expression) {
+            this.keyword = keyword;
+            this.patternType = patternType;
+            this.alias = alias;
+            this.namedPattern = namedPattern;
+            this.binding = binding;
+            this.guard = guard;
+            this.wildcard = wildcard;
+            this.expression = expression;
+        }
+
+        public Token keyword() { return keyword; }
+        public TypeDescriptor patternType() { return patternType; }
+        public Token alias() { return alias; }
+        public Token namedPattern() { return namedPattern; }
+        public Token binding() { return binding; }
+        public Expr guard() { return guard; }
+        public boolean wildcard() { return wildcard; }
+        public Expr expression() { return expression; }
+        public TypeDescriptor declaredPatternType() { return declaredPatternType; }
+        public TypeDescriptor resolvedPatternType() { return resolvedPatternType; }
+
+        public void setResolvedPatternTypes(TypeDescriptor declaredType, TypeDescriptor resolvedType) {
+            declaredPatternType = declaredType;
+            resolvedPatternType = resolvedType;
+        }
+    }
 
     final class Match implements Expr {
         public final Token keyword;

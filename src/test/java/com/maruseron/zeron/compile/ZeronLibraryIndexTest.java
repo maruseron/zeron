@@ -106,11 +106,17 @@ public final class ZeronLibraryIndexTest {
                 public class Success<T> is Outcome<T> {
                     payload: T;
                     public constructor new;
+                    public property value: T {
+                        get = this.payload;
+                    }
                     public read(): T = this.payload;
                 }
                 public class Failure<T> is Outcome<T> {
                     payload: T;
                     public constructor new;
+                    public property reason: T {
+                        get = this.payload;
+                    }
                     public read(): T = this.payload;
                 }
                 """.formatted(libraryPackage));
@@ -154,8 +160,9 @@ public final class ZeronLibraryIndexTest {
                     fn result(): Int {
                         let value: Outcome<Int> = Success<Int>.new(42);
                         return match (value) {
-                            case Success<Int> as success -> success.read();
-                            case Failure<Int> as failure -> failure.read();
+                            case Success<Int>.value(item) if item > 0 -> item;
+                            case Success<Int>.value(_) -> 0;
+                            case Failure<Int>.reason(_) -> -1;
                         };
                     }
                     """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage));

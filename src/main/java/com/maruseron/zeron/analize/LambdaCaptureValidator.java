@@ -127,6 +127,8 @@ final class LambdaCaptureValidator {
                 for (final var arm : match.arms) {
                     final var armNames = new HashSet<>(localNames);
                     if (arm.alias() != null) armNames.add(arm.alias().lexeme());
+                    if (arm.binding() != null) armNames.add(arm.binding().lexeme());
+                    if (arm.guard() != null) walkCaptureUsage(arm.guard(), armNames);
                     walkCaptureUsage(arm.expression(), armNames);
                 }
             }

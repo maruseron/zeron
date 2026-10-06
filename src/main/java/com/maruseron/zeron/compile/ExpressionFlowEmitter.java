@@ -87,60 +87,81 @@ final class ExpressionFlowEmitter {
 
     static void emitMatchExpression(CompilationContext context, final CodeBuilder composer, final Expr.Match match ){
         final var done = composer.newLabel();
-        var aliasScopeCount = 0;
-        try {
-            emitExpr(context, composer, match.scrutinee);
-            final var failure = composer.newLabel();
-            composer.dup();
-            composer.ifnull(failure);
-            for (final var arm : match.arms) {
-                if (arm.wildcard()) {
-                    composer.pop();
-                    emitExpr(context, composer, arm.expression());
-                    emitConversion(context, composer, context.lastEmittedType, match.getType());
-                    composer.goto_(done);
-                    break;
-                }
+        emitExpr(context, composer, match.scrutinee);
+        final var failure = composer.newLabel();
+        composer.dup();
+        composer.ifnull(failure);
+        for (final var arm : match.arms) {
+            if (arm.wildcard()) {
+                composer.pop();
+                emitExpr(context, composer, arm.expression());
+                emitConversion(context, composer, context.lastEmittedType, match.getType());
+                composer.goto_(done);
+                break;
+            }
 
-                final var next = composer.newLabel();
-                final var targetClass = TypeDescriptor.toJavaClassDesc(arm.patternType());
-                composer.dup();
-                composer.instanceOf(targetClass);
-                composer.ifeq(next);
-                if (arm.alias() == null) {
-                    composer.pop();
-                    emitExpr(context, composer, arm.expression());
-                    emitConversion(context, composer, context.lastEmittedType, match.getType());
-                    composer.goto_(done);
-                } else {
-                    beginScope(context);
-                    aliasScopeCount++;
+            final var next = composer.newLabel();
+            final var targetClass = TypeDescriptor.toJavaClassDesc(arm.patternType());
+            composer.dup();
+            composer.instanceOf(targetClass);
+            composer.ifeq(next);
+
+            beginScope(context);
+            try {
+                if (arm.alias() != null) {
                     final var aliasSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.alias(),
                             arm.patternType(), BindingMutability.IMMUTABLE);
                     context.symbols.define(arm.alias());
+                    composer.dup();
                     composer.checkcast(targetClass);
                     composer.storeLocal(TypeKind.REFERENCE, aliasSlot + context.localSlotOffset);
-                    emitExpr(context, composer, arm.expression());
-                    emitConversion(context, composer, context.lastEmittedType, match.getType());
-                    composer.goto_(done);
                 }
-                composer.labelBinding(next);
+                if (arm.namedPattern() != null) {
+                    final var propertyType = arm.declaredPatternType();
+                    final var erasedPropertyType = TypeSubstitution.erase(propertyType);
+                    composer.dup();
+                    composer.checkcast(targetClass);
+                    final var getterName = Stmt.propertyGetterName(arm.namedPattern().lexeme());
+                    composer.invokevirtual(targetClass, getterName,
+                            toJavaMethodDescriptor(TypeDescriptor.functionOf(getterName, erasedPropertyType)));
+                    context.lastEmittedType = erasedPropertyType;
+                    emitConversion(context, composer, erasedPropertyType, arm.resolvedPatternType());
+                    if (arm.binding() == null) {
+                        composer.pop();
+                    } else {
+                        final var bindingSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.binding(),
+                                arm.resolvedPatternType(), BindingMutability.IMMUTABLE);
+                        context.symbols.define(arm.binding());
+                        composer.storeLocal(TypeKind.fromDescriptor(
+                                TypeDescriptor.toJavaClassDesc(arm.resolvedPatternType()).descriptorString()),
+                                bindingSlot + context.localSlotOffset);
+                    }
+                }
+                if (arm.guard() != null) {
+                    emitExpr(context, composer, arm.guard());
+                    composer.ifeq(next);
+                }
+                composer.pop();
+                emitExpr(context, composer, arm.expression());
+                emitConversion(context, composer, context.lastEmittedType, match.getType());
+                composer.goto_(done);
+            } finally {
+                endScope(context);
             }
-
-            composer.labelBinding(failure);
-            composer.pop();
-            final var exception = ClassDesc.of("java.lang.IllegalStateException");
-            composer.new_(exception);
-            composer.dup();
-            composer.ldc("No match case accepted the runtime value.");
-            composer.invokespecial(exception, "<init>",
-                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
-            composer.athrow();
-            composer.labelBinding(done);
-            context.lastEmittedType = match.getType();
-        } finally {
-            for (var i = 0; i < aliasScopeCount; i++) endScope(context);
+            composer.labelBinding(next);
         }
+
+        composer.labelBinding(failure);
+        composer.pop();
+        final var exception = ClassDesc.of("java.lang.IllegalStateException");
+        composer.new_(exception);
+        composer.dup();
+        composer.ldc("No match case accepted the runtime value.");
+        composer.invokespecial(exception, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+        composer.athrow();
+        composer.labelBinding(done);
+        context.lastEmittedType = match.getType();
     }
 
     static void emitTypeTest(CompilationContext context, final CodeBuilder composer, final Expr.TypeTest test ){

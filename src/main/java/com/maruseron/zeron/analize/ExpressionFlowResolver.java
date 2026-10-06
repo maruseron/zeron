@@ -601,6 +601,10 @@ final class ExpressionFlowResolver {
 
             TypeDescriptor armType = null;
             if (arm.wildcard()) {
+                if (arm.guard() != null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                            arm.keyword(), "A wildcard match case cannot have a guard."));
+                }
                 if (matchedNames.containsAll(permittedNames)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                             arm.keyword(),
@@ -627,10 +631,11 @@ final class ExpressionFlowResolver {
                             "Class '" + armType.name() + "' is not permitted by sealed contract '"
                                     + sealedContract.name().lexeme() + "'."));
                 }
-                if (!matchedNames.add(armType.name())) {
+                if (matchedNames.contains(armType.name())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                             arm.keyword(),
-                            "Duplicate match case for '" + armType.name() + "'."));
+                            "A match case for '" + armType.name()
+                                    + "' follows an unguarded case and is unreachable."));
                 }
                 final var classArguments = armType instanceof GenericDescriptor generic
                         ? generic.typeParameters()
@@ -639,6 +644,23 @@ final class ExpressionFlowResolver {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                             arm.keyword(),
                             "Match case type arguments must match the sealed contract's type arguments."));
+                }
+                if (arm.namedPattern() != null) {
+                    final var property = MemberInteropResolver.findProperty(
+                            context, armType.name(), arm.namedPattern());
+                    if (property == null) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                                arm.namedPattern(), "Class '" + simpleName(armType.name())
+                                        + "' has no readable property named '"
+                                        + arm.namedPattern().lexeme() + "'."));
+                    }
+                    if (!property.isPublic()) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                                arm.namedPattern(), "Named patterns can only read public properties."));
+                    }
+                    arm.setResolvedPatternTypes(property.type(),
+                            MemberInteropResolver.resolvedPropertyType(
+                                    context, armType.name(), property, armType));
                 }
             }
 
@@ -656,14 +678,28 @@ final class ExpressionFlowResolver {
                             arm.alias(), armType, BindingMutability.IMMUTABLE);
                     define(context, arm.alias());
                 }
+                if (arm.binding() != null) {
+                    final var bindingType = arm.resolvedPatternType();
+                    declare(context, new Stmt.Var(arm.binding(), bindingType, null,
+                                    BindingMutability.IMMUTABLE, false),
+                            arm.binding(), bindingType, BindingMutability.IMMUTABLE);
+                    define(context, arm.binding());
+                }
+                if (arm.guard() != null) {
+                    final var guardType = resolve(context, arm.guard());
+                    ensureAssignable(context, TypeDescriptor.ofBoolean(), guardType, arm.keyword());
+                }
                 final var armResultType = resolve(context, arm.expression());
                 resultType = resultType == null
                         ? armResultType
                         : ensureCommonParent(context, arm.keyword(), resultType, armResultType);
-                armFlows.add(context.frame.flowState.copy());
+                var armFlow = context.frame.flowState.copy();
+                if (arm.guard() != null) armFlow = FlowState.join(incomingFlow, armFlow);
+                armFlows.add(armFlow);
             } finally {
                 endScope(context);
             }
+            if (!arm.wildcard() && arm.guard() == null) matchedNames.add(armType.name());
         }
 
         if (!wildcardSeen && !matchedNames.containsAll(permittedNames)) {

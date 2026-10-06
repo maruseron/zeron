@@ -403,7 +403,9 @@ final class LambdaResolver {
                 || match.arms.stream().anyMatch(arm -> {
                     final var armNames = new HashSet<>(names);
                     if (arm.alias() != null) armNames.remove(arm.alias().lexeme());
-                    return referencesAnyVariable(context, arm.expression(), armNames);
+                    if (arm.binding() != null) armNames.remove(arm.binding().lexeme());
+                    return arm.guard() != null && referencesAnyVariable(context, arm.guard(), armNames)
+                            || referencesAnyVariable(context, arm.expression(), armNames);
                 });
             case Expr.Logical logical -> referencesAnyVariable(context, logical.left, names)
                 || referencesAnyVariable(context, logical.right, names);

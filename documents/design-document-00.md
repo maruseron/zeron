@@ -38,9 +38,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     statically, lower to receiver-first static functions, and cannot access private members.
     Instance-method overloads (including contract defaults) take precedence when applicable;
     otherwise imported extension overloads are considered. Mutating extensions require `&T`.
-- Invariant generic classes and contracts with explicit construction arguments, member substitution,
-    declaration-site conformance, raw JVM erasure, erased-signature bridges, and callback adaptation
-    across erased nominal fields and members.
+- Invariant generic classes and contracts with inferred or explicit constructor arguments, member
+    substitution, declaration-site conformance, raw JVM erasure, erased-signature bridges, and callback
+    adaptation across erased nominal fields and members.
 - Fixed-size `Array<T>` values with non-empty and contextually typed empty literals, indexed reads
   and writes, and a `length` property; writes require a mutable reference view.
 - `for` loops over arrays, inline integer ranges, and user-defined types conforming to the bundled
@@ -56,8 +56,10 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - `zeron.lang.Result<T, E>` as a sealed contract implemented by `Ok<T, E>` and `Err<T, E>`, with
     `fold`, `map`, `mapError`, and `andThen` for explicit error-value composition. No propagation
     operator or source-level exception handling is introduced.
-- Exhaustive `match` expressions over non-null sealed-contract values. Cases name permitted classes
-    and may bind the value with `as`; a final `_` case covers any remaining variants.
+- Exhaustive `match` expressions over non-null sealed-contract values. Cases name permitted classes,
+    may bind the whole value with `as`, or use one named public-property pattern
+    (`Some<T>.value(value)`) with an optional Boolean guard. Guard-failing cases continue to later
+    arms and do not count toward exhaustiveness; a final unguarded `_` may cover remaining variants.
 - Compiled Zeron libraries can be packaged as JARs and loaded from either JARs or class directories;
     consumers validate both API-index schema and standard-library API compatibility.
 - Initial Java class-directory interop for public constructors and methods, including expanded
@@ -141,7 +143,8 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     only where the matching witness is imported; witnesses travel with generic and library APIs, and
     conflicting witnesses require disambiguation or are rejected. Witnesses are separate from object
     identity; adapter wrappers may be an implementation detail, not the language's model.
-- Richer pattern matching, including payload destructuring, nested patterns, guards, and OR-patterns.
+- Richer pattern matching, including multiple named-property patterns per case, nested patterns, and
+    OR-patterns.
 - Named object patterns that define explicit, potentially partial views for matching; overlap,
     match-failure signaling, purity, and exhaustiveness rules remain to be designed.
 - Low priority: anonymous objects that explicitly implement a named contract, for one-off adapters

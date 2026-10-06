@@ -1,6 +1,9 @@
 import zeron.io.println;
-
 import zeron.collections.List;
+import zeron.lang.Option;
+import zeron.lang.Some;
+import zeron.lang.None;
+
 import List.map;
 
 namespace List {
@@ -31,4 +34,11 @@ fn main() {
     for (let name in names) {
         println(name);
     }
+
+    let option: Option<Int> = Option.some(5);
+
+    match (option) {
+        case Some<Int>.value(i) -> println(i);
+        case None<Int>          -> println("nothing");
+    };
 }

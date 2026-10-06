@@ -11,17 +11,20 @@ import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import com.maruseron.zeron.scan.Token;
 
 import java.lang.classfile.ClassFile;
+import java.lang.classfile.ClassHierarchyResolver;
 import java.lang.classfile.Label;
+import java.lang.constant.ClassDesc;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 final class CompilationContext {
-    final ClassFile classFile = ClassFile.of();
+    final ClassFile classFile;
     final List<Stmt> topLevelDeclarations;
     final List<CompilationUnit> compilationUnits;
     final Path outputDirectory;
@@ -57,6 +60,8 @@ final class CompilationContext {
                        final List<Path> javaClassPathRoots,
                        final FunctionBindingRegistry functionBindings) {
         compilationUnits = List.copyOf(units);
+        classFile = ClassFile.of(ClassFile.ClassHierarchyResolverOption.of(
+                sourceTypeResolver(compilationUnits)));
         this.outputDirectory = outputDirectory;
         this.includeBundledSourcesInIndex = includeBundledSourcesInIndex;
         this.libraryBuild = libraryBuild;
@@ -72,6 +77,27 @@ final class CompilationContext {
             }
         }
         this.mainClassName = mainClassName;
+    }
+
+    private static ClassHierarchyResolver sourceTypeResolver(final List<CompilationUnit> units) {
+        final var sourceTypes = new HashMap<ClassDesc, ClassHierarchyResolver.ClassHierarchyInfo>();
+        for (final var unit : units) {
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                final var declaration = member.declaration();
+                if (declaration instanceof Stmt.ClassDecl classDeclaration) {
+                    sourceTypes.put(ClassDesc.of(classDeclaration.name().lexeme()),
+                            ClassHierarchyResolver.ClassHierarchyInfo.ofClass(ClassDesc.of("java.lang.Object")));
+                } else if (declaration instanceof Stmt.ContractDecl contractDeclaration) {
+                    sourceTypes.put(ClassDesc.of(contractDeclaration.name().lexeme()),
+                            ClassHierarchyResolver.ClassHierarchyInfo.ofInterface());
+                }
+            }
+        }
+        final var fallback = ClassHierarchyResolver.defaultResolver();
+        return resolver -> {
+            final var sourceType = sourceTypes.get(resolver);
+            return sourceType != null ? sourceType : fallback.getClassInfo(resolver);
+        };
     }
 
     String sourcePath(final Stmt declaration) {

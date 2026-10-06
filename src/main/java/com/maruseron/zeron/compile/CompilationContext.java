@@ -2,6 +2,7 @@ package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.analize.ResolutionResult;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.FunctionBindingRegistry;
 import com.maruseron.zeron.domain.SymbolTable;
@@ -63,10 +64,11 @@ final class CompilationContext {
         this.functionBindings = Objects.requireNonNull(functionBindings);
         metadata = new CompilationMetadata(compilationUnits, libraries, mainClassName);
         topLevelDeclarations = compilationUnits.stream().filter(unit -> !unit.metadataOnly())
-                .flatMap(unit -> unit.declarations().stream()).toList();
+                .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
+                .map(NamespaceMembers.Member::declaration).toList();
         for (final var unit : compilationUnits) {
-            for (final var declaration : unit.declarations()) {
-                sourcePathsByDeclaration.put(declaration, unit.sourcePath());
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                sourcePathsByDeclaration.put(member.declaration(), unit.sourcePath());
             }
         }
         this.mainClassName = mainClassName;

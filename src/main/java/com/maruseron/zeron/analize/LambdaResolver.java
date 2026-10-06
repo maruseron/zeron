@@ -85,8 +85,8 @@ final class LambdaResolver {
                         "Cannot infer type parameter '" + parameter.name()
                                 + "' for function value; provide an explicit type argument."));
             }
-            if (parameter.bound() != null) {
-                final var requiredBound = TypeSubstitution.substitute(parameter.bound(), substitutions);
+            for (final var bound : parameter.bounds()) {
+                final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
                 ensureAssignable(context, requiredBound, substitutions.get(parameter), reference.name);
             }
         }

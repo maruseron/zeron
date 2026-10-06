@@ -1,0 +1,66 @@
+package zeron.lang;
+
+public sealed contract Result<T, E> permits Ok<T, E>, Err<T, E> {
+    isOk(): Boolean;
+    isErr(): Boolean;
+    fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R;
+    map<U>(transform: (T) -> U): Result<U, E>;
+    mapError<F>(transform: (E) -> F): Result<T, F>;
+    andThen<U>(transform: (T) -> Result<U, E>): Result<U, E>;
+}
+
+public class Ok<T, E> is Result<T, E> {
+    item: T;
+
+    private constructor new;
+
+    public constructor from(value: T) = Ok<T, E>.new(value);
+
+    public isOk(): Boolean = true;
+
+    public isErr(): Boolean = false;
+
+    public property value: T {
+        get = this.item;
+    }
+
+    public fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R =
+        ifOk(this.item);
+
+    public map<U>(transform: (T) -> U): Result<U, E> =
+        Ok<U, E>.from(transform(this.item));
+
+    public mapError<F>(transform: (E) -> F): Result<T, F> =
+        Ok<T, F>.from(this.item);
+
+    public andThen<U>(transform: (T) -> Result<U, E>): Result<U, E> =
+        transform(this.item);
+}
+
+public class Err<T, E> is Result<T, E> {
+    errorValue: E;
+
+    private constructor new;
+
+    public constructor from(error: E) = Err<T, E>.new(error);
+
+    public isOk(): Boolean = false;
+
+    public isErr(): Boolean = true;
+
+    public property error: E {
+        get = this.errorValue;
+    }
+
+    public fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R =
+        ifErr(this.errorValue);
+
+    public map<U>(transform: (T) -> U): Result<U, E> =
+        Err<U, E>.from(this.errorValue);
+
+    public mapError<F>(transform: (E) -> F): Result<T, F> =
+        Err<T, F>.from(transform(this.errorValue));
+
+    public andThen<U>(transform: (T) -> Result<U, E>): Result<U, E> =
+        Err<U, E>.from(this.errorValue);
+}

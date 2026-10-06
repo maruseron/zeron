@@ -26,7 +26,12 @@ public final class TypeSubstitution {
                     function.parameters().stream()
                             .map(parameter -> substitute(parameter, substitutions))
                             .toList(),
-                    function.typeParameters());
+                    function.typeParameters().stream()
+                            .map(parameter -> new TypeParameterDescriptor(parameter.scopeId(), parameter.name(),
+                                    parameter.bounds().stream()
+                                            .map(bound -> substitute(bound, substitutions))
+                                            .toList()))
+                            .toList());
             default -> type;
         };
     }

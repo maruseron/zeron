@@ -44,6 +44,53 @@ final class MemberInteropResolver {
     }
 
     static TypeDescriptor resolveProperty(final ResolutionContext context, final Expr.Property property) {
+        if (property.receiver instanceof Expr.Variable typeName) {
+            final var ownerName = resolveClassName(context, typeName.name.lexeme(), typeName.name);
+            final var externalClass = ownerName == null ? null : context.externalClasses.get(ownerName);
+            if (externalClass != null || "java.lang.System".equals(ownerName)) {
+                if (property.safeNavigation()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                            property.name, "Safe navigation cannot be used for a static property."));
+                }
+                final var declaredProperty = externalClass == null ? null : externalClass.staticProperties().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
+                        .findFirst().orElse(null);
+                final var javaClass = context.javaClassPath.find(ownerName);
+                final var javaField = javaClass == null ? null : javaClass.fields().stream()
+                        .filter(candidate -> candidate.name().equals(property.name.lexeme()) && candidate.isStatic())
+                        .findFirst().orElse(null);
+                final var fieldType = javaField == null ? null : JavaTypeMapping.toZeronType(javaField.descriptor());
+                if (javaField == null || fieldType == null
+                        || externalClass != null && (declaredProperty == null || !declaredProperty.isPublic()
+                            || !fieldType.equals(declaredProperty.type()))
+                        || externalClass == null && !property.name.lexeme().equals("out")) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                            property.name, "Unknown or unsupported external static property."));
+                }
+                property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
+                        javaField.descriptor().descriptorString()));
+                property.setType(fieldType);
+                return fieldType;
+            }
+        }
+        final var namespaceValueName = namespaceMemberName(context, property.receiver, property.name.lexeme());
+        if (namespaceValueName != null && context.topLevelValues.containsKey(namespaceValueName)) {
+            if (property.safeNavigation()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        property.name, "Safe navigation cannot be used for a namespace value."));
+            }
+            final var value = context.topLevelValues.get(namespaceValueName);
+            if (!isNamespaceMemberAccessible(context, namespaceValueName, value.isPublic())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                        property.name, "Namespace value '" + namespaceValueName + "' is private."));
+            }
+            final var symbol = context.topLevelValueSymbols.get(namespaceValueName);
+            property.setNamespaceValue(symbol, value);
+            final var binding = context.symbols.getSymbol(symbol);
+            final var type = binding == null ? value.type() : binding.type();
+            property.setType(type);
+            return type;
+        }
         final var receiverType = ExpressionFlowResolver.resolveExpression(context, property.receiver);
         final var safeFlows = property.safeNavigation()
                 ? beginSafeNavigation(context, property.receiver, property.name, receiverType)
@@ -125,6 +172,18 @@ final class MemberInteropResolver {
     private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                              final TypeDescriptor alreadyResolvedReceiverType) {
         Zeron.debug("resolving member call       " + call.name.lexeme() + " for " + call.receiver);
+        if (!call.safeNavigation()) {
+            final var namespaceFunctionName = namespaceMemberName(context, call.receiver, call.name.lexeme());
+            final var namespaceFunction = namespaceFunctionName == null
+                    ? null : context.functions.get(namespaceFunctionName);
+            if (namespaceFunction != null) {
+                if (!isNamespaceMemberAccessible(context, namespaceFunctionName, namespaceFunction.isPublic())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                            call.name, "Namespace function '" + namespaceFunctionName + "' is private."));
+                }
+                return context.callResolver.resolveNamespaceCall(call, namespaceFunctionName);
+            }
+        }
         final var classOwnerName = call.receiver instanceof Expr.Variable typeName
             ? resolveClassName(context, typeName.name.lexeme(), typeName.name)
             : null;
@@ -401,6 +460,10 @@ final class MemberInteropResolver {
                         "Cannot infer type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument."));
             }
+            for (final var bound : parameter.bounds()) {
+                final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
+                ensureAssignable(context, requiredBound, substitutions.get(parameter), call.name);
+            }
         }
 
         final var instantiatedParameters = genericType.parameters().stream()
@@ -556,24 +619,40 @@ final class MemberInteropResolver {
 
     private static TypeDescriptor resolveBoundedMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                                     final TypeParameterDescriptor parameter) {
-        if (parameter.bound() == null) {
+        if (parameter.bounds().isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "Member access on an unconstrained type parameter is not allowed."));
         }
-        final var bound = parameter.bound();
-        final var ownerName = className(context, bound);
-        final var contract = context.contracts.get(ownerName);
-        final var method = contract == null ? null : contract.methods().stream()
-                .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
-                .findFirst().orElse(null);
+        TypeDescriptor bound = null;
+        Stmt.ContractDecl contract = null;
+        Stmt.ContractMethod method = null;
+        var hasMutatingMethod = false;
+        for (final var candidateBound : parameter.bounds()) {
+            final var candidateName = className(context, candidateBound);
+            final var candidateContract = context.contracts.get(candidateName);
+            final var candidateMethod = candidateContract == null ? null : candidateContract.methods().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
+                    .findFirst().orElse(null);
+            if (candidateMethod != null) {
+                if (candidateMethod.isMutating()) {
+                    hasMutatingMethod = true;
+                    continue;
+                }
+                bound = candidateBound;
+                contract = candidateContract;
+                method = candidateMethod;
+                break;
+            }
+        }
         if (method == null) {
+            if (hasMutatingMethod) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
+                        "Mutating methods are not available through a generic contract bound."));
+            }
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
-                    "Method is not provided by the type parameter's contract bound."));
+                    "Method is not provided by any of the type parameter's contract bounds."));
         }
-        if (method.isMutating()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
-                    "Mutating methods are not available through a generic contract bound."));
-        }
+        final var ownerName = className(context, bound);
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         final var boundBase = bound instanceof ReferenceDescriptor reference ? reference.baseType() : bound;
@@ -656,6 +735,11 @@ final class MemberInteropResolver {
 
     static String resolveFunctionName(final ResolutionContext context, final String name, final Token where) {
         context.skipInvalidImportAlias(name);
+        if (context.currentNamespaceName != null) {
+            final var namespaceName = qualifyNamespaceMember(context.packageName,
+                    context.currentNamespaceName, name);
+            if (context.functions.containsKey(namespaceName)) return namespaceName;
+        }
         final var localName = qualify(context.packageName, name);
         if (context.functions.containsKey(localName)) return localName;
         final var explicitImport = context.currentImports.functions().get(name);
@@ -683,6 +767,13 @@ final class MemberInteropResolver {
 
     static Token resolveTopLevelValueSymbol(final ResolutionContext context, final Token name) {
         context.skipInvalidImportAlias(name.lexeme());
+        if (context.currentNamespaceName != null) {
+            final var namespaceValueName = qualifyNamespaceMember(context.packageName,
+                    context.currentNamespaceName, name.lexeme());
+            if (context.topLevelValues.containsKey(namespaceValueName)) {
+                return context.topLevelValueSymbols.get(namespaceValueName);
+            }
+        }
         final var localName = qualify(context.packageName, name.lexeme());
         if (context.topLevelValues.containsKey(localName)) return context.topLevelValueSymbols.get(localName);
         final var explicitImport = context.currentImports.values().get(name.lexeme());
@@ -702,8 +793,58 @@ final class MemberInteropResolver {
         return candidates.isEmpty() ? null : context.topLevelValueSymbols.get(candidates.getFirst());
     }
 
+    private static String namespaceMemberName(final ResolutionContext context, final Expr receiver,
+                                              final String memberName) {
+        final var path = expressionPath(receiver);
+        if (path == null) return null;
+        final var localName = qualifyNamespaceMember(context.packageName, path, memberName);
+        if (context.functions.containsKey(localName) || context.topLevelValues.containsKey(localName)) {
+            return localName;
+        }
+        final var importedTypeName = context.currentImports.types().get(path);
+        if (importedTypeName != null) {
+            final var importedNamespaceMember = importedTypeName + "." + memberName;
+            if (context.functions.containsKey(importedNamespaceMember)
+                    || context.topLevelValues.containsKey(importedNamespaceMember)) {
+                return importedNamespaceMember;
+            }
+        }
+        final var qualifiedName = path + "." + memberName;
+        if (context.functions.containsKey(qualifiedName) || context.topLevelValues.containsKey(qualifiedName)) {
+            return qualifiedName;
+        }
+        return null;
+    }
+
+    private static String expressionPath(final Expr expression) {
+        if (expression instanceof Expr.Variable variable) return variable.name.lexeme();
+        if (expression instanceof Expr.Property property && !property.safeNavigation()) {
+            final var prefix = expressionPath(property.receiver);
+            return prefix == null ? null : prefix + "." + property.name.lexeme();
+        }
+        return null;
+    }
+
+    private static String qualifyNamespaceMember(final String ownerPackage, final String namespacePath,
+                                                 final String memberName) {
+        final var prefix = ownerPackage == null || ownerPackage.isEmpty()
+                ? namespacePath
+                : ownerPackage + "." + namespacePath;
+        return prefix + "." + memberName;
+    }
+
+    private static boolean isNamespaceMemberAccessible(final ResolutionContext context,
+                                                       final String qualifiedName,
+                                                       final boolean isPublic) {
+        return Objects.equals(context.namespaceMemberPackages.get(qualifiedName), context.packageName)
+                || isPublic;
+    }
+
     static TypeDescriptor resolveArgument(final ResolutionContext context, final Expr argument,
                                            final TypeDescriptor expectedType) {
+        if (argument instanceof Expr.ArrayLiteral literal && literal.elements.isEmpty()) {
+            return ExpressionFlowResolver.resolveEmptyArrayLiteral(context, literal, expectedType);
+        }
         if (argument instanceof Expr.Variable variable && context.symbols.containsSymbol(variable.name)) {
             var bindingType = context.symbols.getSymbol(variable.name).type();
             if (bindingType instanceof ReferenceDescriptor reference) bindingType = reference.baseType();

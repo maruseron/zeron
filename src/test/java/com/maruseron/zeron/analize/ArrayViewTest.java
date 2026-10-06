@@ -46,6 +46,32 @@ public final class ArrayViewTest {
         assertEquals(TypeDescriptor.ofInt(), bindingType(result, statements, "size"));
     }
 
+    @Test
+    public void resolvesContextualEmptyArrayLiteralsAndRejectsUncontextualOnes() {
+        final var statements = parse("""
+                let values: &Array<Int> = [];
+                fn length(values: Array<Int>): Int = values.length;
+                fn fromArgument(): Int = length([]);
+                """);
+        new ResolutionService().resolve(statements);
+
+        final var declaration = (Stmt.Var) statements.getFirst();
+        final var literal = (Expr.ArrayLiteral) declaration.initializer();
+        assertEquals(new ReferenceDescriptor(TypeDescriptor.arrayOf(TypeDescriptor.ofInt())),
+                literal.getType());
+        assertEquals(IntrinsicId.ARRAY_LITERAL, literal.intrinsicOperation().id());
+        assertTrue(literal.intrinsicOperation().parameterTypes().isEmpty());
+
+        final var fromArgument = (Stmt.Function) statements.get(2);
+        final var call = (Expr.Call) ((Stmt.Return) fromArgument.body().getFirst()).value();
+        final var argument = (Expr.ArrayLiteral) call.arguments.getFirst();
+        assertEquals(new ReferenceDescriptor(TypeDescriptor.arrayOf(TypeDescriptor.ofInt())),
+                argument.getType());
+
+        assertThrows(ResolutionError.class,
+                () -> new ResolutionService().resolve(parse("let values = [];")));
+    }
+
         @Test
         public void resolvesArraySyntaxToStableTypedIntrinsicOperations() {
         final var statements = parse("""

@@ -22,6 +22,7 @@ final class DeclarationResolver {
                         method.name(), "Duplicate contract method."));
             }
             TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
+            TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
             if (method.isDefault()) {
                 resolveContractMethod(context, contract, method);
             }
@@ -170,6 +171,7 @@ final class DeclarationResolver {
                         method.name(), "Duplicate class member."));
             }
             TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
+            TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
         }
 
         final var contractNames = new HashSet<String>();
@@ -488,6 +490,12 @@ final class DeclarationResolver {
         for (int i = 0; i < required.typeParameters().size(); i++) {
             methodSubstitutions.put(required.typeParameters().get(i),
                     implementation.typeParameters().get(i));
+        }
+        for (int i = 0; i < required.typeParameters().size(); i++) {
+            final var requiredBounds = required.typeParameters().get(i).bounds().stream()
+                    .map(bound -> TypeSubstitution.substitute(bound, methodSubstitutions))
+                    .toList();
+            if (!requiredBounds.equals(implementation.typeParameters().get(i).bounds())) return false;
         }
         for (int i = 0; i < required.arity(); i++) {
             if (!TypeSubstitution.substitute(required.parameters().get(i), methodSubstitutions)

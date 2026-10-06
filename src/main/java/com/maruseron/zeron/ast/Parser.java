@@ -148,7 +148,12 @@ public final class Parser {
         try {
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
-            if (match(EXTERNAL)) return externalFunctionDeclaration(false);
+            if (match(NAMESPACE)) return namespaceDeclaration();
+            if (match(EXTERNAL)) {
+                if (match(CLASS)) return externalClassDeclaration(false);
+                return externalFunctionDeclaration(false);
+            }
+
             if (levelMarker == null && match(PUBLIC)) {
                 if (match(LET)) return letDeclaration(true);
                 if (match(CLASS)) return classDeclaration(true);
@@ -158,7 +163,10 @@ public final class Parser {
                             "Only contracts can be sealed.");
                     return contractDeclaration(true, true);
                 }
-                if (match(EXTERNAL)) return externalFunctionDeclaration(true);
+                if (match(EXTERNAL)) {
+                    if (match(CLASS)) return externalClassDeclaration(true);
+                    return externalFunctionDeclaration(true);
+                }
                 if (match(FN)) return fnDeclaration(true);
                 throw error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
                         "Only values, functions, classes, and contracts may be public.");
@@ -178,6 +186,25 @@ public final class Parser {
             synchronize();
             return null;
         }
+    }
+
+    private Stmt.Namespace namespaceDeclaration() {
+        final var name = consume(IDENTIFIER, "Expect namespace name.");
+        consume(LEFT_BRACE, "Expect '{' after namespace name.");
+        final var members = new ArrayList<Stmt>();
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            final var member = declaration();
+            if (member instanceof Stmt.FunctionDeclaration
+                    || member instanceof Stmt.Var variable
+                    && !variable.mutability().isReassignable()) {
+                members.add(member);
+            } else {
+                error(name, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Namespaces may contain only functions and immutable values.");
+            }
+        }
+        consume(RIGHT_BRACE, "Expect '}' after namespace members.");
+        return new Stmt.Namespace(name, members);
     }
 
     private Stmt letDeclaration() {
@@ -253,6 +280,60 @@ public final class Parser {
         final var descriptor = TypeDescriptor.functionOf(name.lexeme(), returnType,
                 parameterTypes.toArray(TypeDescriptor[]::new));
         return new Stmt.ExternalFunction(name, List.copyOf(parameterNames), descriptor, isPublic);
+    }
+
+    private Stmt.ExternalClass externalClassDeclaration(final boolean isPublic) {
+        if (levelMarker != null) {
+            throw error(previous(), DiagnosticCatalog.INVALID_EXTERNAL_FUNCTION_DECLARATION,
+                    "External classes are only allowed at top level.");
+        }
+        final var name = consume(IDENTIFIER, "Expect external class name.");
+        consume(EQUAL, "Expect '=' after external class name.");
+        final var target = consume(STRING, "Expect Java binary class name string.");
+        final var binaryName = (String) target.literal();
+        if (binaryName == null || binaryName.isBlank()) {
+            throw error(target, DiagnosticCatalog.INVALID_EXTERNAL_FUNCTION_DECLARATION,
+                    "External class target must be a non-empty Java binary name.");
+        }
+        consume(LEFT_BRACE, "Expect '{' before external class members.");
+        final var methods = new ArrayList<Stmt.ExternalMethod>();
+        final var properties = new ArrayList<Stmt.ExternalStaticProperty>();
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            final var isMemberPublic = match(PUBLIC);
+            final var isMutating = match(MUT);
+            if (match(STATIC)) {
+                if (isMutating) throw error(previous(), DiagnosticCatalog.INVALID_EXTERNAL_FUNCTION_DECLARATION,
+                        "Static external properties cannot be mutating.");
+                consume(PROPERTY, "Expect 'property' after 'static'.");
+                final var propertyName = consume(IDENTIFIER, "Expect property name.");
+                consume(COLON, "Expect ':' after property name.");
+                final var type = collectType();
+                consume(SEMICOLON, "Expect ';' after external property.");
+                properties.add(new Stmt.ExternalStaticProperty(propertyName, type, isMemberPublic));
+                continue;
+            }
+            final var methodName = consume(IDENTIFIER, "Expect external method name.");
+            consume(LEFT_PAREN, "Expect '(' after external method name.");
+            final var parameters = new ArrayList<Token>();
+            final var parameterTypes = new ArrayList<TypeDescriptor>();
+            if (!check(RIGHT_PAREN)) {
+                do {
+                    parameters.add(consume(IDENTIFIER, "Expect parameter name."));
+                    consume(COLON, "Expect ':' after parameter name.");
+                    parameterTypes.add(collectType());
+                } while (match(COMMA));
+            }
+            consume(RIGHT_PAREN, "Expect ')' after parameters.");
+            consume(COLON, "External methods require an explicit return type.");
+            final var returnType = collectType();
+            consume(SEMICOLON, "Expect ';' after external method.");
+            methods.add(new Stmt.ExternalMethod(methodName, List.copyOf(parameters),
+                    TypeDescriptor.functionOf(methodName.lexeme(), returnType,
+                            parameterTypes.toArray(TypeDescriptor[]::new)),
+                    isMemberPublic, isMutating));
+        }
+        consume(RIGHT_BRACE, "Expect '}' after external class members.");
+        return new Stmt.ExternalClass(name, binaryName, isPublic, methods, properties);
     }
 
     private Stmt.Function parseFunctionDeclaration(
@@ -331,14 +412,17 @@ public final class Parser {
             parameters.put(parameter.lexeme(), descriptor);
             if (match(COLON)) {
                 if (!allowBounds) {
-                    error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                            "Type-parameter bounds are supported only on top-level generic functions.");
+                    throw error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                            "Type-parameter bounds are supported only on generic functions and methods.");
                 }
                 final var enclosingTypeParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(parameters);
-                final var bound = collectType();
+                final var bounds = new ArrayList<TypeDescriptor>();
+                do {
+                    bounds.add(collectType());
+                } while (match(PLUS));
                 activeTypeParameters = enclosingTypeParameters;
-                descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bound);
+                descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bounds);
                 parameters.put(parameter.lexeme(), descriptor);
             }
         } while (match(COMMA));
@@ -429,7 +513,7 @@ public final class Parser {
     private Stmt.Method classMethod(final boolean isPublic,
                                     final boolean isMutating,
                                     final Token name) {
-        final var methodTypeParameters = typeParameterDeclaration(name, false, true);
+        final var methodTypeParameters = typeParameterDeclaration(name, true, true);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = new LinkedHashMap<>(enclosingTypeParameters);
         activeTypeParameters.putAll(methodTypeParameters);
@@ -602,7 +686,7 @@ public final class Parser {
                     continue;
                 }
                 final var methodName = consume(IDENTIFIER, "Expect contract method name.");
-                final var methodTypeParameters = typeParameterDeclaration(methodName, false, true);
+                final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
                 final var enclosingMethodTypeParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(enclosingMethodTypeParameters);
                 activeTypeParameters.putAll(methodTypeParameters);
@@ -1316,11 +1400,11 @@ public final class Parser {
 
         if (match(LEFT_BRACKET)) {
             final var elements = new ArrayList<Expr>();
-            if (check(RIGHT_BRACKET)) error(peek(), DiagnosticCatalog.INVALID_ARRAY_TYPE_OR_LITERAL,
-                    "Array literals must initialize at least one element.");
-            do {
-                elements.add(expression());
-            } while (match(COMMA));
+            if (!check(RIGHT_BRACKET)) {
+                do {
+                    elements.add(expression());
+                } while (match(COMMA));
+            }
             consume(RIGHT_BRACKET, "Expect ']' after array elements.");
             return new Expr.ArrayLiteral(elements, TypeDescriptor.ofInfer());
         }

@@ -59,8 +59,7 @@ final class TypeCompatibility {
     boolean canAssign(final TypeDescriptor expectedType, final TypeDescriptor resolvedType) {
         if (expectedType.equals(resolvedType)) return true;
         if (resolvedType instanceof TypeParameterDescriptor parameter
-            && parameter.bound() != null
-            && canAssign(expectedType, parameter.bound())) return true;
+            && parameter.bounds().stream().anyMatch(bound -> canAssign(expectedType, bound))) return true;
         if (expectedType instanceof AnyDescriptor
                 && !(resolvedType instanceof NullableDescriptor || resolvedType instanceof NullDescriptor)) {
             return true;

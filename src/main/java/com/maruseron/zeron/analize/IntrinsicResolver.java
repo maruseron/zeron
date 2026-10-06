@@ -44,15 +44,19 @@ final class IntrinsicResolver {
         final var expectedParameterTypes = signature.parameterTypes().stream()
                 .map(type -> TypeSubstitution.substitute(type, substitutions))
                 .toList();
+        final var minimumArity = signature.variadic()
+                ? Math.max(0, expectedParameterTypes.size() - 1)
+                : expectedParameterTypes.size();
         final var expectedArity = signature.variadic()
-                ? actualParameterTypes.size() >= expectedParameterTypes.size()
+                ? actualParameterTypes.size() >= minimumArity
                 : actualParameterTypes.size() == expectedParameterTypes.size();
         if (!expectedArity) {
             throw new IllegalStateException("Intrinsic operand arity mismatch for " + id.stableName());
         }
         final var instantiatedParameterTypes = new ArrayList<TypeDescriptor>(actualParameterTypes.size());
         for (int i = 0; i < actualParameterTypes.size(); i++) {
-            final var expected = expectedParameterTypes.get(signature.variadic() ? 0 : i);
+            final var expected = expectedParameterTypes.get(
+                    signature.variadic() ? Math.min(i, expectedParameterTypes.size() - 1) : i);
             ensureAssignable(context, expected, actualParameterTypes.get(i), where);
             instantiatedParameterTypes.add(expected);
         }

@@ -37,16 +37,20 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Invariant generic classes and contracts with explicit construction arguments, member substitution,
     declaration-site conformance, raw JVM erasure, erased-signature bridges, and callback adaptation
     across erased nominal fields and members.
-- Fixed-size `Array<T>` values with non-empty literals, indexed reads and writes, and a `length`
-    property; writes require a mutable reference view.
+- Fixed-size `Array<T>` values with non-empty and contextually typed empty literals, indexed reads
+  and writes, and a `length` property; writes require a mutable reference view.
 - `for` loops over arrays, inline integer ranges, and user-defined types conforming to the bundled
     `Iterable<T>` and `Iterator<T>` contracts. Arrays retain specialized lowering; ranges are
     ordinary `zeron.ranges.IntRange` values and use protocol dispatch.
 - Callable `zeron.io.print` and `zeron.io.println` standard-library functions, backed by typed
     external function bindings. The former print statement syntax has been removed.
-- `zeron.lang.Option<T>` as a sealed contract implemented by `Some<T>` and `None<T>`, with `fold` for
-    consuming either case without exceptions. `Iterator<T>.next()` returns this type, using `None`
-    for exhaustion and `Some` for yielded values.
+- `zeron.lang.Option<T>` as a sealed contract implemented by `Some<T>` and `None<T>`, with
+    `Option.some(value)` and `Option.none::<T>()` factories and `fold` for consuming either case
+    without exceptions. `Iterator<T>.next()` returns this type, using `None` for exhaustion and
+    `Some` for yielded values.
+- `zeron.lang.Result<T, E>` as a sealed contract implemented by `Ok<T, E>` and `Err<T, E>`, with
+    `fold`, `map`, `mapError`, and `andThen` for explicit error-value composition. No propagation
+    operator or source-level exception handling is introduced.
 - Exhaustive `match` expressions over non-null sealed-contract values. Cases name permitted classes
     and may bind the value with `as`; a final `_` case covers any remaining variants.
 - Compiled Zeron libraries can be packaged as JARs and loaded from either JARs or class directories;
@@ -80,10 +84,11 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     zero-iteration path. See
     [design-document-08](design-document-08_flow-typing-type-tests-and-casts.md).
     Arrays support nullable element types, while broader nullable collection behavior remains limited.
-- Generic functions support one contract bound per type parameter. Generic function references can
-    be specialized explicitly with `name::<Type>` or inferred from an expected function type; these
-    are monomorphic values, not polymorphic lambdas. Variance, overloads, generic class/contract
-    bounds, and first-class generic function values without specialization remain unsupported.
+- Generic functions and methods support multiple contract bounds per type parameter. Generic
+    function references can be specialized explicitly with `name::<Type>` or inferred from an
+    expected function type; these are monomorphic values, not polymorphic lambdas. Variance,
+    overloads, generic class/contract bounds, and first-class generic function values without
+    specialization remain unsupported.
     Generic callback adaptation works across top-level functions, specialized function references,
     and nominal members; broader shape coverage and adapter reuse remain.
 
@@ -151,6 +156,15 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     operators remain unchanged. Duplicate applicable witnesses require disambiguation or are errors.
     The design is open and difficult: the compiler can check signatures, but algebraic laws such as
     associativity and identity remain unenforced.
+- Low priority: compiler-recognized type-admissibility constraints on generic type parameters, such
+    as `NonNull` to exclude nullable type arguments or `Numeric` to admit only `Int` and `Float`.
+    These constraints restrict which types may be supplied but do not expose operations; generic
+    operator support remains a separate operator-witness design. Define constraint inference,
+    forwarding, and compiled-library representation before implementation.
+- Low priority: type-predicate return types such as `isSome(): this is Some<T>`, which connect a
+    successful Boolean check to flow refinement of a stable receiver. Define how predicate bodies
+    are verified so the refinement is sound, which receivers may be narrowed, and how generic
+    arguments are preserved despite runtime erasure before using this for `Option` or `Result`.
 - Low priority: an explicit pipe operator where `value |> f` means `f(value)` and
     `value |> f(option)` means `f(value, option)`. The piped value becomes the first argument;
     stages evaluate left to right. No partial application, method lookup, or implicit nullable/result
@@ -161,8 +175,12 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 ### Names, Packages, and Imports
 
 Package headers, qualified nominal identities, selective imports, aliases, and public/package
-visibility are implemented. Packages are source namespaces; imports are compile-time name bindings,
-not runtime loading. Project discovery, library artifacts, and Java interop are covered in
+visibility are implemented. Named namespaces are reopenable compile-time groups of functions and
+immutable values within a package; qualified member access and individual member imports are
+supported. Namespace values use ordinary top-level initialization rules and have no special
+constant syntax or folding guarantee. Packages define declaration identity, while namespaces group
+declarations without runtime identity. Namespace sealing is deferred. Imports are compile-time name
+bindings, not runtime loading. Project discovery, library artifacts, and Java interop are covered in
 [design-document-11](design-document-11_compilation-libraries-and-host-integration.md); intrinsic
 bindings are covered in [design-document-12](design-document-12_intrinsics-and-external-bindings.md).
 Source-level name resolution is specified in
@@ -254,8 +272,9 @@ invariant generic classes/contracts support type parameters, substitution, and e
 Generic top-level function callbacks have bridge adaptation. Callback values crossing generic nominal
 member boundaries are also adapted through generated helpers and erased contract bridges; broader
 shape coverage remains follow-up work. `Array<T>` is an implemented built-in invariant type
-constructor with its own descriptor, not a user-defined generic class; non-empty literals, indexing,
-and `.length` are supported. The `Type[]` spelling and discriminated unions remain design proposals.
+constructor with its own descriptor, not a user-defined generic class; literals, indexing, and
+`.length` are supported. Empty literals require an expected array type, and `generateArray` initializes
+every slot through an index callback. The `Type[]` spelling and discriminated unions remain design proposals.
 Mutable-reference capability (`&Type`) is preserved in resolved
 types and enforced for array-slot writes, function-view projection, class member mutation, and
 mutable-to-read-only projections.
@@ -386,8 +405,9 @@ erase to `Object`; direct callback parameters/results and specialized function r
 between erased and concrete function shapes use generated bridge helpers. Nested callbacks, nullable
 callback values, and mutable function views are adapted recursively; broader primitive/reference
 combinations and bridge-reuse coverage remain. Invariant generic classes/contracts and callback
-adaptation across their erased member boundaries are implemented. Single contract bounds on generic
-functions are implemented; variance and generic class/contract bounds remain deferred.
+adaptation across their erased member boundaries are implemented. Multiple contract bounds on
+generic functions and methods are implemented; variance and generic class/contract bounds remain
+deferred.
 
 ---
 
@@ -512,15 +532,19 @@ loop {
 
 ### Error handling
 
-Zeron defers source-level error handling, including exception handlers and typed result values, until
-its generic and sum-type foundations are established. The syntax and semantics can then be designed
-together with error propagation, cleanup, and behavior across generated-function and Java boundaries.
+`zeron.lang.Result<T, E>` represents recoverable failures as ordinary values. Its sealed `Ok` and
+`Err` cases can be consumed with exhaustive matching or `fold`, and composed explicitly with
+`map`, `mapError`, and `andThen`. Propagation syntax remains deferred while its interaction with
+nullability and other sequencing notation is explored. Source-level exception handlers and cleanup
+semantics are separate deferred features. `Ok.value` and `Err.error` are read-only properties on
+their respective variants, not members of the common `Result` contract; narrow or match the result
+before accessing a payload.
 
 For now, scanner/parser and resolver failures are compile-time diagnostics that stop code generation.
 Runtime exceptions from generated JVM code propagate to the host caller; Zeron does not catch or
-translate them. This is the current runtime boundary behavior, not a source-level recovery mechanism.
-Nullable values represent absence only when that is the intended meaning, not general errors. Values
-such as `Response.error(...)` remain ordinary API-level values rather than built-in error handling.
+translate them or automatically convert them to `Err`. This is the current runtime boundary behavior,
+not a source-level recovery mechanism. Nullable values represent absence only when that is the intended
+meaning, not general errors. Values such as `Response.error(...)` remain ordinary API-level values.
 
 ### Ranges and Iterables
 
@@ -551,8 +575,8 @@ for (let i in 1..10) {
 }
 ```
 
-The parser requires `let` in the loop header. Arrays must currently be non-empty because empty array
-literals are not implemented. Range values can be stored and iterated later like any other iterable.
+The parser requires `let` in the loop header. Empty array literals require a contextual `Array<T>`
+type. Range values can be stored and iterated later like any other iterable.
 
 #### Making an iterable
 
@@ -565,6 +589,12 @@ same-named contract in another package
 does not make a type iterable. A custom iterable imports and implements these public contracts
 through ordinary class conformance; arrays retain specialized lowering and ranges use ordinary
 protocol dispatch.
+
+`Sequence<T>` operators `map`, `filter`, `take`, and `drop` are lazy; each traversal obtains a fresh
+iterator from the source. Negative `take`/`drop` counts behave like zero. Terminal operations
+`forEach`, `fold`, `count`, `any`, and `all` consume the sequence, with `any` and `all` short-circuiting.
+`Sequence.fromArray` and `ArrayIterator` adapt arrays to `Iterable<T>`; direct array `for` loops keep
+their specialized index-based lowering.
 
 `List<T>.empty()` creates a growable list, and `List<T>.fromArray(values)` copies an array. Its
 read operations (`size`, `isEmpty`, `at`, and iteration) work through `List<T>`; structural

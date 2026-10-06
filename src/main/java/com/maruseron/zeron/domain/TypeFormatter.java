@@ -27,7 +27,8 @@ public final class TypeFormatter {
             case ReferenceDescriptor reference -> "&" + format(reference.baseType());
             case FunctionDescriptor function -> function.typeParameters().stream()
                     .map(parameter -> parameter.name()
-                            + (parameter.bound() == null ? "" : ": " + format(parameter.bound())))
+                            + (parameter.bounds().isEmpty() ? "" : ": " + parameter.bounds().stream()
+                                    .map(TypeFormatter::format).collect(Collectors.joining(" + "))))
                     .collect(Collectors.joining(", ", function.typeParameters().isEmpty() ? "" : "<", ">"))
                     + function.parameters().stream()
                     .map(TypeFormatter::format)

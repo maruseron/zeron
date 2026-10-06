@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.*;
@@ -14,6 +15,7 @@ import java.util.*;
 final class DeclarationRegistry {
     private final Set<String> types;
     private final Map<String, Stmt.ClassDecl> classes;
+    private final Map<String, Stmt.ExternalClass> externalClasses;
     private final Map<String, Stmt.ContractDecl> contracts;
     private final Map<String, Stmt.FunctionDeclaration> functions;
     private final Map<String, Stmt.Var> topLevelValues;
@@ -29,6 +31,7 @@ final class DeclarationRegistry {
     DeclarationRegistry(
             final Set<String> types,
             final Map<String, Stmt.ClassDecl> classes,
+            final Map<String, Stmt.ExternalClass> externalClasses,
             final Map<String, Stmt.ContractDecl> contracts,
             final Map<String, Stmt.FunctionDeclaration> functions,
             final Map<String, Stmt.Var> topLevelValues,
@@ -42,6 +45,7 @@ final class DeclarationRegistry {
             final FunctionBindingRegistry functionBindings) {
         this.types = types;
         this.classes = classes;
+        this.externalClasses = externalClasses;
         this.contracts = contracts;
         this.functions = functions;
         this.topLevelValues = topLevelValues;
@@ -55,20 +59,83 @@ final class DeclarationRegistry {
         this.functionBindings = functionBindings;
     }
 
-    void registerTypes(final List<Stmt> statements) {
+    void registerTypes(final String ownerPackage, final List<Stmt> statements) {
         for (final var statement : statements) {
             if (statement instanceof Stmt.ClassDecl declaration) {
                 registerType(declaration.name());
                 classes.put(declaration.name().lexeme(), declaration);
+            } else if (statement instanceof Stmt.ExternalClass declaration) {
+                final var qualifiedName = qualify(ownerPackage, declaration.name().lexeme());
+                if (!declaration.javaBinaryName().equals(qualifiedName)
+                        || !List.of("java.lang.System", "java.io.PrintStream").contains(qualifiedName)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                            declaration.name(),
+                            "This external class target is not in the curated JDK facade set."));
+                }
+                validateExternalClass(declaration, qualifiedName);
+                if (externalClasses.putIfAbsent(qualifiedName, declaration) != null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            declaration.name(), "External class '" + qualifiedName + "' is already declared."));
+                }
             } else if (statement instanceof Stmt.ContractDecl declaration) {
                 registerType(declaration.name());
                 contracts.put(declaration.name().lexeme(), declaration);
             }
+
+        }
+    }
+
+    private void validateExternalClass(final Stmt.ExternalClass declaration, final String qualifiedName) {
+        if (!declaration.isPublic()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                    declaration.name(), "Curated external classes must be public."));
+        }
+        final var javaClass = javaClassPath.find(qualifiedName);
+        if (javaClass == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    declaration.name(), "The curated Java class is not available in this runtime."));
+        }
+        if (qualifiedName.equals("java.lang.System")) {
+            final var outField = javaClass.fields().stream()
+                    .filter(field -> field.name().equals("out") && field.isStatic()).findFirst().orElse(null);
+            if (!declaration.methods().isEmpty() || declaration.staticProperties().size() != 1
+                    || !declaration.staticProperties().getFirst().name().lexeme().equals("out")
+                    || !declaration.staticProperties().getFirst().isPublic()
+                    || outField == null
+                    || !outField.descriptor().descriptorString().equals("Ljava/io/PrintStream;")
+                    || !outField.descriptor().equals(TypeDescriptor.toJavaClassDesc(
+                            declaration.staticProperties().getFirst().type()))) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                        declaration.name(), "The System facade may expose only public static property 'out'."));
+            }
+        } else if (!declaration.staticProperties().isEmpty()
+                || declaration.methods().size() != 2
+                || !declaration.methods().stream().map(method -> method.name().lexeme()).collect(
+                        java.util.stream.Collectors.toSet()).equals(Set.of("print", "println"))
+                || declaration.methods().stream().anyMatch(method -> !method.isPublic()
+                    || !method.isMutating()
+                    || !Set.of("print", "println").contains(method.name().lexeme())
+                    || method.typeDescriptor().parameters().size() != 1
+                    || !method.typeDescriptor().parameters().getFirst().equals(
+                            TypeDescriptor.ofAny().toNullable())
+                    || !method.typeDescriptor().returnType().equals(TypeDescriptor.ofUnit())
+                    || javaClass.methods().stream().noneMatch(javaMethod ->
+                            javaMethod.name().equals(method.name().lexeme())
+                                    && javaMethod.descriptor().descriptorString()
+                                    .equals("(Ljava/lang/Object;)V")))) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    declaration.name(),
+                    "The PrintStream facade may expose only public mutating print/println(Any?): Unit."));
         }
     }
 
     void registerTopLevelValue(final CompilationUnit unit, final Stmt.Var variable) {
-        if (variable.initializer() == null) {
+        registerTopLevelValue(unit, variable, null);
+    }
+
+    void registerTopLevelValue(final CompilationUnit unit, final Stmt.Var variable,
+                               final String namespaceName) {
+        if (variable.initializer() == null && !unit.metadataOnly()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     variable.name(),
                     "Top-level values require an initializer."));
@@ -78,7 +145,9 @@ final class DeclarationRegistry {
                     variable.name(),
                     "Public top-level values must be immutable."));
         }
-        final var qualifiedName = qualify(unit.packageName(), variable.name().lexeme());
+        final var qualifiedName = namespaceName == null
+                ? qualify(unit.packageName(), variable.name().lexeme())
+                : NamespaceMembers.qualifiedName(unit.packageName(), namespaceName, variable.name().lexeme());
         if (topLevelValues.putIfAbsent(qualifiedName, variable) != null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                     variable.name(),
@@ -92,7 +161,14 @@ final class DeclarationRegistry {
     }
 
     void registerFunction(final String ownerPackage, final Stmt.FunctionDeclaration function) {
-        final var qualifiedName = qualify(ownerPackage, function.name().lexeme());
+        registerFunction(ownerPackage, null, function);
+    }
+
+    void registerFunction(final String ownerPackage, final String namespaceName,
+                          final Stmt.FunctionDeclaration function) {
+        final var qualifiedName = namespaceName == null
+                ? qualify(ownerPackage, function.name().lexeme())
+                : NamespaceMembers.qualifiedName(ownerPackage, namespaceName, function.name().lexeme());
         if (functions.containsKey(qualifiedName)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                     function.name(),

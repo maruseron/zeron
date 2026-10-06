@@ -1,3 +1,15 @@
 package zeron.collections;
 
+import zeron.lang.Option;
+
 fn unwrapSome<T>(option: Option<T>): T = unwrapSome<T>(option);
+
+public fn generateArray<T>(length: Int, initialize: (Int) -> T): &Array<T> {
+    let mut values = allocateArray<T>(length);
+    let mut index = 0;
+    while (index < length) {
+        values[index] = initialize(index);
+        index += 1;
+    }
+    return values;
+}

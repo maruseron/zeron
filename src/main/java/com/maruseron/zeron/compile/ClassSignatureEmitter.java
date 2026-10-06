@@ -34,6 +34,9 @@ final class ClassSignatureEmitter {
         final var signature = new StringBuilder("<");
         for (final var parameter : parameters) {
             signature.append(parameter.name()).append(":Ljava/lang/Object;");
+            for (final var bound : parameter.bounds()) {
+                signature.append(':').append(typeSignature(bound, true));
+            }
         }
         return signature.append('>').toString();
     }

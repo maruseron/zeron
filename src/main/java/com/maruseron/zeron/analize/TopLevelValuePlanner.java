@@ -4,6 +4,7 @@ import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.ImportDeclaration;
+import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.InferDescriptor;
@@ -11,7 +12,7 @@ import com.maruseron.zeron.domain.InferDescriptor;
 import java.util.*;
 
 final class TopLevelValuePlanner {
-    record SourceValue(CompilationUnit unit, Stmt.Var declaration) {}
+    record SourceValue(CompilationUnit unit, Stmt.Var declaration, String namespaceName) {}
 
     private final Map<String, Stmt.Var> topLevelValues;
 
@@ -23,8 +24,10 @@ final class TopLevelValuePlanner {
         final var values = new ArrayList<SourceValue>();
         for (final var unit : units) {
             if (unit.metadataOnly()) continue;
-            for (final var declaration : unit.declarations()) {
-                if (declaration instanceof Stmt.Var variable) values.add(new SourceValue(unit, variable));
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (member.declaration() instanceof Stmt.Var variable) {
+                    values.add(new SourceValue(unit, variable, member.namespaceName()));
+                }
             }
         }
         final var valueByDeclaration = new IdentityHashMap<Stmt.Var, SourceValue>();
@@ -35,7 +38,7 @@ final class TopLevelValuePlanner {
             collectVariableNames(value.declaration().initializer(), names);
             final var dependenciesForValue = Collections.newSetFromMap(new IdentityHashMap<Stmt.Var, Boolean>());
             for (final var name : names) {
-                final var targetName = importedValueName(value.unit(), name);
+                final var targetName = importedValueName(value.unit(), value.namespaceName(), name);
                 if (targetName == null) continue;
                 final var target = topLevelValues.get(targetName);
                 if (target != null && target.type() instanceof InferDescriptor) {
@@ -53,7 +56,18 @@ final class TopLevelValuePlanner {
         return List.copyOf(result);
     }
 
-    private String importedValueName(final CompilationUnit unit, final String simpleName) {
+    private String importedValueName(final CompilationUnit unit, final String namespaceName,
+                                     final String simpleName) {
+        if (topLevelValues.containsKey(simpleName)) return simpleName;
+        if (namespaceName != null) {
+            final var currentNamespaceName = NamespaceMembers.qualifiedName(
+                    unit.packageName(), namespaceName, simpleName);
+            if (topLevelValues.containsKey(currentNamespaceName)) return currentNamespaceName;
+        }
+        final var localNamespacePath = unit.packageName().isEmpty()
+                ? simpleName
+                : unit.packageName() + "." + simpleName;
+        if (topLevelValues.containsKey(localNamespacePath)) return localNamespacePath;
         final var localQualifiedName = qualify(unit.packageName(), simpleName);
         if (topLevelValues.containsKey(localQualifiedName)) return localQualifiedName;
         for (final var imported : unit.imports()) {
@@ -105,6 +119,10 @@ final class TopLevelValuePlanner {
         if (expression == null) return;
         if (expression instanceof Expr.Variable variable) names.add(variable.name.lexeme());
         if (expression instanceof Expr.Call call) names.add(call.callee.lexeme());
+        if (expression instanceof Expr.Property property) {
+            final var path = expressionPath(property);
+            if (path != null) names.add(path);
+        }
         for (final var field : expression.getClass().getFields()) {
             try {
                 final var child = field.get(expression);
@@ -120,6 +138,15 @@ final class TopLevelValuePlanner {
                 throw new IllegalStateException("Unable to inspect value initializer.", exception);
             }
         }
+    }
+
+    private String expressionPath(final Expr expression) {
+        if (expression instanceof Expr.Variable variable) return variable.name.lexeme();
+        if (expression instanceof Expr.Property property) {
+            final var prefix = expressionPath(property.receiver);
+            return prefix == null ? null : prefix + "." + property.name.lexeme();
+        }
+        return null;
     }
 
     private void collectVariableNames(final Stmt statement, final Set<String> names) {

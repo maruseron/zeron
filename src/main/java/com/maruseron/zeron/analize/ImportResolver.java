@@ -24,17 +24,20 @@ final class ImportResolver {
     private final Map<String, Stmt.ContractDecl> contracts;
     private final Map<String, Stmt.FunctionDeclaration> functions;
     private final Map<String, Stmt.Var> topLevelValues;
+    private final Map<String, String> declarationPackages;
     private final JavaClassPath javaClassPath;
 
     ImportResolver(final Map<String, Stmt.ClassDecl> classes,
                    final Map<String, Stmt.ContractDecl> contracts,
                    final Map<String, Stmt.FunctionDeclaration> functions,
                    final Map<String, Stmt.Var> topLevelValues,
+                   final Map<String, String> declarationPackages,
                    final JavaClassPath javaClassPath) {
         this.classes = classes;
         this.contracts = contracts;
         this.functions = functions;
         this.topLevelValues = topLevelValues;
+        this.declarationPackages = declarationPackages;
         this.javaClassPath = javaClassPath;
     }
 
@@ -69,8 +72,8 @@ final class ImportResolver {
                 }
                 final var packageExists = classes.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
                         || contracts.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
-                        || functions.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
-                        || topLevelValues.keySet().stream().anyMatch(name -> packageOf(name).equals(target));
+                        || declarationPackages.entrySet().stream()
+                            .anyMatch(entry -> entry.getValue().equals(target));
                 if (!packageExists) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
                             importDeclaration.location(),
@@ -90,7 +93,8 @@ final class ImportResolver {
                         importDeclaration.location(),
                         "Unknown import target '" + target + "'."));
             }
-            if (packageOf(target).isEmpty() && !unit.packageName().isEmpty()) {
+            final var targetPackage = declarationPackages.getOrDefault(target, packageOf(target));
+            if (targetPackage.isEmpty() && !unit.packageName().isEmpty()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
                         importDeclaration.location(),
                         "Default-package types cannot be imported into a named package."));
@@ -100,7 +104,7 @@ final class ImportResolver {
                     : functionDeclaration != null ? functionDeclaration.isPublic()
                     : valueDeclaration != null ? valueDeclaration.isPublic()
                     : true;
-            if (!packageOf(target).equals(unit.packageName()) && !isPublic) {
+            if (!targetPackage.equals(unit.packageName()) && !isPublic) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
                         importDeclaration.location(),
                         (valueDeclaration == null ? "Type '" : "Value '") + target + "' is not public."));

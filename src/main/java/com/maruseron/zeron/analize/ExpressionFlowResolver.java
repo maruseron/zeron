@@ -27,6 +27,10 @@ final class ExpressionFlowResolver {
                             "Safe navigation cannot be used for property assignment."));
                 }
                 MemberInteropResolver.resolveProperty(context, assignment.property);
+                if (assignment.property.javaFieldTarget() != null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                            assignment.property.name, "External static properties are read-only."));
+                }
                 final var receiverType = assignment.property.receiver.getType();
                 final var ownerName = className(context, receiverType);
                 if (!(receiverType instanceof ReferenceDescriptor)) {
@@ -61,6 +65,10 @@ final class ExpressionFlowResolver {
             }
             case Expr.PropertyCompoundAssignment assignment -> {
                 MemberInteropResolver.resolveProperty(context, assignment.property);
+                if (assignment.property.javaFieldTarget() != null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                            assignment.property.name, "External static properties are read-only."));
+                }
                 final var receiverType = assignment.property.receiver.getType();
                 if (!(receiverType instanceof ReferenceDescriptor)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -85,6 +93,11 @@ final class ExpressionFlowResolver {
             }
             case Expr.Property property -> MemberInteropResolver.resolveProperty(context, property);
             case Expr.ArrayLiteral literal -> {
+                if (literal.elements.isEmpty()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                            SYNTHETIC_IDENTIFIER,
+                            "Cannot infer an empty array's element type without an expected Array<T> type."));
+                }
                 final var elementTypes = new ArrayList<TypeDescriptor>();
                 var elementType = (TypeDescriptor) null;
                 var hasNullElement = false;
@@ -519,6 +532,24 @@ final class ExpressionFlowResolver {
 
     static TypeDescriptor resolveExpression(final ResolutionContext context, final Expr expression) {
         return resolve(context, expression);
+    }
+
+    static TypeDescriptor resolveEmptyArrayLiteral(final ResolutionContext context,
+                                                    final Expr.ArrayLiteral literal,
+                                                    TypeDescriptor expectedType) {
+        if (expectedType instanceof NullableDescriptor nullable) expectedType = nullable.baseType();
+        if (expectedType instanceof ReferenceDescriptor reference) expectedType = reference.baseType();
+        if (!(expectedType instanceof ArrayDescriptor arrayType)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    SYNTHETIC_IDENTIFIER,
+                    "An empty array literal requires an expected Array<T> type."));
+            throw new IllegalStateException("unreachable");
+        }
+        final var operation = IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.ARRAY_LITERAL,
+                List.of(arrayType.elementType()), List.of(), SYNTHETIC_IDENTIFIER);
+        literal.setIntrinsicOperation(operation);
+        literal.setType(operation.resultType());
+        return operation.resultType();
     }
 
     private static TypeDescriptor resolveMatch(final ResolutionContext context, final Expr.Match match) {

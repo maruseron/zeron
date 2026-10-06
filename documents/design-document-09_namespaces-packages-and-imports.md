@@ -2,8 +2,9 @@
 
 ## Status
 
-Package headers, package-qualified nominal identities, explicit and star type/function imports,
-aliases, and public versus package-visible declarations are implemented. Top-level value imports,
+Package headers, package-qualified nominal identities, explicit and star imports, aliases, and
+public versus package-visible declarations are implemented. Named source namespaces group functions
+and immutable values within a package, independent of project directory layout. Namespace sealing,
 re-exports, and module-level visibility remain deferred. Project source discovery, library artifacts,
 Java interop, and compiler intrinsic bindings are covered separately in
 [design-document-11_compilation-libraries-and-host-integration.md](design-document-11_compilation-libraries-and-host-integration.md).
@@ -19,6 +20,8 @@ Names, imports, packages, and modules solve related but different problems:
     mechanisms are outside this source-language design.
 
 Keep these layers separate. In particular, do not make a source package declaration imply a JPMS module.
+Packages continue to own declaration identity; namespaces group related declarations within a
+package without imposing a source-directory convention.
 
 ## Current Boundary
 
@@ -29,8 +32,8 @@ Keep these layers separate. In particular, do not make a source package declarat
 - `SymbolTable` keys functions and values by source spelling; class and contract types live in separate resolver maps.
 - Package and declaration identities are source-level names; the chosen JVM owners and output paths
     do not participate in name resolution. Build and output behavior is specified in doc 11.
-- Imports resolve public classes, contracts, and top-level functions. Package-private declarations
-    remain available within their package; values are not importable.
+- Imports resolve public classes, contracts, functions, and immutable values. Package-private
+    declarations remain available within their package.
 
 ## Influences
 
@@ -49,7 +52,8 @@ declarations. Re-exports and module-level dependency semantics remain deferred.
 
 Goals for the source-language layer:
 
-- Give every class, contract, top-level function, and top-level value a stable source identity.
+- Give every class, contract, top-level function, and top-level value a stable source identity;
+  namespace members additionally have a package-qualified namespace path.
 - Allow same-spelled declarations in different packages without confusing type equality or function-shape keys.
 - Make imported names, visibility, and ambiguity deterministic and statically checked.
 - Keep package identity independent of JVM names; project builds validate that source directories
@@ -69,10 +73,10 @@ A source file is one compilation unit and has at most one package header before 
 Package membership is declared in source and defines identity. In project-root builds, the source
 directory relative to its configured root must match the package path; standalone file compilation
 does not impose a directory convention. The default package remains available for root-level project
-sources and standalone scripts. Explicit and star imports resolve public class, contract, and
-function declarations. Top-level value imports remain deferred.
+sources and standalone scripts. Explicit and star imports resolve public classes, contracts, functions, and
+immutable values.
 
-Implemented syntax:
+Implemented package, import, and namespace syntax:
 
 ```text
 CompilationUnit       ::= [PackageDeclaration] ImportDeclaration* TopLevelDeclaration* EOF
@@ -81,18 +85,50 @@ ImportDeclaration     ::= "import" QualifiedName ["as" Identifier] ";"
                          | "import" QualifiedName "." "*" ";"
 QualifiedName         ::= Identifier {"." Identifier}
 TopLevelDeclaration  ::= VariableDeclaration | FunctionDeclaration | ClassDeclaration
-                         | ContractDeclaration | "public" (VariableDeclaration
-                         | FunctionDeclaration | ClassDeclaration | ContractDeclaration)
+                         | ContractDeclaration | NamespaceDeclaration
+                         | "public" (VariableDeclaration | FunctionDeclaration | ClassDeclaration
+                         | ContractDeclaration)
+NamespaceDeclaration ::= "namespace" Identifier "{" NamespaceMember* "}"
+NamespaceMember      ::= ["public"] (FunctionDeclaration | VariableDeclaration)
 ```
 
-Imports resolve class, contract, function, and top-level value targets. Star imports enumerate public Zeron
-declarations in a known package; Java package enumeration is unsupported. Non-entry functions
+### Named namespaces
+
+A namespace is a compile-time bag of named functions and values, declared with a block such as
+`namespace Array { ... }`. It is not a type or runtime value: it cannot be constructed, passed, or
+returned. A qualified call such as `Array.sort(values)` resolves directly to the namespace member
+function, not through runtime receiver dispatch. Namespace names occupy a
+separate name category from types and values, so a namespace and a type may share a simple name;
+`Array<T>` in a type context denotes the array type while `Array.sort(...)` denotes a qualified
+namespace function.
+
+Namespace identity is qualified by its containing package, not by its source file or directory.
+Namespace blocks with the same name in different source files of the same package contribute to the
+same namespace; duplicate member names are diagnosed. Members retain their ordinary declaration
+visibility. The namespace's source location does not alter the project's package-path validation.
+Nested namespaces and namespace-level visibility are not supported.
+
+Namespace functions are otherwise ordinary functions: each declares its own type parameters,
+parameters, and return type. Namespace values are immutable `let` declarations and use the ordinary
+top-level initialization ordering and cycle rules. They may have runtime initializers; no special
+constant syntax or compile-time folding guarantee is provided.
+
+Namespace blocks may be reopened by source files in the same package. They do not grant external
+code permission to add members. An explicit rule sealing a namespace against contributions beyond
+their owning library is a separate deferred feature; it is not part of the namespace model.
+Public namespace members can be addressed by their qualified namespace path or imported individually
+with an explicit member import. Wildcard imports select public declarations in a package, not all
+members of a namespace as a separate operation.
+
+Imports resolve class, contract, function, and immutable value targets, including namespace members.
+Star imports enumerate public Zeron declarations in a known package; Java package enumeration is
+unsupported. Non-entry functions
 require explicit return types so their signatures are available before bodies are resolved.
 Every project top-level value requires an initializer. Project-local values are predeclared for
 cross-unit resolution; inferred values can depend on earlier inferred values and on explicit-type
-forward dependencies. Public immutable values may be imported explicitly or through star imports.
-Private values are available to units in the same package but cannot be imported from another
-package. Public mutable values and compiled-library value exports remain deferred.
+forward dependencies. Public immutable values may be imported explicitly or through star imports. Private values are
+available to units in the same package but cannot be imported from another package. Public mutable
+values remain unsupported.
 
 Example producer:
 
@@ -191,8 +227,13 @@ described in [design-document-11_compilation-libraries-and-host-integration.md](
    local and imported names resolve deterministically in the type and value namespaces.
 3. **Selective imports and visibility: implemented first slice.** Public classes, contracts, and
    functions can be imported with aliases; unmarked declarations remain package-visible.
-4. **Deferred language-level imports.** Top-level value imports, re-exports, extension imports, and
-   friend/module visibility require separate semantics.
+4. **Named namespaces: implemented first slice.** Reopenable compile-time groups of functions and
+   immutable values, package-qualified but independent of file and directory layout. Qualified member
+   access and individual member imports are supported; namespaces have no runtime identity.
+5. **Deferred language-level imports and ownership.** Re-exports, extension imports, and friend/module
+   visibility require separate semantics.
+6. **Namespace sealing: deferred.** Define library ownership and contribution boundaries before
+   preventing downstream namespace augmentation.
 
 ## Acceptance Criteria
 

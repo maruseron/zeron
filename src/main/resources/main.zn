@@ -1,0 +1,7 @@
+import zeron.io.println;
+
+fn f<T>(t: T): Unit = println(t);
+
+fn main() {
+    f(null);
+}

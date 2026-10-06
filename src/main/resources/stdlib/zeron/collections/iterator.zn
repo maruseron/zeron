@@ -1,6 +1,6 @@
 package zeron.collections;
 
-import java.lang.Option;
+import zeron.lang.Option;
 
 public contract Iterator<T> {
     mut next(): Option<T>;

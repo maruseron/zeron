@@ -4,6 +4,7 @@ import com.maruseron.zeron.StandardLibrary;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.ast.ImportDeclaration;
+import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
@@ -26,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 5;
+    public static final int VERSION = 8;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -34,17 +35,44 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         declarations = List.copyOf(declarations);
     }
 
+    public record ValueExport(String qualifiedName,
+                              String jvmOwner,
+                              String namespaceName,
+                              TypeDescriptor type) implements ExportedDeclaration {
+        public ValueExport {
+            Objects.requireNonNull(qualifiedName);
+            Objects.requireNonNull(jvmOwner);
+            Objects.requireNonNull(namespaceName);
+            Objects.requireNonNull(type);
+        }
+    }
+
         public List<CompilationUnit> toCompilationUnits(final String sourceLabel) {
         final var declarationsByPackage = new LinkedHashMap<String, List<Stmt>>();
         for (final var exported : declarations) {
-            final var packageName = packageName(exported.qualifiedName());
+            final var packageName = switch (exported) {
+                case FunctionExport function -> packageName(function.jvmOwner());
+                case ValueExport value -> packageName(value.jvmOwner());
+                default -> packageName(exported.qualifiedName());
+            };
             final var statements = declarationsByPackage.computeIfAbsent(packageName, _ -> new ArrayList<>());
             switch (exported) {
             case FunctionExport function -> {
                 final var functionName = token(simpleName(function.qualifiedName()));
-                statements.add(new Stmt.Function(functionName,
+                final var declaration = new Stmt.Function(functionName,
                     parameterNames(function.signature(), functionName.line()),
-                    function.signature(), List.of(), true));
+                    function.signature(), List.of(), true);
+                if (function.namespaceName() == null) {
+                    statements.add(declaration);
+                } else {
+                    addNamespaceMember(statements, function.namespaceName(), declaration);
+                }
+            }
+            case ValueExport value -> {
+                final var valueName = token(simpleName(value.qualifiedName()));
+                addNamespaceMember(statements, value.namespaceName(),
+                        new Stmt.Var(valueName, value.type(), null,
+                                BindingMutability.IMMUTABLE, true));
             }
             case ClassExport classExport -> {
                 final var className = token(classExport.qualifiedName());
@@ -100,12 +128,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             .toList();
         }
 
-    public sealed interface ExportedDeclaration permits FunctionExport, ClassExport, ContractExport {
+    public sealed interface ExportedDeclaration permits FunctionExport, ValueExport, ClassExport, ContractExport {
         String qualifiedName();
     }
 
     public record FunctionExport(String qualifiedName,
                                  String jvmOwner,
+                                 String namespaceName,
                                  FunctionDescriptor signature) implements ExportedDeclaration {
         public FunctionExport {
             Objects.requireNonNull(qualifiedName);
@@ -198,20 +227,41 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                     final Map<String, String> functionOwners,
                                                     final Function<String, FunctionDescriptor> functionTypes,
                                                     final boolean includeBundledSources) {
+        return fromCompilation(units, functionOwners, functionTypes, Stmt.Var::type, includeBundledSources);
+    }
+
+    public static ZeronLibraryIndex fromCompilation(final List<CompilationUnit> units,
+                                                    final Map<String, String> functionOwners,
+                                                    final Function<String, FunctionDescriptor> functionTypes,
+                                                    final Function<Stmt.Var, TypeDescriptor> valueTypes,
+                                                    final boolean includeBundledSources) {
         final var exports = new ArrayList<ExportedDeclaration>();
         for (final var unit : units) {
             if (unit.metadataOnly()
                     || !includeBundledSources && StandardLibrary.isBundledSourcePath(unit.sourcePath())) continue;
-            for (final var declaration : unit.declarations()) {
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                final var declaration = member.declaration();
                 switch (declaration) {
                     case Stmt.FunctionDeclaration function when function.isPublic() -> {
-                        final var name = qualify(unit.packageName(), function.name().lexeme());
+                        final var name = member.namespaceName() == null
+                                ? qualify(unit.packageName(), function.name().lexeme())
+                                : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
+                                        function.name().lexeme());
                         final var signature = functionTypes.apply(name);
                         final var owner = functionOwners.get(name);
                         if (signature == null || owner == null) {
                             throw new IllegalStateException("Missing resolved signature or owner for " + name);
                         }
-                        exports.add(new FunctionExport(name, owner, signature));
+                        exports.add(new FunctionExport(name, owner, member.namespaceName(), signature));
+                    }
+                    case Stmt.Var variable when member.namespaceName() != null && variable.isPublic() -> {
+                        final var name = NamespaceMembers.qualifiedName(
+                                unit.packageName(), member.namespaceName(), variable.name().lexeme());
+                        final var owner = functionOwners.get(name);
+                        if (owner == null) {
+                            throw new IllegalStateException("Missing resolved owner for namespace value " + name);
+                        }
+                        exports.add(new ValueExport(name, owner, member.namespaceName(), valueTypes.apply(variable)));
                     }
                     case Stmt.ClassDecl classDeclaration when classDeclaration.isPublic() -> {
                         exports.add(new ClassExport(classDeclaration.name().lexeme(),
@@ -290,7 +340,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v5.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v8.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -316,7 +366,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v5.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -340,7 +390,15 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeByte(1);
                 output.writeUTF(function.qualifiedName());
                 output.writeUTF(function.jvmOwner());
+                writeOptionalString(output, function.namespaceName());
                 writeFunction(output, function.signature(), new WriteContext());
+            }
+            case ValueExport value -> {
+                output.writeByte(4);
+                output.writeUTF(value.qualifiedName());
+                output.writeUTF(value.jvmOwner());
+                output.writeUTF(value.namespaceName());
+                writeType(output, value.type(), new WriteContext());
             }
             case ClassExport classExport -> {
                 output.writeByte(2);
@@ -384,7 +442,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ExportedDeclaration readDeclaration(final DataInputStream input) throws IOException {
         return switch (input.readUnsignedByte()) {
-            case 1 -> new FunctionExport(input.readUTF(), input.readUTF(), readFunction(input, new ReadContext()));
+            case 1 -> new FunctionExport(input.readUTF(), input.readUTF(), readOptionalString(input),
+                    readFunction(input, new ReadContext()));
+            case 4 -> new ValueExport(input.readUTF(), input.readUTF(), input.readUTF(),
+                    readType(input, new ReadContext()));
             case 2 -> {
                 final var name = input.readUTF();
                 final var context = new ReadContext();
@@ -508,8 +569,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             output.writeInt(context.wireScope(parameter.scopeId()));
         }
         for (final var parameter : parameters) {
-            output.writeBoolean(parameter.bound() != null);
-            if (parameter.bound() != null) writeType(output, parameter.bound(), context);
+            output.writeInt(parameter.bounds().size());
+            for (final var bound : parameter.bounds()) writeType(output, bound, context);
         }
     }
 
@@ -529,10 +590,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             context.parameters.put(new WireTypeParameter(scopes.get(i), names.get(i)), parameter);
         }
         for (int i = 0; i < count; i++) {
-            if (input.readBoolean()) {
-                final var bound = readType(input, context);
+            final var bounds = new ArrayList<TypeDescriptor>();
+            for (int boundIndex = 0, boundCount = readCount(input); boundIndex < boundCount; boundIndex++) {
+                bounds.add(readType(input, context));
+            }
+            if (!bounds.isEmpty()) {
                 final var old = parameters.get(i);
-                final var parameter = new TypeParameterDescriptor(old.scopeId(), old.name(), bound);
+                final var parameter = new TypeParameterDescriptor(old.scopeId(), old.name(), bounds);
                 parameters.set(i, parameter);
                 context.parameters.put(new WireTypeParameter(scopes.get(i), names.get(i)), parameter);
             }
@@ -625,6 +689,15 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         return count;
     }
 
+    private static void writeOptionalString(final DataOutputStream output, final String value) throws IOException {
+        output.writeBoolean(value != null);
+        if (value != null) output.writeUTF(value);
+    }
+
+    private static String readOptionalString(final DataInputStream input) throws IOException {
+        return input.readBoolean() ? input.readUTF() : null;
+    }
+
     private static String qualify(final String packageName, final String name) {
         return packageName == null || packageName.isEmpty() ? name : packageName + "." + name;
     }
@@ -641,6 +714,28 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static Token token(final String name, final int line) {
         return new Token(TokenType.IDENTIFIER, name, null, line);
+    }
+
+    private static <T> List<T> append(final List<T> values, final T value) {
+        final var result = new ArrayList<>(values);
+        result.add(value);
+        return List.copyOf(result);
+    }
+
+    private static void addNamespaceMember(final List<Stmt> statements, final String namespaceName,
+                                           final Stmt member) {
+        final var namespace = statements.stream()
+                .filter(Stmt.Namespace.class::isInstance)
+                .map(Stmt.Namespace.class::cast)
+                .filter(candidate -> candidate.name().lexeme().equals(namespaceName))
+                .findFirst();
+        if (namespace.isPresent()) {
+            final var previous = namespace.get();
+            statements.set(statements.indexOf(previous),
+                    new Stmt.Namespace(previous.name(), append(previous.members(), member)));
+        } else {
+            statements.add(new Stmt.Namespace(token(namespaceName), List.of(member)));
+        }
     }
 
     private static String packageName(final String qualifiedName) {

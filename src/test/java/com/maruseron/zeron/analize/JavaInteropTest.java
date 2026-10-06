@@ -25,6 +25,31 @@ public final class JavaInteropTest {
     private static final Path JAVA_FIXTURE_ROOT = Path.of("target", "test-classes");
 
     @Test
+    public void rejectsExternalClassesOutsideTheCuratedJdkSet() {
+        final var source = parse("UncuratedExternalClass.zn", """
+                package externalFacade;
+                public external class Runtime = "java.lang.Runtime" {}
+                """);
+        final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                "externalFacade.UncuratedExternalClass", "externalFacade");
+        assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
+    @Test
+    public void rejectsAssignmentToSystemOut() {
+        final var source = parse("WriteSystemOut.zn", """
+                package externalClient;
+                import java.lang.System;
+                fn replaceOutput(): Unit {
+                    System.out = null;
+                }
+                """);
+        final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                "externalClient.WriteSystemOut", "externalClient");
+        assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
+    @Test
     public void bindsImportedExternalFunctionToJvmStaticMethod() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var facadePackage = "externalFacade" + suffix;

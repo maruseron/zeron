@@ -59,7 +59,7 @@ sealed permits list, including when contract metadata comes from a compiled libr
 
 ```zeron
 match (option) {
-    case Some<T> as some -> some.value();
+    case Some<T> as some -> some.value;
     case None<T> -> defaultValue;
 }
 ```

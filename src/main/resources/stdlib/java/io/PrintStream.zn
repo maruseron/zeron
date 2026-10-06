@@ -1,0 +1,6 @@
+package java.io;
+
+public external class PrintStream = "java.io.PrintStream" {
+    public mut print(value: Any?): Unit;
+    public mut println(value: Any?): Unit;
+}

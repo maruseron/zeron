@@ -116,6 +116,8 @@ final class DeclarationEmitter {
         }
 
         if (entryHolder && !context.initializationPlan.order().isEmpty()) {
+            classBuilder.withMethodBody("$zeron$initialize", emptyVoidMethod(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, composer -> composer.return_());
             classBuilder.withMethodBody(
                     "<clinit>",
                     emptyVoidMethod(),
@@ -195,6 +197,10 @@ final class DeclarationEmitter {
         classBuilder.withMethodBody(topLevelValueAccessorName(fieldName),
                 MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(type)),
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, composer -> {
+                    if (context.currentHolderName.contains("$zeron$Namespace$")) {
+                        composer.invokestatic(ClassDesc.of(context.mainClassName),
+                                "$zeron$initialize", emptyVoidMethod());
+                    }
                     final var ready = composer.newLabel();
                     composer.getstatic(owner, initializedFlag, ConstantDescs.CD_boolean);
                     composer.ifne(ready);

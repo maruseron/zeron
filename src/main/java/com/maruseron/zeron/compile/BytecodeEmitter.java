@@ -5,6 +5,7 @@ import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.analize.Bind;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.*;
+import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.FloatDescriptor;
@@ -28,23 +29,31 @@ final class BytecodeEmitter {
         Files.createDirectories(context.outputDirectory);
         RuntimeSupportEmitter.emitUnitClass(context.outputDirectory);
         final var signatureDeclarations = context.compilationUnits.stream()
-                .flatMap(unit -> unit.declarations().stream()).toList();
+                .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
+                .map(NamespaceMembers.Member::declaration).toList();
         context.lambdaPlan = new LambdaCompilationPlan(context.topLevelDeclarations, signatureDeclarations,
                 context.symbols);
         for (final var shape : context.lambdaPlan.functionShapes().entrySet()) {
             RuntimeSupportEmitter.emitFunctionShape(context.outputDirectory, shape.getKey(), shape.getValue());
         }
 
+        final var hasNamespaceValues = context.compilationUnits.stream().filter(unit -> !unit.metadataOnly())
+                .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
+                .anyMatch(member -> member.namespaceName() != null
+                        && member.declaration() instanceof Stmt.Var);
         for (var unitIndex = 0; unitIndex < context.compilationUnits.size(); unitIndex++) {
             final var unit = context.compilationUnits.get(unitIndex);
             if (unit.metadataOnly()) continue;
             final var isEntryHolder = unitIndex == 0;
             final var holderName = isEntryHolder ? context.mainClassName
                     : context.metadata.holderName(unit, unitIndex);
-            final var unitDeclarations = unit.declarations();
+            final var unitDeclarations = NamespaceMembers.flatten(unit.declarations()).stream()
+                    .filter(member -> member.namespaceName() == null)
+                    .map(NamespaceMembers.Member::declaration).toList();
             final var hasTopLevelStorage = unitDeclarations.stream()
                     .anyMatch(declaration -> declaration instanceof Stmt.FunctionDeclaration
                         || declaration instanceof Stmt.Var)
+                    || isEntryHolder && hasNamespaceValues
                     || (isEntryHolder && !context.lambdaPlan.lambdaImplementations().isEmpty());
             if ((unitIndex != 0 || context.libraryBuild) && !hasTopLevelStorage) continue;
             final var holderPath = outputPath(context, holderName);
@@ -60,12 +69,32 @@ final class BytecodeEmitter {
                 DeclarationEmitter.generateClass(context, builder, unitDeclarations, isEntryHolder);
             });
         }
+        final var namespaceDeclarations = new LinkedHashMap<String, List<Stmt>>();
+        for (final var unit : context.compilationUnits) {
+            if (unit.metadataOnly()) continue;
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (member.namespaceName() == null) continue;
+                final var owner = CompilationMetadata.namespaceOwner(unit.packageName(), member.namespaceName());
+                namespaceDeclarations.computeIfAbsent(owner, _ -> new ArrayList<>()).add(member.declaration());
+            }
+        }
+        for (final var namespace : namespaceDeclarations.entrySet()) {
+            final var namespacePath = outputPath(context, namespace.getKey());
+            Files.createDirectories(namespacePath.getParent());
+            context.currentHolderName = namespace.getKey();
+            context.classFile.buildTo(namespacePath.toAbsolutePath(), ClassDesc.of(namespace.getKey()), builder -> {
+                builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
+                DeclarationEmitter.generateClass(context, builder, namespace.getValue(), false);
+            });
+        }
         NominalTypeEmitter.emit(context);
         final var libraryIndex = ZeronLibraryIndex.fromCompilation(context.compilationUnits,
                 context.metadata.functionOwners(),
                 name -> context.symbols.getFunctionType(context.resolution.functionSymbolToken(name)),
+                variable -> context.symbols.getSymbol(
+                        context.resolution.topLevelValueSymbol(variable)).type(),
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v5.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v8.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -228,7 +257,9 @@ final class BytecodeEmitter {
     private static void emitArrayLiteral(CompilationContext context, final CodeBuilder composer,
                                   final Expr.ArrayLiteral literal,
                                   final ResolvedIntrinsicOperation operation ){
-        final var elementType = operation.parameterTypes().getFirst();
+        final var elementType = operation.parameterTypes().isEmpty()
+                ? arrayElementType(operation.resultType())
+                : operation.parameterTypes().getFirst();
         composer.ldc(literal.elements.size());
         composer.anewarray(ClassDesc.of("java.lang.Object"));
         for (int i = 0; i < literal.elements.size(); i++) {
@@ -241,6 +272,12 @@ final class BytecodeEmitter {
             composer.aastore();
         }
         context.lastEmittedType = operation.resultType();
+    }
+
+    private static TypeDescriptor arrayElementType(TypeDescriptor type) {
+        if (type instanceof ReferenceDescriptor reference) type = reference.baseType();
+        if (type instanceof ArrayDescriptor array) return array.elementType();
+        throw new IllegalStateException("Array literal intrinsic has a non-array result type.");
     }
 
     private static void emitArrayRead(CompilationContext context, final CodeBuilder composer,
@@ -276,7 +313,16 @@ final class BytecodeEmitter {
     static void emitExpr(CompilationContext context, final CodeBuilder composer, final Expr expr ){
         switch (expr) {
             case Expr.Property property -> {
-                if (property.safeNavigation()) {
+                if (property.namespaceValueSymbol() != null) {
+                    emitVariable(context, composer, property.namespaceValueSymbol());
+                    break;
+                } else if (property.javaFieldTarget() != null) {
+                    final var target = property.javaFieldTarget();
+                    composer.getstatic(ClassDesc.of(target.owner()), target.name(),
+                            ClassDesc.ofDescriptor(target.descriptor()));
+                    context.lastEmittedType = property.getType();
+                    break;
+                } else if (property.safeNavigation()) {
                     emitSafeProperty(context, composer, property);
                     break;
                 }
@@ -630,6 +676,10 @@ final class BytecodeEmitter {
     }
 
     private static void emitMemberCall(CompilationContext context, final CodeBuilder composer, final Expr.MemberCall call ){
+        if (call.namespaceCall() != null) {
+            emitCall(context, composer, call.namespaceCall());
+            return;
+        }
         if (call.safeNavigation()) {
             emitSafeMemberCall(context, composer, call);
             return;
@@ -941,7 +991,7 @@ final class BytecodeEmitter {
                 if (binding.lvt() == SymbolTable.GLOBAL) {
                     final var owner = ClassDesc.of(holderForDeclaration(context, binding.declaration()));
                     if (binding.declaration() instanceof Stmt.Var variable
-                            && context.initializationPlan.initializerNames().containsKey(variable)) {
+                            && requiresTopLevelValueAccessor(context, variable)) {
                         composer.invokestatic(owner, DeclarationEmitter.topLevelValueAccessorName(variable.name().lexeme()),
                                 MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(binding.type())));
                     } else {
@@ -964,7 +1014,7 @@ final class BytecodeEmitter {
         if (binding.lvt() == SymbolTable.GLOBAL) {
             final var owner = ClassDesc.of(holderForDeclaration(context, binding.declaration()));
             if (binding.declaration() instanceof Stmt.Var variable
-                    && context.initializationPlan.initializerNames().containsKey(variable)) {
+                    && requiresTopLevelValueAccessor(context, variable)) {
                 composer.invokestatic(owner, DeclarationEmitter.topLevelValueAccessorName(variable.name().lexeme()),
                         MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(binding.type())));
             } else {
@@ -985,6 +1035,12 @@ final class BytecodeEmitter {
         return binding.declaration() instanceof Stmt.Var variable
                 ? variable.name().lexeme()
                 : fallback.lexeme();
+    }
+
+    private static boolean requiresTopLevelValueAccessor(final CompilationContext context,
+                                                          final Stmt.Var variable) {
+        return context.initializationPlan.initializerNames().containsKey(variable)
+                || holderForDeclaration(context, variable).contains("$zeron$Namespace$");
     }
 
     private static String holderForDeclaration(CompilationContext context, final Stmt declaration ){

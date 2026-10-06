@@ -10,9 +10,11 @@ importDeclaration       : "import" qualifiedName ["as" IDENTIFIER] ";" ;
 
 topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl
                         | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
+                        | externalClassDecl | publicExternalClassDecl
                         | publicClassDecl | publicContractDecl | publicSealedContractDecl ;
 publicFunDecl           : "public" funDecl ;
 publicExternalFunctionDecl : "public" externalFunctionDecl ;
+publicExternalClassDecl : "public" externalClassDecl ;
 publicClassDecl         : "public" classDecl ;
 publicContractDecl      : "public" contractDecl ;
 publicSealedContractDecl : "public" sealedContractDecl ;
@@ -23,8 +25,11 @@ varDecl                 : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] "
 funDecl                 : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type]
                           ("=" expression ";" | block) ;
 externalFunctionDecl   : "external" "fn" IDENTIFIER "(" parameters ")" ":" type ";" ;
+externalClassDecl      : "external" "class" IDENTIFIER "=" STRING "{" externalClassMember* "}" ;
+externalClassMember    : ["public"] ["mut"] IDENTIFIER "(" parameters ")" ":" type ";"
+                        | ["public"] "static" "property" IDENTIFIER ":" type ";" ;
 typeParameters          : "<" typeParameter {"," typeParameter} ">" ;
-typeParameter           : IDENTIFIER [":" type] ;
+typeParameter           : IDENTIFIER [":" type {"+" type}] ;
 parameters              : [parameter {"," parameter}] ;
 parameter               : IDENTIFIER ":" type ;
 
@@ -131,6 +136,8 @@ range                   : INT ".." INT ;
 
 # Semantic/parser constraints:
 # - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
+# - Contract bounds are permitted only on generic functions and generic methods; class and contract
+#   declaration type parameters remain unbounded. Multiple ordinary contract bounds use `+`.
 # - Sealed contracts require a non-empty permits list. Permitted classes must be in the contract's
 #   package; public sealed contracts permit only public classes. Generic arity and type parameters
 #   correspond by position. Permitted implementation classes are final.
@@ -152,12 +159,14 @@ range                   : INT ".." INT ;
 #   bodies. Their result type is implicitly `&Class`, they have no `this`, and every reachable normal
 #   path in a block must return an `&Class` value. Allocation still uses the canonical `Class.new`.
 # - Generic functions and methods must have explicit return types. Method type parameters are
-#   unbounded, scoped to that method, and cannot shadow enclosing class or contract parameters.
+#   scoped to that method and cannot shadow enclosing class or contract parameters. Function and
+#   method type parameters may each have multiple contract bounds joined by `+`.
 #   Calls infer type arguments from arguments or accept explicit arguments before the argument list.
 # - Generic function values use `name::<Type, ...>` for explicit specialization, or a bare name
 #   when an expected function type determines every type parameter. These values are monomorphic.
-# - Generic functions may constrain a type parameter with one contract bound (`T: Contract`). Class
-#   and contract type-parameter bounds, multiple bounds, and mutating bound methods remain unsupported.
+# - Class and contract declaration type parameters remain unbounded. Bounds on generic function or
+#   method type parameters must name contracts; only non-mutating contract methods are available
+#   through a bounded type parameter. Operator constraints remain unsupported.
 # - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
 # - Project compilation uses explicit source roots and an entry file. Cross-package source units may
 #   declare classes, contracts, and functions; cross-package top-level values are deferred.

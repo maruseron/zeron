@@ -1,7 +1,6 @@
 package com.maruseron.zeron.domain;
 
 import java.lang.constant.ClassDesc;
-import java.lang.constant.ConstantDescs;
 import java.lang.constant.MethodTypeDesc;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -75,17 +74,6 @@ public final class FunctionBindingRegistry {
     }
 
     private static FunctionBindingRegistry createStandard() {
-        final var signature = TypeDescriptor.functionOf("", TypeDescriptor.ofUnit(),
-                TypeDescriptor.ofAny().toNullable());
-        final var printStream = ClassDesc.of("java.io.PrintStream");
-        return new FunctionBindingRegistry(Map.of(
-                "zeron.io.print", new Binding(signature,
-                    new StaticFieldInstanceMethod(ClassDesc.of("java.lang.System"), "out", printStream,
-                        printStream, "print",
-                        MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object))),
-                "zeron.io.println", new Binding(signature,
-                    new StaticFieldInstanceMethod(ClassDesc.of("java.lang.System"), "out", printStream,
-                        printStream, "println",
-                        MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object)))));
+        return new FunctionBindingRegistry(Map.of());
     }
 }

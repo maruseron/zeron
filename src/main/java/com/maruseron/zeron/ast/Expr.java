@@ -3,6 +3,7 @@ package com.maruseron.zeron.ast;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.JavaCallTarget;
+import com.maruseron.zeron.domain.JavaFieldTarget;
 import com.maruseron.zeron.domain.ResolvedIntrinsicOperation;
 import com.maruseron.zeron.scan.Token;
 
@@ -23,6 +24,7 @@ public sealed interface Expr {
         private final boolean safeNavigation;
         private TypeDescriptor type;
         private FunctionDescriptor resolvedDescriptor;
+        private Call namespaceCall;
         private String resolvedClassName;
         private String resolvedOwnerName;
         private boolean receiverRequiresCast;
@@ -50,6 +52,8 @@ public sealed interface Expr {
         public boolean safeNavigation() { return safeNavigation; }
         public FunctionDescriptor resolvedDescriptor() { return resolvedDescriptor; }
         public void setResolvedDescriptor(FunctionDescriptor descriptor) { resolvedDescriptor = descriptor; }
+        public Call namespaceCall() { return namespaceCall; }
+        public void setNamespaceCall(final Call call) { namespaceCall = call; }
         public String resolvedClassName() { return resolvedClassName; }
         public void setResolvedClassName(String className) { resolvedClassName = className; }
         public String resolvedOwnerName() { return resolvedOwnerName; }
@@ -68,6 +72,9 @@ public sealed interface Expr {
         private ResolvedIntrinsicOperation intrinsicOperation;
         private String resolvedOwnerName;
         private boolean resolvedAsProperty;
+        private JavaFieldTarget javaFieldTarget;
+        private Token namespaceValueSymbol;
+        private Stmt.Var namespaceValueDeclaration;
 
         public Property(Expr receiver, Token name, TypeDescriptor type) {
             this(receiver, name, type, false);
@@ -89,6 +96,14 @@ public sealed interface Expr {
         public void setResolvedOwnerName(final String ownerName) { resolvedOwnerName = ownerName; }
         public boolean resolvedAsProperty() { return resolvedAsProperty; }
         public void setResolvedAsProperty(final boolean value) { resolvedAsProperty = value; }
+        public JavaFieldTarget javaFieldTarget() { return javaFieldTarget; }
+        public void setJavaFieldTarget(final JavaFieldTarget target) { javaFieldTarget = target; }
+        public Token namespaceValueSymbol() { return namespaceValueSymbol; }
+        public Stmt.Var namespaceValueDeclaration() { return namespaceValueDeclaration; }
+        public void setNamespaceValue(final Token symbol, final Stmt.Var declaration) {
+            namespaceValueSymbol = symbol;
+            namespaceValueDeclaration = declaration;
+        }
     }
 
     final class PropertyAssignment implements Expr {

@@ -3,6 +3,7 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Expr;
+import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.diagnostic.DiagnosticHelp;
@@ -51,28 +52,51 @@ public final class Resolver {
     static ResolutionResult resolveUnits(
             final ResolutionContext context, final List<CompilationUnit> units) {
         for (final var unit : units) {
-            for (final var declaration : unit.declarations()) {
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                final var declaration = entry.declaration();
+                if (declarationName(declaration) != null
+                        && (declaration instanceof Stmt.FunctionDeclaration || declaration instanceof Stmt.Var)) {
+                    final var qualifiedName = entry.namespaceName() == null
+                            ? qualify(unit.packageName(), declarationName(declaration).lexeme())
+                            : NamespaceMembers.qualifiedName(unit.packageName(), entry.namespaceName(),
+                                declarationName(declaration).lexeme());
+                    context.declarationPackages.put(qualifiedName, unit.packageName());
+                    if (entry.namespaceName() != null) {
+                        context.namespaceMemberPackages.put(qualifiedName, unit.packageName());
+                    }
+                }
                 context.sourcePathsByDeclaration.put(declaration, unit.sourcePath());
+                if (entry.namespaceName() != null) {
+                    context.namespaceNamesByDeclaration.put(declaration, entry.namespaceName());
+                }
                 final var name = declarationName(declaration);
                 if (name != null) context.sourcePathsByToken.put(name, unit.sourcePath());
             }
         }
         for (final var unit : units) {
             context.currentSourcePath = unit.sourcePath();
-            for (final var declaration : unit.declarations()) {
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                final var declaration = entry.declaration();
                 if (declaration instanceof Stmt.ClassDecl classDeclaration) {
-                    attempt(context, () -> context.declarationRegistrar.registerTypes(List.of(classDeclaration)));
+                    attempt(context, () -> context.declarationRegistrar.registerTypes(
+                            unit.packageName(), List.of(classDeclaration)));
                 } else if (declaration instanceof Stmt.ContractDecl contractDeclaration) {
-                    attempt(context, () -> context.declarationRegistrar.registerTypes(List.of(contractDeclaration)));
+                    attempt(context, () -> context.declarationRegistrar.registerTypes(
+                            unit.packageName(), List.of(contractDeclaration)));
+                } else if (declaration instanceof Stmt.ExternalClass externalClass) {
+                    attempt(context, () -> context.declarationRegistrar.registerTypes(
+                            unit.packageName(), List.of(externalClass)));
                 }
             }
         }
         for (var unitIndex = 0; unitIndex < units.size(); unitIndex++) {
             final var unit = units.get(unitIndex);
             context.currentSourcePath = unit.sourcePath();
-            for (final var declaration : unit.declarations()) {
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                final var declaration = entry.declaration();
                 if (declaration instanceof Stmt.Var variable) {
-                    attempt(context, () -> context.declarationRegistrar.registerTopLevelValue(unit, variable));
+                    attempt(context, () -> context.declarationRegistrar.registerTopLevelValue(
+                            unit, variable, entry.namespaceName()));
                 }
                 if (!(declaration instanceof Stmt.FunctionDeclaration function)) continue;
                 if (unitIndex > 0 && function.typeDescriptor().returnType() instanceof InferDescriptor) {
@@ -82,7 +106,8 @@ public final class Resolver {
                     continue;
                 }
                 if (!(function.typeDescriptor().returnType() instanceof InferDescriptor)) {
-                    attempt(context, () -> context.declarationRegistrar.registerFunction(unit.packageName(), function));
+                    attempt(context, () -> context.declarationRegistrar.registerFunction(
+                            unit.packageName(), entry.namespaceName(), function));
                 }
             }
         }
@@ -109,7 +134,8 @@ public final class Resolver {
             context.currentSourcePath = unit.sourcePath();
             context.currentImports = importsByUnit.get(unit);
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
-            for (final var declaration : unit.declarations()) {
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                final var declaration = entry.declaration();
                 if (!(declaration instanceof Stmt.Var variable)) continue;
                 if (variable.type() instanceof InferDescriptor) continue;
                 final var symbol = context.topLevelTokensByDeclaration.get(variable);
@@ -133,10 +159,12 @@ public final class Resolver {
             context.currentSourcePath = sourceValue.unit().sourcePath();
             context.currentImports = importsByUnit.get(sourceValue.unit());
             context.invalidImportAliases = invalidAliasesByUnit.get(sourceValue.unit());
+            context.currentNamespaceName = context.namespaceNamesByDeclaration.get(sourceValue.declaration());
             if (!attempt(context, () -> resolve(context, sourceValue.declaration()))) {
                 final var symbol = context.topLevelTokensByDeclaration.get(sourceValue.declaration());
                 if (symbol != null) context.symbols.removeGlobalSymbol(symbol, sourceValue.declaration());
             }
+            context.currentNamespaceName = null;
         }
         for (final var unit : units) {
             context.packageName = unit.packageName();
@@ -144,11 +172,14 @@ public final class Resolver {
             context.currentImports = importsByUnit.get(unit);
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
             if (unit.metadataOnly()) continue;
-            for (final var statement : unit.declarations()) {
-                if (!(statement instanceof Stmt.Var)) {
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                final var statement = entry.declaration();
+                if (!(statement instanceof Stmt.Var) && !(statement instanceof Stmt.ExternalClass)) {
+                    context.currentNamespaceName = entry.namespaceName();
                     attempt(context, () -> resolve(context, statement));
                 }
             }
+            context.currentNamespaceName = null;
         }
         for (final var lambda : context.resolvedLambdas) {
             if (LambdaResolver.containsInfer(context, lambda.getType())) {
@@ -194,6 +225,7 @@ public final class Resolver {
         return switch (declaration) {
             case Stmt.ClassDecl classDeclaration -> classDeclaration.name();
             case Stmt.ContractDecl contractDeclaration -> contractDeclaration.name();
+            case Stmt.ExternalClass externalClass -> externalClass.name();
             case Stmt.FunctionDeclaration function -> function.name();
             case Stmt.Var variable -> variable.name();
             default -> null;

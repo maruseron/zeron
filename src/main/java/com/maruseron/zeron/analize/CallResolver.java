@@ -18,10 +18,30 @@ final class CallResolver {
     }
 
     TypeDescriptor resolve(final Expr.Call call) {
+        return resolve(call, null);
+    }
+
+    TypeDescriptor resolveNamespaceCall(final Expr.MemberCall memberCall, final String functionName) {
+        final var call = new Expr.Call(memberCall.name, memberCall.paren, memberCall.arguments,
+                memberCall.explicitTypeArguments, TypeDescriptor.ofInfer());
+        resolve(call, functionName);
+        memberCall.setNamespaceCall(call);
+        memberCall.setType(call.getType());
+        return call.getType();
+    }
+
+    private TypeDescriptor resolve(final Expr.Call call, final String forcedFunctionName) {
         FunctionDescriptor descriptor;
-        final var callableSymbol = context.symbols.containsSymbol(call.callee)
-                ? call.callee : MemberInteropResolver.resolveTopLevelValueSymbol(context, call.callee);
-        if (callableSymbol != null && context.symbols.containsSymbol(callableSymbol)) {
+        final var callableSymbol = forcedFunctionName == null
+                ? context.symbols.containsSymbol(call.callee)
+                    ? call.callee : MemberInteropResolver.resolveTopLevelValueSymbol(context, call.callee)
+                : null;
+        if (forcedFunctionName != null) {
+            final var functionToken = context.functionSymbolTokens.get(forcedFunctionName);
+            if (functionToken == null) throw new IllegalStateException("Resolved namespace function disappeared.");
+            call.setResolvedFunctionName(forcedFunctionName);
+            descriptor = (FunctionDescriptor) context.symbols.getFunction(functionToken).type();
+        } else if (callableSymbol != null && context.symbols.containsSymbol(callableSymbol)) {
             call.setResolvedSymbolToken(callableSymbol);
             final var symbol = context.symbols.getSymbol(callableSymbol).type();
             if (symbol instanceof FunctionDescriptor function) {
@@ -164,8 +184,8 @@ final class CallResolver {
                         "Cannot infer type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument."));
             }
-            if (parameter.bound() != null) {
-                final var requiredBound = TypeSubstitution.substitute(parameter.bound(), substitutions);
+            for (final var bound : parameter.bounds()) {
+                final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
                 Resolver.ensureAssignable(context, requiredBound, substitutions.get(parameter), call.callee);
             }
         }

@@ -15,7 +15,9 @@ public class Some<T> is Option<T> {
 
     public isSome(): Boolean = true;
 
-    public value(): T = this.item;
+    public property value: T {
+        get = this.item;
+    }
 
     public getOrElse(defaultValue: T): T = this.item;
 

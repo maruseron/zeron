@@ -25,8 +25,11 @@ final class StatementResolver {
 
     void resolve(final Stmt stmt) {
         switch (stmt) {
+            case Stmt.Namespace _ ->
+                    throw new IllegalStateException("Namespace members must be flattened before resolution.");
             case Stmt.ClassDecl declaration -> DeclarationResolver.resolveClass(context, declaration);
             case Stmt.ContractDecl declaration -> DeclarationResolver.resolveContract(context, declaration);
+            case Stmt.ExternalClass _ -> {}
             case Stmt.Block(List<Stmt> statements) -> {
                 context.symbols.beginScope();
                 resolveStatements(statements);
@@ -57,8 +60,7 @@ final class StatementResolver {
             case Stmt.Expression(Expr expression) -> ExpressionFlowResolver.resolveExpression(context, expression);
             case Stmt.Function fn -> {
                 TypeResolver.validateFunctionTypes(context, fn.typeDescriptor(), fn.name());
-                fn.typeDescriptor().typeParameters().forEach(
-                        parameter -> TypeResolver.validateTypeParameterBound(context, parameter, fn.name()));
+                TypeResolver.validateTypeParameterBounds(context, fn.typeDescriptor(), fn.name());
                 if (!context.functionNamesByDeclaration.containsKey(fn.name())) {
                     context.declarationRegistrar.registerFunction(context.packageName, fn);
                 }

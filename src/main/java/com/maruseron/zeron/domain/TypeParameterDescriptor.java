@@ -1,22 +1,29 @@
 package com.maruseron.zeron.domain;
 
 import java.util.Objects;
+import java.util.List;
 
 public final class TypeParameterDescriptor implements TypeDescriptor {
     private final int scopeId;
     private final String name;
-    private final TypeDescriptor bound;
+    private final List<TypeDescriptor> bounds;
 
     public TypeParameterDescriptor(final int scopeId, final String name) {
-        this(scopeId, name, null);
+        this(scopeId, name, List.of());
     }
 
     public TypeParameterDescriptor(final int scopeId,
                                    final String name,
                                    final TypeDescriptor bound) {
+        this(scopeId, name, bound == null ? List.of() : List.of(bound));
+    }
+
+    public TypeParameterDescriptor(final int scopeId,
+                                   final String name,
+                                   final List<TypeDescriptor> bounds) {
         this.scopeId = scopeId;
         this.name = Objects.requireNonNull(name);
-        this.bound = bound;
+        this.bounds = List.copyOf(bounds);
     }
 
     public int scopeId() {
@@ -24,7 +31,11 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
     }
 
     public TypeDescriptor bound() {
-        return bound;
+        return bounds.isEmpty() ? null : bounds.getFirst();
+    }
+
+    public List<TypeDescriptor> bounds() {
+        return bounds;
     }
 
     @Override

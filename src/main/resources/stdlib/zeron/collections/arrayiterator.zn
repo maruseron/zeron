@@ -1,0 +1,21 @@
+package zeron.collections;
+
+import zeron.lang.Option;
+import zeron.lang.Some;
+import zeron.lang.None;
+
+public class ArrayIterator<T> is Iterator<T> {
+    arr: Array<T>;
+    current: Int;
+
+    private constructor new;
+
+    public constructor from(arr: Array<T>) = ArrayIterator<T>.new(arr, 0);
+
+    public mut next(): Option<T> {
+        if (this.current >= this.arr.length) return None<T>.none();
+        let value = this.arr[this.current];
+        this.current = this.current + 1;
+        return Some<T>.from(value);
+    }
+}

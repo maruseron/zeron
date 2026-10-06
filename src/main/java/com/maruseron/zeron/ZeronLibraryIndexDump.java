@@ -30,7 +30,7 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v5.bin|class-directory|library.jar>");
+            System.err.println("Usage: ZeronLibraryIndexDump <api-v8.bin|class-directory|library.jar>");
             return;
         }
         final var path = Path.of(args[0]);
@@ -56,7 +56,13 @@ public final class ZeronLibraryIndexDump {
                             + formatTypeParameters(function.signature().typeParameters())
                             + formatParameters(function.signature()) + ": "
                             + formatType(function.signature().returnType()));
+                    System.out.println("  Namespace: " + namespaceLabel(function.namespaceName()));
                     System.out.println("  JVM owner: " + function.jvmOwner());
+                }
+                case ZeronLibraryIndex.ValueExport value -> {
+                    System.out.println("value " + value.qualifiedName() + ": " + formatType(value.type()));
+                    System.out.println("  Namespace: " + namespaceLabel(value.namespaceName()));
+                    System.out.println("  JVM owner: " + value.jvmOwner());
                 }
                 case ZeronLibraryIndex.ClassExport classExport -> {
                     System.out.println("class " + classExport.qualifiedName()
@@ -109,12 +115,18 @@ public final class ZeronLibraryIndexDump {
         }
     }
 
+    private static String namespaceLabel(final String namespaceName) {
+        return namespaceName == null ? "<top-level>" : namespaceName;
+    }
+
     private static String formatTypeParameters(final List<TypeParameterDescriptor> parameters) {
         if (parameters.isEmpty()) return "";
         return parameters.stream()
-                .map(parameter -> parameter.name() + (parameter.bound() == null
+                .map(parameter -> parameter.name() + (parameter.bounds().isEmpty()
                         ? ""
-                        : ": " + formatType(parameter.bound())))
+                        : ": " + parameter.bounds().stream()
+                                .map(ZeronLibraryIndexDump::formatType)
+                                .collect(Collectors.joining(" + "))))
                 .collect(Collectors.joining(", ", "<", ">"));
     }
 

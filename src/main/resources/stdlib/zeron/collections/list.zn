@@ -19,7 +19,7 @@ class ListIterator<T> is Iterator<T> {
     public constructor from(values: List<T>) = ListIterator<T>.new(values, 0);
 
     public mut next(): Option<T> {
-        if (this.position >= this.values.size()) return None<T>.none();
+        if (this.position >= this.values.size) return None<T>.none();
         let value = this.values.at(this.position);
         this.position = this.position + 1;
         return Some<T>.from(value);
@@ -65,7 +65,9 @@ public class List<T> is Iterable<T> {
         }
     }
 
-    public size(): Int = this.count;
+    public property size: Int {
+        get = this.count;
+    }
 
     public isEmpty(): Boolean = this.count == 0;
 

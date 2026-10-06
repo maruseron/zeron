@@ -8,8 +8,8 @@ erases type variables to JVM reference types. Callback parameters and callback r
 including nested callbacks, nullable callback values, and mutable function views, are adapted through
 generated bridge helpers.
 
-Generic methods on classes and contracts are implemented in the same unbounded first slice:
-type arguments are inferred from arguments or supplied explicitly at member calls. Contract
+Generic methods on classes and contracts support inferred or explicit type arguments at member calls,
+including multiple contract bounds on method type parameters. Contract
 implementations match generic method signatures up to renaming of method type parameters. The
 method parameters are erased in JVM descriptors; the Zeron library index retains them for
 Zeron-to-Zeron consumers, and class/method `Signature` attributes expose the corresponding generic
@@ -19,9 +19,10 @@ Invariant generic classes/contracts and callback adaptation across their erased 
 are also implemented; see [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md)
 and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). Generic named
 functions can be specialized as monomorphic function values. Immutable let-bound lambdas support a
-limited rank-1 scheme slice. A first slice of single contract bounds on generic function type
-parameters is implemented. Variance, overloads, nested schemes, explicit `forall`, and polymorphic
-values stored in mutable bindings remain deferred. This is not a complete generic type system.
+limited rank-1 scheme slice. A first slice of multiple contract bounds on generic function and
+generic method type parameters is implemented. Variance, overloads, nested schemes, explicit
+`forall`, and polymorphic values stored in mutable bindings remain deferred. This is not a complete
+generic type system.
 
 ## Language Contract
 
@@ -43,13 +44,18 @@ let intIdentity: (Int) -> Int = identity::<Int>;
 let stringIdentity: (String) -> String = identity;
 ```
 
-Type parameters are scoped to one declaration. Generic functions may give each parameter one
-contract bound, such as `T: Named`. The bound exposes that contract's non-mutating methods in the
-generic body and is checked against inferred or explicit type arguments. Multiple bounds, class
-bounds, bounds on generic classes/contracts, and mutating bound methods remain unsupported. Type
-parameters may appear recursively in parameters, results, function signatures, nullable and
-reference types, and the built-in `Array<T>` descriptor. Function type annotations accept zero or
-multiple parameters.
+Type parameters are scoped to one declaration. Generic functions and generic methods may give each
+parameter one or more contract bounds, such as `T: Named + Encodable`. Each bound exposes its
+non-mutating methods in the generic body and every bound is checked against inferred or explicit
+type arguments. Class bounds, bounds on generic classes/contracts, and mutating bound methods remain
+unsupported. Type parameters may appear recursively in parameters, results, function signatures,
+nullable and reference types, and the built-in `Array<T>` descriptor. Function type annotations
+accept zero or multiple parameters.
+
+Let-bound lambda generalization remains limited to unresolved identity and constant-result forms.
+It does not infer contract bounds from member calls or carry implicit constraints into a scheme;
+expanding it requires a separate sound constraint-inference rule. Operator requirements remain
+deferred to the operator-witness design.
 
 At a direct generic call, the resolver seeds substitutions from explicit type arguments, if given,
 then resolves non-lambda arguments and structurally matches their types against the generic
@@ -60,7 +66,8 @@ are rejected. The resulting arguments are checked against the fully substituted 
 
 Unbounded type variables remain opaque inside a generic body. Values can be passed, stored, returned,
 and used in supported structural positions, but unary and binary operators are rejected when they
-require constraints. A bounded type variable exposes only its bound contract's non-mutating methods.
+require constraints. A bounded type variable exposes the non-mutating methods declared by any of its
+contract bounds.
 Lambdas with an expected function type remain monomorphic. An immutable let-bound lambda with safe
 unresolved parameters may generalize them into a rank-1 scheme, instantiated freshly at each use.
 The first slice handles direct parameter identity and constant results. Mutable bindings, nested
@@ -72,7 +79,7 @@ those named-function references are monomorphic values.
 
 ### Parsing and type identity
 
-The parser recognizes `fn name<T, R>(...)`, `fn display<T: Named>(...)`, direct calls such as
+The parser recognizes `fn name<T, R>(...)`, `fn display<T: Named + Encodable>(...)`, direct calls such as
 `name<Int>(...)`, and function values such as `name::<Int>`. A generic declaration without an
 explicit return annotation is rejected. Type arguments are retained on the call or function-value
 AST node for resolution. Type-parameter descriptors include a declaration-scope identity so
@@ -89,15 +96,18 @@ to their raw JVM class or interface; see [design-document-05_classes-and-contrac
 Generic call inference is structural and intentionally bounded. It handles direct type variables,
 function signatures, arrays (including a mutable array literal projected to a read-only parameter),
 nullable/reference wrappers, and existing generic descriptors. It is not a general subtype solver:
-there are no variance rules, overload selection, or inference from a desired result type alone. A
-single contract bound may authorize readonly contract methods on a generic function type parameter.
+there are no variance rules, overload selection, or inference from a desired result type alone.
+Contract bounds may authorize readonly contract methods on generic function and method type
+parameters; all bounds are checked independently.
 If a type parameter appears only in an unconstrained lambda parameter, the caller must
 provide enough information elsewhere or pass an explicit type argument.
 
 Lambdas and bare function names passed as arguments are resolved against the partially substituted
 function signature. Immutable let-bound lambda schemes instantiate freshly at calls and expected
-function types; the binding's scheme is not mutated by an individual use. Operator-constrained lambda
-parameters remain monomorphic and may use later call context. Generic function references validate
+function types; the binding's scheme is not mutated by an individual use. Let-bound lambda
+generalization remains limited to identity and constant results: it does not invent contract bounds
+or operator constraints, and the lambda syntax has no explicit bounded-parameter form. Operator-constrained
+lambda parameters remain monomorphic and may use later call context. Generic function references validate
 bounds and expected function types after specialization. Neither a scheme nor a lambda acquires the
 enclosing function's polymorphism.
 
@@ -148,11 +158,11 @@ shape matrix and broader adapter reuse still need coverage.
    declaration-site conformance, invariant identity, raw JVM erasure, nominal callback adapters, and
    erased contract bridges are covered. Broader shape combinations and adapter reuse remain follow-up
    coverage.
-5. **Single contract bound on generic functions: first slice implemented.** Each function type
-  parameter may have one contract bound. Call sites validate inferred and explicit type arguments;
-  generic bodies may call the bound's non-mutating methods through a cast and interface dispatch.
-  Bounds on generic classes/contracts, multiple or class bounds, mutating methods, operators, variance,
-  overloads, and broader inference remain deferred.
+5. **Multiple contract bounds on generic functions and methods: first slice implemented.** Each
+  function or method type parameter may have multiple contract bounds. Call sites validate inferred
+  and explicit type arguments against every bound; generic bodies may call a bound's non-mutating
+  methods through a cast and interface dispatch. Bounds on generic classes/contracts, class bounds,
+  mutating methods, operator constraints, variance, overloads, and broader inference remain deferred.
 6. **Let-bound polymorphic lambdas: implemented first slice.** Immutable identity and constant-result
     lambdas generalize unresolved parameters into rank-1 schemes; each use instantiates independently.
     Mutable bindings, nested schemes, and operator constraints remain deferred.
@@ -170,8 +180,8 @@ shape matrix and broader adapter reuse still need coverage.
   method type-parameter renaming.
 - Generic nominal and method signatures are present in JVM class files and agree with erased method
   descriptors; the Zeron API index retains source-level method type parameters for compiled libraries.
-- Contract-bounded generic function calls validate inferred and explicit type arguments; only
-  readonly methods declared by the bound are callable on `T`.
+- Multiple contract-bounded generic function and method calls validate inferred and explicit type
+  arguments against each bound; only readonly methods declared by a bound are callable on `T`.
 - Type-specific operations on unconstrained type variables fail during resolution rather than
   producing invalid bytecode.
 - Erased method descriptors, primitive boxing/unboxing, generic array access, and recursive callback

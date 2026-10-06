@@ -33,6 +33,12 @@ public sealed interface Stmt {
 
     record Block(List<Stmt> statements) implements Stmt {}
 
+    record Namespace(Token name, List<Stmt> members) implements Stmt {
+        public Namespace {
+            members = List.copyOf(members);
+        }
+    }
+
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                      List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
                      Constructor constructor, List<NamedConstructor> namedConstructors,
@@ -138,6 +144,20 @@ public sealed interface Stmt {
 
     record ExternalFunction(Token name, List<Token> parameters,
                             FunctionDescriptor typeDescriptor, boolean isPublic) implements FunctionDeclaration {}
+
+    record ExternalClass(Token name, String javaBinaryName, boolean isPublic,
+                         List<ExternalMethod> methods, List<ExternalStaticProperty> staticProperties)
+            implements Stmt, Decl {
+        public ExternalClass {
+            methods = List.copyOf(methods);
+            staticProperties = List.copyOf(staticProperties);
+        }
+    }
+
+    record ExternalMethod(Token name, List<Token> parameters, FunctionDescriptor typeDescriptor,
+                          boolean isPublic, boolean isMutating) {}
+
+    record ExternalStaticProperty(Token name, TypeDescriptor type, boolean isPublic) {}
 
     record Method(Token name, List<Token> parameters,
                   FunctionDescriptor typeDescriptor, boolean isPublic,

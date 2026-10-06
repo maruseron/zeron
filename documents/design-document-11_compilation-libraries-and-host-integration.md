@@ -19,19 +19,21 @@ a source package a JVM module.
   read-before-initialization, and aborts startup if an initializer fails. Public immutable values are
   importable; public mutable values and compiled-library value exports remain deferred. Non-entry
   functions require explicit return types.
-- Bundled source mode is the default and includes `zeron.collections` iteration, list, and
-  lazy-sequence APIs, `zeron.ranges`, and `zeron.io`. Standard-library declarations remain explicit
-  imports. The canonical source tree under `src/main/resources/stdlib/` mirrors these package names.
-- The compiler writes `META-INF/zeron/api-v5.bin`. The index has schema version 5 and carries the
-  required standard-library API version, currently 8.
+- Bundled source mode is the default and includes every `.zn` file under
+  `src/main/resources/stdlib/`. Maven generates a sorted classpath source index from that tree during
+  resource generation; runtime loading uses the index, so adding a standard-library source does not
+  require a separate registration-list edit. Standard-library declarations remain explicit imports,
+  and the canonical source tree mirrors package names.
+- The compiler writes `META-INF/zeron/api-v8.bin`. The index has schema version 8 and carries the
+  required standard-library API version, currently 10.
 - Zeron libraries can be built into a class directory and consumed in compiled mode. Library loading
   validates the API-index schema and standard-library API versions and creates metadata-only
   declarations; consumer compilation does not re-emit library classes. Zeron library JARs are also
   supported, with the same index and compatibility checks.
 - Java interop reads public class-file metadata from explicit class-directory roots. Public
   constructors and declared methods are callable, including expanded varargs for supported component
-  types. Top-level external function declarations can also bind to public static methods in those
-  directories.
+  types. A separate curated source facade exposes only `java.lang.System.out` and
+  `java.io.PrintStream.print(Object)` / `println(Object)`; this does not enable general JDK discovery.
 - Compiler intrinsic IDs and lowering are described separately in
   [design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md).
 
@@ -67,20 +69,21 @@ validated library JARs or class directories to the runtime classpath.
 
 ## Zeron Library Artifacts
 
-The API index is a binary sidecar at `META-INF/zeron/api-v5.bin`. Its schema version is separate from
+The API index is a binary sidecar at `META-INF/zeron/api-v8.bin`. Its schema version is separate from
 the standard-library API version. It records qualified public signatures, generated JVM owners,
 declaration and method generic parameters, nullability, reference views, mutability markers, and
 callback shapes. Public property requirements and getter/setter capabilities are recorded alongside
 class and contract signatures. Sealed contracts additionally export their permitted class templates.
 Method type parameters and references to enclosing class or contract parameters use the same scoped
-type encoding as generic function signatures. It does not contain bodies or private implementation
-details.
+type encoding as generic function signatures. Function and value exports carry an explicit namespace
+name when declared inside a namespace; they remain regular function/value entries in the index. It
+does not contain bodies or private implementation details.
 
 `--build-stdlib <output-directory>` compiles the canonical bundled units as a class directory.
 `--jar-output <file.jar>` packages a successful source/project compilation from a temporary staging
 directory, leaving the default `dist/` output unchanged when the option is omitted. When combined
 with `--build-stdlib`, the requested class directory is preserved and also packaged as a JAR.
-Archives contain the compiled classes and `META-INF/zeron/api-v5.bin`, with entries in deterministic
+Archives contain the compiled classes and `META-INF/zeron/api-v8.bin`, with entries in deterministic
 order. The JAR is published only after packaging succeeds.
 
 Consumers may select a Zeron library class directory or JAR with `--library`; compiled standard
@@ -98,11 +101,17 @@ standard-library build includes them.
 
 ## Java Interoperability
 
-The CLI accepts repeatable `--java-classpath <class-directory>` roots. A requested class is found by
-its binary-name path under one of those roots. The current reader accepts public classes and
-interfaces, excluding annotation, enum, and module classes; it exposes public declared constructors
-and methods, not fields or inherited-member lookup. Java classes are not discovered automatically
-from the runtime classpath or JDK modules.
+The CLI accepts repeatable `--java-classpath <class-directory>` roots for user-provided classes. A
+requested class is found by its binary-name path under one of those roots. The current reader accepts
+public classes and interfaces, excluding annotation, enum, and module classes; it exposes public
+declared constructors and methods, not inherited-member lookup. Java classes are not discovered
+automatically from the runtime classpath or JDK modules. Independently, the bundled standard library
+declares a curated external-class facade for `java.lang.System` and `java.io.PrintStream`; only
+`System.out`, `PrintStream.print(Object)`, and `PrintStream.println(Object)` are exposed. `System.out`
+is typed as nullable `&PrintStream?`, and calls therefore require safe navigation or non-null flow
+refinement. The static field is read-only. The same narrowly curated bindings remain available when
+using the compiled standard library; no extra Java classpath root is needed for them. The
+`zeron.io.print` and `println` convenience functions skip output when `System.out` is null.
 
 The supported source mappings are intentionally narrow:
 
@@ -119,8 +128,9 @@ The supported source mappings are intentionally narrow:
   an already-packed Java array is not supported.
 - Java exceptions propagate to the host.
 
-Java generics, ordinary Java array parameters/results, fields, callbacks/SAM conversion, inherited
-members, Java JAR classpath roots, JDK module discovery, and JPMS readability/exports are deferred.
+Java generics, ordinary Java array parameters/results, arbitrary fields, callbacks/SAM conversion,
+inherited members, Java JAR classpath roots, JDK module discovery, and JPMS readability/exports are
+deferred. The curated `System.out` field is the only field exception.
 Zeron library JAR support does not extend `--java-classpath`; these are separate extensions and must
 not be inferred from the Zeron API-index reader.
 
@@ -141,22 +151,24 @@ exports use ordinary Zeron function behavior. Curated platform bindings can use 
 static-field/instance-method plan, such as `System.out` followed by `PrintStream.println`, without
 general JDK class discovery or a source-level invocation DSL.
 
-This is not yet an `external class` or instance-method declaration form. It does not add JDK-module
-discovery; `java.io.IO` remains unavailable unless provided through a supported metadata root or a
-future JDK binding provider.
+The curated bundled facade uses `external class` declarations and ordinary Java member invocation.
+It is limited to two JDK owners and three members; it does not add JDK-module discovery. Other types,
+including `java.io.IO`, remain unavailable unless provided through a supported metadata root.
 
 ## Roadmap
 
 1. **Project source sets and package-path output: implemented.** `--root`/`--entry`, multi-unit
    resolution, package paths, deterministic function holders, and dependency-ordered project value
-   initialization are available. Compiled-library value exports remain deferred.
+   initialization are available. Public namespace values are included in compiled-library metadata;
+   top-level value exports remain deferred.
 2. **Zeron library artifacts: implemented.** Versioned API-index production/loading, class-directory
    libraries, deterministic JAR packaging/loading, and compiled standard-library mode work. Both
    index-schema and standard-library API compatibility are checked.
-3. **Java class-directory interop: initial slice implemented.** Public constructors/methods, mapped
-   types, overload selection, mutable receivers, expanded varargs, and host exception propagation
-   work. Ordinary arrays, fields, inheritance, callbacks, JDK module discovery, and JARs remain out
-   of scope.
+3. **Java interop: initial slices implemented.** Class-directory interop supports public
+   constructors/methods, mapped types, overload selection, mutable receivers, expanded varargs, and
+   host exception propagation. The curated JDK facade adds only `System.out` and `PrintStream`
+   `print`/`println`. Arbitrary fields, inheritance, callbacks, JDK module discovery, and Java JARs
+   remain out of scope.
 4. **Expand distribution and host integration deliberately.** Define external declarations and JDK
    access requirements before adding module discovery. Add each Java feature as a separately tested
    mapping rather than broadening reflection implicitly. Intrinsic architecture is tracked in doc 12.

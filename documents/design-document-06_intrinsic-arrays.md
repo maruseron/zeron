@@ -3,20 +3,24 @@
 ## Status
 
 The reference-view and fixed-size array slice is implemented. It uses a dedicated invariant
-`Array<T>` descriptor, preserves `&T` in resolved types, and supports non-empty array literals,
-indexed reads and writes, and `.length` through the compiler backend. Array operations carry resolved
-intrinsic IDs and signatures. The shared registry and function-binding model is specified in
+`Array<T>` descriptor, preserves `&T` in resolved types, and supports array literals (including empty
+literals when an expected array type is available), indexed reads and writes, and `.length` through
+the compiler backend. Array operations carry resolved intrinsic IDs and signatures. The shared
+registry and function-binding model is specified in
 [design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md).
 
-The construction syntax is a non-empty literal, `[value, ...]`. Every element is initialized before
-the literal produces a value; `null` combines with a single concrete element type to infer a nullable
-element type. A fresh literal produces `&Array<T>` so its slots may be updated; assigning it to
-`Array<T>` projects that view to read-only. `array[index]` reads a slot, `array[index] = value` writes
-through `&Array<T>`, and `array.length` returns the fixed length. Indexes are zero-based; compiled
+The construction syntax is a literal, `[value, ...]` or `[]`. Every non-empty literal element is
+initialized before the literal produces a value; an empty literal requires an expected `Array<T>`
+type because it has no element from which to infer `T`. `null` combines with a single concrete element
+type to infer a nullable element type. A fresh literal produces `&Array<T>` so its slots may be
+updated; assigning it to `Array<T>` projects that view to read-only. `array[index]` reads a slot,
+`array[index] = value` writes through `&Array<T>`, and `array.length` returns the fixed length.
+Indexes are zero-based; compiled
 programs use `Objects.checkIndex` and throw `IndexOutOfBoundsException` for an invalid index.
-Each literal creates a distinct backing array. Empty literals and allocation by length are not
-available as general source-level operations. The bundled list implementation uses a registered
-fill-initialized array operation internally for its private backing storage.
+Each literal creates a distinct backing array. The standard library exposes
+`generateArray(length, initializer)`, which initializes each slot before returning. The bundled
+list implementation may use raw allocation internally for private capacity, but never exposes
+unused slots as `T` values.
 
 ## Purpose
 
@@ -115,15 +119,18 @@ The implemented first slice settles the basic collection contract as follows:
 - `.length` returns the number of slots.
 - Indexes are zero-based; invalid indexes throw `IndexOutOfBoundsException` in compiled programs.
 - Reads work through `Array<T>`; writes require `&Array<T>`.
-- Non-empty literals initialize every slot before exposing the array. Allocation by length and
-  uninitialized slots are unavailable.
-- Each literal allocates a distinct array. Structural equality, slicing, multidimensional syntax,
-  and integration with the user-defined iterator protocol remain deferred. `for` loops over arrays
-  are implemented with dedicated index-based lowering and do not require the intrinsic registry or
-  an iterator protocol.
+- Literals initialize every slot before exposing the array. `generateArray(length, initializer)`
+  invokes its initializer exactly once per index in ascending order before returning the mutable
+  array; a zero-length array invokes it zero times. Negative lengths fail during JVM array allocation
+  with `NegativeArraySizeException`. Internal capacity allocation may leave unused slots null only
+  while those slots remain inaccessible as `T` values.
+- Each literal allocates a distinct array. Structural equality and slicing remain deferred.
+  `for` loops over arrays retain dedicated index-based lowering; `Sequence.fromArray` and
+  `ArrayIterator` adapt arrays to the ordinary `Iterable<T>` protocol without making JVM arrays
+  themselves implement a Zeron interface.
 
-Empty literals and contextual element typing remain open. Allocation by length alone must not
-expose JVM zero-initialization as if it were a language guarantee.
+Uncontextual empty literals remain invalid. Public length-based allocation initializes every element
+before returning; it never exposes JVM zero-initialization as an initialized `Array<T>` value.
 
 ## Compiler Intrinsic Integration
 
@@ -148,17 +155,19 @@ if the JVM array representation has its own runtime store checks.
 
 ## Implementation Roadmap
 
-1. **Freeze the implemented contract.** Non-empty literals, fixed length, `.length`, zero-based
-  indexing, checked bounds, initialized slots, fresh-array identity, and specialized `for` iteration
-  are the current choices. Empty literals, allocation by length, resizing, slicing, structural
-  equality, and custom iterator integration remain deferred.
+1. **Freeze the implemented contract.** Contextually typed empty and non-empty literals, fixed length,
+  `.length`, zero-based indexing, checked bounds, initialized slots, fresh-array identity, and
+  specialized `for` iteration are the current choices. Public initialized allocation is provided by
+  `generateArray`; raw allocation remains internal. Resizing, slicing, and structural equality remain
+  deferred.
 2. **Represent `Array<T>`.** Implemented with a dedicated element-aware descriptor, invariant
   equality, and composition with nullability, reference views, and function types.
 3. **Represent reference capability.** Implemented as `&T`, including function types, with
   mutable-to-read-only projection and no implicit reverse conversion. `let mut` remains only a
   binding-reassignment permission.
-4. **Add syntax and typed AST operations.** Implemented for non-empty literals, indexed reads,
-  indexed assignment, and `.length`, represented through the general property expression.
+4. **Add syntax and typed AST operations.** Implemented for non-empty and contextually typed empty
+  literals, indexed reads, indexed assignment, and `.length`, represented through the general
+  property expression.
 5. **Add resolver checks and intrinsic identities: implemented baseline.** Element and index checks,
   mutable-write enforcement, stable IDs, generic signature substitution, and resolved operation
   annotations are implemented. User-declared intrinsic signatures remain deferred.
@@ -168,8 +177,8 @@ if the JVM array representation has its own runtime store checks.
 7. **Test the contract end to end.** Tests cover projection, invariance, nullable slots, primitive
   boxing/unboxing, aliasing, bounds failures, and generated-code execution. Broader interoperability,
   all reference/function element combinations, and descriptor inspection remain follow-up coverage.
-8. **Extend array operations only with a defined contract.** For example, allocation by length needs
-  explicit initialization and nullability rules before it can be added; registry-wide extension
+8. **Extend array operations only with a defined contract.** The source-level generator uses an
+  initializer callback over the existing allocation and write intrinsics; registry-wide extension
   policy belongs in doc 12.
 
 ## Acceptance Criteria
@@ -188,9 +197,8 @@ if the JVM array representation has its own runtime store checks.
 
 - Should `Array<T>` interoperate directly with Java arrays, or should an intrinsic runtime wrapper
   mediate Java's covariant array behavior?
-- Should support be extended beyond non-empty literals to fixed-size allocation with an initializer?
-- Should arrays later conform to the standard `Iterable<T>` contract, or continue to use only their
-  dedicated index-based loop lowering?
+- Should arrays directly conform to the standard `Iterable<T>` contract, or continue to use dedicated
+  index-based `for` lowering plus an explicit `Sequence`/`ArrayIterator` adapter?
 - If first-class element-slot references are eventually added, what lifetime and escape rules govern
   them without exclusive borrowing?
 - Which future array operations justify new compiler intrinsics, and what initialization contract

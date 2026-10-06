@@ -2,6 +2,7 @@ package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Expr;
+import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.Diagnostic;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
@@ -25,8 +26,9 @@ final class InitializationPlanner {
         final var stableKeys = new IdentityHashMap<Stmt.Var, String>();
         final var initializerNames = new IdentityHashMap<Stmt.Var, String>();
         for (final var unit : units) {
-            for (var index = 0; index < unit.declarations().size(); index++) {
-                final var declaration = unit.declarations().get(index);
+            final var members = NamespaceMembers.flatten(unit.declarations());
+            for (var index = 0; index < members.size(); index++) {
+                final var declaration = members.get(index).declaration();
                 if (declaration instanceof Stmt.Var variable) {
                     stableKeys.put(variable, unit.packageName() + "\u0000"
                             + sourceRootOrder(unit.sourcePath()) + "\u0000"
@@ -42,9 +44,13 @@ final class InitializationPlanner {
         valueSet.addAll(values);
         final var functions = new LinkedHashMap<String, Stmt.Function>();
         for (final var unit : units) {
-            for (final var declaration : unit.declarations()) {
-                if (declaration instanceof Stmt.Function function) {
-                    functions.put(qualifiedName(unit.packageName(), function.name().lexeme()), function);
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (member.declaration() instanceof Stmt.Function function) {
+                    final var functionName = member.namespaceName() == null
+                            ? qualifiedName(unit.packageName(), function.name().lexeme())
+                            : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
+                                    function.name().lexeme());
+                    functions.put(functionName, function);
                 }
             }
         }
@@ -71,8 +77,10 @@ final class InitializationPlanner {
     private static IdentityHashMap<Stmt.Var, String> sourcePathByValue(final List<CompilationUnit> units) {
         final var sourcePaths = new IdentityHashMap<Stmt.Var, String>();
         for (final var unit : units) {
-            for (final var declaration : unit.declarations()) {
-                if (declaration instanceof Stmt.Var variable) sourcePaths.put(variable, unit.sourcePath());
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (member.declaration() instanceof Stmt.Var variable) {
+                    sourcePaths.put(variable, unit.sourcePath());
+                }
             }
         }
         return sourcePaths;
@@ -143,6 +151,11 @@ final class InitializationPlanner {
                 && projectValues.contains(variable.resolvedValueDeclaration())) {
             dependencies.add(variable.resolvedValueDeclaration());
         }
+        if (expression instanceof Expr.Property property
+                && property.namespaceValueDeclaration() != null
+                && projectValues.contains(property.namespaceValueDeclaration())) {
+            dependencies.add(property.namespaceValueDeclaration());
+        }
         if (expression instanceof Expr.Call call && call.resolvedFunctionName() != null
                 && visitedFunctions.add(call.resolvedFunctionName())) {
             final var function = functions.get(call.resolvedFunctionName());
@@ -151,6 +164,9 @@ final class InitializationPlanner {
                     collectDependencies(statement, dependencies, functions, visitedFunctions, projectValues);
                 }
             }
+        }
+        if (expression instanceof Expr.MemberCall call && call.namespaceCall() != null) {
+            collectDependencies(call.namespaceCall(), dependencies, functions, visitedFunctions, projectValues);
         }
         for (final var field : expression.getClass().getFields()) {
             try {

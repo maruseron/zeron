@@ -202,6 +202,121 @@ public final class GenericFunctionTest {
     }
 
     @Test
+    public void resolvesMultipleContractBoundsOnFunctionsAndMethods() throws Exception {
+        final var className = "MultipleContractBounds" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var itemFile = Path.of("dist", "MultiBoundItem.class");
+        final var formatterFile = Path.of("dist", "FormatterImpl.class");
+        final var formatterContractFile = Path.of("dist", "Formatter.class");
+        final var source = parse("""
+                public contract Named {
+                    name(): String;
+                }
+                public contract Encodable {
+                    encode(): String;
+                }
+                public contract Formatter {
+                    format<T: Named + Encodable>(value: T): String;
+                }
+                public class MultiBoundItem is Named, Encodable {
+                    label: String;
+                    public constructor new;
+                    public name(): String = this.label;
+                    public encode(): String = "[" + this.label + "]";
+                }
+                public class FormatterImpl is Formatter {
+                    public constructor new;
+                    public format<T: Named + Encodable>(value: T): String =
+                        value.name() + value.encode();
+                }
+                fn combine<T: Named + Encodable>(value: T): String =
+                    value.name() + value.encode();
+                fn inferredFunctionCall(): String = combine(MultiBoundItem.new("A"));
+                fn explicitFunctionCall(): String = combine<MultiBoundItem>(MultiBoundItem.new("B"));
+                fn specializedFunctionReference(): String {
+                    let operation: (MultiBoundItem) -> String = combine;
+                    return operation(MultiBoundItem.new("E"));
+                }
+                fn genericMethodCall(): String =
+                    FormatterImpl.new().format(MultiBoundItem.new("C"));
+                fn contractMethodCall(): String {
+                    let formatter: Formatter = FormatterImpl.new();
+                    return formatter.format(MultiBoundItem.new("D"));
+                }
+                """);
+        final var compiler = new CompilationService(source, className);
+        compiler.resolve();
+
+        try {
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals("A[A]", generated.getMethod("inferredFunctionCall").invoke(null));
+                assertEquals("B[B]", generated.getMethod("explicitFunctionCall").invoke(null));
+                assertEquals("E[E]", generated.getMethod("specializedFunctionReference").invoke(null));
+                assertEquals("C[C]", generated.getMethod("genericMethodCall").invoke(null));
+                assertEquals("D[D]", generated.getMethod("contractMethodCall").invoke(null));
+
+                final var functionBounds = generated.getMethod("combine", Object.class)
+                        .getTypeParameters()[0].getBounds();
+                assertEquals(List.of("Object", "Named", "Encodable"),
+                        java.util.Arrays.stream(functionBounds)
+                                .map(type -> ((Class<?>) type).getSimpleName()).toList());
+                final var methodBounds = loader.loadClass("FormatterImpl")
+                        .getMethod("format", Object.class).getTypeParameters()[0].getBounds();
+                assertEquals(List.of("Object", "Named", "Encodable"),
+                        java.util.Arrays.stream(methodBounds)
+                                .map(type -> ((Class<?>) type).getSimpleName()).toList());
+                final var contractBounds = loader.loadClass("Formatter")
+                        .getMethod("format", Object.class).getTypeParameters()[0].getBounds();
+                assertEquals(List.of("Object", "Named", "Encodable"),
+                        java.util.Arrays.stream(contractBounds)
+                                .map(type -> ((Class<?>) type).getSimpleName()).toList());
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(itemFile);
+            Files.deleteIfExists(formatterFile);
+            Files.deleteIfExists(formatterContractFile);
+            Files.deleteIfExists(Path.of("dist", "Named.class"));
+            Files.deleteIfExists(Path.of("dist", "Encodable.class"));
+        }
+    }
+
+    @Test
+    public void rejectsInvalidMultipleContractBoundsAndBoundedMethodCalls() {
+        for (final var source : List.of(
+                "contract Named { name(): String; } contract Encodable { encode(): String; } "
+                        + "class NameOnly is Named { value: String; public constructor new; "
+                        + "public name(): String = this.value; } "
+                        + "fn display<T: Named + Encodable>(value: T): String = value.name(); "
+                        + "fn inferredInvalid(): String = display(NameOnly.new(\"x\")); "
+                        + "fn explicitInvalid(): String = display<NameOnly>(NameOnly.new(\"x\"));",
+                "contract Named { name(): String; } "
+                        + "fn invalid<T: Named + String>(value: T): String = value.name();",
+                "contract Named { name(): String; } contract Encodable { encode(): String; } "
+                        + "contract Formatter { format<T: Named + Encodable>(value: T): String; } "
+                        + "class Invalid is Formatter { public constructor new; "
+                        + "public format<T: Named>(value: T): String = value.name(); }")) {
+            assertThrows(source, ResolutionError.class,
+                    () -> new ResolutionService().resolve(parse(source)));
+        }
+    }
+
+    @Test
+    public void rejectsBoundsOnClassAndContractDeclarationTypeParameters() {
+        for (final var source : List.of(
+                "contract Named { name(): String; } class Box<T: Named> {}",
+                "contract Named { name(): String; } contract Box<T: Named> {}")) {
+            final var result = Parser.of(Scanner.from(source).scanTokens())
+                    .parseCompilationUnitWithDiagnostics("bounds.zn");
+            assertTrue(result.diagnostics().stream()
+                    .anyMatch(diagnostic -> diagnostic.code().toString().equals("ZR1105")));
+        }
+    }
+
+    @Test
     public void specializesGenericFunctionValuesExplicitlyAndFromExpectedTypes() throws Exception {
         final var className = "GenericFunctionValues" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");

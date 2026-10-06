@@ -22,9 +22,10 @@ An intrinsic is not a Java class lookup mechanism and does not imply JDK module 
   by qualified source name. The resolver checks the declaration signature, and the compiler emits a
   Zeron bridge for the binding.
 - Array literal, fill, length, read, and write operations are intrinsics. `zeron.io.print` and
-  `zeron.io.println` are external function declarations backed by typed JVM call plans.
-- Intrinsic IDs and bindings are internal. There is no source-level `intrinsic` keyword, external
-  class or instance-method declaration form, or expected-class declaration.
+  `zeron.io.println` are ordinary Zeron functions implemented through the curated Java class facade.
+- Intrinsic IDs and function bindings are internal. There is no source-level `intrinsic` keyword or
+  expected-class declaration. A narrowly curated external-class form is implemented for the
+  `System.out` printing facade only.
 
 ## Binding Model
 
@@ -53,18 +54,31 @@ signature but no body; its implementation is selected by `FunctionBindingRegistr
 verifies that the declaration signature matches the registered binding. Calls still use ordinary
 function-call resolution and lowering; compilation emits a bridge for the external target.
 
-The bundled output functions are the initial example:
+The bundled output functions now compose ordinary member calls through the external-class facade:
 
 ```zeron
 package zeron.io;
 
-public external fn print(value: Any?): Unit;
-public external fn println(value: Any?): Unit;
+public fn print(value: Any?): Unit { ... }
+public fn println(value: Any?): Unit { ... }
 ```
 
-The standard binding registry maps these names to typed call plans that read `System.out` and invoke
-`PrintStream.print(Object)` or `PrintStream.println(Object)`. These target plans are compiler data,
-not source syntax. Consumers import and call the functions normally.
+The facade declarations are:
+
+```zeron
+public external class System = "java.lang.System" {
+    public static property out: &PrintStream?;
+}
+
+public external class PrintStream = "java.io.PrintStream" {
+    public mut print(value: Any?): Unit;
+    public mut println(value: Any?): Unit;
+}
+```
+
+Only those exact owners and members are available through the built-in JDK provider. `System.out`
+remains nullable and callers use flow refinement or safe navigation. No JDK package scanning or
+general module discovery is enabled.
 
 ## Current Registry
 
@@ -82,12 +96,9 @@ The `...` in the array-literal signature describes the registry's repeated-param
 callable source syntax. `Array<T>` remains a built-in invariant type constructor. It is not declared
 by this registry.
 
-External function bindings are separate from intrinsic IDs and are keyed by qualified source name:
-
-| Source binding | Signature | Typed JVM target |
-| --- | --- | --- |
-| `zeron.io.print` | `(Any?) -> Unit` | `System.out` then `PrintStream.print(Object)` |
-| `zeron.io.println` | `(Any?) -> Unit` | `System.out` then `PrintStream.println(Object)` |
+External function bindings are separate from intrinsic IDs and are keyed by qualified source name.
+The standard registry currently contains no output bindings; `zeron.io` calls compile from the
+bundled Zeron function bodies and curated external-class declarations.
 
 ## External and Expected Declarations
 
@@ -99,10 +110,10 @@ An intrinsic operation and an external Java function binding are different mecha
   descriptor for ordinary invocation; details are in
   [design-document-11_compilation-libraries-and-host-integration.md](design-document-11_compilation-libraries-and-host-integration.md).
 - A signature-only top-level external function binds through `FunctionBindingRegistry`. A direct
-  static-method target is verified against class-directory metadata; a curated typed call plan can
-  combine a static field receiver with an instance method without source-level target syntax.
-  External classes and user-declared instance methods remain future work; their relation to ordinary
-  contracts, class identity, imports/visibility, Java descriptors, and intrinsic IDs is undecided.
+  static-method target is verified against class-directory metadata.
+- The curated external-class syntax exposes only exact Java member declarations validated against
+  the two supported JDK facades. It does not provide general JDK class discovery or let source
+  declarations broaden the approved member set.
 
 Do not use intrinsic IDs as a substitute for general Java symbol discovery. Conversely, do not make
 all compiler-provided behavior depend on a class-file owner. A deliberately curated facade such as
@@ -116,14 +127,13 @@ all compiler-provided behavior depend on a class-file owner. A deliberately cura
   registry signatures and lower through typed JVM call plans and generated bridges.
 3. **Keep feature-specific semantics local.** Array typing stays in doc 06; library artifacts and
    Java method discovery stay in doc 11. This document owns only the shared binding model.
-4. **External static functions: initial slice implemented.** Signature-only declarations bind to
-  public static methods found through configured class-directory roots, validate mapped signatures,
-  and lower through generated Zeron bridges. External classes, instance methods, JDK module lookup,
-  and Java generic signatures remain deferred.
-5. **Design broader external declarations only for a concrete need.** Specify type identity,
-   visibility/imports, descriptor ownership, initialization, and interaction with contracts before
-   adding source syntax. Decide whether such a declaration binds a JVM symbol, an intrinsic ID, or
-   either through an explicit backend binding.
+4. **Curated external class facade: initial slice implemented.** `java.lang.System.out` and
+   `java.io.PrintStream.print(Object)` / `println(Object)` validate against the JDK runtime metadata
+   and lower as direct field/method instructions. General external class discovery, arbitrary fields,
+   inheritance, JDK module lookup, and Java generics remain deferred.
+5. **Broaden external declarations only for a concrete need.** Specify each additional type identity,
+   visibility/import behavior, descriptor ownership, initialization, and interaction with contracts
+   before expanding the supported facade set.
 
 ## Acceptance Boundaries
 

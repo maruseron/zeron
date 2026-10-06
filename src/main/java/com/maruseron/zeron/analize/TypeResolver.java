@@ -17,19 +17,26 @@ final class TypeResolver {
     }
 
     static void validateTypeParameterBound(final ResolutionContext context, final TypeParameterDescriptor parameter, final Token where) {
-        if (parameter.bound() == null) return;
-        if (!(parameter.bound() instanceof NominalDescriptor || parameter.bound() instanceof GenericDescriptor)) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                    where, "A generic function bound must be a contract type."));
+        for (final var bound : parameter.bounds()) {
+            if (!(bound instanceof NominalDescriptor || bound instanceof GenericDescriptor)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        where, "A generic function or method bound must be a contract type."));
+            }
+            final var boundName = className(context, bound);
+            final var contract = context.contracts.get(boundName);
+            if (contract == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                        "Type parameter bound '" + boundName + "' is not a contract."));
+            }
+            ensureTypeAccessible(context, boundName, where, contract.isPublic());
+            validateType(context, bound, where);
         }
-        final var boundName = className(context, parameter.bound());
-        final var contract = context.contracts.get(boundName);
-        if (contract == null) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
-                    "Type parameter bound '" + boundName + "' is not a contract."));
-        }
-        ensureTypeAccessible(context, boundName, where, contract.isPublic());
-        validateType(context, parameter.bound(), where);
+    }
+
+    static void validateTypeParameterBounds(final ResolutionContext context,
+                                            final FunctionDescriptor function,
+                                            final Token where) {
+        function.typeParameters().forEach(parameter -> validateTypeParameterBound(context, parameter, where));
     }
 
     static void validateType(final ResolutionContext context, final TypeDescriptor type, final Token where) {

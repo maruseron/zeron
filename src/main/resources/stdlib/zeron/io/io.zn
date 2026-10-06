@@ -1,5 +1,11 @@
 package zeron.io;
 
-public external fn print(value: Any?): Unit;
+import java.lang.System;
 
-public external fn println(value: Any?): Unit;
+public fn print(value: Any?): Unit {
+    System.out?.print(value);
+}
+
+public fn println(value: Any?): Unit {
+    System.out?.println(value);
+}

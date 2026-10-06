@@ -1,5 +1,7 @@
 package zeron.lang;
 
-public fn someOf<T>(value: T): Option<T> = Some<T>.from(value);
+namespace Option {
+    public fn some<T>(value: T): Option<T> = Some<T>.from(value);
 
-public fn noneOf<T>(): Option<T> = None<T>.none();
+    public fn none<T>(): Option<T> = None<T>.none();
+}

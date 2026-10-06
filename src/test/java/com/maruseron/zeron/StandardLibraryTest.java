@@ -47,25 +47,25 @@ public final class StandardLibraryTest {
                     return Some<Int>.from(42);
                 }
                 fn someResult(): Int = match (next()) {
-                    case Some<Int> as some -> some.value();
+                    case Some<Int> as some -> some.value;
                     case None<Int> -> -1;
                 };
                 fn noneResult(): Int {
                     let value: Option<Int> = None<Int>.none();
                     return match (value) {
-                        case Some<Int> as some -> some.value();
+                        case Some<Int> as some -> some.value;
                         case None<Int> -> -1;
                     };
                 }
                 fn wildcardResult(): Int {
                     let value: Option<Int> = None<Int>.none();
                     return match (value) {
-                        case Some<Int> as some -> some.value();
+                        case Some<Int> as some -> some.value;
                         case _ -> 7;
                     };
                 }
                 fn acceptsExternalNull(value: Option<Int>): Int = match (value) {
-                    case Some<Int> as some -> some.value();
+                    case Some<Int> as some -> some.value;
                     case _ -> 7;
                 };
                 fn callCount(): Int = calls;
@@ -144,6 +144,21 @@ public final class StandardLibraryTest {
     @Test
     public void bundledSourcesFollowTheirPackageDirectoryStructure() throws Exception {
         final var sourceRoot = Path.of("src", "main", "resources", "stdlib");
+        final var expectedSources = new ArrayList<String>();
+        try (final var sources = Files.walk(sourceRoot)) {
+            sources.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".zn"))
+                    .map(sourceRoot::relativize)
+                    .map(path -> "/stdlib/" + path.toString().replace('\\', '/'))
+                    .sorted()
+                    .forEach(expectedSources::add);
+        }
+        assertEquals(expectedSources, StandardLibrary.BUNDLED_SOURCE_PATHS);
+        try (final var index = StandardLibrary.class.getResourceAsStream("/stdlib/sources.index")) {
+            assertTrue(index != null);
+            assertEquals(expectedSources,
+                    new String(index.readAllBytes(), StandardCharsets.UTF_8).lines().toList());
+        }
         for (final var resourcePath : StandardLibrary.BUNDLED_SOURCE_PATHS) {
             final var sourcePath = sourceRoot.resolve(resourcePath.substring("/stdlib/".length()));
             final var relativeDirectory = sourceRoot.relativize(sourcePath).getParent()
@@ -217,7 +232,7 @@ public final class StandardLibraryTest {
     }
 
     @Test
-    public void bundledPrintFunctionsUseRegisteredJvmBindings() throws Exception {
+    public void bundledPrintFunctionsUseExternalClassFacades() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var packageName = "ioClient" + suffix;
         final var classSimpleName = "PrintFunctions" + suffix;
@@ -227,11 +242,13 @@ public final class StandardLibraryTest {
                 package %s;
                 import zeron.io.print;
                 import zeron.io.println;
+                import java.lang.System;
                 fn emit(): Unit {
                     print("a");
                     print(42);
                     println("b");
                     println(null);
+                    System.out?.println("direct");
                 }
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(
@@ -251,7 +268,8 @@ public final class StandardLibraryTest {
                     System.setOut(originalOutput);
                 }
             }
-            assertEquals("a42b" + System.lineSeparator() + "null" + System.lineSeparator(),
+            assertEquals("a42b" + System.lineSeparator() + "null" + System.lineSeparator()
+                            + "direct" + System.lineSeparator(),
                     output.toString(StandardCharsets.UTF_8));
         } finally {
             deleteTree(outputDirectory);
@@ -332,16 +350,15 @@ public final class StandardLibraryTest {
                 package %s;
                 import zeron.lang.Option;
                 import zeron.lang.Some;
-                import zeron.lang.None;
 
-                fn someValue(): Int = Some<Int>.from(41).fold(value -> value + 1, () -> 0);
-                fn noneValue(): Int = None<Int>.none().fold(value -> value, () -> 42);
+                fn someValue(): Int = Option.some(41).fold(value -> value + 1, () -> 0);
+                fn noneValue(): Int = Option.none<Int>().fold(value -> value, () -> 42);
                 fn someNullIsPresent(): Boolean {
                     let option: Option<String?> = Some<String?>.from(null);
                     return option.isSome()
                         and option.fold(value -> value == null, () -> false);
                 }
-                fn noneIsAbsent(): Boolean = None<String?>.none().isSome() == false;
+                fn noneIsAbsent(): Boolean = Option.none<String?>().isSome() == false;
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
@@ -357,6 +374,74 @@ public final class StandardLibraryTest {
                 assertEquals(42, test.getMethod("noneValue").invoke(null));
                 assertEquals(true, test.getMethod("someNullIsPresent").invoke(null));
                 assertEquals(true, test.getMethod("noneIsAbsent").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void resultPreservesSuccessAndErrorAcrossCombinators() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "resultClient" + suffix;
+        final var className = packageName + ".ResultTest" + suffix;
+        final var source = parse("ResultTest.zn", """
+                package %s;
+                import zeron.lang.Result;
+                import zeron.lang.Ok;
+                import zeron.lang.Err;
+
+                fn increment(value: Int): Result<Int, String> =
+                    Ok<Int, String>.from(value + 1);
+                fn success(): Result<Int, String> = Ok<Int, String>.from(41)
+                    .map(value -> value + 1)
+                    .andThen(value -> increment(value + 1));
+                fn failure(): Result<Int, String> = Err<Int, String>.from("bad")
+                    .map(value -> value + 1);
+                fn mappedFailure(): Result<Int, Int> = Err<Int, String>.from("bad")
+                    .mapError(error -> 3);
+                fn successAfterErrorMap(): Result<Int, Int> =
+                    Ok<Int, String>.from(42).mapError(error -> 3);
+                fn foldedSuccess(): Int = success().fold(value -> value, error -> -1);
+                fn foldedError(): Int = failure().fold(value -> value, error -> -1);
+                fn matchedSuccess(): Int = match (success()) {
+                    case Ok<Int, String> as ok -> ok.value;
+                    case Err<Int, String> -> -1;
+                };
+                fn matchedError(): Boolean = match (failure()) {
+                    case Ok<Int, String> -> false;
+                    case Err<Int, String> as err -> err.error == "bad";
+                };
+                fn successIsOk(): Boolean = success().isOk() and not success().isErr();
+                fn errorIsRetained(): Boolean = failure().isErr()
+                    and failure().fold(value -> false, error -> error == "bad");
+                fn errorShortCircuitsAndThen(): Result<Int, String> = failure()
+                    .andThen(value -> increment(value + 1));
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var test = loader.loadClass(className);
+                assertEquals(44, test.getMethod("foldedSuccess").invoke(null));
+                assertEquals(-1, test.getMethod("foldedError").invoke(null));
+                assertEquals(44, test.getMethod("matchedSuccess").invoke(null));
+                assertEquals(true, test.getMethod("matchedError").invoke(null));
+                assertEquals(true, test.getMethod("successIsOk").invoke(null));
+                assertEquals(true, test.getMethod("errorIsRetained").invoke(null));
+                final var mappedFailure = test.getMethod("mappedFailure").invoke(null);
+                assertEquals(3, mappedFailure.getClass().getMethod("$zeron$get$error").invoke(mappedFailure));
+                final var successAfterErrorMap = test.getMethod("successAfterErrorMap").invoke(null);
+                assertEquals(42, successAfterErrorMap.getClass().getMethod("$zeron$get$value")
+                        .invoke(successAfterErrorMap));
+                final var errorShortCircuited = test.getMethod("errorShortCircuitsAndThen").invoke(null);
+                assertEquals("bad", errorShortCircuited.getClass().getMethod("$zeron$get$error")
+                        .invoke(errorShortCircuited));
             }
         } finally {
             deleteTree(Path.of("dist"));
@@ -887,6 +972,7 @@ public final class StandardLibraryTest {
         final var source = parse("SequenceTest.zn", """
                 package %s;
                 import zeron.collections.Sequence;
+                import zeron.collections.generateArray;
                 class Total {
                     value: Int;
                     public constructor new;
@@ -894,6 +980,23 @@ public final class StandardLibraryTest {
                     public mut record(value: Int): Int {
                         this.value = this.value + 1;
                         return value;
+                    }
+                    public mut recordIndex(index: Int): Int {
+                        this.value = this.value * 10 + index;
+                        return this.value;
+                    }
+                    public read(): Int = this.value;
+                }
+                class Trace {
+                    value: Int;
+                    public constructor new;
+                    public mut map(value: Int): Int {
+                        this.value = this.value * 10 + 1;
+                        return value;
+                    }
+                    public mut keep(value: Int): Boolean {
+                        this.value = this.value * 10 + 2;
+                        return value >= 2;
                     }
                     public read(): Int = this.value;
                 }
@@ -932,6 +1035,55 @@ public final class StandardLibraryTest {
                     return values.count() == 0 and not values.any(value -> true)
                         and values.all(value -> false);
                 }
+                fn lazyCallbackOrder(): Int {
+                    let trace = Trace.new(0);
+                    let values = Sequence<Int>.fromArray([1, 2, 3])
+                        .map(value -> trace.map(value))
+                        .filter(value -> trace.keep(value))
+                        .take(1);
+                    let beforeConsumption = trace.read();
+                    let total = values.fold(0, (sum, value) -> sum + value);
+                    return beforeConsumption * 100000 + trace.read() * 10 + total;
+                }
+                fn zeroAndNegativeCounts(): Int {
+                    let values = Sequence<Int>.fromArray([1, 2, 3]);
+                    return values.take(0).count() * 1000
+                        + values.take(-1).count() * 100
+                        + values.drop(0).count() * 10
+                        + values.drop(-1).count();
+                }
+                fn repeatedSequenceTraversal(): Int {
+                    let values = Sequence<Int>.fromArray([2, 3]);
+                    return values.count() * 10 + values.count();
+                }
+                fn nullableSequenceElements(): Int {
+                    let values = Sequence<String?>.fromArray(["a", null, "b"]);
+                    return values.count();
+                }
+                fn generatedArray(): Int {
+                    let calls = Total.new(0);
+                    let values = generateArray<Int>(4, index -> calls.recordIndex(index));
+                    let mut total = 0;
+                    for (let value in values) total += value;
+                    return calls.read() * 1000 + total;
+                }
+                fn generatedEmptyArray(): Int {
+                    let calls = Total.new(0);
+                    let values = generateArray<Int>(0, index -> calls.record(index));
+                    return calls.read() + values.length;
+                }
+                fn contextuallyEmptyArray(): Int {
+                    let values: &Array<Int> = [];
+                    let throughParameter = arrayLength([]);
+                    return values.length + throughParameter + Sequence<Int>.fromArray([]).count();
+                }
+                fn arrayLength(values: Array<Int>): Int = values.length;
+                fn emptyArrayIteration(): Int {
+                    let values: &Array<Int> = [];
+                    let mut total = 0;
+                    for (let value in values) total += value;
+                    return total;
+                }
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(List.of(source), className, packageName);
 
@@ -949,6 +1101,14 @@ public final class StandardLibraryTest {
                 assertEquals(15, test.getMethod("forEachTotal").invoke(null));
                 assertEquals(41, test.getMethod("lazyEvaluation").invoke(null));
                 assertEquals(true, test.getMethod("emptySequencePredicates").invoke(null));
+                assertEquals(12122, test.getMethod("lazyCallbackOrder").invoke(null));
+                assertEquals(33, test.getMethod("zeroAndNegativeCounts").invoke(null));
+                assertEquals(22, test.getMethod("repeatedSequenceTraversal").invoke(null));
+                assertEquals(3, test.getMethod("nullableSequenceElements").invoke(null));
+                assertEquals(123136, test.getMethod("generatedArray").invoke(null));
+                assertEquals(0, test.getMethod("generatedEmptyArray").invoke(null));
+                assertEquals(0, test.getMethod("contextuallyEmptyArray").invoke(null));
+                assertEquals(0, test.getMethod("emptyArrayIteration").invoke(null));
             }
         } finally {
             deleteTree(Path.of("dist"));
@@ -976,7 +1136,7 @@ public final class StandardLibraryTest {
                     let readonly: List<Int> = values;
                     let mut total = 0;
                     for (let value in readonly) total += value;
-                    return total + replaced + removed + readonly.size();
+                    return total + replaced + removed + readonly.size;
                 }
                 fn empty(): Boolean = List<Int>.empty().isEmpty();
                 fn copied(): Int {
@@ -984,7 +1144,7 @@ public final class StandardLibraryTest {
                     values.add(10);
                     values.clear();
                     values.add(11);
-                    return values.at(0) + values.size();
+                    return values.at(0) + values.size;
                 }
                 fn nullableElements(): Boolean {
                     let mut values: &List<String?> = List<String?>.empty();
@@ -1059,9 +1219,9 @@ public final class StandardLibraryTest {
             libraryCompiler.compile();
 
             copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
-            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v5.bin"));
+            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
             Files.createDirectories(libraryIndex.getParent());
-            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v5.bin"), libraryIndex);
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v8.bin"), libraryIndex);
 
             deleteTree(Path.of("dist"));
             Files.writeString(clientSource, """
@@ -1116,7 +1276,7 @@ public final class StandardLibraryTest {
             assertEquals(0, Zeron.runCli(librarySource.toString(), "--jar-output", secondLibraryJar.toString()));
             assertArrayEquals(Files.readAllBytes(libraryJar), Files.readAllBytes(secondLibraryJar));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v5.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v8.bin") != null);
                 assertTrue(jar.stream().anyMatch(entry -> entry.getName().equals(
                         libraryPackage.replace('.', '/') + "/Answer.class")));
             }
@@ -1144,7 +1304,7 @@ public final class StandardLibraryTest {
         final var libraryJar = Path.of("target", "zeron-stdlib-" + suffix + ".jar");
         final var sourceFile = Path.of("target", "CompiledStdlibClient" + suffix + ".zn");
         final var entryName = sourceFile.getFileName().toString().replaceFirst("\\.zn$", "");
-        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v5.bin"));
+        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
         final var iterableClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterable.class"));
         final var iteratorClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterator.class"));
         final var arrayIteratorClass = libraryOutput.resolve(
@@ -1191,7 +1351,7 @@ public final class StandardLibraryTest {
             assertTrue(Files.exists(rangeClass));
             assertTrue(Files.exists(unitClass));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v5.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v8.bin") != null);
                 assertTrue(jar.getJarEntry("zeron/collections/Sequence.class") != null);
                 assertTrue(jar.getJarEntry("zeron/lang/Unit.class") != null);
             }
@@ -1263,7 +1423,7 @@ public final class StandardLibraryTest {
         final var sourceUnit = Parser.of(Scanner.from(Files.readString(sourcePath)).scanTokens())
                 .parseCompilationUnit(sourcePath.toString());
         final var compiler = CompilationService.forCompilationUnits(
-                List.of(sourceUnit, StandardLibrary.iterationUnit()), mainClass, "zeron.ranges");
+                List.of(sourceUnit), mainClass, "zeron.ranges");
 
         try {
             compiler.resolve();
@@ -1293,7 +1453,7 @@ public final class StandardLibraryTest {
         for (;;) {
             final var option = next.invoke(iterator);
             if (!(boolean) option.getClass().getMethod("isSome").invoke(option)) break;
-            values.add((Integer) option.getClass().getMethod("value").invoke(option));
+            values.add((Integer) option.getClass().getMethod("$zeron$get$value").invoke(option));
         }
         return values;
     }

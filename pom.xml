@@ -34,7 +34,50 @@
         </dependency>
     </dependencies>
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.build.directory}/generated-resources</directory>
+            </resource>
+        </resources>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>index-standard-library-sources</id>
+                        <phase>generate-resources</phase>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.directory}/generated-resources/stdlib"/>
+                                <pathconvert property="stdlib.sources"
+                                             pathsep="${line.separator}"
+                                             dirsep="/">
+                                    <path>
+                                        <sort>
+                                            <fileset dir="${project.basedir}/src/main/resources/stdlib">
+                                                <include name="**/*.zn"/>
+                                            </fileset>
+                                        </sort>
+                                    </path>
+                                    <mapper type="regexp"
+                                            from="^.*stdlib[/\\](.*)$"
+                                            to="/stdlib/\1"/>
+                                </pathconvert>
+                                <echo file="${project.build.directory}/generated-resources/stdlib/sources.index"
+                                      encoding="UTF-8">${stdlib.sources}</echo>
+                            </target>
+                        </configuration>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

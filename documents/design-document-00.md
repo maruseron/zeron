@@ -42,8 +42,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - `for` loops over arrays, inline integer ranges, and user-defined types conforming to the bundled
     `Iterable<T>` and `Iterator<T>` contracts. Arrays retain specialized lowering; ranges are
     ordinary `zeron.ranges.IntRange` values and use protocol dispatch.
-- Callable `zeron.io.print` and `zeron.io.println` standard-library functions, backed by typed
-    external function bindings. The former print statement syntax has been removed.
+- Callable `zeron.io.print` and `zeron.io.println` standard-library functions, implemented as
+    ordinary Zeron functions through the curated Java external-class facade. The former print
+    statement syntax has been removed.
 - `zeron.lang.Option<T>` as a sealed contract implemented by `Some<T>` and `None<T>`, with
     `Option.some(value)` and `Option.none::<T>()` factories and `fold` for consuming either case
     without exceptions. `Iterator<T>.next()` returns this type, using `None` for exhaustion and
@@ -98,15 +99,19 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     reference, such as `get(index: Int): T` delegating to `contents::get`. Define this as a distinct
     forwarding form, not as a function-reference value or a change to `=` expression bodies; syntax,
     generic substitution, overload resolution, and receiver mutability rules remain to be designed.
-- Default parameters are future work, separate from field initializers. The proposed first design
-    permits defaults only on a trailing sequence of parameters; omitted defaults are evaluated once
-    per call, in parameter order, and may refer only to earlier parameters. Resolve defaults in the
-    declaration's scope, and lower omitted suffixes through generated overloads that delegate to the
-    full-arity implementation. Interactions with methods, contracts, external functions, and
-    separately compiled libraries need further design.
-- Typed signature-only external functions are implemented for registered JVM targets; external
-    classes, instance-method declarations, and expected-class declarations remain future work. See
-    the [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
+- Default parameters are implemented separately from field initializers. They may appear only on a
+    trailing parameter suffix; positional calls supply a prefix, and each omitted default is evaluated
+    once per call, left to right, in declaration scope; explicit arguments (including `null`) remain
+    ordinary call-site arguments. Defaults may refer to earlier parameters, while function values
+    retain the full-arity type. Functions, class methods, contract methods, and
+    signature-only external functions use generated shorter-arity JVM wrappers. Contract defaults
+    belong to the contract and are available through contract- and implementing-class-typed calls;
+    implementations provide only the full-arity method. Compiled-library APIs record minimum arity.
+    Defaults on named/canonical constructors and curated external-class methods remain deferred.
+- Typed signature-only external functions are implemented for registered JVM targets. A narrowly
+    curated external-class facade supports `System.out` and `PrintStream.print`/`println`; general
+    external classes and member declarations, and expected-class declarations, remain future work.
+    See the [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
     Native algebraic data-type declarations, discriminated unions beyond sealed contracts, and
     structural or nominal tuples are also future work.
 - Immutable collection types, list comprehensions, and explicit resource management.
@@ -114,9 +119,15 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     reference identity (`===`) are implemented. Structural equality remains future work; existing
     `==`/`!=` behavior is unchanged. See the
     [small language features discussion](design-document-10_small-miscelaneous.md).
-- Variadic parameters: permit one trailing `T...` parameter, exposed as `Array<T>` in the function
-    body; calls pack zero or more trailing arguments. Spread calls, defaults, and overload-resolution
-    details remain to be designed.
+- One trailing `T...` parameter is supported on functions, class methods, contract methods, and
+    signature-only external functions. Its body type and full function-value parameter type are
+    `Array<T>`; direct calls pack the positional arguments after fixed parameters, while indirect
+    function-value calls take one array argument. Trailing defaults may precede the variadic
+    parameter and apply only to fixed parameters; positional arguments fill fixed parameters first,
+    then become variadic elements. Compiled-library metadata preserves the variadic marker. Spread
+    syntax, canonical `new` constructors, and external-class methods remain deferred. Named
+    constructors are static factories and accept the same variadic parameters as functions. The
+    bundled `zeron.collections.List<T>.of(elements: T...)` factory provides a standard example.
 - Trailing-lambda syntax: allow one block lambda after a call, as in `repeat(3) { index ->
     println(index) }`, with parentheses optional when the lambda is the only argument (`run {
     initialize() }`). Use unparenthesized comma-separated parameter names; a body without `->`
@@ -581,7 +592,8 @@ type. Range values can be stored and iterated later like any other iterable.
 #### Making an iterable
 
 `Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`,
-defined in `src/main/resources/stdlib/zeron/collections/iteration.zn`. The standard library also
+defined in `src/main/resources/stdlib/zeron/collections/iterator.zn` and
+`src/main/resources/stdlib/zeron/collections/iterable.zn`, respectively. The standard library also
 provides a lazy `Sequence<T>` API in `src/main/resources/stdlib/zeron/collections/sequence.zn` and
 an array-backed mutable `List<T>` in `src/main/resources/stdlib/zeron/collections/list.zn`. The
 `for` protocol recognizes only the fully-qualified `zeron.collections.Iterable<T>` contract; a
@@ -651,8 +663,8 @@ allocation still goes through canonical `new`. Methods and properties provide th
 Contracts can require method signatures and read-only or writable properties; the
 source design permits multiple declaration-site conformances, checked statically, and calls through
 contract-typed references use interface dispatch, including when a class conforms to multiple
-contracts. Separate `implement` declarations, default methods, contract inheritance, and class
-inheritance remain deferred.
+contracts. Default contract methods are implemented. Separate `implement` declarations,
+contract-to-contract inheritance, and class inheritance remain deferred.
 
 ```zeron
 class PersonList is Iterable<Person> { ... }

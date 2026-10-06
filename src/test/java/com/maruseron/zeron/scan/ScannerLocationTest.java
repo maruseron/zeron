@@ -31,6 +31,16 @@ public final class ScannerLocationTest {
     }
 
     @Test
+    public void distinguishesDotRangeAndEllipsisTokens() {
+        final var tokens = Scanner.from(". .. ...").scanTokens();
+
+        assertEquals(TokenType.DOT, tokens.get(0).type());
+        assertEquals(TokenType.DOT_DOT, tokens.get(1).type());
+        assertEquals(TokenType.ELLIPSIS, tokens.get(2).type());
+        assertEquals(TokenType.EOF, tokens.getLast().type());
+    }
+
+    @Test
     public void collectsCodedScannerDiagnosticsWithoutReportingEagerly() {
         final var previousOutput = System.out;
         final var output = new ByteArrayOutputStream();

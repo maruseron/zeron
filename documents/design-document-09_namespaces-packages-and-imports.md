@@ -35,6 +35,13 @@ package without imposing a source-directory convention.
 - Imports resolve public classes, contracts, functions, and immutable values. Package-private
     declarations remain available within their package.
 
+    Default parameters are properties of function and method declarations, not of their function types.
+    Calls may provide any positional prefix that reaches the declaration's minimum arity; omitted
+    suffixes are supplied by declaration-side wrappers. A contract's defaults are available through
+    contract-typed and implementing-class-typed calls without being repeated by the implementation.
+    Compiled-library consumers use the default-arity metadata and generated wrappers described in
+    [design-document-11_compilation-libraries-and-host-integration.md](design-document-11_compilation-libraries-and-host-integration.md).
+
 ## Influences
 
 The cited languages offer several useful patterns for source-level naming and visibility:
@@ -126,9 +133,11 @@ unsupported. Non-entry functions
 require explicit return types so their signatures are available before bodies are resolved.
 Every project top-level value requires an initializer. Project-local values are predeclared for
 cross-unit resolution; inferred values can depend on earlier inferred values and on explicit-type
-forward dependencies. Public immutable values may be imported explicitly or through star imports. Private values are
-available to units in the same package but cannot be imported from another package. Public mutable
-values remain unsupported.
+forward dependencies. Public immutable project values may be imported explicitly or through star
+imports. Compiled libraries also export ordinary public immutable top-level values and public
+namespace values; metadata preserves their declared types and generated storage/initialization
+owners. Private values are available to units in the same package but cannot be imported from another
+package. Public mutable values remain unsupported.
 
 Example producer:
 
@@ -180,8 +189,11 @@ Statically discoverable dependency cycles are compile-time errors. Generated val
 guard against a read before its value is initialized and throw `IllegalStateException` instead of
 exposing a JVM default field value. If an initializer throws, JVM class initialization fails with
 `ExceptionInInitializerError` preserving the original cause; later initializers and entry `main` do
-not run. This source-project initialization contract does not export values through compiled-library
-indexes.
+not run. A compiled-library value getter invokes the provider's generated initialization gateway on
+first access, triggering the provider's ordinary dependency-ordered initialization once. The
+consumer does not initialize a provider that it never reads or replay the provider's dependencies.
+The API index records the gateway owner; initializer bodies and private dependencies remain inside
+the provider artifact.
 
 ## Namespaces and Resolution
 
@@ -206,8 +218,9 @@ packages. Unmarked declarations are package-visible. The initial design has no t
 or `internal` modifier; package-private defaults avoid accidentally exporting a package's
 implementation. Existing default-package scripts remain mutually visible as before.
 
-Explicit imports target individual classes, contracts, and functions, with aliases. Star imports,
-re-exports, and value imports are distinct; only star imports are implemented. Built-in types remain
+Explicit imports target individual classes, contracts, functions, and immutable values, with aliases.
+Star imports, re-exports, and value imports are distinct; imports do not re-export declarations.
+Built-in types remain
 implicitly available, but there is no implicit wildcard import of a standard library or `java.lang`.
 The CLI compiles the bundled
 `zeron.collections` and `zeron.ranges` source units as ordinary units.

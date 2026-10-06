@@ -23,7 +23,7 @@ final class DeclarationResolver {
             }
             TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
             TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
-            if (method.isDefault()) {
+            if (method.isDefault() || !method.defaultValues().isEmpty()) {
                 resolveContractMethod(context, contract, method);
             }
         }
@@ -127,13 +127,22 @@ final class DeclarationResolver {
         define(context, thisToken);
         for (int i = 0; i < method.parameters().size(); i++) {
             final var parameter = method.parameters().get(i);
+            if (i < Stmt.fixedArity(method.parameters(), method.variadic())
+                    && !method.defaultValues().isEmpty() && i >= method.minimumArity()) {
+                final var defaultValue = method.defaultValues().get(i - method.minimumArity());
+                final var expected = method.typeDescriptor().parameters().get(i);
+                final var resolvedDefault = MemberInteropResolver.resolveArgument(context, defaultValue, expected);
+                ensureAssignable(context, expected, resolvedDefault, method.name());
+            }
             declare(context, SYNTHETIC_VAR, parameter, method.typeDescriptor().parameters().get(i),
                     BindingMutability.IMMUTABLE);
             define(context, parameter);
         }
         try {
-            resolveStmts(context, method.body());
-            ensureReturns(context, method.name(), method.typeDescriptor().returnType(), method.body());
+            if (method.isDefault()) {
+                resolveStmts(context, method.body());
+                ensureReturns(context, method.name(), method.typeDescriptor().returnType(), method.body());
+            }
         } finally {
             context.frame.expectedReturnTypes.pop();
             endScope(context);
@@ -306,6 +315,13 @@ final class DeclarationResolver {
         define(context, thisToken);
         for (int i = 0; i < method.parameters().size(); i++) {
             final var parameter = method.parameters().get(i);
+            if (i < Stmt.fixedArity(method.parameters(), method.variadic())
+                    && !method.defaultValues().isEmpty() && i >= method.minimumArity()) {
+                final var defaultValue = method.defaultValues().get(i - method.minimumArity());
+                final var expected = method.typeDescriptor().parameters().get(i);
+                final var resolvedDefault = MemberInteropResolver.resolveArgument(context, defaultValue, expected);
+                ensureAssignable(context, expected, resolvedDefault, method.name());
+            }
             declare(context, SYNTHETIC_VAR, parameter, method.typeDescriptor().parameters().get(i), BindingMutability.IMMUTABLE);
             define(context, parameter);
         }
@@ -382,7 +398,7 @@ final class DeclarationResolver {
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
                     required.typeDescriptor(), substitutions);
             final var defaults = implementation == null
-                    ? defaultMethodsFor(context, declaration, requiredType)
+                    ? defaultMethodsFor(context, declaration, requiredType, required.variadic())
                     : List.<Resolver.DefaultMethodSelection>of();
             if (defaults.size() > 1) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
@@ -397,7 +413,8 @@ final class DeclarationResolver {
             if (implementation == null && defaultMethod == null
                     || implementation != null && (!implementation.isPublic()
                     || implementation.isMutating() != required.isMutating()
-                    || !compatibleMethodSignatures(context, requiredType, implementation.typeDescriptor()))) {
+                    || !compatibleMethodSignatures(context, requiredType, required.variadic(),
+                            implementation.typeDescriptor(), implementation.variadic()))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         contractUse.name(),
                         "Class does not provide a compatible public contract method '"
@@ -428,7 +445,7 @@ final class DeclarationResolver {
         final var substitutions = contractSubstitutions(context, requiredUse);
         final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
                 required.typeDescriptor(), substitutions);
-        final var matches = defaultMethodsFor(context, declaration, requiredType);
+        final var matches = defaultMethodsFor(context, declaration, requiredType, required.variadic());
         return matches.size() == 1
                 && matches.getFirst().method().isMutating() == required.isMutating()
                 ? matches.getFirst()
@@ -436,7 +453,8 @@ final class DeclarationResolver {
     }
 
     private static List<Resolver.DefaultMethodSelection> defaultMethodsFor(final ResolutionContext context, final Stmt.ClassDecl declaration,
-                                                                   final FunctionDescriptor requiredType) {
+                                                                   final FunctionDescriptor requiredType,
+                                                                   final boolean requiredVariadic) {
         final var matches = new ArrayList<Resolver.DefaultMethodSelection>();
         for (final var contractUse : declaration.contractUses()) {
             final var candidateContract = context.contracts.get(contractUse.name().lexeme());
@@ -446,7 +464,8 @@ final class DeclarationResolver {
                         || !candidate.name().lexeme().equals(requiredType.name())) continue;
                 final var candidateType = (FunctionDescriptor) TypeSubstitution.substitute(
                         candidate.typeDescriptor(), substitutions);
-                if (compatibleMethodSignatures(context, requiredType, candidateType)) {
+                if (compatibleMethodSignatures(context, requiredType, requiredVariadic,
+                        candidateType, candidate.variadic())) {
                     matches.add(new Resolver.DefaultMethodSelection(candidateContract.name().lexeme(), candidate,
                             candidateType));
                 }
@@ -462,7 +481,10 @@ final class DeclarationResolver {
             final var contract = context.contracts.get(contractUse.name().lexeme());
             final var substitutions = contractSubstitutions(context, contractUse);
             for (final var method : contract.methods()) {
-                if (!method.isDefault() || !method.name().lexeme().equals(methodName)) continue;
+                if ((!method.isDefault()
+                        && method.minimumArity()
+                            == Stmt.fixedArity(method.parameters(), method.variadic()))
+                        || !method.name().lexeme().equals(methodName)) continue;
                 final var type = (FunctionDescriptor) TypeSubstitution.substitute(
                         method.typeDescriptor(), substitutions);
                 matches.add(new Resolver.DefaultMethodSelection(contract.name().lexeme(), method, type));
@@ -482,9 +504,13 @@ final class DeclarationResolver {
         return substitutions;
     }
 
-    private static boolean compatibleMethodSignatures(final ResolutionContext context, final FunctionDescriptor required,
-                                               final FunctionDescriptor implementation) {
-        if (required.typeParameters().size() != implementation.typeParameters().size()
+    private static boolean compatibleMethodSignatures(final ResolutionContext context,
+                                               final FunctionDescriptor required,
+                                               final boolean requiredVariadic,
+                                               final FunctionDescriptor implementation,
+                                               final boolean implementationVariadic) {
+        if (requiredVariadic != implementationVariadic
+                || required.typeParameters().size() != implementation.typeParameters().size()
                 || required.arity() != implementation.arity()) return false;
         final var methodSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < required.typeParameters().size(); i++) {

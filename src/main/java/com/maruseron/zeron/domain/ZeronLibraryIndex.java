@@ -27,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 8;
+    public static final int VERSION = 12;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -37,12 +37,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     public record ValueExport(String qualifiedName,
                               String jvmOwner,
+                              String initializationOwner,
                               String namespaceName,
                               TypeDescriptor type) implements ExportedDeclaration {
         public ValueExport {
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(jvmOwner);
-            Objects.requireNonNull(namespaceName);
+            Objects.requireNonNull(initializationOwner);
             Objects.requireNonNull(type);
         }
     }
@@ -61,7 +62,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var functionName = token(simpleName(function.qualifiedName()));
                 final var declaration = new Stmt.Function(functionName,
                     parameterNames(function.signature(), functionName.line()),
-                    function.signature(), List.of(), true);
+                    function.signature(), List.of(), true, List.of(), function.minimumArity(),
+                    function.variadic());
                 if (function.namespaceName() == null) {
                     statements.add(declaration);
                 } else {
@@ -70,9 +72,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             }
             case ValueExport value -> {
                 final var valueName = token(simpleName(value.qualifiedName()));
-                addNamespaceMember(statements, value.namespaceName(),
-                        new Stmt.Var(valueName, value.type(), null,
-                                BindingMutability.IMMUTABLE, true));
+                final var declaration = new Stmt.Var(valueName, value.type(), null,
+                        BindingMutability.IMMUTABLE, true);
+                if (value.namespaceName() == null) statements.add(declaration);
+                else addNamespaceMember(statements, value.namespaceName(), declaration);
             }
             case ClassExport classExport -> {
                 final var className = token(classExport.qualifiedName());
@@ -89,12 +92,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var namedConstructors = classExport.namedConstructors().stream()
                     .map(named -> new Stmt.NamedConstructor(token(named.name()),
                         parameterNames(named.signature(), className.line()), named.signature(), true,
-                        List.of()))
+                        List.of(), named.variadic()))
                     .toList();
                 final var methods = classExport.methods().stream()
                     .map(method -> new Stmt.Method(token(method.name()),
                         parameterNames(method.signature(), className.line()), method.signature(), true,
-                        method.mutating(), List.of()))
+                        method.mutating(), List.of(), List.of(), method.minimumArity(), method.variadic()))
                     .toList();
                 final var properties = classExport.properties().stream()
                     .map(property -> new Stmt.Property(token(property.name()), property.type(), null,
@@ -108,7 +111,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var methods = contract.methods().stream()
                     .map(method -> new Stmt.ContractMethod(token(method.name()),
                         parameterNames(method.signature(), contractName.line()), method.signature(),
-                        method.mutating(), method.defaultMethod(), List.of()))
+                        method.mutating(), method.defaultMethod(), List.of(), List.of(),
+                        method.minimumArity(), method.variadic()))
                     .toList();
                 final var properties = contract.properties().stream()
                     .map(property -> new Stmt.ContractProperty(token(property.name()),
@@ -135,11 +139,24 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     public record FunctionExport(String qualifiedName,
                                  String jvmOwner,
                                  String namespaceName,
-                                 FunctionDescriptor signature) implements ExportedDeclaration {
+                                 FunctionDescriptor signature,
+                                 int minimumArity,
+                                 boolean variadic) implements ExportedDeclaration {
         public FunctionExport {
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(jvmOwner);
             Objects.requireNonNull(signature);
+            validateMinimumArity(signature, minimumArity, variadic);
+        }
+
+        public FunctionExport(String qualifiedName, String jvmOwner, String namespaceName,
+                              FunctionDescriptor signature) {
+            this(qualifiedName, jvmOwner, namespaceName, signature, signature.arity(), false);
+        }
+
+        public FunctionExport(String qualifiedName, String jvmOwner, String namespaceName,
+                              FunctionDescriptor signature, int minimumArity) {
+            this(qualifiedName, jvmOwner, namespaceName, signature, minimumArity, false);
         }
     }
 
@@ -191,22 +208,51 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
     }
 
-    public record NamedConstructorExport(String name, FunctionDescriptor signature) {
+    public record NamedConstructorExport(String name, FunctionDescriptor signature, boolean variadic) {
         public NamedConstructorExport {
             Objects.requireNonNull(name);
             Objects.requireNonNull(signature);
+            validateMinimumArity(signature, signature.arity() - (variadic ? 1 : 0), variadic);
+        }
+
+        public NamedConstructorExport(String name, FunctionDescriptor signature) {
+            this(name, signature, false);
         }
     }
 
     public record MethodExport(String name, FunctionDescriptor signature,
-                               boolean mutating, boolean defaultMethod) {
+                               boolean mutating, boolean defaultMethod, int minimumArity,
+                               boolean variadic) {
         public MethodExport {
             Objects.requireNonNull(name);
             Objects.requireNonNull(signature);
+            validateMinimumArity(signature, minimumArity, variadic);
         }
 
         public MethodExport(String name, FunctionDescriptor signature, boolean mutating) {
-            this(name, signature, mutating, false);
+            this(name, signature, mutating, false, signature.arity(), false);
+        }
+
+        public MethodExport(String name, FunctionDescriptor signature,
+                            boolean mutating, boolean defaultMethod) {
+            this(name, signature, mutating, defaultMethod, signature.arity(), false);
+        }
+
+        public MethodExport(String name, FunctionDescriptor signature,
+                            boolean mutating, boolean defaultMethod, int minimumArity) {
+            this(name, signature, mutating, defaultMethod, minimumArity, false);
+        }
+    }
+
+    private static void validateMinimumArity(final FunctionDescriptor signature, final int minimumArity,
+                                             final boolean variadic) {
+        if (variadic && (signature.parameters().isEmpty()
+                || !(signature.parameters().getLast() instanceof ArrayDescriptor))) {
+            throw new IllegalArgumentException("Variadic callable must end in an array parameter.");
+        }
+        final var fixedArity = signature.arity() - (variadic ? 1 : 0);
+        if (minimumArity < 0 || minimumArity > fixedArity) {
+            throw new IllegalArgumentException("Invalid minimum arity for exported callable.");
         }
     }
 
@@ -219,21 +265,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     public static ZeronLibraryIndex fromCompilation(final List<CompilationUnit> units,
                                                     final Map<String, String> functionOwners,
-                                                    final Function<String, FunctionDescriptor> functionTypes) {
-        return fromCompilation(units, functionOwners, functionTypes, false);
-    }
-
-    public static ZeronLibraryIndex fromCompilation(final List<CompilationUnit> units,
-                                                    final Map<String, String> functionOwners,
-                                                    final Function<String, FunctionDescriptor> functionTypes,
-                                                    final boolean includeBundledSources) {
-        return fromCompilation(units, functionOwners, functionTypes, Stmt.Var::type, includeBundledSources);
-    }
-
-    public static ZeronLibraryIndex fromCompilation(final List<CompilationUnit> units,
-                                                    final Map<String, String> functionOwners,
                                                     final Function<String, FunctionDescriptor> functionTypes,
                                                     final Function<Stmt.Var, TypeDescriptor> valueTypes,
+                                                    final Function<Stmt.Var, String> valueOwners,
+                                                    final String initializationOwner,
                                                     final boolean includeBundledSources) {
         final var exports = new ArrayList<ExportedDeclaration>();
         for (final var unit : units) {
@@ -252,16 +287,20 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         if (signature == null || owner == null) {
                             throw new IllegalStateException("Missing resolved signature or owner for " + name);
                         }
-                        exports.add(new FunctionExport(name, owner, member.namespaceName(), signature));
+                        exports.add(new FunctionExport(name, owner, member.namespaceName(),
+                                signature, function.minimumArity(), function.variadic()));
                     }
-                    case Stmt.Var variable when member.namespaceName() != null && variable.isPublic() -> {
-                        final var name = NamespaceMembers.qualifiedName(
-                                unit.packageName(), member.namespaceName(), variable.name().lexeme());
-                        final var owner = functionOwners.get(name);
+                    case Stmt.Var variable when variable.isPublic() -> {
+                        final var name = member.namespaceName() == null
+                                ? qualify(unit.packageName(), variable.name().lexeme())
+                                : NamespaceMembers.qualifiedName(
+                                        unit.packageName(), member.namespaceName(), variable.name().lexeme());
+                        final var owner = valueOwners.apply(variable);
                         if (owner == null) {
-                            throw new IllegalStateException("Missing resolved owner for namespace value " + name);
+                            throw new IllegalStateException("Missing resolved owner for value " + name);
                         }
-                        exports.add(new ValueExport(name, owner, member.namespaceName(), valueTypes.apply(variable)));
+                        exports.add(new ValueExport(name, owner, initializationOwner,
+                                member.namespaceName(), valueTypes.apply(variable)));
                     }
                     case Stmt.ClassDecl classDeclaration when classDeclaration.isPublic() -> {
                         exports.add(new ClassExport(classDeclaration.name().lexeme(),
@@ -276,12 +315,14 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 classDeclaration.namedConstructors().stream()
                                         .filter(Stmt.NamedConstructor::isPublic)
                                         .map(constructor -> new NamedConstructorExport(
-                                                constructor.name().lexeme(), constructor.typeDescriptor()))
+                                                constructor.name().lexeme(), constructor.typeDescriptor(),
+                                                constructor.variadic()))
                                         .toList(),
                                 classDeclaration.methods().stream()
                                         .filter(Stmt.Method::isPublic)
                                         .map(method -> new MethodExport(method.name().lexeme(),
-                                                method.typeDescriptor(), method.isMutating()))
+                                                method.typeDescriptor(), method.isMutating(), false,
+                                                method.minimumArity(), method.variadic()))
                                         .toList(),
                                 classDeclaration.properties().stream()
                                         .filter(Stmt.Property::isPublic)
@@ -294,7 +335,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                     contract.methods().stream()
                                             .map(method -> new MethodExport(method.name().lexeme(),
                                                     method.typeDescriptor(), method.isMutating(),
-                                                    method.isDefault()))
+                                                    method.isDefault(), method.minimumArity(),
+                                                    method.variadic()))
                                             .toList(),
                                     contract.properties().stream()
                                             .map(property -> new PropertyExport(property.name().lexeme(),
@@ -340,7 +382,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v8.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v12.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -366,7 +408,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -392,12 +434,15 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeUTF(function.jvmOwner());
                 writeOptionalString(output, function.namespaceName());
                 writeFunction(output, function.signature(), new WriteContext());
+                output.writeInt(function.minimumArity());
+                output.writeBoolean(function.variadic());
             }
             case ValueExport value -> {
                 output.writeByte(4);
                 output.writeUTF(value.qualifiedName());
                 output.writeUTF(value.jvmOwner());
-                output.writeUTF(value.namespaceName());
+                output.writeUTF(value.initializationOwner());
+                writeOptionalString(output, value.namespaceName());
                 writeType(output, value.type(), new WriteContext());
             }
             case ClassExport classExport -> {
@@ -418,6 +463,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 for (final var constructor : classExport.namedConstructors()) {
                     output.writeUTF(constructor.name());
                     writeFunction(output, constructor.signature(), context);
+                    output.writeBoolean(constructor.variadic());
                 }
                 writeMethods(output, classExport.methods(), context);
                 writeProperties(output, classExport.properties(), context);
@@ -443,9 +489,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     private static ExportedDeclaration readDeclaration(final DataInputStream input) throws IOException {
         return switch (input.readUnsignedByte()) {
             case 1 -> new FunctionExport(input.readUTF(), input.readUTF(), readOptionalString(input),
-                    readFunction(input, new ReadContext()));
+                    readFunction(input, new ReadContext()), input.readInt(), input.readBoolean());
             case 4 -> new ValueExport(input.readUTF(), input.readUTF(), input.readUTF(),
-                    readType(input, new ReadContext()));
+                    readOptionalString(input), readType(input, new ReadContext()));
             case 2 -> {
                 final var name = input.readUTF();
                 final var context = new ReadContext();
@@ -466,7 +512,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 }
                 final var constructors = new ArrayList<NamedConstructorExport>();
                 for (int i = 0, count = readCount(input); i < count; i++) {
-                    constructors.add(new NamedConstructorExport(input.readUTF(), readFunction(input, context)));
+                    final var constructorName = input.readUTF();
+                    final var signature = readFunction(input, context);
+                    constructors.add(new NamedConstructorExport(constructorName, signature, input.readBoolean()));
                 }
                 final var methods = readMethods(input, context);
                 yield new ClassExport(name, typeParameters, contracts, constructorParameters, canonicalPublic,
@@ -502,6 +550,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             output.writeUTF(method.name());
             output.writeBoolean(method.mutating());
             output.writeBoolean(method.defaultMethod());
+            output.writeInt(method.minimumArity());
+            output.writeBoolean(method.variadic());
             writeFunction(output, method.signature(), context);
         }
     }
@@ -513,7 +563,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             final var name = input.readUTF();
             final var mutating = input.readBoolean();
             final var defaultMethod = input.readBoolean();
-            methods.add(new MethodExport(name, readFunction(input, context), mutating, defaultMethod));
+            final var minimumArity = input.readInt();
+            final var variadic = input.readBoolean();
+            methods.add(new MethodExport(name, readFunction(input, context),
+                    mutating, defaultMethod, minimumArity, variadic));
         }
         return methods;
     }

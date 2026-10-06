@@ -95,6 +95,7 @@ final class DeclarationEmitter {
                                     //Zeron.debug(currentFunction.toString());
                                 });
                             });
+                    emitDefaultOverloads(context, classBuilder, function, functionType);
                 }
                 default -> {}
             }
@@ -178,6 +179,81 @@ final class DeclarationEmitter {
                     }
     }
 
+    private static void emitDefaultOverloads(final CompilationContext context,
+                                             final ClassBuilder classBuilder,
+                                             final Stmt.FunctionDeclaration function,
+                                             final FunctionDescriptor functionType) {
+        if (function.defaultValues().isEmpty()) return;
+        final var qualifiedName = context.resolution.functionName(function.name());
+        final var owner = context.metadata.functionOwner(qualifiedName);
+        final var flags = ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL
+                | ClassFile.ACC_SYNTHETIC;
+        final var fixedArity = Stmt.fixedArity(function.parameters(), function.variadic());
+        final var lastWrapperArity = function.variadic() ? fixedArity : functionType.arity() - 1;
+        for (int arity = function.minimumArity(); arity <= lastWrapperArity; arity++) {
+            final var suppliedArity = arity;
+            final var overloadType = TypeDescriptor.functionOf(functionType.name(),
+                    functionType.returnType(), functionType.parameters().subList(0, suppliedArity)
+                            .toArray(TypeDescriptor[]::new));
+            final var runtimeOverload = (FunctionDescriptor) TypeSubstitution.erase(overloadType);
+            classBuilder.withMethod(function.name().lexeme(), toJavaMethodDescriptor(runtimeOverload),
+                    flags, methodBuilder -> methodBuilder.withCode(code -> {
+                        final var previousOffset = context.localSlotOffset;
+                        final var previousReturnType = context.currentReturnType;
+                        context.localSlotOffset = 0;
+                        context.currentReturnType = functionType.returnType();
+                        beginScope(context);
+                        try {
+                            for (int i = 0; i < suppliedArity; i++) {
+                                final var parameter = function.parameters().get(i);
+                                context.symbols.declareSymbol(function, parameter,
+                                        functionType.parameters().get(i), BindingMutability.IMMUTABLE);
+                                context.symbols.define(parameter);
+                            }
+                            for (int i = suppliedArity; i < fixedArity; i++) {
+                                emitExpr(context, code, function.defaultValues().get(i - function.minimumArity()));
+                                emitConversion(context, code, context.lastEmittedType, functionType.parameters().get(i));
+                                final var parameter = function.parameters().get(i);
+                                context.symbols.declareSymbol(function, parameter,
+                                        functionType.parameters().get(i), BindingMutability.IMMUTABLE);
+                                final var binding = context.symbols.getSymbol(parameter);
+                                code.storeLocal(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(
+                                        TypeSubstitution.erase(functionType.parameters().get(i))).descriptorString()),
+                                        binding.lvt() + context.localSlotOffset);
+                                context.symbols.define(parameter);
+                            }
+                            if (function.variadic()) {
+                                final var parameter = function.parameters().get(fixedArity);
+                                context.symbols.declareSymbol(function, parameter,
+                                        functionType.parameters().get(fixedArity), BindingMutability.IMMUTABLE);
+                                code.iconst_0();
+                                code.anewarray(ClassDesc.of("java.lang.Object"));
+                                final var binding = context.symbols.getSymbol(parameter);
+                                code.astore(binding.lvt() + context.localSlotOffset);
+                                context.symbols.define(parameter);
+                            }
+                            for (int i = 0; i < functionType.arity(); i++) {
+                                final var parameter = function.parameters().get(i);
+                                final var parameterType = TypeSubstitution.erase(functionType.parameters().get(i));
+                                NominalTypeEmitter.loadLocal(context, code,
+                                        context.symbols.getSymbol(parameter).lvt(), parameterType);
+                                context.lastEmittedType = parameterType;
+                                emitConversion(context, code, context.lastEmittedType,
+                                        parameterType);
+                            }
+                            code.invokestatic(ClassDesc.of(owner), function.name().lexeme(),
+                                    toJavaMethodDescriptor((FunctionDescriptor) TypeSubstitution.erase(functionType)));
+                            code.return_(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(
+                                    TypeSubstitution.erase(functionType.returnType())).descriptorString()));
+                        } finally {
+                            endScope(context);
+                            context.localSlotOffset = previousOffset;
+                            context.currentReturnType = previousReturnType;
+                        }
+                    }));
+        }
+    }
+
     private static void generateTopLevelValueMethods(CompilationContext context, final ClassBuilder classBuilder,
                                               final Stmt.Var variable,
                                               final TypeDescriptor type ){
@@ -185,6 +261,10 @@ final class DeclarationEmitter {
         final var fieldName = variable.name().lexeme();
         final var initializedFlag = initializedFlagFieldName(fieldName);
         final var initializerName = context.initializationPlan.initializerNames().get(variable);
+        final var initializationOwner = context.metadata.initializationOwner(variable);
+        if (initializationOwner.isEmpty()) {
+            throw new IllegalStateException("Missing initialization owner for top-level value " + fieldName);
+        }
         classBuilder.withMethodBody(initializerName, emptyVoidMethod(),
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, composer -> {
                     emitExpr(context, composer, variable.initializer());
@@ -197,10 +277,8 @@ final class DeclarationEmitter {
         classBuilder.withMethodBody(topLevelValueAccessorName(fieldName),
                 MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(type)),
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, composer -> {
-                    if (context.currentHolderName.contains("$zeron$Namespace$")) {
-                        composer.invokestatic(ClassDesc.of(context.mainClassName),
-                                "$zeron$initialize", emptyVoidMethod());
-                    }
+                    composer.invokestatic(ClassDesc.of(initializationOwner),
+                            "$zeron$initialize", emptyVoidMethod());
                     final var ready = composer.newLabel();
                     composer.getstatic(owner, initializedFlag, ConstantDescs.CD_boolean);
                     composer.ifne(ready);

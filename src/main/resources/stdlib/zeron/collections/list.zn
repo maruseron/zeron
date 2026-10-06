@@ -35,6 +35,8 @@ public class List<T> is Iterable<T> {
     public constructor empty() =
         List<T>.new(allocateArray<T>(4), 0);
 
+    public constructor of(elements: T...) = List<T>.fromArray(elements);
+
     public constructor fromArray(source: Array<T>) {
         let result = List<T>.empty();
         let mut index = 0;

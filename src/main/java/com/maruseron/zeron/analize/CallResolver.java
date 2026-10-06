@@ -87,12 +87,24 @@ final class CallResolver {
                     "This function does not declare type parameters."));
         }
         final var parameters = descriptor.parameters();
+        final var declaration = declaration(call);
+        final var variadic = declaration != null && declaration.variadic();
+        final var fixedArity = Stmt.fixedArity(declaration == null ? List.of() : declaration.parameters(),
+                variadic);
+        if (variadic) {
+            final var arrayType = parameters.getLast();
+            call.setVariadic(((ArrayDescriptor) arrayType).elementType(), fixedArity);
+        }
         Zeron.debug("resolving call              " + call.callee.lexeme() + parameters
                 + " -> " + descriptor.returnType());
-        if (descriptor.arity() != call.arguments.size()) {
+        final var minimumArity = minimumArity(call, descriptor);
+        if (call.arguments.size() < minimumArity || !variadic && call.arguments.size() > descriptor.arity()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.callee,
-                    "Expected " + descriptor.arity() + " arguments, found " + call.arguments.size()));
+                    variadic
+                            ? "Expected at least " + minimumArity + " arguments, found " + call.arguments.size()
+                            : "Expected between " + minimumArity + " and " + descriptor.arity()
+                                    + " arguments, found " + call.arguments.size()));
         }
 
         if (descriptor.returnType() instanceof InferDescriptor) {
@@ -100,7 +112,7 @@ final class CallResolver {
         } else {
             for (var i = 0; i < call.arguments.size(); i++) {
                 final var argument = call.arguments.get(i);
-                final var expected = parameters.get(i);
+                final var expected = parameterType(parameters, i, fixedArity, variadic);
                 final var resolved = MemberInteropResolver.resolveArgument(context, argument, expected);
                 Resolver.ensureAssignable(context, expected, resolved, call.callee);
             }
@@ -143,10 +155,22 @@ final class CallResolver {
                     "Expected " + typeParameters.size() + " type arguments, found "
                             + call.explicitTypeArguments.size() + "."));
         }
-        if (genericType.arity() != call.arguments.size()) {
+        final var minimumArity = minimumArity(call, genericType);
+        final var declaration = declaration(call);
+        final var variadic = declaration != null && declaration.variadic();
+        final var fixedArity = variadic
+                ? Stmt.fixedArity(declaration.parameters(), true)
+                : genericType.arity();
+        if (variadic) {
+            call.setVariadic(((ArrayDescriptor) genericType.parameters().getLast()).elementType(), fixedArity);
+        }
+        if (call.arguments.size() < minimumArity || !variadic && call.arguments.size() > genericType.arity()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.callee,
-                    "Expected " + genericType.arity() + " arguments, found " + call.arguments.size()));
+                    variadic
+                            ? "Expected at least " + minimumArity + " arguments, found " + call.arguments.size()
+                            : "Expected between " + minimumArity + " and " + genericType.arity()
+                                    + " arguments, found " + call.arguments.size()));
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
@@ -161,20 +185,23 @@ final class CallResolver {
             final var argument = call.arguments.get(i);
             if (argument instanceof Expr.Lambda || isFunctionReferenceCandidate(argument)) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
-            TypeUnifier.unify(genericType.parameters().get(i), resolvedArguments[i], substitutions, call.callee);
+            TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
+                    resolvedArguments[i], substitutions, call.callee);
         }
 
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
             if (!(argument instanceof Expr.Lambda) && !isFunctionReferenceCandidate(argument)) continue;
-            final var expected = TypeSubstitution.substitute(genericType.parameters().get(i), substitutions);
+            final var expected = TypeSubstitution.substitute(
+                    parameterType(genericType.parameters(), i, fixedArity, variadic), substitutions);
             if (functionType(expected) == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                         call.callee,
                         "A function value argument requires a function parameter type."));
             }
             resolvedArguments[i] = MemberInteropResolver.resolveArgument(context, argument, expected);
-            TypeUnifier.unify(genericType.parameters().get(i), resolvedArguments[i], substitutions, call.callee);
+            TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
+                    resolvedArguments[i], substitutions, call.callee);
         }
 
         for (final var parameter : typeParameters) {
@@ -194,11 +221,32 @@ final class CallResolver {
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
                 .toList();
         for (int i = 0; i < resolvedArguments.length; i++) {
-            Resolver.ensureAssignable(context, instantiatedParameters.get(i), resolvedArguments[i], call.callee);
+            Resolver.ensureAssignable(context,
+                    parameterType(instantiatedParameters, i, fixedArity, variadic),
+                    resolvedArguments[i], call.callee);
         }
         final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
         call.setType(instantiatedReturn);
         return instantiatedReturn;
+    }
+
+    private int minimumArity(final Expr.Call call, final FunctionDescriptor descriptor) {
+        final var declaration = declaration(call);
+        return declaration == null ? descriptor.arity() : declaration.minimumArity();
+    }
+
+    private Stmt.FunctionDeclaration declaration(final Expr.Call call) {
+        return call.resolvedFunctionName() == null
+                ? null
+                : context.functions.get(call.resolvedFunctionName());
+    }
+
+    private static TypeDescriptor parameterType(final List<TypeDescriptor> parameters,
+                                                final int argumentIndex,
+                                                final int fixedArity,
+                                                final boolean variadic) {
+        if (!variadic || argumentIndex < fixedArity) return parameters.get(argumentIndex);
+        return ((ArrayDescriptor) parameters.getLast()).elementType();
     }
 
     private FunctionDescriptor resolveCallWithTypes(final Token callee, final List<Expr> arguments) {

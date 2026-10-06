@@ -154,7 +154,8 @@ final class LambdaCompilationPlan {
                 }
                 for (final var property : declaration.properties()) collectFunctionShapes(property.type());
             }
-            case Stmt.Function(Token _, List<Token> _, FunctionDescriptor type, List<Stmt> body, boolean _) -> {
+            case Stmt.Function(Token _, List<Token> _, FunctionDescriptor type, List<Stmt> body,
+                               boolean _, List<Expr> _, int _, boolean _) -> {
                 for (final var parameter : type.parameters()) collectFunctionShapes(parameter);
                 collectFunctionShapes(type.returnType());
                 collectLambdaShapes(body);
@@ -389,7 +390,8 @@ final class LambdaCompilationPlan {
                 collectCapturedVariables(condition, localNames, captured, seen);
                 collectCapturedVariables(body, new HashSet<>(localNames), captured, seen);
             }
-            case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body, boolean _) -> {
+            case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body,
+                               boolean _, List<Expr> _, int _, boolean _) -> {
                 final var nestedNames = new HashSet<>(localNames);
                 for (final var param : parameters) nestedNames.add(param.lexeme());
                 collectCapturedVariables(body, nestedNames, captured, seen);
@@ -524,7 +526,10 @@ final class LambdaCompilationPlan {
         if (genericType == null) return;
 
         for (int i = 0; i < call.arguments.size(); i++) {
-            final var expected = genericType.parameters().get(i);
+            final var expected = call.variadicElementType() != null
+                    && i >= call.variadicFixedArity()
+                    ? ((ArrayDescriptor) genericType.parameters().getLast()).elementType()
+                    : genericType.parameters().get(i);
             final var actual = call.arguments.get(i).getType();
             if (TypeSubstitution.containsTypeParameter(expected)) {
                 collectFunctionAdapters(actual, TypeSubstitution.erase(expected));
@@ -548,6 +553,28 @@ final class LambdaCompilationPlan {
             return;
         }
 
+        if (call.resolvedClassName() != null) {
+            final var declaration = classes.get(call.resolvedClassName());
+            final var constructor = declaration == null
+                    ? null
+                    : declaration.namedConstructors().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
+                        .findFirst().orElse(null);
+            if (constructor != null) {
+                final var parameters = call.resolvedDescriptor() == null
+                        ? constructor.typeDescriptor().parameters()
+                        : call.resolvedDescriptor().parameters();
+                final var fixedArity = parameters.size() - (constructor.variadic() ? 1 : 0);
+                for (int i = 0; i < call.arguments.size(); i++) {
+                    final var expected = constructor.variadic() && i >= fixedArity
+                            ? ((ArrayDescriptor) parameters.getLast()).elementType()
+                            : parameters.get(i);
+                    collectFunctionAdapters(call.arguments.get(i).getType(), TypeSubstitution.erase(expected));
+                }
+                return;
+            }
+        }
+
         final var ownerName = nominalName(call.receiver.getType());
         final var classDeclaration = classes.get(ownerName);
         final var contractDeclaration = contracts.get(ownerName);
@@ -561,13 +588,20 @@ final class LambdaCompilationPlan {
         final var methodParameters = classMethod != null
             ? classMethod.typeDescriptor().parameters()
             : contractMethod.typeDescriptor().parameters();
+        final var variadic = classMethod != null
+                ? classMethod.variadic()
+                : contractMethod.variadic();
+        final var fixedArity = methodParameters.size() - (variadic ? 1 : 0);
         final var methodReturnType = classMethod != null
             ? classMethod.typeDescriptor().returnType()
             : contractMethod.typeDescriptor().returnType();
 
-        for (int i = 0; i < Math.min(call.arguments.size(), methodParameters.size()); i++) {
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var expected = variadic && i >= fixedArity
+                    ? ((ArrayDescriptor) methodParameters.getLast()).elementType()
+                    : methodParameters.get(i);
             collectFunctionAdapters(call.arguments.get(i).getType(),
-                TypeSubstitution.erase(methodParameters.get(i)));
+                TypeSubstitution.erase(expected));
         }
         if (call.resolvedDescriptor() != null) {
             collectFunctionAdapters(TypeSubstitution.erase(methodReturnType), call.resolvedDescriptor().returnType());

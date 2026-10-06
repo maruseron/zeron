@@ -26,12 +26,14 @@ funDecl                 : "fn" IDENTIFIER [typeParameters] "(" parameters ")" ["
                           ("=" expression ";" | block) ;
 externalFunctionDecl   : "external" "fn" IDENTIFIER "(" parameters ")" ":" type ";" ;
 externalClassDecl      : "external" "class" IDENTIFIER "=" STRING "{" externalClassMember* "}" ;
-externalClassMember    : ["public"] ["mut"] IDENTIFIER "(" parameters ")" ":" type ";"
+externalClassMember    : ["public"] ["mut"] IDENTIFIER "(" plainParameters ")" ":" type ";"
                         | ["public"] "static" "property" IDENTIFIER ":" type ";" ;
 typeParameters          : "<" typeParameter {"," typeParameter} ">" ;
 typeParameter           : IDENTIFIER [":" type {"+" type}] ;
 parameters              : [parameter {"," parameter}] ;
-parameter               : IDENTIFIER ":" type ;
+parameter               : IDENTIFIER ":" type ["..."] ["=" expression] ;
+plainParameters         : [plainParameter {"," plainParameter}] ;
+plainParameter          : IDENTIFIER ":" type ;
 
 classDecl               : "class" IDENTIFIER [typeParameters]
                           ["is" contractUse {"," contractUse}]
@@ -44,8 +46,10 @@ propertyDecl            : visibility ["mut"] "property" IDENTIFIER ":" type ["="
 propertyAccessor        : "get" ("=" expression ";" | block)
                         | "set" "(" IDENTIFIER ")" ("=" expression ";" | block) ;
 constructorDecl         : visibility "constructor" "new" ";" ;
-namedConstructorDecl    : visibility "constructor" IDENTIFIER "(" parameters ")"
+namedConstructorDecl    : visibility "constructor" IDENTIFIER "(" namedConstructorParameters ")"
                           ("=" expression ";" | block) ;
+namedConstructorParameters : [namedConstructorParameter {"," namedConstructorParameter}] ;
+namedConstructorParameter : IDENTIFIER ":" type ["..."] ;
 methodDecl              : visibility ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
                           ("=" expression ";" | block) ;
 contractDecl            : "contract" IDENTIFIER [typeParameters] ["permits" permittedClass
@@ -169,11 +173,26 @@ range                   : INT ".." INT ;
 #   through a bounded type parameter. Operator constraints remain unsupported.
 # - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
 # - Project compilation uses explicit source roots and an entry file. Cross-package source units may
-#   declare classes, contracts, and functions; cross-package top-level values are deferred.
-#   Selective class/contract/function imports may use `as` aliases and require public declarations.
+#   declare classes, contracts, functions, and immutable top-level values. Selective imports may use
+#   `as` aliases and require public declarations. Compiled libraries export public immutable
+#   top-level and namespace values; public mutable values remain unsupported.
 # - Non-entry functions require explicit return annotations so signatures are available up front.
 # - External functions are top-level signature-only declarations. Their implementation is selected
 #   by a compiler-side typed binding registry keyed by the source-qualified function name.
+# - Parameters may have defaults only as a trailing suffix. Calls supply a positional prefix;
+#   defaults run once per call, left to right, in declaration scope and may refer to earlier
+#   parameters. Full function types retain full arity. Defaults are supported on functions,
+#   class methods, contract methods, and external functions; constructors and external-class
+#   methods do not support defaults.
+# - Contract method defaults belong to the contract and are available through contract- and
+#   implementing-class-typed calls. Implementations provide only the full-arity method. Compiled
+#   libraries export minimum arity and generate shorter-arity JVM wrappers.
+# - Functions, methods, external functions, and named constructors allow at most one variadic
+#   parameter, and it must be last. Its declared element type is
+#   exposed as Array<T>; direct calls pack positional arguments after fixed parameters, while
+#   function values retain the full Array<T> parameter. Defaults may precede it but cannot apply to
+#   it. Named constructors do not support defaults. Spread calls, canonical constructors, and
+#   external-class methods do not support variadics.
 # - `..` constructs an inclusive `zeron.ranges.IntRange`; `for` accepts arrays and values conforming
 #   to the bundled Iterable<T> contract.
 # - Output uses ordinary imported calls to `zeron.io.print` and `zeron.io.println`; `print` is not a

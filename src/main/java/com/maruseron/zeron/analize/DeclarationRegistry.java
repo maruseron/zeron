@@ -256,17 +256,23 @@ final class DeclarationRegistry {
                     "Registered JVM method arity does not match the external function signature."));
         }
         for (int index = 0; index < methodDescriptor.parameterCount(); index++) {
-            final var mappedType = JavaTypeMapping.toZeronType(methodDescriptor.parameterType(index));
-            if (mappedType == null || !mappedType.equals(binding.signature().parameters().get(index))) {
+            if (!matchesExternalType(methodDescriptor.parameterType(index),
+                    binding.signature().parameters().get(index))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
                         "Registered JVM parameter descriptor does not match the external function signature."));
             }
         }
-        final var mappedReturnType = JavaTypeMapping.toZeronType(methodDescriptor.returnType());
-        if (mappedReturnType == null || !mappedReturnType.equals(binding.signature().returnType())) {
+        if (!matchesExternalType(methodDescriptor.returnType(), binding.signature().returnType())) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
                     "Registered JVM return descriptor does not match the external function signature."));
         }
+    }
+
+    private boolean matchesExternalType(final ClassDesc javaType, final TypeDescriptor zeronType) {
+        final var mappedType = JavaTypeMapping.toZeronType(javaType);
+        if (mappedType != null) return mappedType.equals(zeronType);
+        return zeronType instanceof ArrayDescriptor
+                && javaType.descriptorString().equals("[Ljava/lang/Object;");
     }
 
     private String binaryName(final ClassDesc classDescriptor) {

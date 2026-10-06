@@ -439,12 +439,8 @@ final class LambdaResolver {
         beginScope(context);
         context.frame.expectedReturnTypes.push(function.typeDescriptor().returnType());
         try {
-            final var paramNames = function.parameters();
-            final var params = function.typeDescriptor().parameters();
-            for (int i = 0; i < function.parameters().size(); i++) {
-                declare(context, SYNTHETIC_VAR, paramNames.get(i), params.get(i), BindingMutability.IMMUTABLE);
-                define(context, paramNames.get(i));
-            }
+            resolveParametersAndDefaults(context, function, function.parameters(), function.typeDescriptor(),
+                    function.defaultValues(), function.minimumArity());
             resolveStmts(context, function.body());
             final var resolvedType = ensureReturns(context,
                     function.name(),
@@ -462,6 +458,38 @@ final class LambdaResolver {
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+        }
+    }
+
+    static void resolveExternalDefaults(final ResolutionContext context,
+                                        final Stmt.ExternalFunction function) {
+        if (function.defaultValues().isEmpty()) return;
+        beginScope(context);
+        try {
+            resolveParametersAndDefaults(context, function, function.parameters(), function.typeDescriptor(),
+                    function.defaultValues(), function.minimumArity());
+        } finally {
+            endScope(context);
+        }
+    }
+
+    private static void resolveParametersAndDefaults(final ResolutionContext context,
+                                                    final Stmt declaration,
+                                                    final List<Token> parameterNames,
+                                                    final FunctionDescriptor descriptor,
+                                                    final List<Expr> defaultValues,
+                                                    final int minimumArity) {
+        for (int i = 0; i < parameterNames.size(); i++) {
+            final var parameterType = descriptor.parameters().get(i);
+            if (i >= minimumArity && i - minimumArity < defaultValues.size()) {
+                final var defaultValue = defaultValues.get(i - minimumArity);
+                final var resolvedDefault = MemberInteropResolver.resolveArgument(context, defaultValue,
+                        parameterType);
+                ensureAssignable(context, parameterType, resolvedDefault, parameterNames.get(i));
+            }
+            declare(context, SYNTHETIC_VAR, parameterNames.get(i), parameterType,
+                    BindingMutability.IMMUTABLE);
+            define(context, parameterNames.get(i));
         }
     }
 

@@ -252,14 +252,26 @@ final class MemberInteropResolver {
                 }
                 final var instantiatedFactory = (FunctionDescriptor) TypeSubstitution.substitute(
                     namedConstructor.typeDescriptor(), substitutions);
-                if (instantiatedFactory.arity() != call.arguments.size()) {
+                final var variadic = namedConstructor.variadic();
+                final var fixedArity = Stmt.fixedArity(namedConstructor.parameters(), variadic);
+                if (variadic) {
+                    call.setVariadic(((ArrayDescriptor) instantiatedFactory.parameters().getLast()).elementType(),
+                            fixedArity);
+                }
+                if (variadic
+                        ? call.arguments.size() < fixedArity
+                        : instantiatedFactory.arity() != call.arguments.size()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                         call.name,
-                    "Expected " + instantiatedFactory.arity() + " arguments, found "
-                        + call.arguments.size() + "."));
+                    variadic
+                            ? "Expected at least " + fixedArity + " arguments, found " + call.arguments.size() + "."
+                            : "Expected " + instantiatedFactory.arity() + " arguments, found "
+                                    + call.arguments.size() + "."));
                 }
                 for (int i = 0; i < call.arguments.size(); i++) {
-                final var expectedType = instantiatedFactory.parameters().get(i);
+                final var expectedType = variadic && i >= fixedArity
+                        ? call.variadicElementType()
+                        : instantiatedFactory.parameters().get(i);
                 ensureAssignable(context, expectedType,
                     resolveArgument(context, call.arguments.get(i), expectedType), call.name);
                 }
@@ -285,6 +297,52 @@ final class MemberInteropResolver {
                 .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
                 .findFirst()
                 .orElse(null);
+        if (owner != null && classMethod != null
+                && call.arguments.size() < classMethod.minimumArity()) {
+            final var defaults = DeclarationResolver.defaultMethodsOnClass(context, owner, call.name.lexeme());
+            if (defaults.size() > 1) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        call.name,
+                        "Multiple default contract methods named '" + call.name.lexeme()
+                                + "' require an explicit class implementation."));
+            }
+            if (!defaults.isEmpty()) {
+                final var defaultMethod = defaults.getFirst();
+                final var descriptor = defaultMethod.instantiatedType();
+                if (defaultMethod.method().isMutating()
+                        && !(receiverType instanceof ReferenceDescriptor)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                            call.name,
+                            "Mutating method requires a mutable reference."));
+                }
+                call.setResolvedOwnerName(defaultMethod.ownerName());
+                call.setReceiverRequiresCast(true);
+                final var variadic = defaultMethod.method().variadic();
+                final var fixedArity = Stmt.fixedArity(defaultMethod.method().parameters(), variadic);
+                if (descriptor.isGeneric()) {
+                    return resolveGenericMemberCall(
+                            context, call, descriptor, defaultMethod.method().minimumArity(), variadic, fixedArity);
+                }
+                if (!call.explicitTypeArguments.isEmpty()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            call.name, "This method does not declare type parameters."));
+                }
+                call.setResolvedDescriptor(descriptor);
+                ensureMemberCallArity(call, descriptor, defaultMethod.method().minimumArity(), variadic);
+                if (variadic) {
+                    call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(), fixedArity);
+                }
+                for (int i = 0; i < call.arguments.size(); i++) {
+                    final var expected = memberParameterType(
+                            descriptor.parameters(), i, fixedArity, variadic);
+                    ensureAssignable(context, expected,
+                            resolveArgument(context, call.arguments.get(i), expected),
+                            call.name);
+                }
+                call.setType(descriptor.returnType());
+                return descriptor.returnType();
+            }
+        }
         if (classMethod == null && contractMethod == null) {
             if (owner != null) {
                 final var defaults = DeclarationResolver.defaultMethodsOnClass(context, owner, call.name.lexeme());
@@ -305,22 +363,29 @@ final class MemberInteropResolver {
                     }
                     call.setResolvedOwnerName(defaultMethod.ownerName());
                     call.setReceiverRequiresCast(true);
-                    if (descriptor.isGeneric()) return resolveGenericMemberCall(context, call, descriptor);
+                    final var variadic = defaultMethod.method().variadic();
+                    final var fixedArity = Stmt.fixedArity(defaultMethod.method().parameters(), variadic);
+                    if (descriptor.isGeneric()) {
+                        return resolveGenericMemberCall(
+                                context, call, descriptor, defaultMethod.method().minimumArity(),
+                                variadic, fixedArity);
+                    }
                     if (!call.explicitTypeArguments.isEmpty()) {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                                 call.name,
                                 "This method does not declare type parameters."));
                     }
                     call.setResolvedDescriptor(descriptor);
-                    if (descriptor.arity() != call.arguments.size()) {
-                        Zeron.resolutionError(new ResolutionError(
-                                DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH, call.name,
-                                "Expected " + descriptor.arity() + " arguments, found "
-                                        + call.arguments.size() + "."));
+                    ensureMemberCallArity(call, descriptor, defaultMethod.method().minimumArity(), variadic);
+                    if (variadic) {
+                        call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(),
+                                fixedArity);
                     }
                     for (int i = 0; i < call.arguments.size(); i++) {
-                        ensureAssignable(context, descriptor.parameters().get(i),
-                                resolveArgument(context, call.arguments.get(i), descriptor.parameters().get(i)),
+                        final var expected = memberParameterType(
+                                descriptor.parameters(), i, fixedArity, variadic);
+                        ensureAssignable(context, expected,
+                                resolveArgument(context, call.arguments.get(i), expected),
                                 call.name);
                     }
                     call.setType(descriptor.returnType());
@@ -344,6 +409,15 @@ final class MemberInteropResolver {
         final var isMutating = classMethod != null
                 ? classMethod.isMutating()
                 : contractMethod.isMutating();
+        final var minimumArity = classMethod != null
+                ? classMethod.minimumArity()
+                : contractMethod.minimumArity();
+        final var variadic = classMethod != null
+                ? classMethod.variadic()
+                : contractMethod.variadic();
+        final var fixedArity = classMethod != null
+                ? Stmt.fixedArity(classMethod.parameters(), variadic)
+                : Stmt.fixedArity(contractMethod.parameters(), variadic);
         if (classMethod != null && !classMethod.isPublic()
                 && !Objects.equals(context.frame.currentClassName, ownerName)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
@@ -354,7 +428,8 @@ final class MemberInteropResolver {
                     "Mutating method requires a mutable reference."));
         }
         if (instantiatedDescriptor.isGeneric()) {
-            return resolveGenericMemberCall(context, call, instantiatedDescriptor);
+            return resolveGenericMemberCall(
+                    context, call, instantiatedDescriptor, minimumArity, variadic, fixedArity);
         }
         if (!call.explicitTypeArguments.isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
@@ -362,19 +437,42 @@ final class MemberInteropResolver {
                     "This method does not declare type parameters."));
         }
         call.setResolvedDescriptor(instantiatedDescriptor);
-        if (instantiatedDescriptor.arity() != call.arguments.size()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                    call.name,
-                    "Expected " + instantiatedDescriptor.arity() + " arguments, found "
-                            + call.arguments.size() + "."));
+        ensureMemberCallArity(call, instantiatedDescriptor, minimumArity, variadic);
+        if (variadic) {
+            call.setVariadic(((ArrayDescriptor) instantiatedDescriptor.parameters().getLast()).elementType(),
+                    fixedArity);
         }
         for (int i = 0; i < call.arguments.size(); i++) {
-            ensureAssignable(context, instantiatedDescriptor.parameters().get(i),
-                    resolveArgument(context, call.arguments.get(i), instantiatedDescriptor.parameters().get(i)),
+            final var expected = memberParameterType(
+                    instantiatedDescriptor.parameters(), i, fixedArity, variadic);
+            ensureAssignable(context, expected,
+                    resolveArgument(context, call.arguments.get(i), expected),
                     call.name);
         }
         call.setType(instantiatedDescriptor.returnType());
         return instantiatedDescriptor.returnType();
+    }
+
+    private static void ensureMemberCallArity(final Expr.MemberCall call,
+                                              final FunctionDescriptor descriptor,
+                                              final int minimumArity,
+                                              final boolean variadic) {
+        if (call.arguments.size() < minimumArity || !variadic && call.arguments.size() > descriptor.arity()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    call.name, variadic
+                            ? "Expected at least " + minimumArity + " arguments, found " + call.arguments.size()
+                                    + "."
+                            : "Expected between " + minimumArity + " and " + descriptor.arity()
+                                    + " arguments, found " + call.arguments.size() + "."));
+        }
+    }
+
+    private static TypeDescriptor memberParameterType(final List<TypeDescriptor> parameters,
+                                                      final int argumentIndex,
+                                                      final int fixedArity,
+                                                      final boolean variadic) {
+        if (!variadic || argumentIndex < fixedArity) return parameters.get(argumentIndex);
+        return ((ArrayDescriptor) parameters.getLast()).elementType();
     }
 
     private static SafeNavigationFlows beginSafeNavigation(final ResolutionContext context, final Expr receiver,
@@ -410,7 +508,8 @@ final class MemberInteropResolver {
     }
 
     private static TypeDescriptor resolveGenericMemberCall(final ResolutionContext context, final Expr.MemberCall call,
-                                                    final FunctionDescriptor genericType) {
+                                                    final FunctionDescriptor genericType, final int minimumArity,
+                                                    final boolean variadic, final int fixedArity) {
         final var typeParameters = genericType.typeParameters();
         if (!call.explicitTypeArguments.isEmpty()
                 && call.explicitTypeArguments.size() != typeParameters.size()) {
@@ -419,10 +518,14 @@ final class MemberInteropResolver {
                     "Expected " + typeParameters.size() + " type arguments, found "
                             + call.explicitTypeArguments.size() + "."));
         }
-        if (genericType.arity() != call.arguments.size()) {
+        if (call.arguments.size() < minimumArity || !variadic && call.arguments.size() > genericType.arity()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.name,
-                    "Expected " + genericType.arity() + " arguments, found " + call.arguments.size() + "."));
+                    variadic
+                            ? "Expected at least " + minimumArity + " arguments, found " + call.arguments.size()
+                                    + "."
+                            : "Expected between " + minimumArity + " and " + genericType.arity()
+                                    + " arguments, found " + call.arguments.size() + "."));
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
@@ -437,20 +540,23 @@ final class MemberInteropResolver {
             final var argument = call.arguments.get(i);
             if (argument instanceof Expr.Lambda || LambdaResolver.isFunctionReferenceCandidate(context, argument)) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
-            TypeUnifier.unify(genericType.parameters().get(i), resolvedArguments[i], substitutions, call.name);
+            TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
+                    resolvedArguments[i], substitutions, call.name);
         }
 
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
             if (!(argument instanceof Expr.Lambda) && !LambdaResolver.isFunctionReferenceCandidate(context, argument)) continue;
-            final var expected = TypeSubstitution.substitute(genericType.parameters().get(i), substitutions);
+            final var expected = TypeSubstitution.substitute(
+                    memberParameterType(genericType.parameters(), i, fixedArity, variadic), substitutions);
             if (LambdaResolver.functionType(context, expected) == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                         call.name,
                         "A function value argument requires a function parameter type."));
             }
             resolvedArguments[i] = resolveArgument(context, argument, expected);
-            TypeUnifier.unify(genericType.parameters().get(i), resolvedArguments[i], substitutions, call.name);
+            TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
+                    resolvedArguments[i], substitutions, call.name);
         }
 
         for (final var parameter : typeParameters) {
@@ -470,11 +576,15 @@ final class MemberInteropResolver {
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
                 .toList();
         for (int i = 0; i < resolvedArguments.length; i++) {
-            ensureAssignable(context, instantiatedParameters.get(i), resolvedArguments[i], call.name);
+            ensureAssignable(context, memberParameterType(instantiatedParameters, i, fixedArity, variadic),
+                    resolvedArguments[i], call.name);
         }
         final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
         call.setResolvedDescriptor(TypeDescriptor.functionOf(genericType.name(), instantiatedReturn,
                 instantiatedParameters.toArray(TypeDescriptor[]::new)));
+        if (variadic) {
+            call.setVariadic(((ArrayDescriptor) instantiatedParameters.getLast()).elementType(), fixedArity);
+        }
         call.setType(instantiatedReturn);
         return instantiatedReturn;
     }
@@ -668,19 +778,21 @@ final class MemberInteropResolver {
         }
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
                 method.typeDescriptor(), substitutions);
+        final var variadic = method.variadic();
+        final var fixedArity = Stmt.fixedArity(method.parameters(), variadic);
         if (descriptor.isGeneric()) {
-            final var result = resolveGenericMemberCall(context, call, descriptor);
+            final var result = resolveGenericMemberCall(context, call, descriptor,
+                    method.minimumArity(), variadic, fixedArity);
             call.setResolvedOwnerName(ownerName);
             call.setReceiverRequiresCast(true);
             return result;
         }
-        if (descriptor.arity() != call.arguments.size()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                    call.name,
-                    "Expected " + descriptor.arity() + " arguments, found " + call.arguments.size() + "."));
+        ensureMemberCallArity(call, descriptor, method.minimumArity(), variadic);
+        if (variadic) {
+            call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(), fixedArity);
         }
         for (int index = 0; index < call.arguments.size(); index++) {
-            final var expected = descriptor.parameters().get(index);
+            final var expected = memberParameterType(descriptor.parameters(), index, fixedArity, variadic);
             ensureAssignable(context, expected, resolveArgument(context, call.arguments.get(index), expected), call.name);
         }
         call.setResolvedOwnerName(ownerName);

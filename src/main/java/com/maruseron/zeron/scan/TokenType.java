@@ -9,7 +9,7 @@ public enum TokenType {
     TILDE,                          // ~
 
     // One, two or three character tokens
-    DOT, DOT_DOT,                   // . ..
+    DOT, DOT_DOT, ELLIPSIS,          // . .. ...
     COLON, COLON_COLON,             // : ::
     MINUS, MINUS_EQUAL, ARROW,      // - -= ->
     PLUS, PLUS_EQUAL,               // + +=

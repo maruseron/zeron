@@ -71,6 +71,7 @@ final class StatementResolver {
                 if (!context.functionNamesByDeclaration.containsKey(externalFunction.name())) {
                     context.declarationRegistrar.registerFunction(context.packageName, externalFunction);
                 }
+                LambdaResolver.resolveExternalDefaults(context, externalFunction);
             }
             case Stmt.For(Token iterationBind, Token _, Expr iterable, Stmt body) -> {
                 context.symbols.beginScope();

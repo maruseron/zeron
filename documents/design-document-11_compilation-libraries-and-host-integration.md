@@ -17,15 +17,17 @@ a source package a JVM module.
 - Project-local top-level values can be imported and are initialized eagerly before entry `main`.
   Initialization follows static dependencies, rejects statically discoverable cycles, guards
   read-before-initialization, and aborts startup if an initializer fails. Public immutable values are
-  importable; public mutable values and compiled-library value exports remain deferred. Non-entry
-  functions require explicit return types.
+  importable; public mutable values remain unsupported. Compiled-library metadata exports both
+  ordinary public immutable top-level values and public namespace-member values. A provider's
+  values initialize in provider order when the first exported value is read; unused libraries are
+  not initialized. Non-entry functions require explicit return types.
 - Bundled source mode is the default and includes every `.zn` file under
   `src/main/resources/stdlib/`. Maven generates a sorted classpath source index from that tree during
   resource generation; runtime loading uses the index, so adding a standard-library source does not
   require a separate registration-list edit. Standard-library declarations remain explicit imports,
   and the canonical source tree mirrors package names.
-- The compiler writes `META-INF/zeron/api-v8.bin`. The index has schema version 8 and carries the
-  required standard-library API version, currently 10.
+- The compiler writes `META-INF/zeron/api-v12.bin`. The index has schema version 12 and carries the
+  required standard-library API version, currently 11.
 - Zeron libraries can be built into a class directory and consumed in compiled mode. Library loading
   validates the API-index schema and standard-library API versions and creates metadata-only
   declarations; consumer compilation does not re-emit library classes. Zeron library JARs are also
@@ -34,6 +36,8 @@ a source package a JVM module.
   constructors and declared methods are callable, including expanded varargs for supported component
   types. A separate curated source facade exposes only `java.lang.System.out` and
   `java.io.PrintStream.print(Object)` / `println(Object)`; this does not enable general JDK discovery.
+  Registered top-level external functions can bind Zeron `Array<T>` parameters to JVM `Object[]`;
+  ordinary Java array signatures remain unsupported by member interop.
 - Compiler intrinsic IDs and lowering are described separately in
   [design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md).
 
@@ -52,9 +56,10 @@ normalized root-relative source path, and declaration order. Static dependencies
 and reads reached through statically resolved Zeron functions; statically discoverable cycles are
 compile-time errors. Generated accessors fail on a read before initialization rather than returning a
 default value. An initializer exception aborts the class initializer, preserves its original cause,
-and prevents later values and `main` from running. Only public immutable values may be imported;
-compiled-library value exports remain deferred. Generated program classes are written to `dist/`;
-compiler classes remain under Maven's `target/classes`.
+and prevents later values and `main` from running. Only public immutable values may be imported; public mutable values remain unsupported. The compiled
+library API index exports ordinary top-level and namespace-member immutable values, including their
+declared type, storage owner, optional namespace, and provider initialization owner. Generated
+program classes are written to `dist/`; compiler classes remain under Maven's `target/classes`.
 
 The single-file command remains available for default-package scripts. Multi-file project builds use
 `--root <directory>` and `--entry <source-file>`. More general build manifests, incremental
@@ -63,27 +68,44 @@ zero-argument `fn main(): Unit`, the generated entry class also includes the sta
 `public static void main(String[] args)` launcher method, which delegates to the Zeron function.
 Run a generated launcher from `dist/` with `--run-class <path-to-class-file>`, for example
 `--run-class dist/main.class`. The command launches a child JVM with `dist/`, the compiler runtime,
-and `target/zeron-stdlib.jar` on its classpath. If the standard-library JAR is missing, it is built
-and cached there; `--stdlib-jar <path>` overrides that default. Repeatable `--library` arguments add
+and a cached standard-library JAR named for the current API-index schema and standard-library API
+versions (for example, `target/zeron-stdlib-index-v12-api-v11.jar`). If that versioned JAR is missing,
+it is built; `--stdlib-jar <path>` overrides the default. Repeatable `--library` arguments add
 validated library JARs or class directories to the runtime classpath.
 
 ## Zeron Library Artifacts
 
-The API index is a binary sidecar at `META-INF/zeron/api-v8.bin`. Its schema version is separate from
+The API index is a binary sidecar at `META-INF/zeron/api-v12.bin`. Its schema version is separate from
 the standard-library API version. It records qualified public signatures, generated JVM owners,
-declaration and method generic parameters, nullability, reference views, mutability markers, and
-callback shapes. Public property requirements and getter/setter capabilities are recorded alongside
+declaration and method generic parameters, nullability, reference views, mutability markers, callback
+shapes, and each callable's minimum accepted arity. Public property requirements and getter/setter
+capabilities are recorded alongside
 class and contract signatures. Sealed contracts additionally export their permitted class templates.
 Method type parameters and references to enclosing class or contract parameters use the same scoped
 type encoding as generic function signatures. Function and value exports carry an explicit namespace
-name when declared inside a namespace; they remain regular function/value entries in the index. It
-does not contain bodies or private implementation details.
+name when declared inside a namespace; ordinary top-level value exports have no namespace. Callable
+exports retain their full-arity signatures and record both minimum arity and whether the final
+parameter is variadic. Named-constructor exports also record their variadic marker so consumers can
+pack direct factory-call arguments correctly. Consumers omit only trailing defaulted fixed parameters
+and call generated provider-side JVM wrappers; direct variadic arguments are packed by the consumer,
+while function values keep the full array-shaped signature. Default expressions are not serialized or re-evaluated by
+consumers. Removing defaults removes wrappers and can break existing binaries; changing a default
+expression changes behavior for callers running against the updated provider. Value exports record
+both their generated storage owner and the provider's initialization-gateway owner.
+The index does not contain initializer bodies or private implementation details.
+
+Generated value accessors call the provider gateway before returning a value. This active use triggers
+the provider entry class's JVM initialization, which executes the provider's existing
+dependency-ordered initializer plan exactly once. Thus a first read initializes the provider's value
+set, including private dependencies, rather than computing each immutable value independently.
+Libraries that are not read remain uninitialized. The consumer does not need or receive the
+provider's initializer bodies.
 
 `--build-stdlib <output-directory>` compiles the canonical bundled units as a class directory.
 `--jar-output <file.jar>` packages a successful source/project compilation from a temporary staging
 directory, leaving the default `dist/` output unchanged when the option is omitted. When combined
 with `--build-stdlib`, the requested class directory is preserved and also packaged as a JAR.
-Archives contain the compiled classes and `META-INF/zeron/api-v8.bin`, with entries in deterministic
+Archives contain the compiled classes and `META-INF/zeron/api-v12.bin`, with entries in deterministic
 order. The JAR is published only after packaging succeeds.
 
 Consumers may select a Zeron library class directory or JAR with `--library`; compiled standard
@@ -92,7 +114,8 @@ API-index loading and, when needed, as a normal runtime classpath entry. A consu
 whose schema version is unsupported or whose required standard-library API version does not exactly
 match its compiler. Increment `StandardLibrary.API_VERSION` when the bundled source contract changes
 incompatibly; do not use it as a substitute for the binary index schema version. The index schema is
-independent of its JAR packaging, so adding JAR support does not itself require a schema-version bump.
+independent of its JAR packaging; this schema bump adds default-arity metadata alongside the existing
+value-export metadata.
 
 `ZeronLibraryIndexDump` accepts an index file, a class directory, or a Zeron library JAR.
 
@@ -159,8 +182,8 @@ including `java.io.IO`, remain unavailable unless provided through a supported m
 
 1. **Project source sets and package-path output: implemented.** `--root`/`--entry`, multi-unit
    resolution, package paths, deterministic function holders, and dependency-ordered project value
-   initialization are available. Public namespace values are included in compiled-library metadata;
-   top-level value exports remain deferred.
+   initialization are available. Public namespace and ordinary top-level immutable values are
+   included in compiled-library metadata, with provider initialization triggered on first read.
 2. **Zeron library artifacts: implemented.** Versioned API-index production/loading, class-directory
    libraries, deterministic JAR packaging/loading, and compiled standard-library mode work. Both
    index-schema and standard-library API compatibility are checked.

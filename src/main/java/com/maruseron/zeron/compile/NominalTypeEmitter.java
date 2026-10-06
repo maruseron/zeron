@@ -65,6 +65,7 @@ final class NominalTypeEmitter {
                                             }
                                         });
                             }
+                            emitContractDefaultOverloads(context, builder, contract, method);
                         }
                         for (final var property : contract.properties()) {
                             final var getterType = TypeDescriptor.functionOf(
@@ -149,6 +150,7 @@ final class NominalTypeEmitter {
                                     }
                                     methodBuilder.withCode(code -> emitClassMethod(context, code, declaration, method));
                                 });
+                        emitClassDefaultOverloads(context, builder, declaration, classDesc, method, flags);
                     }
                     for (final var property : declaration.properties()) {
                         emitPropertyMethods(context, builder, declaration, property, classDesc);
@@ -516,6 +518,121 @@ final class NominalTypeEmitter {
 
     static String lambdaMethodBridge(final String methodName) {
         return "$zeron$lambda$call$" + methodName;
+    }
+
+    private static void emitClassDefaultOverloads(final CompilationContext context,
+                                                  final ClassBuilder builder,
+                                                  final Stmt.ClassDecl owner,
+                                                  final ClassDesc classDesc,
+                                                  final Stmt.Method method,
+                                                  final int flags) {
+        emitDefaultMethodOverloads(context, builder, owner.name().lexeme(), classDesc,
+                method.name(), method.parameters(), method.typeDescriptor(),
+                method.defaultValues(), method.minimumArity(), method.variadic(),
+                flags | ClassFile.ACC_SYNTHETIC, false, method.isMutating());
+    }
+
+    private static void emitContractDefaultOverloads(final CompilationContext context,
+                                                     final ClassBuilder builder,
+                                                     final Stmt.ContractDecl owner,
+                                                     final Stmt.ContractMethod method) {
+        if (method.defaultValues().isEmpty()) return;
+        emitDefaultMethodOverloads(context, builder, owner.name().lexeme(), ClassDesc.of(owner.name().lexeme()),
+                method.name(), method.parameters(), method.typeDescriptor(),
+                method.defaultValues(), method.minimumArity(), method.variadic(),
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_SYNTHETIC, true, method.isMutating());
+    }
+
+    private static void emitDefaultMethodOverloads(final CompilationContext context,
+                                                   final ClassBuilder builder,
+                                                   final String ownerName,
+                                                   final ClassDesc ownerDesc,
+                                                   final Token methodName,
+                                                   final List<Token> parameters,
+                                                   final FunctionDescriptor functionType,
+                                                   final List<Expr> defaultValues,
+                                                   final int minimumArity,
+                                                   final boolean variadic,
+                                                   final int flags,
+                                                   final boolean isContract,
+                                                   final boolean isMutating) {
+        if (defaultValues.isEmpty()) return;
+        final var fixedArity = parameters.size() - (variadic ? 1 : 0);
+        final var lastWrapperArity = variadic ? fixedArity : functionType.arity() - 1;
+        for (int arity = minimumArity; arity <= lastWrapperArity; arity++) {
+            final var suppliedArity = arity;
+            final var overloadType = TypeDescriptor.functionOf(functionType.name(),
+                    functionType.returnType(), functionType.parameters().subList(0, suppliedArity)
+                            .toArray(TypeDescriptor[]::new));
+            final var runtimeOverload = (FunctionDescriptor) TypeSubstitution.erase(overloadType);
+            builder.withMethod(methodName.lexeme(), toJavaMethodDescriptor(runtimeOverload), flags,
+                    methodBuilder -> methodBuilder.withCode(code -> {
+                        final var previousOffset = context.localSlotOffset;
+                        final var previousReturnType = context.currentReturnType;
+                        context.localSlotOffset = 0;
+                        context.currentReturnType = functionType.returnType();
+                        beginScope(context);
+                        final var thisToken = new Token(TokenType.THIS, "this", null, methodName.span());
+                        final var ownerType = TypeDescriptor.of(ownerName);
+                        final var thisType = isMutating
+                                ? new ReferenceDescriptor(ownerType)
+                                : ownerType;
+                        context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, thisToken,
+                                thisType, BindingMutability.IMMUTABLE);
+                        context.symbols.define(thisToken);
+                        try {
+                            for (int i = 0; i < suppliedArity; i++) {
+                                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, parameters.get(i),
+                                        functionType.parameters().get(i), BindingMutability.IMMUTABLE);
+                                context.symbols.define(parameters.get(i));
+                            }
+                            for (int i = suppliedArity; i < fixedArity; i++) {
+                                emitExpr(context, code, defaultValues.get(i - minimumArity));
+                                emitConversion(context, code, context.lastEmittedType, functionType.parameters().get(i));
+                                final var parameter = parameters.get(i);
+                                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, parameter,
+                                        functionType.parameters().get(i), BindingMutability.IMMUTABLE);
+                                final var binding = context.symbols.getSymbol(parameter);
+                                code.storeLocal(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(
+                                        TypeSubstitution.erase(functionType.parameters().get(i))).descriptorString()),
+                                        binding.lvt() + context.localSlotOffset);
+                                context.symbols.define(parameter);
+                            }
+                            if (variadic) {
+                                final var parameter = parameters.get(fixedArity);
+                                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, parameter,
+                                        functionType.parameters().get(fixedArity), BindingMutability.IMMUTABLE);
+                                code.iconst_0();
+                                code.anewarray(ClassDesc.of("java.lang.Object"));
+                                final var binding = context.symbols.getSymbol(parameter);
+                                code.astore(binding.lvt() + context.localSlotOffset);
+                                context.symbols.define(parameter);
+                            }
+                            code.aload(0);
+                            for (int i = 0; i < functionType.arity(); i++) {
+                                loadLocal(context, code, context.symbols.getSymbol(parameters.get(i)).lvt(),
+                                        TypeSubstitution.erase(functionType.parameters().get(i)));
+                            }
+                            final var runtimeType = (FunctionDescriptor) TypeSubstitution.erase(functionType);
+                            if (isContract) {
+                                code.invokeinterface(ownerDesc, methodName.lexeme(),
+                                        toJavaMethodDescriptor(runtimeType));
+                            } else if ((flags & ClassFile.ACC_PRIVATE) != 0) {
+                                code.invokespecial(ownerDesc, methodName.lexeme(),
+                                        toJavaMethodDescriptor(runtimeType));
+                            } else {
+                                code.invokevirtual(ownerDesc, methodName.lexeme(),
+                                        toJavaMethodDescriptor(runtimeType));
+                            }
+                            code.return_(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(
+                                    TypeSubstitution.erase(functionType.returnType())).descriptorString()));
+                        } finally {
+                            endScope(context);
+                            context.localSlotOffset = previousOffset;
+                            context.currentReturnType = previousReturnType;
+                        }
+                    }));
+        }
     }
 
     private static void emitClassMethod(CompilationContext context, final CodeBuilder code,

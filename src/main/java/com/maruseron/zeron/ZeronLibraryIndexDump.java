@@ -22,6 +22,7 @@ import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -30,7 +31,7 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v8.bin|class-directory|library.jar>");
+            System.err.println("Usage: ZeronLibraryIndexDump <api-v12.bin|class-directory|library.jar>");
             return;
         }
         final var path = Path.of(args[0]);
@@ -54,15 +55,18 @@ public final class ZeronLibraryIndexDump {
                 case ZeronLibraryIndex.FunctionExport function -> {
                     System.out.println("function " + function.qualifiedName()
                             + formatTypeParameters(function.signature().typeParameters())
-                            + formatParameters(function.signature()) + ": "
+                            + formatParameters(function.signature(), function.variadic()) + ": "
                             + formatType(function.signature().returnType()));
                     System.out.println("  Namespace: " + namespaceLabel(function.namespaceName()));
                     System.out.println("  JVM owner: " + function.jvmOwner());
+                    printMinimumArity(function.signature(), function.minimumArity(), function.variadic());
+                    printVariadic(function.variadic());
                 }
                 case ZeronLibraryIndex.ValueExport value -> {
                     System.out.println("value " + value.qualifiedName() + ": " + formatType(value.type()));
                     System.out.println("  Namespace: " + namespaceLabel(value.namespaceName()));
                     System.out.println("  JVM owner: " + value.jvmOwner());
+                    System.out.println("  Initialization owner: " + value.initializationOwner());
                 }
                 case ZeronLibraryIndex.ClassExport classExport -> {
                     System.out.println("class " + classExport.qualifiedName()
@@ -84,13 +88,15 @@ public final class ZeronLibraryIndexDump {
                     }
                     for (final var constructor : classExport.namedConstructors()) {
                         System.out.println("  public constructor " + constructor.name()
-                                + formatParameters(constructor.signature()) + ": "
+                                + formatParameters(constructor.signature(), constructor.variadic()) + ": "
                                 + formatType(constructor.signature().returnType()));
                     }
                     for (final var method : classExport.methods()) {
                         System.out.println("  public " + (method.mutating() ? "mut " : "") + method.name()
-                                + formatParameters(method.signature()) + ": "
+                                + formatParameters(method.signature(), method.variadic()) + ": "
                                 + formatType(method.signature().returnType()));
+                        printMinimumArity(method.signature(), method.minimumArity(), method.variadic());
+                        printVariadic(method.variadic());
                     }
                     for (final var property : classExport.properties()) {
                         System.out.println("  public " + (property.mutating() ? "mut " : "")
@@ -103,8 +109,10 @@ public final class ZeronLibraryIndexDump {
                     for (final var method : contract.methods()) {
                         System.out.println("  " + (method.defaultMethod() ? "default " : "")
                                 + (method.mutating() ? "mut " : "") + method.name()
-                                + formatParameters(method.signature()) + ": "
+                                + formatParameters(method.signature(), method.variadic()) + ": "
                                 + formatType(method.signature().returnType()));
+                        printMinimumArity(method.signature(), method.minimumArity(), method.variadic());
+                        printVariadic(method.variadic());
                     }
                     for (final var property : contract.properties()) {
                         System.out.println("  " + (property.mutating() ? "mut " : "")
@@ -113,6 +121,18 @@ public final class ZeronLibraryIndexDump {
                 }
             }
         }
+    }
+
+    private static void printMinimumArity(final FunctionDescriptor signature, final int minimumArity,
+                                          final boolean variadic) {
+        final var fixedArity = signature.arity() - (variadic ? 1 : 0);
+        if (minimumArity < fixedArity) {
+            System.out.println("    Minimum arity: " + minimumArity);
+        }
+    }
+
+    private static void printVariadic(final boolean variadic) {
+        if (variadic) System.out.println("    Variadic: yes");
     }
 
     private static String namespaceLabel(final String namespaceName) {
@@ -136,10 +156,16 @@ public final class ZeronLibraryIndexDump {
                 .collect(Collectors.joining(", ", "<", ">"));
     }
 
-    private static String formatParameters(final FunctionDescriptor function) {
-        return function.parameters().stream()
-                .map(ZeronLibraryIndexDump::formatType)
-                .collect(Collectors.joining(", ", "(", ")"));
+    private static String formatParameters(final FunctionDescriptor function, final boolean variadic) {
+        final var fixedArity = function.arity() - (variadic ? 1 : 0);
+        final var parameters = new ArrayList<String>(function.arity());
+        for (int i = 0; i < function.arity(); i++) {
+            final var type = function.parameters().get(i);
+            parameters.add(variadic && i == fixedArity
+                    ? formatType(((ArrayDescriptor) type).elementType()) + "..."
+                    : formatType(type));
+        }
+        return parameters.stream().collect(Collectors.joining(", ", "(", ")"));
     }
 
     private static String formatType(final TypeDescriptor type) {

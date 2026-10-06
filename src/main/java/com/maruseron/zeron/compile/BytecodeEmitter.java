@@ -54,6 +54,7 @@ final class BytecodeEmitter {
                     .anyMatch(declaration -> declaration instanceof Stmt.FunctionDeclaration
                         || declaration instanceof Stmt.Var)
                     || isEntryHolder && hasNamespaceValues
+                    || isEntryHolder && !context.initializationPlan.order().isEmpty()
                     || (isEntryHolder && !context.lambdaPlan.lambdaImplementations().isEmpty());
             if ((unitIndex != 0 || context.libraryBuild) && !hasTopLevelStorage) continue;
             final var holderPath = outputPath(context, holderName);
@@ -93,8 +94,10 @@ final class BytecodeEmitter {
                 name -> context.symbols.getFunctionType(context.resolution.functionSymbolToken(name)),
                 variable -> context.symbols.getSymbol(
                         context.resolution.topLevelValueSymbol(variable)).type(),
+                context.metadata::valueOwner,
+                context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v8.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v12.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -592,12 +595,26 @@ final class BytecodeEmitter {
             final var runtimeType = functionType.isGeneric()
                     ? (FunctionDescriptor) TypeSubstitution.erase(functionType)
                     : functionType;
-            for (int i = 0; i < call.arguments.size(); i++) {
-                emitExpr(context, composer, call.arguments.get(i));
-                emitConversion(context, composer, context.lastEmittedType, functionType.parameters().get(i));
-            }
+            if (call.variadicElementType() != null) {
+                final var fixedArity = call.variadicFixedArity();
+                emitVariadicArguments(context, composer, call.arguments, runtimeType,
+                        fixedArity, call.variadicElementType());
+                final var invokedType = call.arguments.size() < fixedArity
+                        ? prefixFunctionType(runtimeType, call.arguments.size())
+                        : runtimeType;
                 composer.invokestatic(ClassDesc.of(context.metadata.functionOwner(functionName)),
-                    functionName.substring(functionName.lastIndexOf('.') + 1), toJavaMethodDescriptor(runtimeType));
+                        functionName.substring(functionName.lastIndexOf('.') + 1),
+                        toJavaMethodDescriptor(invokedType));
+            } else {
+                for (int i = 0; i < call.arguments.size(); i++) {
+                    emitExpr(context, composer, call.arguments.get(i));
+                    emitConversion(context, composer, context.lastEmittedType, functionType.parameters().get(i));
+                }
+                final var invokedType = prefixFunctionType(runtimeType, call.arguments.size());
+                composer.invokestatic(ClassDesc.of(context.metadata.functionOwner(functionName)),
+                        functionName.substring(functionName.lastIndexOf('.') + 1),
+                        toJavaMethodDescriptor(invokedType));
+            }
             if (functionType.isGeneric()) {
                 final var instantiated = TypeSubstitution.erase(call.getType());
                 emitConversion(context, composer, runtimeType.returnType(), instantiated);
@@ -620,9 +637,14 @@ final class BytecodeEmitter {
                 ? (FunctionDescriptor) TypeSubstitution.erase(functionType)
                 : functionType;
         emitVariable(context, composer, call.resolvedSymbolToken());
-        for (int i = 0; i < call.arguments.size(); i++) {
-            emitExpr(context, composer, call.arguments.get(i));
-            emitConversion(context, composer, context.lastEmittedType, runtimeType.parameters().get(i));
+        if (call.variadicElementType() != null) {
+            emitVariadicArguments(context, composer, call.arguments, runtimeType,
+                    call.variadicFixedArity(), call.variadicElementType());
+        } else {
+            for (int i = 0; i < call.arguments.size(); i++) {
+                emitExpr(context, composer, call.arguments.get(i));
+                emitConversion(context, composer, context.lastEmittedType, runtimeType.parameters().get(i));
+            }
         }
         composer.invokeinterface(TypeDescriptor.toJavaClassDesc(runtimeType), "invoke",
                 toJavaMethodDescriptor(runtimeType));
@@ -739,10 +761,20 @@ final class BytecodeEmitter {
                 if (namedConstructor != null) {
                 final var erasedFactory = (FunctionDescriptor) TypeSubstitution.erase(
                     namedConstructor.typeDescriptor());
-                for (int i = 0; i < call.arguments.size(); i++) {
-                    emitExpr(context, composer, call.arguments.get(i));
-                    emitConversion(context, composer, context.lastEmittedType,
-                        TypeSubstitution.erase(namedConstructor.typeDescriptor().parameters().get(i)));
+                if (call.variadicElementType() != null) {
+                    final var resolvedFactory = call.resolvedDescriptor() == null
+                            ? namedConstructor.typeDescriptor()
+                            : call.resolvedDescriptor();
+                    emitVariadicArguments(context, composer, call.arguments,
+                            (FunctionDescriptor) TypeSubstitution.erase(resolvedFactory),
+                            call.variadicFixedArity(),
+                            TypeSubstitution.erase(call.variadicElementType()));
+                } else {
+                    for (int i = 0; i < call.arguments.size(); i++) {
+                        emitExpr(context, composer, call.arguments.get(i));
+                        emitConversion(context, composer, context.lastEmittedType,
+                            TypeSubstitution.erase(namedConstructor.typeDescriptor().parameters().get(i)));
+                    }
                 }
                 composer.invokestatic(ClassDesc.of(call.resolvedClassName()), call.name.lexeme(),
                     toJavaMethodDescriptor(erasedFactory));
@@ -775,17 +807,28 @@ final class BytecodeEmitter {
 
         if (!receiverOnStack) emitExpr(context, composer, call.receiver);
         if (call.receiverRequiresCast()) composer.checkcast(ClassDesc.of(ownerName));
-        for (int i = 0; i < call.arguments.size(); i++) {
-            emitExpr(context, composer, call.arguments.get(i));
-            emitConversion(context, composer, context.lastEmittedType,
-                TypeSubstitution.erase(descriptor.parameters().get(i)));
+        final var runtimeType = (FunctionDescriptor) TypeSubstitution.erase(descriptor);
+        if (call.variadicElementType() != null) {
+            emitVariadicArguments(context, composer, call.arguments, runtimeType,
+                    call.variadicFixedArity(), TypeSubstitution.erase(call.variadicElementType()));
+        } else {
+            for (int i = 0; i < call.arguments.size(); i++) {
+                emitExpr(context, composer, call.arguments.get(i));
+                emitConversion(context, composer, context.lastEmittedType,
+                    TypeSubstitution.erase(descriptor.parameters().get(i)));
+            }
         }
+        final var invokedType = call.variadicElementType() != null
+                ? call.arguments.size() < call.variadicFixedArity()
+                    ? prefixFunctionType(runtimeType, call.arguments.size())
+                    : runtimeType
+                : prefixFunctionType(descriptor, call.arguments.size());
         if (contractMethod != null) {
             composer.invokeinterface(ClassDesc.of(ownerName), call.name.lexeme(),
-                    toJavaMethodDescriptor(descriptor));
+                    toJavaMethodDescriptor(invokedType));
         } else if (!classMethod.isPublic() && context.emittingLambdaImplementation
                 && !isSamePackage(ownerName, context.mainClassName)) {
-            final var erasedDescriptor = (FunctionDescriptor) TypeSubstitution.erase(descriptor);
+            final var erasedDescriptor = (FunctionDescriptor) TypeSubstitution.erase(invokedType);
             final var bridgeParameters = new ArrayList<TypeDescriptor>();
             bridgeParameters.add(TypeDescriptor.of(ownerName));
             bridgeParameters.addAll(erasedDescriptor.parameters());
@@ -793,14 +836,51 @@ final class BytecodeEmitter {
                     toJavaMethodDescriptor(erasedDescriptor, bridgeParameters));
         } else if (!classMethod.isPublic() && !context.emittingLambdaImplementation) {
             composer.invokespecial(ClassDesc.of(ownerName), call.name.lexeme(),
-                    toJavaMethodDescriptor(descriptor));
+                    toJavaMethodDescriptor(invokedType));
         } else {
             composer.invokevirtual(ClassDesc.of(ownerName), call.name.lexeme(),
-                    toJavaMethodDescriptor(descriptor));
+                    toJavaMethodDescriptor(invokedType));
         }
         final var erasedReturnType = TypeSubstitution.erase(descriptor.returnType());
         emitConversion(context, composer, erasedReturnType, resolvedDescriptor.returnType());
         context.lastEmittedType = resolvedDescriptor.returnType();
+    }
+
+    private static FunctionDescriptor prefixFunctionType(final FunctionDescriptor functionType,
+                                                          final int arity) {
+        return TypeDescriptor.functionOf(functionType.name(), functionType.returnType(),
+                functionType.parameters().subList(0, arity).toArray(TypeDescriptor[]::new));
+    }
+
+    private static void emitVariadicArguments(final CompilationContext context,
+                                              final CodeBuilder composer,
+                                              final List<Expr> arguments,
+                                              final FunctionDescriptor fullType,
+                                              final int fixedArity,
+                                              final TypeDescriptor elementType) {
+        if (arguments.size() < fixedArity) {
+            for (int i = 0; i < arguments.size(); i++) {
+                emitExpr(context, composer, arguments.get(i));
+                emitConversion(context, composer, context.lastEmittedType, fullType.parameters().get(i));
+            }
+            return;
+        }
+        final var suppliedFixed = Math.min(arguments.size(), fixedArity);
+        for (int i = 0; i < suppliedFixed; i++) {
+            emitExpr(context, composer, arguments.get(i));
+            emitConversion(context, composer, context.lastEmittedType, fullType.parameters().get(i));
+        }
+        final var count = Math.max(0, arguments.size() - fixedArity);
+        composer.ldc(count);
+        composer.anewarray(ClassDesc.of("java.lang.Object"));
+        for (int i = 0; i < count; i++) {
+            composer.dup();
+            composer.ldc(i);
+            emitExpr(context, composer, arguments.get(fixedArity + i));
+            emitConversion(context, composer, context.lastEmittedType, elementType);
+            emitBox(context, composer, context.lastEmittedType);
+            composer.aastore();
+        }
     }
 
     private static void emitJavaMemberCall(CompilationContext context, final CodeBuilder composer,
@@ -990,8 +1070,7 @@ final class BytecodeEmitter {
                 final var binding = context.symbols.getAnySymbol(name);
                 if (binding.lvt() == SymbolTable.GLOBAL) {
                     final var owner = ClassDesc.of(holderForDeclaration(context, binding.declaration()));
-                    if (binding.declaration() instanceof Stmt.Var variable
-                            && requiresTopLevelValueAccessor(context, variable)) {
+                    if (binding.declaration() instanceof Stmt.Var variable) {
                         composer.invokestatic(owner, DeclarationEmitter.topLevelValueAccessorName(variable.name().lexeme()),
                                 MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(binding.type())));
                     } else {
@@ -1013,8 +1092,7 @@ final class BytecodeEmitter {
         }
         if (binding.lvt() == SymbolTable.GLOBAL) {
             final var owner = ClassDesc.of(holderForDeclaration(context, binding.declaration()));
-            if (binding.declaration() instanceof Stmt.Var variable
-                    && requiresTopLevelValueAccessor(context, variable)) {
+            if (binding.declaration() instanceof Stmt.Var variable) {
                 composer.invokestatic(owner, DeclarationEmitter.topLevelValueAccessorName(variable.name().lexeme()),
                         MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(binding.type())));
             } else {
@@ -1035,12 +1113,6 @@ final class BytecodeEmitter {
         return binding.declaration() instanceof Stmt.Var variable
                 ? variable.name().lexeme()
                 : fallback.lexeme();
-    }
-
-    private static boolean requiresTopLevelValueAccessor(final CompilationContext context,
-                                                          final Stmt.Var variable) {
-        return context.initializationPlan.initializerNames().containsKey(variable)
-                || holderForDeclaration(context, variable).contains("$zeron$Namespace$");
     }
 
     private static String holderForDeclaration(CompilationContext context, final Stmt declaration ){

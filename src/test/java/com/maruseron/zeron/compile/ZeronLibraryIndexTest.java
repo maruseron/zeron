@@ -5,6 +5,7 @@ import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.analize.ResolutionService;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.domain.ZeronLibraryJar;
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
@@ -12,7 +13,9 @@ import org.junit.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.net.URLClassLoader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.List;
 import java.util.UUID;
 import java.util.jar.JarEntry;
@@ -20,6 +23,7 @@ import java.util.jar.JarOutputStream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -49,7 +53,7 @@ public final class ZeronLibraryIndexTest {
                     public read(): T = this.payload;
                 }
                 """.formatted(libraryPackage));
-        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v8.bin");
+        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v12.bin");
 
         try {
             final var compiler = CompilationService.forCompilationUnits(
@@ -93,7 +97,7 @@ public final class ZeronLibraryIndexTest {
         final var libraryPackage = "sealedartifact" + suffix;
         final var appPackage = "sealedclient" + suffix;
         final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-sealed-library-");
-        final var indexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
+        final var indexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
         final var library = parse("Outcome.zn", """
                 package %s;
                 public sealed contract Outcome<T> permits Success<T>, Failure<T> {
@@ -128,7 +132,7 @@ public final class ZeronLibraryIndexTest {
             libraryCompiler.compile();
             copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
             Files.createDirectories(indexPath.getParent());
-            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v8.bin"), indexPath);
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v12.bin"), indexPath);
 
             final var compiledLibrary = ZeronLibraryIndex.readFromDirectory(libraryRoot);
             deleteTree(Path.of("dist"));
@@ -198,6 +202,122 @@ public final class ZeronLibraryIndexTest {
     }
 
     @Test
+    public void variadicCallableMetadataSurvivesSeparateLibraryCompilation() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var contractPackage = "variadicapi" + suffix;
+        final var implementationPackage = "variadicimpl" + suffix;
+        final var appPackage = "variadicclient" + suffix;
+        final var contractRoot = Files.createTempDirectory(Path.of("target"), "zeron-variadic-api-");
+        final var implementationRoot = Files.createTempDirectory(Path.of("target"), "zeron-variadic-impl-");
+        final var contract = parse("Metric.zn", """
+                package %s;
+                public contract Metric {
+                    measure(prefix: Int = 4, values: Int...): Int;
+                }
+                """.formatted(contractPackage));
+        final var implementation = parse("Counter.zn", """
+                package %s;
+                import %s.Metric;
+                public fn size(prefix: Int = 5, values: Int...): Int = prefix + values.length;
+                public class Counter is Metric {
+                    values: Array<Int>;
+                    public constructor of(values: Int...) = Counter.new(values);
+                    public constructor withPrefix(prefix: Int, values: Int...) {
+                        let result = Counter.new(values);
+                        return result;
+                    }
+                    public measure(prefix: Int, values: Int...): Int =
+                        this.values.length + prefix + values.length;
+                }
+                """.formatted(implementationPackage, contractPackage));
+        final var app = parse("Main.zn", """
+                package %s;
+                import %s.Metric;
+                import %s.Counter;
+                import %s.size;
+                fn fromFunction(): Int = size();
+                fn fromFunctionMany(): Int = size(8, 1, 2);
+                fn fromClassDefault(): Int = Counter.of().measure();
+                fn fromNamed(): Int = Counter.of(1, 2, 3).measure(8, 9);
+                fn fromNamedPrefix(): Int = Counter.withPrefix(0, 1, 2).measure(8, 9);
+                fn fromContract(metric: Metric): Int = metric.measure(8, 1, 2);
+                fn makeCounter(): Metric = Counter.of();
+                """.formatted(appPackage, contractPackage, implementationPackage, implementationPackage));
+
+        try {
+            deleteTree(Path.of("dist"));
+            final var contractCompiler = CompilationService.forCompilationUnits(
+                    List.of(contract), contractPackage + ".Builder", contractPackage);
+            contractCompiler.resolve();
+            contractCompiler.compile();
+            copyTree(Path.of("dist", contractPackage), contractRoot.resolve(contractPackage));
+            final var contractIndexPath = contractRoot.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
+            Files.createDirectories(contractIndexPath.getParent());
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v12.bin"), contractIndexPath);
+            final var contractIndex = ZeronLibraryIndex.readFromDirectory(contractRoot);
+            final var exportedMetric = contractIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.ContractExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ContractExport.class::cast)
+                    .filter(export -> export.qualifiedName().equals(contractPackage + ".Metric"))
+                    .findFirst().orElseThrow();
+            assertTrue(exportedMetric.methods().getFirst().variadic());
+            deleteTree(Path.of("dist"));
+
+            final var implementationCompiler = CompilationService.forCompilationUnits(
+                    List.of(implementation), implementationPackage + ".Builder", implementationPackage,
+                    List.of(contractIndex));
+            implementationCompiler.resolve();
+            implementationCompiler.compile();
+            copyTree(Path.of("dist", implementationPackage), implementationRoot.resolve(implementationPackage));
+            final var implementationIndexPath = implementationRoot.resolve(
+                    Path.of("META-INF", "zeron", "api-v12.bin"));
+            Files.createDirectories(implementationIndexPath.getParent());
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v12.bin"), implementationIndexPath);
+            final var implementationIndex = ZeronLibraryIndex.readFromDirectory(implementationRoot);
+
+            final var function = implementationIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.FunctionExport.class::isInstance)
+                    .map(ZeronLibraryIndex.FunctionExport.class::cast)
+                    .filter(export -> export.qualifiedName().equals(implementationPackage + ".size"))
+                    .findFirst().orElseThrow();
+            assertTrue(function.variadic());
+            assertEquals(0, function.minimumArity());
+            final var exportedCounter = implementationIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.ClassExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ClassExport.class::cast)
+                    .filter(export -> export.qualifiedName().equals(implementationPackage + ".Counter"))
+                    .findFirst().orElseThrow();
+            assertTrue(exportedCounter.methods().getFirst().variadic());
+            assertTrue(exportedCounter.namedConstructors().stream()
+                    .allMatch(ZeronLibraryIndex.NamedConstructorExport::variadic));
+
+            deleteTree(Path.of("dist"));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(app), appPackage + ".Main", appPackage,
+                    List.of(contractIndex, implementationIndex));
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), contractRoot.toUri().toURL(),
+                    implementationRoot.toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass(appPackage + ".Main");
+                assertEquals(5, main.getMethod("fromFunction").invoke(null));
+                assertEquals(10, main.getMethod("fromFunctionMany").invoke(null));
+                assertEquals(4, main.getMethod("fromClassDefault").invoke(null));
+                assertEquals(12, main.getMethod("fromNamed").invoke(null));
+                assertEquals(11, main.getMethod("fromNamedPrefix").invoke(null));
+                final var metric = loader.loadClass(contractPackage + ".Metric");
+                assertEquals(10, main.getMethod("fromContract", metric)
+                        .invoke(null, main.getMethod("makeCounter").invoke(null)));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(contractRoot);
+            deleteTree(implementationRoot);
+        }
+    }
+
+    @Test
     public void readsJarIndexesAndRejectsMissingOrIncompatibleMetadata() throws Exception {
         final var temporaryRoot = Files.createTempDirectory(Path.of("target"), "zeron-library-jar-index-");
         final var indexPath = temporaryRoot.resolve("api.bin");
@@ -238,7 +358,7 @@ public final class ZeronLibraryIndexTest {
         final var libraryPackage = "library" + suffix;
         final var appPackage = "app" + suffix;
         final var entryName = "LibraryIndexMain" + suffix;
-        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v8.bin");
+        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v12.bin");
         final var mainPath = Path.of("dist", appPackage, entryName + ".class");
         final var boxPath = Path.of("dist", libraryPackage, "Box.class");
         final var contractPath = Path.of("dist", libraryPackage, "Echo.class");
@@ -423,7 +543,7 @@ public final class ZeronLibraryIndexTest {
                     return describe(item) + LibraryRenderer.new().render(item);
                 }
                 """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage));
-        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v8.bin");
+        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v12.bin");
 
         try {
             deleteTree(Path.of("dist"));
@@ -478,7 +598,7 @@ public final class ZeronLibraryIndexTest {
         @Test
         public void rejectsLibraryIndexesBuiltAgainstAnotherStandardLibraryVersion() throws Exception {
                 final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-incompatible-library-");
-                final var indexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
+                final var indexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
                 try {
                         new ZeronLibraryIndex(StandardLibrary.API_VERSION + 1, List.of()).writeTo(indexPath);
                         assertThrows(IOException.class, () -> ZeronLibraryIndex.readFromDirectory(libraryRoot));
@@ -507,7 +627,7 @@ public final class ZeronLibraryIndexTest {
                 final var libraryMainName = libraryPackage + ".LibraryBuilder" + suffix;
                 final var clientMainName = appPackage + ".LibraryConsumer" + suffix;
                 final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-library-classes-");
-                final var libraryIndexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
+                final var libraryIndexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
                 final var libraryUnit = parse("library/Api.zn", """
                                 package %s;
                                 public contract Echo<T> {
@@ -548,7 +668,7 @@ public final class ZeronLibraryIndexTest {
 
                         copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
                         Files.createDirectories(libraryIndexPath.getParent());
-                        Files.copy(Path.of("dist", "META-INF", "zeron", "api-v8.bin"), libraryIndexPath);
+                        Files.copy(Path.of("dist", "META-INF", "zeron", "api-v12.bin"), libraryIndexPath);
                         final var library = ZeronLibraryIndex.readFromDirectory(libraryRoot);
 
                         deleteTree(Path.of("dist"));
@@ -612,6 +732,94 @@ public final class ZeronLibraryIndexTest {
                 }
         }
 
+        @Test
+        public void publicTopLevelLibraryValuesInitializeLazilyOnFirstRead() throws Exception {
+                final var suffix = UUID.randomUUID().toString().replace("-", "");
+                final var libraryPackage = "valueprovider" + suffix;
+                final var appPackage = "valueconsumer" + suffix;
+                final var libraryMainName = libraryPackage + ".LibraryEntry";
+                final var clientMainName = appPackage + ".LibraryConsumer";
+                final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-library-");
+                final var libraryJar = Path.of("target", "zeron-value-library-" + suffix + ".jar");
+                final var entry = parse("Entry.zn", """
+                                package %s;
+                                fn placeholder(): Int = 0;
+                                """.formatted(libraryPackage));
+                final var values = parse("Values.zn", """
+                                package %s;
+                                import zeron.io.println;
+                                let mut counter = 0;
+                                fn initializeAnswer(): Int {
+                                    counter += 1;
+                                    println("library initialized");
+                                    return 42;
+                                }
+                                public let answer = initializeAnswer();
+                                """.formatted(libraryPackage));
+
+                try {
+                        deleteTree(Path.of("dist"));
+                        final var libraryCompiler = CompilationService.forCompilationUnits(
+                                        List.of(entry, values), libraryMainName, libraryPackage);
+                        libraryCompiler.resolve();
+                        libraryCompiler.compile();
+
+                        final var indexPath = Path.of("dist", "META-INF", "zeron", "api-v12.bin");
+                        final var index = ZeronLibraryIndex.readFrom(indexPath);
+                        final var exportedValue = index.declarations().stream()
+                                        .filter(ZeronLibraryIndex.ValueExport.class::isInstance)
+                                        .map(ZeronLibraryIndex.ValueExport.class::cast)
+                                        .filter(value -> value.qualifiedName().equals(libraryPackage + ".answer"))
+                                        .findFirst()
+                                        .orElseThrow();
+                        assertNull(exportedValue.namespaceName());
+                        assertEquals(libraryMainName, exportedValue.initializationOwner());
+
+                        copyTree(Path.of("dist"), libraryRoot);
+                        ZeronLibraryJar.write(libraryRoot, libraryJar);
+                        final var jarIndex = ZeronLibraryIndex.readFromJar(libraryJar);
+                        deleteTree(Path.of("dist"));
+                        final var client = parse("Consumer.zn", """
+                                        package %s;
+                                        import %s.answer as importedAnswer;
+                                        import %s.*;
+                                        fn untouched(): Int = 7;
+                                        fn result(): Int = importedAnswer;
+                                        fn starResult(): Int = answer;
+                                        """.formatted(appPackage, libraryPackage, libraryPackage));
+                        final var clientCompiler = CompilationService.forCompilationUnits(
+                                        List.of(client), clientMainName, appPackage, List.of(jarIndex));
+                        clientCompiler.resolve();
+                        clientCompiler.compile();
+
+                        final var originalOutput = System.out;
+                        final var capturedOutput = new ByteArrayOutputStream();
+                        try (final var redirectedOutput = new PrintStream(capturedOutput)) {
+                                System.setOut(redirectedOutput);
+                                try (final var loader = new URLClassLoader(new java.net.URL[]{
+                                        Path.of("dist").toUri().toURL(), libraryJar.toUri().toURL()},
+                                                getClass().getClassLoader())) {
+                                        final var consumer = loader.loadClass(clientMainName);
+                                        assertEquals(7, consumer.getMethod("untouched").invoke(null));
+                                        assertEquals("", capturedOutput.toString());
+                                        assertEquals(42, consumer.getMethod("result").invoke(null));
+                                        assertEquals("library initialized" + System.lineSeparator(),
+                                                        capturedOutput.toString());
+                                        assertEquals(42, consumer.getMethod("result").invoke(null));
+                                        assertEquals(42, consumer.getMethod("starResult").invoke(null));
+                                        assertEquals("library initialized" + System.lineSeparator(),
+                                                        capturedOutput.toString());
+                                }
+                        } finally {
+                                System.setOut(originalOutput);
+                        }
+                } finally {
+                        deleteTree(Path.of("dist"));
+                        deleteTree(libraryRoot);
+                        Files.deleteIfExists(libraryJar);
+                }
+        }
+
         private static void copyTree(final Path source, final Path target) throws Exception {
                 try (final var paths = Files.walk(source)) {
                         for (final var path : paths.toList()) {
@@ -624,7 +832,7 @@ public final class ZeronLibraryIndexTest {
 
         private static void writeJarWithIndex(final Path jarPath, final byte[] indexBytes) throws IOException {
                 try (final var output = new JarOutputStream(Files.newOutputStream(jarPath))) {
-                        output.putNextEntry(new JarEntry("META-INF/zeron/api-v8.bin"));
+                        output.putNextEntry(new JarEntry("META-INF/zeron/api-v12.bin"));
                         output.write(indexBytes);
                         output.closeEntry();
                 }

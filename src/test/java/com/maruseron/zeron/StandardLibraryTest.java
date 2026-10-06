@@ -142,6 +142,231 @@ public final class StandardLibraryTest {
     }
 
     @Test
+    public void trailingDefaultsEvaluateInOrderForFunctionsAndContractMethods() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "defaults" + suffix;
+        final var source = Files.createTempFile(Path.of("target"), "Defaults" + suffix, ".zn");
+        Files.writeString(source, """
+                package %s;
+                let mut evaluations = 0;
+                fn next(value: Int): Int {
+                    evaluations += 1;
+                    return value;
+                }
+                fn compute(first: Int, second: Int = next(first + 1),
+                           third: Int = next(second + 1)): Int = third;
+                fn choose<T>(value: T, fallback: T = value): T = fallback;
+                contract Incrementer {
+                    increment(value: Int, amount: Int = value + 2): Int;
+                }
+                class Counter is Incrementer {
+                    public increment(value: Int, amount: Int): Int = value + amount;
+                }
+                class LocalCounter {
+                    public increment(value: Int, amount: Int = 3): Int = value + amount;
+                    public choose<T>(value: T, fallback: T = value): T = fallback;
+                }
+                fn makeCounter(): Incrementer = Counter.new();
+                fn throughContract(counter: Incrementer): Int = counter.increment(10);
+                fn throughClass(): Int = Counter.new().increment(10);
+                fn throughLocalMethod(): Int = LocalCounter.new().increment(10);
+                fn genericFunctionDefault(): Int = choose<Int>(17);
+                fn genericMethodDefault(): Int = LocalCounter.new().choose<Int>(19);
+                fn evaluationCount(): Int = evaluations;
+                """.formatted(packageName));
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli(source.toString()));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + "." +
+                        source.getFileName().toString().replaceFirst("\\.zn$", ""));
+                assertEquals(4, main.getMethod("compute", int.class).invoke(null, 2));
+                assertEquals(2, main.getMethod("evaluationCount").invoke(null));
+                final var contract = loader.loadClass(packageName + ".Incrementer");
+                final var counter = main.getMethod("makeCounter").invoke(null);
+                assertEquals(22, main.getMethod("throughContract", contract).invoke(null, counter));
+                assertEquals(22, main.getMethod("throughClass").invoke(null));
+                assertEquals(13, main.getMethod("throughLocalMethod").invoke(null));
+                assertEquals(17, main.getMethod("genericFunctionDefault").invoke(null));
+                assertEquals(19, main.getMethod("genericMethodDefault").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            Files.deleteIfExists(source);
+        }
+    }
+
+    @Test
+    public void variadicParametersPackDirectCallsAndKeepArrayFunctionValues() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "variadic" + suffix;
+        final var source = Files.createTempFile(Path.of("target"), "Variadic" + suffix, ".zn");
+        Files.writeString(source, """
+                package %s;
+                import zeron.collections.List;
+                fn tally(prefix: Int, values: Int...): Int = prefix + values.length;
+                fn count<T>(values: T...): Int = values.length;
+                fn arrayCount(values: Int...): Int = values.length;
+                fn withDefault(prefix: Int = 6, values: Int...): Int = prefix + values.length;
+                contract Metric {
+                    measure(prefix: Int = 4, values: Int...): Int;
+                }
+                class Counter is Metric {
+                    public measure(prefix: Int, values: Int...): Int = prefix + values.length;
+                }
+                class LocalCounter {
+                    public measure(prefix: Int = 2, values: Int...): Int = prefix + values.length;
+                }
+                fn makeCounter(): Metric = Counter.new();
+                fn empty(): Int = tally(10);
+                fn many(): Int = tally(10, 1, 2, 3);
+                fn generic(): Int = count(1, 2, 3);
+                fn withDefaultEmpty(): Int = withDefault();
+                fn withDefaultMany(): Int = withDefault(9, 1, 2);
+                fn defaults(): Int = Counter.new().measure();
+                fn contractCall(metric: Metric): Int = metric.measure(7, 1, 2);
+                fn localDefault(): Int = LocalCounter.new().measure();
+                fn localMany(): Int = LocalCounter.new().measure(3, 1, 2);
+                fn indirect(): Int {
+                    let operation: (Array<Int>) -> Int = arrayCount;
+                    return operation([1, 2, 3]);
+                }
+                fn listEmpty(): Int = List<Int>.of().size;
+                fn listMany(): Int = List<Int>.of(1, 2, 3).size;
+                """.formatted(packageName));
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli(source.toString()));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + "." +
+                        source.getFileName().toString().replaceFirst("\\.zn$", ""));
+                assertEquals(10, main.getMethod("empty").invoke(null));
+                assertEquals(13, main.getMethod("many").invoke(null));
+                assertEquals(3, main.getMethod("generic").invoke(null));
+                assertEquals(6, main.getMethod("withDefaultEmpty").invoke(null));
+                assertEquals(11, main.getMethod("withDefaultMany").invoke(null));
+                assertEquals(4, main.getMethod("defaults").invoke(null));
+                assertEquals(2, main.getMethod("localDefault").invoke(null));
+                assertEquals(5, main.getMethod("localMany").invoke(null));
+                final var metric = loader.loadClass(packageName + ".Metric");
+                final var counter = main.getMethod("makeCounter").invoke(null);
+                assertEquals(9, main.getMethod("contractCall", metric).invoke(null, counter));
+                assertEquals(3, main.getMethod("indirect").invoke(null));
+                assertEquals(0, main.getMethod("listEmpty").invoke(null));
+                assertEquals(3, main.getMethod("listMany").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            Files.deleteIfExists(source);
+        }
+    }
+
+    @Test
+    public void contractImplementationsMustPreserveVariadicParameterIdentity() {
+        final var packageName = "variadicMismatch" + UUID.randomUUID().toString().replace("-", "");
+        final var unit = parse("Mismatch.zn", """
+                package %s;
+                contract Collector {
+                    collect(values: Int...): Int;
+                }
+                class InvalidCollector is Collector {
+                    public collect(values: Array<Int>): Int = values.length;
+                }
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(unit)),
+                packageName + ".Mismatch", packageName);
+
+        assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
+    @Test
+    public void defaultsCannotReferToLaterParameters() {
+        final var packageName = "invalidDefaults" + UUID.randomUUID().toString().replace("-", "");
+        final var source = parse("InvalidDefaults.zn", """
+                package %s;
+                fn invalid(first: Int = second, second: Int = 1): Int = first;
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(source)),
+                packageName + ".InvalidDefaults", packageName);
+
+        assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
+    @Test
+    public void externalFunctionDefaultsUseTheRegisteredFullArityBinding() throws Exception {
+        final var packageName = "externalDefaults" + UUID.randomUUID().toString().replace("-", "");
+        final var source = parse("ExternalDefaults.zn", """
+                package %s;
+                external fn nativeAdd(left: Int, right: Int = left + 5): Int;
+                external fn nativeCount(prefix: Int, values: Int...): Int;
+                fn result(): Int = nativeAdd(7);
+                fn variadicResult(): Int = nativeCount(10, 1, 2, 3);
+                """.formatted(packageName));
+        final var signature = com.maruseron.zeron.domain.TypeDescriptor.functionOf(
+                "nativeAdd",
+                com.maruseron.zeron.domain.TypeDescriptor.ofInt(),
+                com.maruseron.zeron.domain.TypeDescriptor.ofInt(),
+                com.maruseron.zeron.domain.TypeDescriptor.ofInt());
+        final var variadicSignature = com.maruseron.zeron.domain.TypeDescriptor.functionOf(
+                "nativeCount",
+                com.maruseron.zeron.domain.TypeDescriptor.ofInt(),
+                com.maruseron.zeron.domain.TypeDescriptor.ofInt(),
+                com.maruseron.zeron.domain.TypeDescriptor.arrayOf(
+                        com.maruseron.zeron.domain.TypeDescriptor.ofInt()));
+        final var bindings = com.maruseron.zeron.domain.FunctionBindingRegistry.of(java.util.Map.of(
+                packageName + ".nativeAdd",
+                new com.maruseron.zeron.domain.FunctionBindingRegistry.Binding(signature,
+                        new com.maruseron.zeron.domain.FunctionBindingRegistry.StaticMethod(
+                                java.lang.constant.ClassDesc.of("com.maruseron.zeron.StandardLibraryTest"),
+                                "nativeAdd",
+                                java.lang.constant.MethodTypeDesc.of(
+                                        java.lang.constant.ConstantDescs.CD_int,
+                                        java.lang.constant.ConstantDescs.CD_int,
+                                        java.lang.constant.ConstantDescs.CD_int))),
+                packageName + ".nativeCount",
+                new com.maruseron.zeron.domain.FunctionBindingRegistry.Binding(variadicSignature,
+                        new com.maruseron.zeron.domain.FunctionBindingRegistry.StaticMethod(
+                                java.lang.constant.ClassDesc.of("com.maruseron.zeron.StandardLibraryTest"),
+                                "nativeCount",
+                                java.lang.constant.MethodTypeDesc.of(
+                                        java.lang.constant.ConstantDescs.CD_int,
+                                        java.lang.constant.ConstantDescs.CD_int,
+                                        java.lang.constant.ConstantDescs.CD_Object.arrayType())))));
+
+        try {
+            deleteTree(Path.of("dist"));
+            final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                    packageName + ".ExternalDefaults", packageName, List.of(), true,
+                    List.of(Path.of("target", "test-classes")), bindings);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(19, loader.loadClass(packageName + ".ExternalDefaults")
+                        .getMethod("result").invoke(null));
+                assertEquals(13, loader.loadClass(packageName + ".ExternalDefaults")
+                        .getMethod("variadicResult").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    public static int nativeAdd(final int left, final int right) {
+        return left + right;
+    }
+
+    public static int nativeCount(final int prefix, final Object[] values) {
+        return prefix + values.length;
+    }
+
+    @Test
     public void bundledSourcesFollowTheirPackageDirectoryStructure() throws Exception {
         final var sourceRoot = Path.of("src", "main", "resources", "stdlib");
         final var expectedSources = new ArrayList<String>();
@@ -1209,6 +1434,17 @@ public final class StandardLibraryTest {
         final var libraryUnit = parse("Math.zn", """
                 package %s;
                 public fn identity<T>(value: T): T = value;
+                public fn add(base: Int, amount: Int = 7): Int = base + amount;
+                public contract Incrementer {
+                    increment(value: Int, amount: Int = value + 2): Int;
+                }
+                public class Counter is Incrementer {
+                    public increment(value: Int, amount: Int): Int = value + amount;
+                }
+                public class LocalCounter {
+                    public increment(value: Int, amount: Int = 3): Int = value + amount;
+                }
+                public fn counter(): Counter = Counter.new();
                 """.formatted(libraryPackage));
 
         try {
@@ -1219,23 +1455,34 @@ public final class StandardLibraryTest {
             libraryCompiler.compile();
 
             copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
-            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
+            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
             Files.createDirectories(libraryIndex.getParent());
-            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v8.bin"), libraryIndex);
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v12.bin"), libraryIndex);
 
             deleteTree(Path.of("dist"));
             Files.writeString(clientSource, """
                     package %s;
                     import %s.identity as identity;
-                    fn result(): Int = identity<Int>(63);
-                    """.formatted(appPackage, libraryPackage));
+                    import %s.add;
+                    import %s.Counter;
+                    import %s.LocalCounter;
+                    import %s.counter;
+                    fn result(): Int = identity<Int>(63) + add(10);
+                    fn contractCall(): Int = counter().increment(10);
+                    fn classCall(): Int = Counter.new().increment(10);
+                    fn defaultMethodCall(): Int = LocalCounter.new().increment(10);
+                    """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage,
+                            libraryPackage, libraryPackage));
             assertEquals(0, Zeron.runCli(clientSource.toString(), "--library", libraryRoot.toString()));
 
             try (final var loader = new URLClassLoader(new java.net.URL[]{
                     Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()}, getClass().getClassLoader())) {
-                assertEquals(63, loader.loadClass(appPackage + "." +
-                        clientSource.getFileName().toString().replaceFirst("\\.zn$", ""))
-                        .getMethod("result").invoke(null));
+                final var main = loader.loadClass(appPackage + "." +
+                        clientSource.getFileName().toString().replaceFirst("\\.zn$", ""));
+                assertEquals(80, main.getMethod("result").invoke(null));
+                assertEquals(22, main.getMethod("contractCall").invoke(null));
+                assertEquals(22, main.getMethod("classCall").invoke(null));
+                assertEquals(13, main.getMethod("defaultMethodCall").invoke(null));
             }
         } finally {
             deleteTree(Path.of("dist"));
@@ -1276,7 +1523,7 @@ public final class StandardLibraryTest {
             assertEquals(0, Zeron.runCli(librarySource.toString(), "--jar-output", secondLibraryJar.toString()));
             assertArrayEquals(Files.readAllBytes(libraryJar), Files.readAllBytes(secondLibraryJar));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v8.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v12.bin") != null);
                 assertTrue(jar.stream().anyMatch(entry -> entry.getName().equals(
                         libraryPackage.replace('.', '/') + "/Answer.class")));
             }
@@ -1304,7 +1551,7 @@ public final class StandardLibraryTest {
         final var libraryJar = Path.of("target", "zeron-stdlib-" + suffix + ".jar");
         final var sourceFile = Path.of("target", "CompiledStdlibClient" + suffix + ".zn");
         final var entryName = sourceFile.getFileName().toString().replaceFirst("\\.zn$", "");
-        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v8.bin"));
+        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
         final var iterableClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterable.class"));
         final var iteratorClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterator.class"));
         final var arrayIteratorClass = libraryOutput.resolve(
@@ -1351,7 +1598,7 @@ public final class StandardLibraryTest {
             assertTrue(Files.exists(rangeClass));
             assertTrue(Files.exists(unitClass));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v8.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v12.bin") != null);
                 assertTrue(jar.getJarEntry("zeron/collections/Sequence.class") != null);
                 assertTrue(jar.getJarEntry("zeron/lang/Unit.class") != null);
             }

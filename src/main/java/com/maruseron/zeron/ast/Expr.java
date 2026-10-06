@@ -29,6 +29,8 @@ public sealed interface Expr {
         private String resolvedOwnerName;
         private boolean receiverRequiresCast;
         private JavaCallTarget javaCallTarget;
+        private TypeDescriptor variadicElementType;
+        private int variadicFixedArity = -1;
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -62,6 +64,12 @@ public sealed interface Expr {
         public void setReceiverRequiresCast(boolean value) { receiverRequiresCast = value; }
         public JavaCallTarget javaCallTarget() { return javaCallTarget; }
         public void setJavaCallTarget(final JavaCallTarget target) { javaCallTarget = target; }
+        public TypeDescriptor variadicElementType() { return variadicElementType; }
+        public int variadicFixedArity() { return variadicFixedArity; }
+        public void setVariadic(final TypeDescriptor elementType, final int fixedArity) {
+            variadicElementType = elementType;
+            variadicFixedArity = fixedArity;
+        }
     }
 
     final class Property implements Expr {
@@ -370,6 +378,8 @@ public sealed interface Expr {
         private Token resolvedSymbolToken;
         private MemberCall implicitMemberCall;
         private ResolvedIntrinsicOperation intrinsicOperation;
+        private TypeDescriptor variadicElementType;
+        private int variadicFixedArity = -1;
 
         public Call(Token callee, Token paren, List<Expr> arguments,
                     List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -401,6 +411,12 @@ public sealed interface Expr {
         public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }
         public void setIntrinsicOperation(final ResolvedIntrinsicOperation operation) {
             intrinsicOperation = operation;
+        }
+        public TypeDescriptor variadicElementType() { return variadicElementType; }
+        public int variadicFixedArity() { return variadicFixedArity; }
+        public void setVariadic(final TypeDescriptor elementType, final int fixedArity) {
+            variadicElementType = elementType;
+            variadicFixedArity = fixedArity;
         }
 
         public void setGenericFunctionType(final FunctionDescriptor functionType) {

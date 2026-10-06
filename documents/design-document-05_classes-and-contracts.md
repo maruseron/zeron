@@ -154,6 +154,10 @@ receiver explicitly. Returning an expression of type `&Class` is allowed; it nee
 `Class.new(...)` expression. Generic class arguments remain explicit at the call site. Named
 constructors do not overload, and their names share the class member namespace with fields and
 methods. They lower to static factory methods; only canonical `new` lowers to JVM `<init>`.
+Named-constructor parameters may end in one variadic `T...` parameter. The factory body receives
+that parameter as `Array<T>`, and direct factory calls pack all positional arguments after the
+fixed prefix. Defaults and spread arguments are not supported on named constructors. Canonical
+`new` parameters are still derived from fields and properties and do not support variadics.
 
 ### Mutation and references
 

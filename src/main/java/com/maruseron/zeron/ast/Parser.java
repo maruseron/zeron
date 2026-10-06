@@ -264,13 +264,33 @@ public final class Parser {
         consume(LEFT_PAREN, "Expect '(' after external function name.");
         final var parameterNames = new ArrayList<Token>();
         final var parameterTypes = new ArrayList<TypeDescriptor>();
+        final var defaultValues = new ArrayList<Expr>();
+        var hasDefault = false;
+        var variadic = false;
         if (!check(RIGHT_PAREN)) {
             do {
+                if (variadic) {
+                    throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A variadic parameter must be last.");
+                }
                 if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                         "Can't have more than 254 parameters.");
                 parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 consume(COLON, "Expect ':' after parameter name.");
-                parameterTypes.add(collectType());
+                final var parameterType = collectType();
+                variadic = match(ELLIPSIS);
+                parameterTypes.add(variadic ? TypeDescriptor.arrayOf(parameterType) : parameterType);
+                if (variadic && check(EQUAL)) {
+                    throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A variadic parameter cannot have a default.");
+                }
+                if (match(EQUAL)) {
+                    hasDefault = true;
+                    defaultValues.add(expression());
+                } else if (hasDefault && !variadic) {
+                    error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "Parameters with defaults must form a trailing suffix.");
+                }
             } while (match(COMMA));
         }
         consume(RIGHT_PAREN, "Expect ')' after parameters.");
@@ -279,7 +299,9 @@ public final class Parser {
         consume(SEMICOLON, "Expect ';' after external function declaration.");
         final var descriptor = TypeDescriptor.functionOf(name.lexeme(), returnType,
                 parameterTypes.toArray(TypeDescriptor[]::new));
-        return new Stmt.ExternalFunction(name, List.copyOf(parameterNames), descriptor, isPublic);
+        return new Stmt.ExternalFunction(name, List.copyOf(parameterNames), descriptor, isPublic,
+                List.copyOf(defaultValues), parameterNames.size() - (variadic ? 1 : 0)
+                        - defaultValues.size(), variadic);
     }
 
     private Stmt.ExternalClass externalClassDeclaration(final boolean isPublic) {
@@ -347,15 +369,35 @@ public final class Parser {
         try {
             final var parameterNames = new ArrayList<Token>();
             final var parameterTypes = new ArrayList<TypeDescriptor>();
+            final var defaultValues = new ArrayList<Expr>();
+            var hasDefault = false;
+            var variadic = false;
             if (!check(RIGHT_PAREN)) {
                 do {
+                    if (variadic) {
+                        throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "A variadic parameter must be last.");
+                    }
                     if (parameterNames.size() >= 254) {
                         error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                                 "Can't have more than 254 parameters.");
                     }
                     parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                     consume(COLON, "Expect ':' after parameter name.");
-                    parameterTypes.add(collectType());
+                    final var parameterType = collectType();
+                    variadic = match(ELLIPSIS);
+                    parameterTypes.add(variadic ? TypeDescriptor.arrayOf(parameterType) : parameterType);
+                    if (variadic && check(EQUAL)) {
+                        throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "A variadic parameter cannot have a default.");
+                    }
+                    if (match(EQUAL)) {
+                        hasDefault = true;
+                        defaultValues.add(expression());
+                    } else if (hasDefault && !variadic) {
+                        error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "Parameters with defaults must form a trailing suffix.");
+                    }
                 } while (match(COMMA));
             }
             consume(RIGHT_PAREN, "Expect ')' after parameters.");
@@ -382,7 +424,8 @@ public final class Parser {
 
             return new Stmt.Function(name, parameterNames,
                     TypeDescriptor.genericFunctionOf(name.lexeme(), returnType, parameterTypes,
-                        List.copyOf(typeParameters.values())), body, isPublic);
+                        List.copyOf(typeParameters.values())), body, isPublic, List.copyOf(defaultValues),
+                    parameterNames.size() - (variadic ? 1 : 0) - defaultValues.size(), variadic);
         } finally {
             levelMarker = enclosingLevelMarker;
         }
@@ -521,7 +564,9 @@ public final class Parser {
             final var signature = methodSignature(name, false,
                     List.copyOf(methodTypeParameters.values()));
             return new Stmt.Method(name, signature.parameters(), signature.typeDescriptor(),
-                    isPublic, isMutating, signature.body());
+                    isPublic, isMutating, signature.body(), signature.defaultValues(),
+                    signature.parameters().size() - (signature.variadic() ? 1 : 0)
+                            - signature.defaultValues().size(), signature.variadic());
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -601,13 +646,20 @@ public final class Parser {
         consume(LEFT_PAREN, "Expect '(' after named constructor name.");
         final var parameterNames = new ArrayList<Token>();
         final var parameterTypes = new ArrayList<TypeDescriptor>();
+        var variadic = false;
         if (!check(RIGHT_PAREN)) {
             do {
+                if (variadic) {
+                    throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A variadic parameter must be last.");
+                }
                 if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                         "Can't have more than 254 parameters.");
                 parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 consume(COLON, "Expect ':' after parameter name.");
-                parameterTypes.add(collectType());
+                final var parameterType = collectType();
+                variadic = match(ELLIPSIS);
+                parameterTypes.add(variadic ? TypeDescriptor.arrayOf(parameterType) : parameterType);
             } while (match(COMMA));
         }
         consume(RIGHT_PAREN, "Expect ')' after named constructor parameters.");
@@ -628,7 +680,7 @@ public final class Parser {
                 body = block();
             }
             return new Stmt.NamedConstructor(constructorName, List.copyOf(parameterNames), descriptor,
-                    isPublic, body);
+                    isPublic, body, variadic);
         } finally {
             levelMarker = enclosingLevelMarker;
         }
@@ -695,7 +747,9 @@ public final class Parser {
                             List.copyOf(methodTypeParameters.values()));
                     methods.add(new Stmt.ContractMethod(methodName, signature.parameters(),
                             signature.typeDescriptor(), isMutating, isDefault,
-                            isDefault ? signature.body() : List.of()));
+                            isDefault ? signature.body() : List.of(), signature.defaultValues(),
+                            signature.parameters().size() - (signature.variadic() ? 1 : 0)
+                                    - signature.defaultValues().size(), signature.variadic()));
                 } finally {
                     activeTypeParameters = enclosingMethodTypeParameters;
                 }
@@ -710,7 +764,7 @@ public final class Parser {
 
     private record ParsedMethod(List<Token> parameters,
                                 com.maruseron.zeron.domain.FunctionDescriptor typeDescriptor,
-                                List<Stmt> body) {}
+                                List<Stmt> body, List<Expr> defaultValues, boolean variadic) {}
 
     private ParsedMethod methodSignature(final Token name,
                                          final boolean isContract,
@@ -718,13 +772,33 @@ public final class Parser {
         consume(LEFT_PAREN, "Expect '(' after method name.");
         final var parameterNames = new ArrayList<Token>();
         final var parameterTypes = new ArrayList<TypeDescriptor>();
+        final var defaultValues = new ArrayList<Expr>();
+        var hasDefault = false;
+        var variadic = false;
         if (!check(RIGHT_PAREN)) {
             do {
+                if (variadic) {
+                    throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A variadic parameter must be last.");
+                }
                 if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                         "Can't have more than 254 parameters.");
                 parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 consume(COLON, "Expect ':' after parameter name.");
-                parameterTypes.add(collectType());
+                final var parameterType = collectType();
+                variadic = match(ELLIPSIS);
+                parameterTypes.add(variadic ? TypeDescriptor.arrayOf(parameterType) : parameterType);
+                if (variadic && check(EQUAL)) {
+                    throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A variadic parameter cannot have a default.");
+                }
+                if (match(EQUAL)) {
+                    hasDefault = true;
+                    defaultValues.add(expression());
+                } else if (hasDefault && !variadic) {
+                    error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "Parameters with defaults must form a trailing suffix.");
+                }
             } while (match(COMMA));
         }
         consume(RIGHT_PAREN, "Expect ')' after parameters.");
@@ -738,7 +812,8 @@ public final class Parser {
                 parameterTypes, typeParameters);
         if (isContract) {
             consume(SEMICOLON, "Expect ';' after contract method signature.");
-            return new ParsedMethod(List.copyOf(parameterNames), descriptor, List.of());
+            return new ParsedMethod(List.copyOf(parameterNames), descriptor, List.of(),
+                    List.copyOf(defaultValues), variadic);
         }
 
         levelMarker = new LevelMarker(levelMarker);
@@ -749,13 +824,14 @@ public final class Parser {
             levelMarker = levelMarker.enclosing();
             return new ParsedMethod(List.copyOf(parameterNames),
                     TypeDescriptor.genericFunctionOf(name.lexeme(), returnType,
-                            parameterTypes, typeParameters), body);
+                            parameterTypes, typeParameters), body, List.copyOf(defaultValues), variadic);
         }
 
         consume(LEFT_BRACE, "Expect '{' before method body.");
         body = block();
         levelMarker = levelMarker.enclosing();
-        return new ParsedMethod(List.copyOf(parameterNames), descriptor, body);
+        return new ParsedMethod(List.copyOf(parameterNames), descriptor, body,
+                List.copyOf(defaultValues), variadic);
     }
 
     private TypeDescriptor collectType() {

@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class StandardLibrary {
-    public static final int API_VERSION = 10;
+    public static final int API_VERSION = 11;
     private static final String SOURCE_INDEX = "/stdlib/sources.index";
     public static final List<String> BUNDLED_SOURCE_PATHS = readSourceIndex();
 

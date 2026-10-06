@@ -67,7 +67,8 @@ public class Zeron {
         Path standardLibraryOutput = null;
         Path jarOutput = null;
         Path runClassFile = null;
-        Path standardLibraryJar = Paths.get("target", "zeron-stdlib.jar");
+        Path standardLibraryJar = Paths.get("target", "zeron-stdlib-index-v"
+                + ZeronLibraryIndex.VERSION + "-api-v" + StandardLibrary.API_VERSION + ".jar");
         var customStandardLibraryJar = false;
         var bundleStandardLibrarySources = true;
         for (var index = 0; index < args.length; index++) {

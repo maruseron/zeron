@@ -124,7 +124,10 @@ public final class Scanner {
             case '~' -> addToken(TILDE);
 
             // multiple
-            case '.' -> addToken(match('.') ? DOT_DOT : DOT);
+            case '.' -> {
+                if (match('.')) addToken(match('.') ? ELLIPSIS : DOT_DOT);
+                else addToken(DOT);
+            }
             case ':' -> addToken(match(':') ? COLON_COLON : COLON);
             case '-' -> addToken(
                     match('=') ? MINUS_EQUAL :

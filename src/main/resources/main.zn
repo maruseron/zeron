@@ -1,7 +1,9 @@
 import zeron.io.println;
 
-fn f<T>(t: T): Unit = println(t);
+import zeron.collections.List;
+
+let fact = a -> List<Int>.fromArray(a);
 
 fn main() {
-    f(null);
+    
 }

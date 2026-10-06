@@ -20,7 +20,8 @@ An intrinsic is not a Java class lookup mechanism and does not imply JDK module 
   instantiated parameter types, and result type. The compiler dispatches on that ID.
 - `FunctionBindingRegistry` maps signature-only top-level external declarations to typed JVM targets
   by qualified source name. The resolver checks the declaration signature, and the compiler emits a
-  Zeron bridge for the binding.
+  Zeron bridge for the binding. Trailing defaults are supported on these declarations through
+  generated shorter-arity Zeron wrappers; the registered target remains full arity.
 - Array literal, fill, length, read, and write operations are intrinsics. `zeron.io.print` and
   `zeron.io.println` are ordinary Zeron functions implemented through the curated Java class facade.
 - Intrinsic IDs and function bindings are internal. There is no source-level `intrinsic` keyword or
@@ -123,8 +124,10 @@ all compiler-provided behavior depend on a class-file owner. A deliberately cura
 
 1. **Internal operation registry: implemented baseline.** Array operations resolve to stable IDs and
    instantiated signatures; emission dispatches on those IDs.
-2. **Typed external function bindings: implemented baseline.** I/O declarations validate against
-  registry signatures and lower through typed JVM call plans and generated bridges.
+2. **Typed external function bindings: implemented baseline.** Registered signature-only external
+  functions validate against their binding signatures and lower through typed JVM call plans and
+  generated bridges. The bundled `print` and `println` functions are ordinary Zeron functions using
+  the curated external-class facade; the standard function-binding registry has no output bindings.
 3. **Keep feature-specific semantics local.** Array typing stays in doc 06; library artifacts and
    Java method discovery stay in doc 11. This document owns only the shared binding model.
 4. **Curated external class facade: initial slice implemented.** `java.lang.System.out` and

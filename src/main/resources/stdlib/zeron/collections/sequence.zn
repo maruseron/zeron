@@ -150,6 +150,8 @@ public class Sequence<T> is Iterable<T> {
 
     private constructor new;
 
+    public constructor of(elements: T...) = Sequence<T>.fromArray(elements);
+
     public constructor from(source: Iterable<T>) = Sequence<T>.new(source);
 
     public constructor fromArray(source: Array<T>) =

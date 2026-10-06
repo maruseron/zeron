@@ -13,7 +13,10 @@ import java.util.*;
 
 final class CompilationMetadata {
     private final IdentityHashMap<Stmt, String> declarationOwners = new IdentityHashMap<>();
+    private final IdentityHashMap<Stmt.Var, String> initializationOwners = new IdentityHashMap<>();
     private final Map<String, String> functionOwners = new HashMap<>();
+    private final Map<String, String> valueOwners = new HashMap<>();
+    private final Map<String, String> valueInitializationOwners = new HashMap<>();
     private final Set<String> metadataTypeNames = new HashSet<>();
 
     CompilationMetadata(final List<CompilationUnit> units,
@@ -35,18 +38,25 @@ final class CompilationMetadata {
                 if (declaration instanceof ZeronLibraryIndex.FunctionExport function) {
                     functionOwners.putIfAbsent(function.qualifiedName(), function.jvmOwner());
                 } else if (declaration instanceof ZeronLibraryIndex.ValueExport value) {
-                    functionOwners.putIfAbsent(value.qualifiedName(), value.jvmOwner());
+                    valueOwners.putIfAbsent(value.qualifiedName(), value.jvmOwner());
+                    valueInitializationOwners.putIfAbsent(value.qualifiedName(), value.initializationOwner());
                 }
             }
         }
         for (final var unit : units) {
             if (!unit.metadataOnly()) continue;
             for (final var member : NamespaceMembers.flatten(unit.declarations())) {
-                if (!(member.declaration() instanceof Stmt.Var variable) || member.namespaceName() == null) continue;
-                final var qualifiedName = NamespaceMembers.qualifiedName(
-                        unit.packageName(), member.namespaceName(), variable.name().lexeme());
-                final var owner = functionOwners.get(qualifiedName);
+                if (!(member.declaration() instanceof Stmt.Var variable)) continue;
+                final var qualifiedName = member.namespaceName() == null
+                        ? qualifiedName(unit.packageName(), variable.name().lexeme())
+                        : NamespaceMembers.qualifiedName(
+                                unit.packageName(), member.namespaceName(), variable.name().lexeme());
+                final var owner = valueOwners.get(qualifiedName);
+                final var initializationOwner = valueInitializationOwners.get(qualifiedName);
                 if (owner != null) declarationOwners.put(variable, owner);
+                if (initializationOwner != null) {
+                    initializationOwners.put(variable, initializationOwner);
+                }
             }
         }
     }
@@ -57,6 +67,14 @@ final class CompilationMetadata {
 
     Map<String, String> functionOwners() {
         return Collections.unmodifiableMap(functionOwners);
+    }
+
+    String valueOwner(final Stmt.Var variable) {
+        return declarationOwners.get(variable);
+    }
+
+    String initializationOwner(final Stmt.Var variable) {
+        return initializationOwners.getOrDefault(variable, "");
     }
 
     Set<String> metadataTypeNames() {
@@ -102,11 +120,13 @@ final class CompilationMetadata {
                         functionOwners.put(functionName, declarationOwner);
                     } else if (declaration instanceof Stmt.Var) {
                         declarationOwners.put(declaration, declarationOwner);
-                        if (member.namespaceName() != null) {
-                            functionOwners.put(NamespaceMembers.qualifiedName(
-                                    unit.packageName(), member.namespaceName(),
-                                    ((Stmt.Var) declaration).name().lexeme()), declarationOwner);
-                        }
+                        final var variable = (Stmt.Var) declaration;
+                        final var valueName = member.namespaceName() == null
+                                ? qualifiedName(unit.packageName(), variable.name().lexeme())
+                                : NamespaceMembers.qualifiedName(
+                                        unit.packageName(), member.namespaceName(), variable.name().lexeme());
+                        valueOwners.put(valueName, declarationOwner);
+                        initializationOwners.put(variable, mainClassName);
                     }
                 }
             }

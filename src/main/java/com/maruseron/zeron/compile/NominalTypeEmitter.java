@@ -168,10 +168,8 @@ final class NominalTypeEmitter {
                     for (final var contractUse : declaration.contractUses()) {
                         final var contract = context.resolution.contracts().get(contractUse.name().lexeme());
                         for (final var required : contract.methods()) {
-                            final var implementation = declaration.methods().stream()
-                                    .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
-                                    .findFirst()
-                                    .orElse(null);
+                            final var implementation = context.resolution.implementationFor(
+                                    declaration, contractUse, required);
                             final var defaultMethod = implementation == null
                                     ? context.resolution.defaultMethodFor(declaration, contractUse, required)
                                     : null;

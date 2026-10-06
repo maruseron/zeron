@@ -41,6 +41,22 @@ final class CompilationMetadata {
                     valueOwners.putIfAbsent(value.qualifiedName(), value.jvmOwner());
                     valueInitializationOwners.putIfAbsent(value.qualifiedName(), value.initializationOwner());
                 }
+                for (final var unit : units) {
+                    if (!unit.metadataOnly()) continue;
+                    for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                        if (!(member.declaration() instanceof Stmt.FunctionDeclaration function)) continue;
+                        final var qualifiedName = member.namespaceName() == null
+                                ? qualifiedName(unit.packageName(), function.name().lexeme())
+                                : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
+                                        function.name().lexeme());
+                        libraries.stream().flatMap(libraryIndex -> libraryIndex.declarations().stream())
+                                .filter(ZeronLibraryIndex.FunctionExport.class::isInstance)
+                                .map(ZeronLibraryIndex.FunctionExport.class::cast)
+                                .filter(export -> export.qualifiedName().equals(qualifiedName)
+                                        && export.signature().equals(function.typeDescriptor()))
+                                .findFirst().ifPresent(export -> declarationOwners.put(function, export.jvmOwner()));
+                    }
+                }
             }
         }
         for (final var unit : units) {
@@ -87,6 +103,10 @@ final class CompilationMetadata {
 
     String functionOwner(final String qualifiedName) {
         return functionOwners.get(qualifiedName);
+    }
+
+    String functionOwner(final Stmt.FunctionDeclaration function) {
+        return declarationOwners.get(function);
     }
 
     String holderName(final CompilationUnit unit, final int unitIndex) {

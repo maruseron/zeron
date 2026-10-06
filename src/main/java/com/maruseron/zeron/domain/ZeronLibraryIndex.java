@@ -264,8 +264,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     }
 
     public static ZeronLibraryIndex fromCompilation(final List<CompilationUnit> units,
-                                                    final Map<String, String> functionOwners,
-                                                    final Function<String, FunctionDescriptor> functionTypes,
+                                                    final Function<Stmt.FunctionDeclaration, String> functionOwners,
+                                                    final Function<Stmt.FunctionDeclaration, FunctionDescriptor> functionTypes,
                                                     final Function<Stmt.Var, TypeDescriptor> valueTypes,
                                                     final Function<Stmt.Var, String> valueOwners,
                                                     final String initializationOwner,
@@ -282,8 +282,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 ? qualify(unit.packageName(), function.name().lexeme())
                                 : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
                                         function.name().lexeme());
-                        final var signature = functionTypes.apply(name);
-                        final var owner = functionOwners.get(name);
+                        final var signature = functionTypes.apply(function);
+                        final var owner = functionOwners.apply(function);
                         if (signature == null || owner == null) {
                             throw new IllegalStateException("Missing resolved signature or owner for " + name);
                         }

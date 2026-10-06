@@ -40,8 +40,9 @@ final class DeclarationEmitter {
                     final var externalFunction = function instanceof Stmt.ExternalFunction external
                             ? external
                             : null;
-                    final var functionToken = context.resolution.functionSymbolToken(name);
-                    final var functionType = context.symbols.getFunctionType(functionToken);
+                    final var functionType = function.typeDescriptor().returnType() instanceof InferDescriptor
+                            ? context.symbols.getFunctionType(context.resolution.functionSymbolToken(name))
+                            : function.typeDescriptor();
                     if (entryHolder && name.lexeme().equals("main")
                             && functionType.parameters().isEmpty()
                             && functionType.returnType() instanceof UnitDescriptor) {

@@ -1,7 +1,6 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Expr;
-import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
@@ -16,6 +15,7 @@ final class ResolutionContext {
     final Map<String, Stmt.ExternalClass> externalClasses = new LinkedHashMap<>();
     final Map<String, Stmt.ContractDecl> contracts = new LinkedHashMap<>();
     final Map<String, Stmt.FunctionDeclaration> functions = new LinkedHashMap<>();
+    final Map<String, List<Stmt.FunctionDeclaration>> functionOverloads = new LinkedHashMap<>();
     final Map<String, Stmt.Var> topLevelValues = new LinkedHashMap<>();
     final Map<String, Token> topLevelValueSymbols = new LinkedHashMap<>();
     final IdentityHashMap<Stmt.Var, Token> topLevelTokensByDeclaration = new IdentityHashMap<>();
@@ -53,11 +53,12 @@ final class ResolutionContext {
                       final FunctionBindingRegistry functionBindings) {
         this.packageName = packageName == null ? "" : packageName;
         this.javaClassPath = Objects.requireNonNull(javaClassPath);
-        importResolver = new ImportResolver(classes, contracts, functions, topLevelValues,
+        importResolver = new ImportResolver(classes, contracts, functions, functionOverloads, topLevelValues,
                 declarationPackages, javaClassPath);
         topLevelValuePlanner = new TopLevelValuePlanner(topLevelValues);
         declarationRegistrar = new DeclarationRegistry(
-                types, classes, externalClasses, contracts, functions, topLevelValues, topLevelValueSymbols,
+                types, classes, externalClasses, contracts, functions, functionOverloads,
+                topLevelValues, topLevelValueSymbols,
                 topLevelTokensByDeclaration, functionSymbolTokens, functionNamesByDeclaration,
                 externalFunctionBindings, symbols, javaClassPath, Objects.requireNonNull(functionBindings));
         statementResolver = new StatementResolver(this);

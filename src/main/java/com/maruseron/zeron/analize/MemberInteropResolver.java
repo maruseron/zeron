@@ -288,15 +288,35 @@ final class MemberInteropResolver {
         }
         final var ownerName = className(context, receiverType);
         final var owner = context.classes.get(ownerName);
-        final var classMethod = owner == null ? null : owner.methods().stream()
+        final var classMethods = owner == null ? List.<Stmt.Method>of() : owner.methods().stream()
                 .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
-                .findFirst()
-                .orElse(null);
+                .filter(method -> method.isPublic() || Objects.equals(context.frame.currentClassName, ownerName))
+                .filter(method -> !method.isMutating() || receiverType instanceof ReferenceDescriptor).toList();
         final var contract = context.contracts.get(ownerName);
-        final var contractMethod = contract == null ? null : contract.methods().stream()
+        final var contractMethods = contract == null ? List.<Stmt.ContractMethod>of() : contract.methods().stream()
                 .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
-                .findFirst()
-                .orElse(null);
+                .filter(method -> !method.isMutating() || receiverType instanceof ReferenceDescriptor).toList();
+        final var sourceCandidates = new ArrayList<SourceMethodCandidate>();
+        if (!classMethods.isEmpty()) {
+            final var substitutions = TypeResolver.substitutionsFor(context, owner.typeParameters(), receiverType);
+            for (final var method : classMethods) {
+                sourceCandidates.add(new SourceMethodCandidate(method, null,
+                        (FunctionDescriptor) TypeSubstitution.substitute(method.typeDescriptor(), substitutions),
+                        method.minimumArity(), method.variadic(), method.isMutating()));
+            }
+        } else if (!contractMethods.isEmpty()) {
+            final var substitutions = TypeResolver.substitutionsFor(context, contract.typeParameters(), receiverType);
+            for (final var method : contractMethods) {
+                sourceCandidates.add(new SourceMethodCandidate(null, method,
+                        (FunctionDescriptor) TypeSubstitution.substitute(method.typeDescriptor(), substitutions),
+                        method.minimumArity(), method.variadic(), method.isMutating()));
+            }
+        }
+        final var selectedSource = sourceCandidates.isEmpty() ? null : selectSourceMethod(context, call, sourceCandidates);
+        final var classMethod = selectedSource == null ? null : selectedSource.classMethod();
+        final var contractMethod = selectedSource == null ? null : selectedSource.contractMethod();
+        call.setResolvedSourceMethod(classMethod);
+        call.setResolvedContractMethod(contractMethod);
         if (owner != null && classMethod != null
                 && call.arguments.size() < classMethod.minimumArity()) {
             final var defaults = DeclarationResolver.defaultMethodsOnClass(context, owner, call.name.lexeme());
@@ -306,6 +326,7 @@ final class MemberInteropResolver {
                         "Multiple default contract methods named '" + call.name.lexeme()
                                 + "' require an explicit class implementation."));
             }
+
             if (!defaults.isEmpty()) {
                 final var defaultMethod = defaults.getFirst();
                 final var descriptor = defaultMethod.instantiatedType();
@@ -316,6 +337,7 @@ final class MemberInteropResolver {
                             "Mutating method requires a mutable reference."));
                 }
                 call.setResolvedOwnerName(defaultMethod.ownerName());
+                call.setResolvedContractMethod(defaultMethod.method());
                 call.setReceiverRequiresCast(true);
                 final var variadic = defaultMethod.method().variadic();
                 final var fixedArity = Stmt.fixedArity(defaultMethod.method().parameters(), variadic);
@@ -362,6 +384,7 @@ final class MemberInteropResolver {
                                 "Mutating method requires a mutable reference."));
                     }
                     call.setResolvedOwnerName(defaultMethod.ownerName());
+                    call.setResolvedContractMethod(defaultMethod.method());
                     call.setReceiverRequiresCast(true);
                     final var variadic = defaultMethod.method().variadic();
                     final var fixedArity = Stmt.fixedArity(defaultMethod.method().parameters(), variadic);
@@ -451,6 +474,106 @@ final class MemberInteropResolver {
         }
         call.setType(instantiatedDescriptor.returnType());
         return instantiatedDescriptor.returnType();
+    }
+
+    private record SourceMethodCandidate(Stmt.Method classMethod, Stmt.ContractMethod contractMethod,
+                                         FunctionDescriptor descriptor, int minimumArity,
+                                         boolean variadic, boolean mutating) {}
+
+    private static SourceMethodCandidate selectSourceMethod(final ResolutionContext context,
+                                                            final Expr.MemberCall call,
+                                                            final List<SourceMethodCandidate> candidates) {
+        if (candidates.size() == 1) return candidates.getFirst();
+        final var actualTypes = call.arguments.stream().map(argument ->
+                argument instanceof Expr.Lambda || LambdaResolver.isFunctionReferenceCandidate(context, argument)
+                        ? null : ExpressionFlowResolver.resolveExpression(context, argument)).toList();
+        final var applicable = new ArrayList<SourceMethodCandidate>();
+        for (final var candidate : candidates) {
+            final var signature = candidate.descriptor();
+            final var parameters = candidate.classMethod() != null
+                    ? candidate.classMethod().parameters() : candidate.contractMethod().parameters();
+            final var fixedArity = Stmt.fixedArity(parameters, candidate.variadic());
+            if ((!call.explicitTypeArguments.isEmpty()
+                    && call.explicitTypeArguments.size() != signature.typeParameters().size())
+                    || call.arguments.size() < candidate.minimumArity()
+                    || !candidate.variadic() && call.arguments.size() > signature.arity()) continue;
+            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            try {
+                for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
+                    TypeResolver.validateType(context, call.explicitTypeArguments.get(i), call.name);
+                    substitutions.put(signature.typeParameters().get(i), call.explicitTypeArguments.get(i));
+                }
+                for (int i = 0; i < actualTypes.size(); i++) {
+                    if (actualTypes.get(i) != null) {
+                        final var pattern = memberParameterType(signature.parameters(), i, fixedArity,
+                                candidate.variadic());
+                        if (TypeSubstitution.containsTypeParameter(pattern)) {
+                            TypeUnifier.unify(pattern, actualTypes.get(i), substitutions, call.name);
+                        }
+                    }
+                }
+            } catch (final ResolutionError _) {
+                continue;
+            }
+            if (signature.typeParameters().stream().anyMatch(parameter -> !substitutions.containsKey(parameter))) {
+                continue;
+            }
+            final var instantiatedParameters = signature.parameters().stream()
+                    .map(parameter -> TypeSubstitution.substitute(parameter, substitutions)).toList();
+            var matches = true;
+            for (int i = 0; i < actualTypes.size(); i++) {
+                final var expected = memberParameterType(instantiatedParameters, i, fixedArity, candidate.variadic());
+                if (actualTypes.get(i) != null && !context.typeCompatibility.canAssign(expected, actualTypes.get(i))
+                        || actualTypes.get(i) == null && !(expected instanceof FunctionDescriptor)) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) applicable.add(candidate);
+        }
+        if (applicable.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    call.name, "No overload of method '" + call.name.lexeme() + "' matches these arguments."));
+        }
+        var best = applicable.stream().filter(candidate -> applicable.stream().noneMatch(other ->
+                other != candidate && sourceMethodMoreSpecific(context, other, candidate))).toList();
+        if (best.size() > 1) {
+            final var minimumOmitted = best.stream().mapToInt(candidate ->
+                    Math.max(0, Stmt.fixedArity(candidate.classMethod() != null
+                                    ? candidate.classMethod().parameters() : candidate.contractMethod().parameters(),
+                            candidate.variadic()) - call.arguments.size())).min().orElse(0);
+            best = best.stream().filter(candidate -> Math.max(0, Stmt.fixedArity(
+                    candidate.classMethod() != null
+                            ? candidate.classMethod().parameters() : candidate.contractMethod().parameters(),
+                    candidate.variadic()) - call.arguments.size()) == minimumOmitted).toList();
+            if (best.stream().anyMatch(SourceMethodCandidate::variadic)
+                    && best.stream().anyMatch(candidate -> !candidate.variadic())) {
+                best = best.stream().filter(candidate -> !candidate.variadic()).toList();
+            }
+            if (best.stream().anyMatch(candidate -> !candidate.descriptor().isGeneric())
+                    && best.stream().anyMatch(candidate -> candidate.descriptor().isGeneric())) {
+                best = best.stream().filter(candidate -> !candidate.descriptor().isGeneric()).toList();
+            }
+        }
+        if (best.size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                    "Ambiguous call to method '" + call.name.lexeme() + "'."));
+        }
+        return best.getFirst();
+    }
+
+    private static boolean sourceMethodMoreSpecific(final ResolutionContext context,
+                                                    final SourceMethodCandidate left,
+                                                    final SourceMethodCandidate right) {
+        final var leftTypes = left.descriptor().parameters();
+        final var rightTypes = right.descriptor().parameters();
+        if (leftTypes.size() != rightTypes.size()) return false;
+        var strict = false;
+        for (int i = 0; i < leftTypes.size(); i++) {
+            if (!context.typeCompatibility.canAssign(rightTypes.get(i), leftTypes.get(i))) return false;
+            strict |= !context.typeCompatibility.canAssign(leftTypes.get(i), rightTypes.get(i));
+        }
+        return strict;
     }
 
     private static void ensureMemberCallArity(final Expr.MemberCall call,
@@ -860,7 +983,8 @@ final class MemberInteropResolver {
                 .filter(importedPackage -> !importedPackage.equals(context.packageName))
                 .map(importedPackage -> qualify(importedPackage, name))
                 .filter(context.functions::containsKey)
-                .filter(functionName -> ((Stmt.FunctionDeclaration) context.functions.get(functionName)).isPublic())
+                .filter(functionName -> context.functionOverloads.getOrDefault(functionName, List.of()).stream()
+                        .anyMatch(Stmt.FunctionDeclaration::isPublic))
                 .distinct()
                 .toList();
         if (candidates.size() > 1) {

@@ -63,7 +63,9 @@ final class LambdaSupportEmitter {
             emitConversion(context, composer, parameterType, sourceType.parameters().get(i));
             slot += TypeDescriptor.toJavaClassDesc(parameterType).descriptorString().equals("D") ? 2 : 1;
         }
-        final var owner = context.metadata.functionOwner(reference.functionName());
+        final var owner = reference.declaration() == null
+                ? context.metadata.functionOwner(reference.functionName())
+                : context.metadata.functionOwner(reference.declaration());
         if (owner == null) {
             throw new IllegalStateException("Missing JVM owner for " + reference.functionName());
         }

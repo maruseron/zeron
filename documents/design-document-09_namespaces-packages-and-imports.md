@@ -32,7 +32,9 @@ package without imposing a source-directory convention.
 - `SymbolTable` keys functions and values by source spelling; class and contract types live in separate resolver maps.
 - Package and declaration identities are source-level names; the chosen JVM owners and output paths
     do not participate in name resolution. Build and output behavior is specified in doc 11.
-- Imports resolve public classes, contracts, functions, and immutable values. Package-private
+- Imports resolve public classes, contracts, function overload families, and immutable values.
+    An explicit function import names the family; call-site argument types select one public
+    signature from it. Package-private
     declarations remain available within their package.
 
     Default parameters are properties of function and method declarations, not of their function types.

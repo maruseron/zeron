@@ -24,6 +24,8 @@ public sealed interface Expr {
         private final boolean safeNavigation;
         private TypeDescriptor type;
         private FunctionDescriptor resolvedDescriptor;
+        private Stmt.Method resolvedSourceMethod;
+        private Stmt.ContractMethod resolvedContractMethod;
         private Call namespaceCall;
         private String resolvedClassName;
         private String resolvedOwnerName;
@@ -54,6 +56,10 @@ public sealed interface Expr {
         public boolean safeNavigation() { return safeNavigation; }
         public FunctionDescriptor resolvedDescriptor() { return resolvedDescriptor; }
         public void setResolvedDescriptor(FunctionDescriptor descriptor) { resolvedDescriptor = descriptor; }
+        public Stmt.Method resolvedSourceMethod() { return resolvedSourceMethod; }
+        public void setResolvedSourceMethod(final Stmt.Method method) { resolvedSourceMethod = method; }
+        public Stmt.ContractMethod resolvedContractMethod() { return resolvedContractMethod; }
+        public void setResolvedContractMethod(final Stmt.ContractMethod method) { resolvedContractMethod = method; }
         public Call namespaceCall() { return namespaceCall; }
         public void setNamespaceCall(final Call call) { namespaceCall = call; }
         public String resolvedClassName() { return resolvedClassName; }
@@ -375,6 +381,7 @@ public sealed interface Expr {
         private TypeDescriptor type;
         private FunctionDescriptor genericFunctionType;
         private String resolvedFunctionName;
+        private Stmt.FunctionDeclaration resolvedFunctionDeclaration;
         private Token resolvedSymbolToken;
         private MemberCall implicitMemberCall;
         private ResolvedIntrinsicOperation intrinsicOperation;
@@ -404,6 +411,10 @@ public sealed interface Expr {
 
         public String resolvedFunctionName() { return resolvedFunctionName; }
         public void setResolvedFunctionName(final String name) { resolvedFunctionName = name; }
+        public Stmt.FunctionDeclaration resolvedFunctionDeclaration() { return resolvedFunctionDeclaration; }
+        public void setResolvedFunctionDeclaration(final Stmt.FunctionDeclaration declaration) {
+            resolvedFunctionDeclaration = declaration;
+        }
         public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? callee : resolvedSymbolToken; }
         public void setResolvedSymbolToken(final Token token) { resolvedSymbolToken = token; }
         public MemberCall implicitMemberCall() { return implicitMemberCall; }
@@ -714,6 +725,7 @@ public sealed interface Expr {
         public final List<TypeDescriptor> explicitFunctionTypeArguments;
         private TypeDescriptor type;
         private String resolvedFunctionName;
+        private Stmt.FunctionDeclaration resolvedFunctionDeclaration;
         private FunctionDescriptor sourceFunctionType;
         private FunctionDescriptor specializedFunctionType;
         private FunctionDescriptor storedFunctionType;
@@ -743,6 +755,10 @@ public sealed interface Expr {
 
         public String resolvedFunctionName() { return resolvedFunctionName; }
         public void setResolvedFunctionName(final String name) { resolvedFunctionName = name; }
+        public Stmt.FunctionDeclaration resolvedFunctionDeclaration() { return resolvedFunctionDeclaration; }
+        public void setResolvedFunctionDeclaration(final Stmt.FunctionDeclaration declaration) {
+            resolvedFunctionDeclaration = declaration;
+        }
         public FunctionDescriptor sourceFunctionType() { return sourceFunctionType; }
         public void setSourceFunctionType(final FunctionDescriptor type) { sourceFunctionType = type; }
         public FunctionDescriptor specializedFunctionType() { return specializedFunctionType; }

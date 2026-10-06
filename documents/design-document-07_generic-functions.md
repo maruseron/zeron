@@ -20,7 +20,7 @@ are also implemented; see [design-document-05_classes-and-contracts.md](design-d
 and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). Generic named
 functions can be specialized as monomorphic function values. Immutable let-bound lambdas support a
 limited rank-1 scheme slice. A first slice of multiple contract bounds on generic function and
-generic method type parameters is implemented. Variance, overloads, nested schemes, explicit
+generic method type parameters is implemented. Variance, nested schemes, explicit
 `forall`, and polymorphic values stored in mutable bindings remain deferred. This is not a complete
 generic type system.
 
@@ -95,8 +95,11 @@ to their raw JVM class or interface; see [design-document-05_classes-and-contrac
 
 Generic call inference is structural and intentionally bounded. It handles direct type variables,
 function signatures, arrays (including a mutable array literal projected to a read-only parameter),
-nullable/reference wrappers, and existing generic descriptors. It is not a general subtype solver:
-there are no variance rules, overload selection, or inference from a desired result type alone.
+nullable/reference wrappers, and existing generic descriptors. It is not a general subtype solver: there are no variance rules or inference from a desired result
+type alone. Overloaded calls infer each generic candidate independently, discard inapplicable
+candidates, and select the unique most-specific applicable parameter signature. Non-generic
+candidates win only as a final tie-break; ambiguous candidates require a more specific argument or
+explicit type arguments.
 Contract bounds may authorize readonly contract methods on generic function and method type
 parameters; all bounds are checked independently.
 If a type parameter appears only in an unconstrained lambda parameter, the caller must
@@ -152,8 +155,8 @@ shape matrix and broader adapter reuse still need coverage.
 3. **Generic function values: implemented first slice.** `name::<T>` explicitly specializes a
   generic function value; an expected function type can infer the specialization when it determines
   every type parameter. Specialized values lower through deduplicated static bridges and
-  `LambdaMetafactory`. Polymorphic function values, partial type-argument lists, and overload
-  interactions remain deferred.
+  `LambdaMetafactory`. Polymorphic function values and partial type-argument lists remain deferred.
+  Overloaded function references require an expected function type that selects one signature.
 4. **Invariant generic classes and contracts implemented.** Constructor and member substitution,
    declaration-site conformance, invariant identity, raw JVM erasure, nominal callback adapters, and
    erased contract bridges are covered. Broader shape combinations and adapter reuse remain follow-up
@@ -162,7 +165,7 @@ shape matrix and broader adapter reuse still need coverage.
   function or method type parameter may have multiple contract bounds. Call sites validate inferred
   and explicit type arguments against every bound; generic bodies may call a bound's non-mutating
   methods through a cast and interface dispatch. Bounds on generic classes/contracts, class bounds,
-  mutating methods, operator constraints, variance, overloads, and broader inference remain deferred.
+  mutating methods, operator constraints, variance, and broader inference remain deferred.
 6. **Let-bound polymorphic lambdas: implemented first slice.** Immutable identity and constant-result
     lambdas generalize unresolved parameters into rank-1 schemes; each use instantiates independently.
     Mutable bindings, nested schemes, and operator constraints remain deferred.

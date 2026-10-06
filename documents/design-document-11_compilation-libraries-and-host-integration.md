@@ -85,7 +85,9 @@ Method type parameters and references to enclosing class or contract parameters 
 type encoding as generic function signatures. Function and value exports carry an explicit namespace
 name when declared inside a namespace; ordinary top-level value exports have no namespace. Callable
 exports retain their full-arity signatures and record both minimum arity and whether the final
-parameter is variadic. Named-constructor exports also record their variadic marker so consumers can
+parameter is variadic. Multiple function exports may share a qualified name and together form its
+overload family; each signature retains its own generic, minimum-arity, and variadic metadata.
+Class and contract method lists likewise preserve same-named overloads. Named-constructor exports also record their variadic marker so consumers can
 pack direct factory-call arguments correctly. Consumers omit only trailing defaulted fixed parameters
 and call generated provider-side JVM wrappers; direct variadic arguments are packed by the consumer,
 while function values keep the full array-shaped signature. Default expressions are not serialized or re-evaluated by

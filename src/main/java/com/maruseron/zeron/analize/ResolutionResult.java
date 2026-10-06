@@ -89,6 +89,20 @@ public record ResolutionResult(
                 : null;
     }
 
+    public Stmt.Method implementationFor(final Stmt.ClassDecl declaration,
+                                         final Stmt.ContractUse requiredUse,
+                                         final Stmt.ContractMethod required) {
+        final var substitutions = contractSubstitutions(requiredUse);
+        final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
+                required.typeDescriptor(), substitutions);
+        return declaration.methods().stream()
+                .filter(method -> method.name().lexeme().equals(required.name().lexeme())
+                        && method.isPublic() && method.isMutating() == required.isMutating()
+                        && method.variadic() == required.variadic()
+                        && compatibleMethodSignatures(requiredType, method.typeDescriptor()))
+                .findFirst().orElse(null);
+    }
+
     private List<Resolver.DefaultMethodSelection> defaultMethodsFor(final Stmt.ClassDecl declaration,
                                                                     final FunctionDescriptor requiredType) {
         final var matches = new ArrayList<Resolver.DefaultMethodSelection>();

@@ -58,7 +58,8 @@ final class InitializationPlanner {
         final var dependencies = new IdentityHashMap<Stmt.Var, Set<Stmt.Var>>();
         for (final var value : values) {
             final var valueDependencies = Collections.newSetFromMap(new IdentityHashMap<Stmt.Var, Boolean>());
-            collectDependencies(value.initializer(), valueDependencies, functions, new HashSet<>(), valueSet);
+            collectDependencies(value.initializer(), valueDependencies, functions,
+                    Collections.newSetFromMap(new IdentityHashMap<>()), valueSet);
             dependencies.put(value, valueDependencies);
         }
         final var states = new IdentityHashMap<Stmt.Var, Integer>();
@@ -143,7 +144,7 @@ final class InitializationPlanner {
             final Expr expression,
             final Set<Stmt.Var> dependencies,
             final Map<String, Stmt.Function> functions,
-            final Set<String> visitedFunctions,
+            final Set<Stmt.Function> visitedFunctions,
             final Set<Stmt.Var> projectValues) {
         if (expression == null) return;
         if (expression instanceof Expr.Variable variable
@@ -156,10 +157,10 @@ final class InitializationPlanner {
                 && projectValues.contains(property.namespaceValueDeclaration())) {
             dependencies.add(property.namespaceValueDeclaration());
         }
-        if (expression instanceof Expr.Call call && call.resolvedFunctionName() != null
-                && visitedFunctions.add(call.resolvedFunctionName())) {
-            final var function = functions.get(call.resolvedFunctionName());
-            if (function != null) {
+        if (expression instanceof Expr.Call call && call.resolvedFunctionName() != null) {
+            final var function = call.resolvedFunctionDeclaration() instanceof Stmt.Function selected
+                    ? selected : functions.get(call.resolvedFunctionName());
+            if (function != null && visitedFunctions.add(function)) {
                 for (final var statement : function.body()) {
                     collectDependencies(statement, dependencies, functions, visitedFunctions, projectValues);
                 }
@@ -192,7 +193,7 @@ final class InitializationPlanner {
             final Stmt statement,
             final Set<Stmt.Var> dependencies,
             final Map<String, Stmt.Function> functions,
-            final Set<String> visitedFunctions,
+            final Set<Stmt.Function> visitedFunctions,
             final Set<Stmt.Var> projectValues) {
         if (statement == null || !statement.getClass().isRecord()) return;
         for (final var component : statement.getClass().getRecordComponents()) {

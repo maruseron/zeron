@@ -11,11 +11,12 @@ import java.util.*;
 final class LambdaCompilationPlan {
     record FunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
     record NullableFunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
-    record FunctionReference(String functionName, FunctionDescriptor sourceType,
+    record FunctionReference(String functionName, Stmt.FunctionDeclaration declaration, FunctionDescriptor sourceType,
                              FunctionDescriptor targetType, String helperName) {}
 
     private record FunctionAdapterKey(FunctionDescriptor source, FunctionDescriptor target) {}
-    private record FunctionReferenceKey(String functionName, FunctionDescriptor targetType) {}
+    private record FunctionReferenceKey(String functionName, Stmt.FunctionDeclaration declaration,
+                                        FunctionDescriptor targetType) {}
     private record LambdaMemberKey(String owner, String member) {}
 
     private final SymbolTable symbols;
@@ -309,9 +310,11 @@ final class LambdaCompilationPlan {
     private void collectFunctionReference(final Expr.Variable expression) {
         final var sourceType = (FunctionDescriptor) TypeSubstitution.erase(expression.sourceFunctionType());
         final var targetType = (FunctionDescriptor) TypeSubstitution.erase(expression.specializedFunctionType());
-        final var key = new FunctionReferenceKey(expression.resolvedFunctionName(), targetType);
+        final var key = new FunctionReferenceKey(expression.resolvedFunctionName(),
+                expression.resolvedFunctionDeclaration(), targetType);
         final var reference = functionReferences.computeIfAbsent(key,
-                _ -> new FunctionReference(expression.resolvedFunctionName(), sourceType, targetType,
+                _ -> new FunctionReference(expression.resolvedFunctionName(),
+                        expression.resolvedFunctionDeclaration(), sourceType, targetType,
                         "$functionRef$" + functionReferences.size()));
         referencesByExpression.put(expression, reference);
         for (int i = 0; i < targetType.arity(); i++) {

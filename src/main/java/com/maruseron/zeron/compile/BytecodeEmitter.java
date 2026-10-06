@@ -90,8 +90,11 @@ final class BytecodeEmitter {
         }
         NominalTypeEmitter.emit(context);
         final var libraryIndex = ZeronLibraryIndex.fromCompilation(context.compilationUnits,
-                context.metadata.functionOwners(),
-                name -> context.symbols.getFunctionType(context.resolution.functionSymbolToken(name)),
+                context.metadata::functionOwner,
+                function -> function.typeDescriptor().returnType() instanceof InferDescriptor
+                        ? context.symbols.getFunctionType(
+                                context.resolution.functionSymbolToken(function.name()))
+                        : function.typeDescriptor(),
                 variable -> context.symbols.getSymbol(
                         context.resolution.topLevelValueSymbol(variable)).type(),
                 context.metadata::valueOwner,
@@ -590,11 +593,20 @@ final class BytecodeEmitter {
         }
         if (call.resolvedFunctionName() != null) {
             final var functionName = call.resolvedFunctionName();
-            final var functionToken = context.resolution.functionSymbolToken(functionName);
-            final var functionType = (FunctionDescriptor) context.symbols.getFunction(functionToken).type();
+            final var functionType = call.resolvedFunctionDeclaration() == null
+                    || call.resolvedFunctionDeclaration().typeDescriptor().returnType() instanceof InferDescriptor
+                    ? context.symbols.getFunctionType(context.resolution.functionSymbolToken(functionName))
+                    : call.resolvedFunctionDeclaration().typeDescriptor();
+            if (functionType == null) throw new IllegalStateException("Resolved function has no function type.");
             final var runtimeType = functionType.isGeneric()
                     ? (FunctionDescriptor) TypeSubstitution.erase(functionType)
                     : functionType;
+            final var functionOwner = call.resolvedFunctionDeclaration() == null
+                    ? context.metadata.functionOwner(functionName)
+                    : context.metadata.functionOwner(call.resolvedFunctionDeclaration());
+            if (functionOwner == null) {
+                throw new IllegalStateException("Resolved function has no JVM owner: " + functionName);
+            }
             if (call.variadicElementType() != null) {
                 final var fixedArity = call.variadicFixedArity();
                 emitVariadicArguments(context, composer, call.arguments, runtimeType,
@@ -602,7 +614,7 @@ final class BytecodeEmitter {
                 final var invokedType = call.arguments.size() < fixedArity
                         ? prefixFunctionType(runtimeType, call.arguments.size())
                         : runtimeType;
-                composer.invokestatic(ClassDesc.of(context.metadata.functionOwner(functionName)),
+                composer.invokestatic(ClassDesc.of(functionOwner),
                         functionName.substring(functionName.lastIndexOf('.') + 1),
                         toJavaMethodDescriptor(invokedType));
             } else {
@@ -611,7 +623,7 @@ final class BytecodeEmitter {
                     emitConversion(context, composer, context.lastEmittedType, functionType.parameters().get(i));
                 }
                 final var invokedType = prefixFunctionType(runtimeType, call.arguments.size());
-                composer.invokestatic(ClassDesc.of(context.metadata.functionOwner(functionName)),
+                composer.invokestatic(ClassDesc.of(functionOwner),
                         functionName.substring(functionName.lastIndexOf('.') + 1),
                         toJavaMethodDescriptor(invokedType));
             }
@@ -789,12 +801,14 @@ final class BytecodeEmitter {
             ? call.resolvedOwnerName()
             : nominalName(context, call.receiver.getType());
         final var classOwner = context.resolution.classes().get(ownerName);
-        final var classMethod = classOwner == null ? null : classOwner.methods().stream()
+        final var classMethod = call.resolvedSourceMethod() != null ? call.resolvedSourceMethod()
+                : classOwner == null ? null : classOwner.methods().stream()
                 .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
                 .findFirst()
                 .orElse(null);
         final var contract = context.resolution.contracts().get(ownerName);
-        final var contractMethod = contract == null ? null : contract.methods().stream()
+        final var contractMethod = call.resolvedContractMethod() != null ? call.resolvedContractMethod()
+                : contract == null ? null : contract.methods().stream()
                 .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
                 .findFirst()
                 .orElse(null);

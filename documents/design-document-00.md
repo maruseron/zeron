@@ -87,8 +87,7 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     Arrays support nullable element types, while broader nullable collection behavior remains limited.
 - Generic functions and methods support multiple contract bounds per type parameter. Generic
     function references can be specialized explicitly with `name::<Type>` or inferred from an
-    expected function type; these are monomorphic values, not polymorphic lambdas. Variance,
-    overloads, generic class/contract bounds, and first-class generic function values without
+    expected function type; these are monomorphic values, not polymorphic lambdas.     Variance, generic class/contract bounds, and first-class generic function values without
     specialization remain unsupported.
     Generic callback adaptation works across top-level functions, specialized function references,
     and nominal members; broader shape coverage and adapter reuse remain.
@@ -98,7 +97,7 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Method delegation: allow a wrapper method to forward its parameters and result to a receiver method
     reference, such as `get(index: Int): T` delegating to `contents::get`. Define this as a distinct
     forwarding form, not as a function-reference value or a change to `=` expression bodies; syntax,
-    generic substitution, overload resolution, and receiver mutability rules remain to be designed.
+    generic substitution, and receiver mutability rules remain to be designed.
 - Default parameters are implemented separately from field initializers. They may appear only on a
     trailing parameter suffix; positional calls supply a prefix, and each omitted default is evaluated
     once per call, left to right, in declaration scope; explicit arguments (including `null`) remain

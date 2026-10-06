@@ -50,7 +50,14 @@ final class LambdaResolver {
                     "Function reference does not resolve to a top-level function."));
         }
         final var functionToken = context.functionSymbolTokens.get(functionName);
-        final var sourceType = (FunctionDescriptor) context.symbols.getFunction(functionToken).type();
+        final var declarations = context.functionOverloads.getOrDefault(functionName, List.of());
+        final var selectedDeclaration = declarations.size() > 1
+                ? selectFunctionReferenceOverload(context, reference, expectedType, declarations)
+                : declarations.isEmpty() ? null : declarations.getFirst();
+        final var sourceType = selectedDeclaration == null
+                || selectedDeclaration.typeDescriptor().returnType() instanceof InferDescriptor
+                ? (FunctionDescriptor) context.symbols.getFunction(functionToken).type()
+                : selectedDeclaration.typeDescriptor();
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         final var explicitTypes = reference.explicitFunctionTypeArguments;
         if (!explicitTypes.isEmpty()) {
@@ -103,10 +110,62 @@ final class LambdaResolver {
             ensureAssignable(context, expectedFunction, specializedType, reference.name);
         }
         reference.setResolvedFunctionName(functionName);
+        reference.setResolvedFunctionDeclaration(selectedDeclaration);
         reference.setSourceFunctionType(sourceType);
         reference.setSpecializedFunctionType(specializedType);
         reference.setType(specializedType);
         return specializedType;
+    }
+
+    private static Stmt.FunctionDeclaration selectFunctionReferenceOverload(
+            final ResolutionContext context, final Expr.Variable reference, final TypeDescriptor expectedType,
+            final List<Stmt.FunctionDeclaration> declarations) {
+        final var expected = expectedType == null ? null : functionType(context, expectedType);
+        final var matches = new ArrayList<Stmt.FunctionDeclaration>();
+        for (final var declaration : declarations) {
+            final var source = declaration.typeDescriptor();
+            final var explicit = reference.explicitFunctionTypeArguments;
+            if (!explicit.isEmpty() && explicit.size() != source.typeParameters().size()) continue;
+            if (expected == null && (source.isGeneric() && explicit.isEmpty()
+                    || declarations.size() > 1 && explicit.isEmpty())) continue;
+            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            try {
+                for (int i = 0; i < explicit.size(); i++) {
+                    TypeResolver.validateType(context, explicit.get(i), reference.name);
+                    substitutions.put(source.typeParameters().get(i), explicit.get(i));
+                }
+                if (source.isGeneric() && explicit.isEmpty()) {
+                    TypeUnifier.unify(source, expected, substitutions, reference.name);
+                }
+                if (source.typeParameters().stream().anyMatch(parameter -> !substitutions.containsKey(parameter))) {
+                    continue;
+                }
+                final var specialized = source.isGeneric()
+                        ? TypeDescriptor.functionOf(source.name(),
+                                TypeSubstitution.substitute(source.returnType(), substitutions),
+                                source.parameters().stream()
+                                        .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
+                                        .toArray(TypeDescriptor[]::new))
+                        : source;
+                if (expected == null || specialized.equals(expected)
+                        || context.typeCompatibility.canAssign(expected, specialized)) matches.add(declaration);
+            } catch (final ResolutionError _) {
+                continue;
+            }
+        }
+        if (matches.size() == 1) return matches.getFirst();
+        if (matches.size() > 1) {
+            final var nonGeneric = matches.stream().filter(candidate ->
+                    !candidate.typeDescriptor().isGeneric()).toList();
+            if (nonGeneric.size() == 1) return nonGeneric.getFirst();
+        }
+        Zeron.resolutionError(new ResolutionError(
+                matches.isEmpty() ? DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE
+                        : DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                reference.name,
+                matches.isEmpty() ? "No function overload matches the expected function type."
+                        : "Function reference is ambiguous; provide a more specific expected function type."));
+        return matches.getFirst();
     }
 
     private static void unifyFunctionReferenceType(final ResolutionContext context, final TypeDescriptor pattern,

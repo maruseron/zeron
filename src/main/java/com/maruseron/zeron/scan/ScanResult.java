@@ -3,7 +3,6 @@ package com.maruseron.zeron.scan;
 import com.maruseron.zeron.diagnostic.Diagnostic;
 
 import java.util.List;
-import java.util.Objects;
 
 public record ScanResult(List<Token> tokens, List<Diagnostic> diagnostics) {
     public ScanResult {

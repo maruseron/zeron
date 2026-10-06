@@ -18,6 +18,7 @@ final class DeclarationRegistry {
     private final Map<String, Stmt.ExternalClass> externalClasses;
     private final Map<String, Stmt.ContractDecl> contracts;
     private final Map<String, Stmt.FunctionDeclaration> functions;
+    private final Map<String, List<Stmt.FunctionDeclaration>> functionOverloads;
     private final Map<String, Stmt.Var> topLevelValues;
     private final Map<String, Token> topLevelValueSymbols;
     private final IdentityHashMap<Stmt.Var, Token> topLevelTokensByDeclaration;
@@ -34,6 +35,7 @@ final class DeclarationRegistry {
             final Map<String, Stmt.ExternalClass> externalClasses,
             final Map<String, Stmt.ContractDecl> contracts,
             final Map<String, Stmt.FunctionDeclaration> functions,
+            final Map<String, List<Stmt.FunctionDeclaration>> functionOverloads,
             final Map<String, Stmt.Var> topLevelValues,
             final Map<String, Token> topLevelValueSymbols,
             final IdentityHashMap<Stmt.Var, Token> topLevelTokensByDeclaration,
@@ -48,6 +50,7 @@ final class DeclarationRegistry {
         this.externalClasses = externalClasses;
         this.contracts = contracts;
         this.functions = functions;
+        this.functionOverloads = functionOverloads;
         this.topLevelValues = topLevelValues;
         this.topLevelValueSymbols = topLevelValueSymbols;
         this.topLevelTokensByDeclaration = topLevelTokensByDeclaration;
@@ -169,10 +172,14 @@ final class DeclarationRegistry {
         final var qualifiedName = namespaceName == null
                 ? qualify(ownerPackage, function.name().lexeme())
                 : NamespaceMembers.qualifiedName(ownerPackage, namespaceName, function.name().lexeme());
-        if (functions.containsKey(qualifiedName)) {
+        final var overloads = functionOverloads.computeIfAbsent(qualifiedName, _ -> new ArrayList<>());
+        if (overloads.stream().anyMatch(existing ->
+                canonicalParameterSignature(existing.typeDescriptor())
+                        .equals(canonicalParameterSignature(function.typeDescriptor()))
+                || !Collections.disjoint(jvmOverloadSignatures(existing), jvmOverloadSignatures(function)))) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                    function.name(),
-                    "Function '" + qualifiedName + "' is already declared."));
+                    function.name(), "Duplicate or JVM-colliding function parameter signature for '"
+                            + qualifiedName + "'."));
         }
         if (function instanceof Stmt.ExternalFunction externalFunction) {
             final var binding = functionBindings.find(qualifiedName);
@@ -191,10 +198,12 @@ final class DeclarationRegistry {
         }
         final var symbolToken = new Token(function.name().type(), qualifiedName,
                 function.name().literal(), function.name().span());
-        functions.put(qualifiedName, function);
-        functionSymbolTokens.put(qualifiedName, symbolToken);
+        overloads.add(function);
+        if (functions.putIfAbsent(qualifiedName, function) == null) {
+            functionSymbolTokens.put(qualifiedName, symbolToken);
+            symbols.declareFunction(function, symbolToken, function.typeDescriptor());
+        }
         functionNamesByDeclaration.put(function.name(), qualifiedName);
-        symbols.declareFunction(function, symbolToken, function.typeDescriptor());
     }
 
     private void registerType(final Token name) {
@@ -209,6 +218,37 @@ final class DeclarationRegistry {
         return left.typeParameters().equals(right.typeParameters())
                 && left.parameters().equals(right.parameters())
                 && left.returnType().equals(right.returnType());
+    }
+
+    private List<TypeDescriptor> canonicalParameterSignature(final FunctionDescriptor descriptor) {
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int i = 0; i < descriptor.typeParameters().size(); i++) {
+            substitutions.put(descriptor.typeParameters().get(i),
+                    new TypeParameterDescriptor(Integer.MIN_VALUE, "T" + i));
+        }
+        return descriptor.parameters().stream()
+                .map(parameter -> TypeSubstitution.substitute(parameter, substitutions)).toList();
+    }
+
+    private List<String> erasedParameterSignature(final FunctionDescriptor descriptor) {
+        return descriptor.parameters().stream()
+                .map(TypeSubstitution::erase)
+                .map(type -> TypeDescriptor.toJavaClassDesc(type).descriptorString()).toList();
+    }
+
+    private Set<List<String>> jvmOverloadSignatures(final Stmt.FunctionDeclaration function) {
+        final var signatures = new HashSet<List<String>>();
+        final var descriptor = function.typeDescriptor();
+        signatures.add(erasedParameterSignature(descriptor));
+        if (function.defaultValues().isEmpty()) return signatures;
+        final var fixedArity = Stmt.fixedArity(function.parameters(), function.variadic());
+        final var lastWrapperArity = function.variadic() ? fixedArity : descriptor.arity() - 1;
+        for (int arity = function.minimumArity(); arity <= lastWrapperArity; arity++) {
+            signatures.add(descriptor.parameters().subList(0, arity).stream()
+                    .map(TypeSubstitution::erase)
+                    .map(type -> TypeDescriptor.toJavaClassDesc(type).descriptorString()).toList());
+        }
+        return signatures;
     }
 
     private void validateExternalFunctionBinding(final Token name,

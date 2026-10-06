@@ -17,9 +17,17 @@ final class DeclarationResolver {
         validateSealedContract(context, contract);
         final var methodNames = new HashSet<String>();
         for (final var method : contract.methods()) {
-            if (!methodNames.add(method.name().lexeme())) {
+            if (contract.methods().stream().anyMatch(existing -> existing != method
+                    && existing.name().lexeme().equals(method.name().lexeme())
+                    && canonicalParameterSignature(existing.typeDescriptor())
+                            .equals(canonicalParameterSignature(method.typeDescriptor()))
+                    || existing != method && existing.name().lexeme().equals(method.name().lexeme())
+                            && !Collections.disjoint(jvmOverloadSignatures(existing.typeDescriptor(),
+                                    existing.minimumArity(), existing.variadic(), existing.defaultValues()),
+                                    jvmOverloadSignatures(method.typeDescriptor(), method.minimumArity(),
+                                            method.variadic(), method.defaultValues())))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        method.name(), "Duplicate contract method."));
+                        method.name(), "Duplicate contract method signature."));
             }
             TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
             TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
@@ -28,7 +36,9 @@ final class DeclarationResolver {
             }
         }
         for (final var property : contract.properties()) {
-            if (!methodNames.add(property.name().lexeme())) {
+            if (contract.methods().stream().anyMatch(method ->
+                    method.name().lexeme().equals(property.name().lexeme()))
+                    || !methodNames.add(property.name().lexeme())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                         property.name(), "Duplicate contract member."));
             }
@@ -175,10 +185,24 @@ final class DeclarationResolver {
             }
         }
         for (final var method : declaration.methods()) {
-            if (!fieldNames.add(method.name().lexeme()) || !methodNames.add(method.name().lexeme())) {
+            if (fieldNames.contains(method.name().lexeme())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                         method.name(), "Duplicate class member."));
             }
+            final var prior = declaration.methods().stream().takeWhile(existing -> existing != method)
+                    .filter(existing -> existing.name().lexeme().equals(method.name().lexeme()))
+                    .anyMatch(existing -> canonicalParameterSignature(existing.typeDescriptor())
+                            .equals(canonicalParameterSignature(method.typeDescriptor()))
+                            || !Collections.disjoint(jvmOverloadSignatures(existing.typeDescriptor(),
+                                    existing.minimumArity(), existing.variadic(), existing.defaultValues()),
+                                    jvmOverloadSignatures(method.typeDescriptor(), method.minimumArity(),
+                                            method.variadic(), method.defaultValues())));
+            if (prior) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        method.name(), "Duplicate method parameter signature."));
+            }
+
+            methodNames.add(method.name().lexeme());
             TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
             TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
         }
@@ -383,6 +407,38 @@ final class DeclarationResolver {
         }
     }
 
+    private static List<TypeDescriptor> canonicalParameterSignature(final FunctionDescriptor descriptor) {
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int i = 0; i < descriptor.typeParameters().size(); i++) {
+            substitutions.put(descriptor.typeParameters().get(i),
+                    new TypeParameterDescriptor(Integer.MIN_VALUE, "T" + i));
+        }
+        return descriptor.parameters().stream()
+                .map(parameter -> TypeSubstitution.substitute(parameter, substitutions)).toList();
+    }
+
+    private static List<String> erasedParameterSignature(final FunctionDescriptor descriptor) {
+        return descriptor.parameters().stream()
+                .map(TypeSubstitution::erase)
+                .map(TypeDescriptor::descriptor).toList();
+    }
+
+    private static Set<List<String>> jvmOverloadSignatures(final FunctionDescriptor descriptor,
+                                                           final int minimumArity,
+                                                           final boolean variadic,
+                                                           final List<Expr> defaultValues) {
+        final var signatures = new HashSet<List<String>>();
+        signatures.add(erasedParameterSignature(descriptor));
+        if (defaultValues.isEmpty()) return signatures;
+        final var fixedArity = descriptor.arity() - (variadic ? 1 : 0);
+        final var lastWrapperArity = variadic ? fixedArity : descriptor.arity() - 1;
+        for (int arity = minimumArity; arity <= lastWrapperArity; arity++) {
+            signatures.add(descriptor.parameters().subList(0, arity).stream()
+                    .map(TypeSubstitution::erase).map(TypeDescriptor::descriptor).toList());
+        }
+        return signatures;
+    }
+
     private static void checkConformance(final ResolutionContext context, final Stmt.ClassDecl declaration,
                                   final Stmt.ContractUse contractUse,
                                   final Stmt.ContractDecl contract) {
@@ -391,12 +447,15 @@ final class DeclarationResolver {
             substitutions.put(contract.typeParameters().get(i), contractUse.typeArguments().get(i));
         }
         for (final var required : contract.methods()) {
-            final var implementation = declaration.methods().stream()
-                    .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
-                    .findFirst()
-                    .orElse(null);
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
                     required.typeDescriptor(), substitutions);
+            final var implementation = declaration.methods().stream()
+                    .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
+                    .filter(method -> method.isPublic() && method.isMutating() == required.isMutating()
+                            && compatibleMethodSignatures(context, requiredType, required.variadic(),
+                                    method.typeDescriptor(), method.variadic()))
+                    .findFirst()
+                    .orElse(null);
             final var defaults = implementation == null
                     ? defaultMethodsFor(context, declaration, requiredType, required.variadic())
                     : List.<Resolver.DefaultMethodSelection>of();

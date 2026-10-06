@@ -596,7 +596,69 @@ public final class ZeronLibraryIndexTest {
     }
 
         @Test
-        public void rejectsLibraryIndexesBuiltAgainstAnotherStandardLibraryVersion() throws Exception {
+    public void resolvesAndInvokesOverloadsFromSeparatelyCompiledLibraries() throws Exception {
+            final var suffix = UUID.randomUUID().toString().replace("-", "");
+            final var libraryPackage = "overloadlibrary" + suffix;
+            final var appPackage = "overloadclient" + suffix;
+            final var libraryOneRoot = Files.createTempDirectory(Path.of("target"), "zeron-overload-one-");
+            final var libraryTwoRoot = Files.createTempDirectory(Path.of("target"), "zeron-overload-two-");
+            final var clientMainName = appPackage + ".OverloadConsumer" + suffix;
+            final var libraryOneIndexPath = libraryOneRoot.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
+            final var libraryTwoIndexPath = libraryTwoRoot.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
+            try {
+                    for (int libraryNumber = 1; libraryNumber <= 2; libraryNumber++) {
+                            deleteTree(Path.of("dist"));
+                            final var libraryEntry = libraryPackage + ".LibraryEntry" + libraryNumber + suffix;
+                            final var overloadUnit = parse("Overload" + libraryNumber + ".zn", libraryNumber == 1
+                                    ? """
+                                            package %s;
+                                            public fn select(value: Int): String = "integer";
+                                            """.formatted(libraryPackage)
+                                    : """
+                                            package %s;
+                                            public fn select(value: String): String = "string";
+                                            """.formatted(libraryPackage));
+                            final var libraryCompiler = CompilationService.forCompilationUnits(
+                                    List.of(overloadUnit), libraryEntry, libraryPackage);
+                            libraryCompiler.resolve();
+                            libraryCompiler.compile();
+                            final var libraryRoot = libraryNumber == 1 ? libraryOneRoot : libraryTwoRoot;
+                            copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
+                            final var targetIndex = libraryNumber == 1
+                                    ? libraryOneIndexPath : libraryTwoIndexPath;
+                            Files.createDirectories(targetIndex.getParent());
+                            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v12.bin"),
+                                    targetIndex);
+                    }
+                    final var firstIndex = ZeronLibraryIndex.readFromDirectory(libraryOneRoot);
+                    final var secondIndex = ZeronLibraryIndex.readFromDirectory(libraryTwoRoot);
+                    deleteTree(Path.of("dist"));
+                    final var client = parse("OverloadClient.zn", """
+                            package %s;
+                            import %s.select as select;
+                            fn intResult(): String = select(1);
+                            fn stringResult(): String = select("text");
+                            """.formatted(appPackage, libraryPackage));
+                    final var consumer = CompilationService.forCompilationUnits(
+                            List.of(client), clientMainName, appPackage, List.of(firstIndex, secondIndex));
+                    consumer.resolve();
+                    consumer.compile();
+                    try (final var loader = new URLClassLoader(new java.net.URL[]{
+                            Path.of("dist").toUri().toURL(), libraryOneRoot.toUri().toURL(),
+                            libraryTwoRoot.toUri().toURL()}, getClass().getClassLoader())) {
+                            final var generated = loader.loadClass(clientMainName);
+                            assertEquals("integer", generated.getMethod("intResult").invoke(null));
+                            assertEquals("string", generated.getMethod("stringResult").invoke(null));
+                    }
+            } finally {
+                    deleteTree(Path.of("dist"));
+                    deleteTree(libraryOneRoot);
+                    deleteTree(libraryTwoRoot);
+            }
+    }
+
+    @Test
+    public void rejectsLibraryIndexesBuiltAgainstAnotherStandardLibraryVersion() throws Exception {
                 final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-incompatible-library-");
                 final var indexPath = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v12.bin"));
                 try {

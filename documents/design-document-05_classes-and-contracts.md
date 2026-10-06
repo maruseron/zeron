@@ -153,7 +153,8 @@ work with a constructed object, bind the result of the canonical constructor to 
 receiver explicitly. Returning an expression of type `&Class` is allowed; it need not be a direct
 `Class.new(...)` expression. Generic class arguments remain explicit at the call site. Named
 constructors do not overload, and their names share the class member namespace with fields and
-methods. They lower to static factory methods; only canonical `new` lowers to JVM `<init>`.
+methods. Methods may overload by parameter signature, but not by return type or receiver mutability.
+They lower to static factory methods; only canonical `new` lowers to JVM `<init>`.
 Named-constructor parameters may end in one variadic `T...` parameter. The factory body receives
 that parameter as `Array<T>`, and direct factory calls pack all positional arguments after the
 fixed prefix. Defaults and spread arguments are not supported on named constructors. Canonical
@@ -266,9 +267,9 @@ comma-separated declaration-site list. Every requirement must be satisfied by a 
 class method or applicable default method. The implementation return type may be assignable to the required return type under
 the existing nominal and nullable compatibility rules; parameter types and receiver mutability must
 still match exactly. Identical requirements from several contracts can be satisfied by one method.
-Conflicting requirements with
-the same name are rejected because overloads are not supported. Calls through contract-typed
-references use interface dispatch. Each class remains final; multiple contract conformance is not
+Requirements with the same name are matched by parameter signature; incompatible requirements are
+diagnosed, and calls are resolved against the statically known contract type. Calls through
+contract-typed references use interface dispatch. Each class remains final; multiple contract conformance is not
 class inheritance or contract-to-contract inheritance.
 
 Defer associated types, multiple inheritance, and intersection types. These features depend on a
@@ -284,7 +285,7 @@ Generic contracts use declaration-site conformance with explicit contract argume
 
 Callback adaptation across erased generic nominal boundaries is implemented. Lambdas are contextually resolved against substituted constructor and member signatures; the compiler plans adapters for callback-valued fields, member arguments/results, and erased contract bridges. Generated bridge methods can call the public synthetic static adapters in the program class. Resolver, runtime, and ABI tests cover primitive/reference specializations, field reads/writes, method arguments/results, nested and nullable callbacks, mutable function views, and both contract bridge directions. Broader shape combinations and adapter reuse remain follow-up coverage.
 
-Bounds, variance, overload resolution, constructor inference, raw generic uses, and advanced contract composition remain outside this slice.
+Bounds, variance, constructor inference, raw generic uses, and advanced contract composition remain outside this slice.
 
 ```zeron
 contract Readable<T> {
@@ -346,7 +347,7 @@ Visibility           ::= "public" | "private"
 MethodBody           ::= "=" Expression ";" | Block
 ```
 
-Fields, properties, methods, and named constructors share one member namespace; duplicate member names and overloads are not supported. Every class has one canonical constructor, synthesized as public when omitted; only `private constructor new;` is needed to restrict direct construction. Named constructors lower to static factories, have no `this`, and return `&Class`; every reachable normal path in a block must return a class reference. Factory bodies may use locals and branches, and may return any expression assignable to `&Class`. Object allocation and initialization still happen only through the canonical constructor. Method calls use `receiver.method(...)`; property reads and writes use `receiver.property` and `receiver.property = value`. Field reads and writes use explicitly named private storage. `this` names the current receiver. Initializers are fixed values, not optional constructor parameters; only uninitialized fields and auto-properties appear in the canonical constructor signature.
+Fields, properties, methods, and named constructors share one member namespace; methods may share a name when their parameter signatures differ, while fields, properties, and named constructors cannot overload. Return types and mutability do not distinguish method overloads. Calls filter candidates by arity, defaults, variadic packing, generic inference, and assignability, then choose the unique most-specific candidate; incomparable best candidates are ambiguous. Every class has one canonical constructor, synthesized as public when omitted; only `private constructor new;` is needed to restrict direct construction. Named constructors lower to static factories, have no `this`, and return `&Class`; every reachable normal path in a block must return a class reference. Factory bodies may use locals and branches, and may return any expression assignable to `&Class`. Object allocation and initialization still happen only through the canonical constructor. Method calls use `receiver.method(...)`; property reads and writes use `receiver.property` and `receiver.property = value`. Field reads and writes use explicitly named private storage. `this` names the current receiver. Initializers are fixed values, not optional constructor parameters; only uninitialized fields and auto-properties appear in the canonical constructor signature.
 
 ## Implementation Roadmap
 
@@ -363,7 +364,7 @@ Fields, properties, methods, and named constructors share one member namespace; 
     the ordinary member namespace; contract property requirements, generic ABI metadata, receiver
     mutability checks, and receiver-once compound assignment are covered by runtime tests.
 5. **Expand the type-system surface.** Consider class inheritance, abstract classes,
-    contract-to-contract inheritance, intersection types, bounds, variance, overload resolution,
+    contract-to-contract inheritance, intersection types, bounds, variance,
     broader inference, and module-qualified type identity as separate designs.
 
 ## Acceptance Criteria
@@ -394,7 +395,7 @@ internal array intrinsic registry does not introduce this language feature. See
 [design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md)
 for the current distinction between intrinsic IDs and future external/expected declarations.
 
-Class inheritance, abstract classes, bounds, variance, source-level overload resolution, broader
+Class inheritance, abstract classes, bounds, variance, broader
 inference, contract-to-contract inheritance, intersection types, extension
 methods, JPMS integration, serialization, public fields, generated accessors, and ownership/borrow
 checking remain deferred. Class-directory compiled-library discovery and the initial Java interop

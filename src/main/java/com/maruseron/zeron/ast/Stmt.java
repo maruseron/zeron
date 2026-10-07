@@ -97,13 +97,21 @@ public sealed interface Stmt {
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                      List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
                      Constructor constructor, List<NamedConstructor> namedConstructors,
-                     List<Method> methods, boolean isPublic) implements Stmt, Decl {
+                     List<Method> methods, boolean isPublic, boolean isEffect) implements Stmt, Decl {
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, boolean isPublic) {
+            this(name, typeParameters, contractUses, fields, properties, constructor,
+                    namedConstructors, methods, isPublic, false);
+        }
+
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                          List<ContractUse> contractUses, List<Field> fields,
                          Constructor constructor, List<NamedConstructor> namedConstructors,
                          List<Method> methods, boolean isPublic) {
             this(name, typeParameters, contractUses, fields, List.of(), constructor,
-                    namedConstructors, methods, isPublic);
+                    namedConstructors, methods, isPublic, false);
         }
 
         public List<Token> contractNames() {

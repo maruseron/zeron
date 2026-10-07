@@ -417,6 +417,78 @@ public sealed interface Expr {
         public void setType(final TypeDescriptor resolvedType) { type = resolvedType; }
     }
 
+    final class Raise implements Expr {
+        public final Token keyword;
+        public final Expr effect;
+
+        public Raise(final Token keyword, final Expr effect) {
+            this.keyword = keyword;
+            this.effect = effect;
+        }
+
+        public TypeDescriptor getType() { return TypeDescriptor.ofNever(); }
+        public void setType(final TypeDescriptor type) {
+            if (!(type instanceof com.maruseron.zeron.domain.NeverDescriptor)) {
+                throw new IllegalArgumentException("A raise expression has type Never.");
+            }
+        }
+    }
+
+    final class HandleArm {
+        private final Token keyword;
+        private final TypeDescriptor effectType;
+        private final Token alias;
+        private final Token namedPattern;
+        private final Token binding;
+        private final Expr expression;
+        private TypeDescriptor resolvedEffectType;
+        private TypeDescriptor declaredPatternType;
+        private TypeDescriptor resolvedPatternType;
+
+        public HandleArm(final Token keyword, final TypeDescriptor effectType,
+                         final Token alias, final Token namedPattern, final Token binding,
+                         final Expr expression) {
+            this.keyword = keyword;
+            this.effectType = effectType;
+            this.alias = alias;
+            this.namedPattern = namedPattern;
+            this.binding = binding;
+            this.expression = expression;
+        }
+
+        public Token keyword() { return keyword; }
+        public TypeDescriptor effectType() { return effectType; }
+        public Token alias() { return alias; }
+        public Token namedPattern() { return namedPattern; }
+        public Token binding() { return binding; }
+        public Expr expression() { return expression; }
+        public TypeDescriptor resolvedEffectType() { return resolvedEffectType; }
+        public void setResolvedEffectType(final TypeDescriptor type) { resolvedEffectType = type; }
+        public TypeDescriptor declaredPatternType() { return declaredPatternType; }
+        public TypeDescriptor resolvedPatternType() { return resolvedPatternType; }
+        public void setResolvedPatternTypes(final TypeDescriptor declaredType,
+                                            final TypeDescriptor resolvedType) {
+            declaredPatternType = declaredType;
+            resolvedPatternType = resolvedType;
+        }
+    }
+
+    final class Handle implements Expr {
+        public final Token keyword;
+        public final Expr expression;
+        public final List<HandleArm> arms;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+
+        public Handle(final Token keyword, final Expr expression, final List<HandleArm> arms) {
+            this.keyword = keyword;
+            this.expression = expression;
+            this.arms = List.copyOf(arms);
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor type) { this.type = type; }
+    }
+
     final class Call implements Expr {
         public final Token callee;
         public final Token paren;

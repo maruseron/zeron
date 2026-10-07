@@ -28,11 +28,12 @@ final class LambdaResolver {
                                 + "' for polymorphic lambda at this use."));
             }
         }
-        final var specialized = TypeDescriptor.functionOf(scheme.name(),
+        final var specialized = TypeDescriptor.functionWithEffectsOf(scheme.name(),
                 TypeSubstitution.substitute(scheme.returnType(), substitutions),
                 scheme.parameters().stream()
                         .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
-                        .toArray(TypeDescriptor[]::new));
+                        .toList(), List.of(), scheme.raisedEffects().stream()
+                        .map(effect -> TypeSubstitution.substitute(effect, substitutions)).toList());
         if (!TypeSubstitution.containsTypeParameter(expectedType)) {
             ensureAssignable(context, expectedType, specialized, where);
         }
@@ -100,11 +101,12 @@ final class LambdaResolver {
         }
 
         final var specializedType = sourceType.isGeneric()
-                ? TypeDescriptor.functionOf(sourceType.name(),
+                ? TypeDescriptor.functionWithEffectsOf(sourceType.name(),
                         TypeSubstitution.substitute(sourceType.returnType(), substitutions),
                         sourceType.parameters().stream()
                                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
-                                .toArray(TypeDescriptor[]::new))
+                                .toList(), List.of(), sourceType.raisedEffects().stream()
+                                .map(effect -> TypeSubstitution.substitute(effect, substitutions)).toList())
                 : sourceType;
         final var expectedFunction = expectedType == null ? null : functionType(context, expectedType);
         if (expectedFunction != null && !TypeSubstitution.containsTypeParameter(expectedFunction)) {
@@ -142,11 +144,12 @@ final class LambdaResolver {
                     continue;
                 }
                 final var specialized = source.isGeneric()
-                        ? TypeDescriptor.functionOf(source.name(),
+                        ? TypeDescriptor.functionWithEffectsOf(source.name(),
                                 TypeSubstitution.substitute(source.returnType(), substitutions),
                                 source.parameters().stream()
                                         .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
-                                        .toArray(TypeDescriptor[]::new))
+                                        .toList(), List.of(), source.raisedEffects().stream()
+                                        .map(effect -> TypeSubstitution.substitute(effect, substitutions)).toList())
                         : source;
                 if (expected == null || specialized.equals(expected)
                         || context.typeCompatibility.canAssign(expected, specialized)) matches.add(declaration);
@@ -246,6 +249,7 @@ final class LambdaResolver {
     static FunctionDescriptor inferLambdaType(final ResolutionContext context, final Expr.Lambda lambda) {
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
+        final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
         beginScope(context);
@@ -272,14 +276,13 @@ final class LambdaResolver {
                         : binding.type());
             }
 
-            return parameterTypes.isEmpty()
-                    ? TypeDescriptor.functionOf("", returnType)
-                    : TypeDescriptor.functionOf("", returnType,
-                            parameterTypes.toArray(TypeDescriptor[]::new));
+            return TypeDescriptor.functionWithEffectsOf("", returnType, parameterTypes,
+                    List.of(), List.copyOf(context.frame.raisedEffects));
         } finally {
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
 
@@ -407,6 +410,14 @@ final class LambdaResolver {
                     return arm.guard() != null && referencesAnyVariable(context, arm.guard(), armNames)
                             || referencesAnyVariable(context, arm.expression(), armNames);
                 });
+            case Expr.Raise raise -> referencesAnyVariable(context, raise.effect, names);
+            case Expr.Handle handle -> referencesAnyVariable(context, handle.expression, names)
+                || handle.arms.stream().anyMatch(arm -> {
+                    final var armNames = new HashSet<>(names);
+                    if (arm.alias() != null) armNames.remove(arm.alias().lexeme());
+                    if (arm.binding() != null) armNames.remove(arm.binding().lexeme());
+                    return referencesAnyVariable(context, arm.expression(), armNames);
+                });
             case Expr.Logical logical -> referencesAnyVariable(context, logical.left, names)
                 || referencesAnyVariable(context, logical.right, names);
             case Expr.Coalesce coalesce -> referencesAnyVariable(context, coalesce.left, names)
@@ -433,6 +444,7 @@ final class LambdaResolver {
 
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
+        final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
         beginScope(context);
@@ -461,12 +473,14 @@ final class LambdaResolver {
             final var resolvedType = expectedType.returnType() instanceof InferDescriptor || unresolvedReturn
                     ? expectedType.toReturnType(returnType)
                     : expectedType;
+            RaisedEffectFlow.verifyCallable(context, expectedType.raisedEffects(), lambda.arrow);
             lambda.setType(resolvedType);
             return resolvedType;
         } finally {
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
 
@@ -494,8 +508,18 @@ final class LambdaResolver {
     }
 
     static void resolveFunction(final ResolutionContext context, final Stmt.Function function) {
+        if (Objects.equals(context.currentSourcePath, context.entrySourcePath)
+                && function.name().lexeme().equals("main")
+                && function.parameters().isEmpty()
+                && (function.typeDescriptor().returnType() instanceof UnitDescriptor
+                    || function.typeDescriptor().returnType() instanceof InferDescriptor)
+                && !function.typeDescriptor().raisedEffects().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    function.name(), "The entry-point main function cannot declare raised effects."));
+        }
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
+        final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
         beginScope(context);
@@ -512,6 +536,7 @@ final class LambdaResolver {
                 context.symbols.setResolvedReturnType(
                         MemberInteropResolver.functionSymbolToken(context, function.name()), resolvedType);
             }
+            RaisedEffectFlow.verifyCallable(context, function.typeDescriptor().raisedEffects(), function.name());
 
                 Zeron.debug(" resolved function " + function.name().lexeme()
                     + " -> " + context.symbols.getFunction(
@@ -521,6 +546,7 @@ final class LambdaResolver {
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
 
@@ -528,6 +554,7 @@ final class LambdaResolver {
                                        final Stmt.ExtensionMethod extension) {
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
+        final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
         beginScope(context);
@@ -537,11 +564,13 @@ final class LambdaResolver {
                     extension.typeDescriptor(), extension.defaultValues(), extension.minimumArity());
             resolveStmts(context, extension.body());
             ensureReturns(context, extension.name(), extension.typeDescriptor().returnType(), extension.body());
+            RaisedEffectFlow.verifyCallable(context, extension.typeDescriptor().raisedEffects(), extension.name());
         } finally {
             context.frame.expectedReturnTypes.pop();
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
 

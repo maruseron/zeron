@@ -147,7 +147,10 @@ public record ResolutionResult(
                     .equals(implementation.parameters().get(i))) return false;
         }
         final var requiredReturn = TypeSubstitution.substitute(required.returnType(), methodSubstitutions);
-        return new TypeCompatibility(classes, contracts).canAssign(requiredReturn, implementation.returnType());
+        final var requiredEffects = required.raisedEffects().stream()
+                .map(effect -> TypeSubstitution.substitute(effect, methodSubstitutions)).toList();
+        return requiredEffects.containsAll(implementation.raisedEffects())
+                && new TypeCompatibility(classes, contracts).canAssign(requiredReturn, implementation.returnType());
     }
 
     public boolean isContractProjection(final TypeDescriptor expectedType,

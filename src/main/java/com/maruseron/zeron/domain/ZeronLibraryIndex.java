@@ -27,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 13;
+    public static final int VERSION = 14;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -117,7 +117,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                             true, property.mutating(), null, null, null, false))
                     .toList();
                 statements.add(new Stmt.ClassDecl(className, classExport.typeParameters(), contractUses,
-                    fields, properties, constructor, namedConstructors, methods, true));
+                    fields, properties, constructor, namedConstructors, methods, true, classExport.effect()));
             }
             case ContractExport contract -> {
                 final var contractName = token(contract.qualifiedName());
@@ -201,6 +201,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                               List<ContractUseExport> contracts,
                               List<TypeDescriptor> canonicalConstructorParameters,
                               boolean canonicalConstructorPublic,
+                              boolean effect,
                               List<NamedConstructorExport> namedConstructors,
                               List<MethodExport> methods,
                               List<PropertyExport> properties) implements ExportedDeclaration {
@@ -360,6 +361,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                         ? classDeclaration.canonicalConstructorTypes()
                                         : List.of(),
                                 classDeclaration.constructor().isPublic(),
+                                classDeclaration.isEffect(),
                                 classDeclaration.namedConstructors().stream()
                                         .filter(Stmt.NamedConstructor::isPublic)
                                         .map(constructor -> new NamedConstructorExport(
@@ -430,7 +432,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v13.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v14.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -456,7 +458,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v13.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v14.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -518,6 +520,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     for (final var type : contract.typeArguments()) writeType(output, type, context);
                 }
                 output.writeBoolean(classExport.canonicalConstructorPublic());
+                output.writeBoolean(classExport.effect());
                 output.writeInt(classExport.canonicalConstructorParameters().size());
                 for (final var type : classExport.canonicalConstructorParameters()) writeType(output, type, context);
                 output.writeInt(classExport.namedConstructors().size());
@@ -577,6 +580,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     contracts.add(new ContractUseExport(contractName, arguments));
                 }
                 final var canonicalPublic = input.readBoolean();
+                final var effect = input.readBoolean();
                 final var constructorParameters = new ArrayList<TypeDescriptor>();
                 for (int i = 0, count = readCount(input); i < count; i++) {
                     constructorParameters.add(readType(input, context));
@@ -588,7 +592,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     constructors.add(new NamedConstructorExport(constructorName, signature, input.readBoolean()));
                 }
                 final var methods = readMethods(input, context);
-                yield new ClassExport(name, typeParameters, contracts, constructorParameters, canonicalPublic,
+                yield new ClassExport(name, typeParameters, contracts, constructorParameters, canonicalPublic, effect,
                         constructors, methods, readProperties(input, context));
             }
             case 3 -> {
@@ -672,6 +676,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         writeType(output, function.returnType(), context);
         output.writeInt(function.parameters().size());
         for (final var parameter : function.parameters()) writeType(output, parameter, context);
+        output.writeInt(function.raisedEffects().size());
+        for (final var effect : function.raisedEffects()) writeType(output, effect, context);
     }
 
     private static FunctionDescriptor readFunction(final DataInputStream input,
@@ -681,7 +687,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         final var returnType = readType(input, context);
         final var parameters = new ArrayList<TypeDescriptor>();
         for (int i = 0, count = readCount(input); i < count; i++) parameters.add(readType(input, context));
-        return TypeDescriptor.genericFunctionOf(name, returnType, parameters, typeParameters);
+        final var effects = new ArrayList<TypeDescriptor>();
+        for (int i = 0, count = readCount(input); i < count; i++) effects.add(readType(input, context));
+        return TypeDescriptor.functionWithEffectsOf(name, returnType, parameters, typeParameters, effects);
     }
 
     private static void writeTypeParameters(final DataOutputStream output,

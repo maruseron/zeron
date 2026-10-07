@@ -14,6 +14,20 @@ final class TypeResolver {
     static void validateFunctionTypes(final ResolutionContext context, final FunctionDescriptor function, final Token where) {
         for (final var parameter : function.parameters()) validateType(context, parameter, where);
         validateType(context, function.returnType(), where);
+        final var seenEffects = new HashSet<TypeDescriptor>();
+        for (final var effect : function.raisedEffects()) {
+            validateType(context, effect, where);
+            if (!(effect instanceof NominalDescriptor nominal)
+                    || context.classes.get(nominal.name()) == null
+                    || !context.classes.get(nominal.name()).isEffect()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        where, "A raises clause must name a declared non-generic effect type."));
+            }
+            if (!seenEffects.add(effect)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
+                        where, "An effect may appear only once in a raises clause."));
+            }
+        }
     }
 
     static void validateTypeParameterBound(final ResolutionContext context, final TypeParameterDescriptor parameter, final Token where) {
@@ -50,6 +64,7 @@ final class TypeResolver {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, where,
                                 "Unknown type '" + nominal.name() + "'."));
                     }
+
                     if (javaClass.hasGenericSignature()) {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
                                 where,
@@ -110,6 +125,18 @@ final class TypeResolver {
             }
             default -> {}
         }
+    }
+
+    static TypeDescriptor requireEffectType(final ResolutionContext context, final TypeDescriptor type,
+                                            final Token where) {
+        validateType(context, type, where);
+        if (!(type instanceof NominalDescriptor nominal)
+                || context.classes.get(nominal.name()) == null
+                || !context.classes.get(nominal.name()).isEffect()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    where, "Expected a declared non-generic effect type."));
+        }
+        return type;
     }
 
     static TypeDescriptor classType(final ResolutionContext context, final Stmt.ClassDecl declaration) {

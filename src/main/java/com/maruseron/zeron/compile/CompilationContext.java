@@ -93,6 +93,8 @@ final class CompilationContext {
                 }
             }
         }
+        sourceTypes.put(ClassDesc.of("zeron.runtime.RaisedEffect"),
+                ClassHierarchyResolver.ClassHierarchyInfo.ofClass(ClassDesc.of("java.lang.RuntimeException")));
         final var fallback = ClassHierarchyResolver.defaultResolver();
         return resolver -> {
             final var sourceType = sourceTypes.get(resolver);

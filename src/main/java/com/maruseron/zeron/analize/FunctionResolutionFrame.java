@@ -10,10 +10,10 @@ final class FunctionResolutionFrame {
     final Deque<Set<Token>> flowWriteScopes = new ArrayDeque<>();
     final Deque<LoopFlow> loopFlows = new ArrayDeque<>();
     final Deque<TypeDescriptor> expectedReturnTypes = new ArrayDeque<>();
+    Set<TypeDescriptor> raisedEffects;
     FlowState flowState = new FlowState();
     int loopDepth;
     String currentClassName;
     Stmt.ClassDecl currentMethodOwner;
     List<Stmt.Field> initializerVisibleFields;
 }
-

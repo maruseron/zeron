@@ -51,6 +51,7 @@ public final class Resolver {
 
     static ResolutionResult resolveUnits(
             final ResolutionContext context, final List<CompilationUnit> units) {
+        context.entrySourcePath = units.isEmpty() ? null : units.getFirst().sourcePath();
         for (final var unit : units) {
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = entry.declaration();

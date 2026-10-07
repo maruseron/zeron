@@ -119,6 +119,7 @@ final class DeclarationResolver {
 
     private static void resolveContractMethod(final ResolutionContext context, final Stmt.ContractDecl owner,
                                        final Stmt.ContractMethod method) {
+        final var enclosingEffects = method.isDefault() ? RaisedEffectFlow.beginCallable(context) : null;
         beginScope(context);
         context.frame.expectedReturnTypes.push(method.typeDescriptor().returnType());
         final var enclosingFlow = context.frame.flowState;
@@ -152,16 +153,26 @@ final class DeclarationResolver {
             if (method.isDefault()) {
                 resolveStmts(context, method.body());
                 ensureReturns(context, method.name(), method.typeDescriptor().returnType(), method.body());
+                RaisedEffectFlow.verifyCallable(context, method.typeDescriptor().raisedEffects(), method.name());
             }
         } finally {
             context.frame.expectedReturnTypes.pop();
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            if (enclosingEffects != null) RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
 
     static void resolveClass(final ResolutionContext context, final Stmt.ClassDecl declaration) {
+        if (declaration.isEffect() && (!declaration.typeParameters().isEmpty()
+                || !declaration.contractUses().isEmpty() || !declaration.methods().isEmpty()
+                || declaration.properties().stream().anyMatch(property -> !property.isPublic()))) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    declaration.name(),
+                    "Effects are non-generic payload classes; they cannot implement contracts or declare methods, "
+                            + "and payload properties must be public."));
+        }
         final var fieldNames = new HashSet<String>();
         for (final var field : declaration.fields()) {
             if (!fieldNames.add(field.name().lexeme())) {
@@ -324,6 +335,7 @@ final class DeclarationResolver {
     }
 
     private static void resolveMethod(final ResolutionContext context, final Stmt.ClassDecl owner, final Stmt.Method method) {
+        final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         beginScope(context);
     context.frame.expectedReturnTypes.push(method.typeDescriptor().returnType());
         final var enclosingFlow = context.frame.flowState;
@@ -352,11 +364,13 @@ final class DeclarationResolver {
         try {
             resolveStmts(context, method.body());
             ensureReturns(context, method.name(), method.typeDescriptor().returnType(), method.body());
+            RaisedEffectFlow.verifyCallable(context, method.typeDescriptor().raisedEffects(), method.name());
         } finally {
             context.frame.expectedReturnTypes.pop();
             endScope(context);
             context.frame.flowState = enclosingFlow;
             context.frame.currentMethodOwner = enclosingMethodOwner;
+            RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
 
@@ -380,6 +394,7 @@ final class DeclarationResolver {
     }
 
     private static void resolveNamedConstructor(final ResolutionContext context, final Stmt.NamedConstructor constructor) {
+        final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         beginScope(context);
         final var enclosingFlow = context.frame.flowState;
         final var enclosingLoopDepth = context.frame.loopDepth;
@@ -399,11 +414,13 @@ final class DeclarationResolver {
                         DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, constructor.name(),
                         "Named constructor must return an instance on every normal path."));
             }
+            RaisedEffectFlow.verifyCallable(context, constructor.typeDescriptor().raisedEffects(), constructor.name());
         } finally {
             if (!context.frame.expectedReturnTypes.isEmpty()) context.frame.expectedReturnTypes.pop();
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
 
@@ -587,7 +604,10 @@ final class DeclarationResolver {
                     .equals(implementation.parameters().get(i))) return false;
         }
         final var requiredReturn = TypeSubstitution.substitute(required.returnType(), methodSubstitutions);
-        return context.typeCompatibility.canAssign(requiredReturn, implementation.returnType());
+        final var requiredEffects = required.raisedEffects().stream()
+                .map(effect -> TypeSubstitution.substitute(effect, methodSubstitutions)).toList();
+        return requiredEffects.containsAll(implementation.raisedEffects())
+                && context.typeCompatibility.canAssign(requiredReturn, implementation.returnType());
     }
 
 }

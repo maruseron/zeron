@@ -58,6 +58,15 @@ final class TypeCompatibility {
 
     boolean canAssign(final TypeDescriptor expectedType, final TypeDescriptor resolvedType) {
         if (expectedType.equals(resolvedType)) return true;
+        if (resolvedType instanceof NeverDescriptor) return true;
+        if (expectedType instanceof FunctionDescriptor expectedFunction
+                && resolvedType instanceof FunctionDescriptor resolvedFunction
+                && expectedFunction.arity() == resolvedFunction.arity()
+                && expectedFunction.parameters().equals(resolvedFunction.parameters())
+                && canAssign(expectedFunction.returnType(), resolvedFunction.returnType())
+                && expectedFunction.raisedEffects().containsAll(resolvedFunction.raisedEffects())) {
+            return true;
+        }
         if (resolvedType instanceof TypeParameterDescriptor parameter
             && parameter.bounds().stream().anyMatch(bound -> canAssign(expectedType, bound))) return true;
         if (expectedType instanceof AnyDescriptor

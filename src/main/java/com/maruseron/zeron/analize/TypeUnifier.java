@@ -63,7 +63,8 @@ final class TypeUnifier {
         }
         if (pattern instanceof FunctionDescriptor functionPattern
                 && actual instanceof FunctionDescriptor functionActual
-                && functionPattern.arity() == functionActual.arity()) {
+                && functionPattern.arity() == functionActual.arity()
+                && functionPattern.raisedEffects().equals(functionActual.raisedEffects())) {
             for (int i = 0; i < functionPattern.arity(); i++) {
                 unify(functionPattern.parameters().get(i), functionActual.parameters().get(i),
                         substitutions, where);

@@ -28,6 +28,7 @@ final class BytecodeEmitter {
     static void emit(final CompilationContext context) throws IOException {
         Files.createDirectories(context.outputDirectory);
         RuntimeSupportEmitter.emitUnitClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitRaisedEffectClass(context.outputDirectory);
         final var signatureDeclarations = context.compilationUnits.stream()
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
                 .map(NamespaceMembers.Member::declaration).toList();
@@ -100,7 +101,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v13.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v14.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -444,6 +445,8 @@ final class BytecodeEmitter {
             case Expr.Grouping grouping -> emitExpr(context, composer, grouping.expression);
             case Expr.If iff -> ExpressionFlowEmitter.emitIfExpression(context, composer, iff);
             case Expr.Match match -> ExpressionFlowEmitter.emitMatchExpression(context, composer, match);
+            case Expr.Raise raise -> ExpressionFlowEmitter.emitRaise(context, composer, raise);
+            case Expr.Handle handle -> ExpressionFlowEmitter.emitHandle(context, composer, handle);
             case Expr.Logical logical -> ExpressionFlowEmitter.emitLogical(context, composer, logical);
             case Expr.Coalesce coalesce -> ExpressionFlowEmitter.emitCoalesce(context, composer, coalesce);
             case Expr.TypeTest test -> ExpressionFlowEmitter.emitTypeTest(context, composer, test);
@@ -1232,6 +1235,10 @@ final class BytecodeEmitter {
                     LambdaSupportEmitter.emitFunctionAdapter(context, composer, erasedSource, erasedTarget);
                 }
             }
+            context.lastEmittedType = targetType;
+            return;
+        }
+        if (sourceType instanceof NeverDescriptor) {
             context.lastEmittedType = targetType;
             return;
         }

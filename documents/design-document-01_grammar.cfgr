@@ -11,9 +11,12 @@ importDeclaration       : "import" qualifiedName ["as" IDENTIFIER] ";" ;
 topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl
                         | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
                         | externalClassDecl | publicExternalClassDecl
+                        | effectDecl | publicEffectDecl | extensionDecl | publicExtensionDecl
                         | publicClassDecl | publicContractDecl | publicSealedContractDecl ;
 publicFunDecl           : "public" funDecl ;
 publicExternalFunctionDecl : "public" externalFunctionDecl ;
+publicEffectDecl        : "public" effectDecl ;
+publicExtensionDecl     : "public" extensionDecl ;
 publicExternalClassDecl : "public" externalClassDecl ;
 publicClassDecl         : "public" classDecl ;
 publicContractDecl      : "public" contractDecl ;
@@ -22,8 +25,9 @@ sealedContractDecl      : "sealed" contractDecl ;
 declaration             : varDecl | funDecl | statement ;
 
 varDecl                 : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
-funDecl                 : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type]
+funDecl                 : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type] [raisesClause]
                           ("=" expression ";" | block) ;
+raisesClause            : "raises" type {"," type} ;
 externalFunctionDecl   : "external" "fn" IDENTIFIER "(" parameters ")" ":" type ";" ;
 externalClassDecl      : "external" "class" IDENTIFIER "=" STRING "{" externalClassMember* "}" ;
 externalClassMember    : ["public"] ["mut"] IDENTIFIER "(" plainParameters ")" ":" type ";"
@@ -38,6 +42,11 @@ plainParameter          : IDENTIFIER ":" type ;
 classDecl               : "class" IDENTIFIER [typeParameters]
                           ["is" contractUse {"," contractUse}]
                           "{" classMember* "}" ;
+effectDecl              : "effect" IDENTIFIER "{" classMember* "}" ;
+extensionDecl           : "extension" [typeParameters] type "{" extensionMethod* "}" ;
+extensionMethod         : ["public"] ["mut"] "fn" IDENTIFIER [typeParameters]
+                          "(" parameters ")" ":" type [raisesClause]
+                          ("=" expression ";" | block) ;
 contractUse             : qualifiedName [typeArguments] ;
 classMember             : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl | methodDecl ;
 fieldDecl               : IDENTIFIER ":" type ";" ;
@@ -46,11 +55,12 @@ propertyDecl            : visibility ["mut"] "property" IDENTIFIER ":" type ["="
 propertyAccessor        : "get" ("=" expression ";" | block)
                         | "set" "(" IDENTIFIER ")" ("=" expression ";" | block) ;
 constructorDecl         : visibility "constructor" "new" ";" ;
-namedConstructorDecl    : visibility "constructor" IDENTIFIER "(" namedConstructorParameters ")"
+namedConstructorDecl    : visibility "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause]
                           ("=" expression ";" | block) ;
 namedConstructorParameters : [namedConstructorParameter {"," namedConstructorParameter}] ;
 namedConstructorParameter : IDENTIFIER ":" type ["..."] ;
 methodDecl              : visibility ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
+                          [raisesClause]
                           ("=" expression ";" | block) ;
 contractDecl            : "contract" IDENTIFIER [typeParameters] ["permits" permittedClass
                           {"," permittedClass}] "{" contractMember* "}" ;
@@ -58,6 +68,7 @@ permittedClass          : qualifiedName [typeArguments] ;
 contractMember          : contractProperty | contractMethod ;
 contractProperty        : ["mut"] "property" IDENTIFIER ":" type ";" ;
 contractMethod          : ["default"] ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
+                          [raisesClause]
                           (";" | "=" expression ";" | block) ;
 visibility              : "public" | "private" ;
 
@@ -98,7 +109,8 @@ comparison              : shift {(">" | ">=" | "<" | "<=") shift} ;
 shift                   : term {("<<" | ">>" | ">>>") term} ;
 term                    : factor {("-" | "+") factor} ;
 factor                  : unary {("/" | "*" | "%") unary} ;
-unary                   : ("not" | "-" | "+" | "~" | "typeof") unary
+unary                   : "raise" unary
+                        | ("not" | "-" | "+" | "~" | "typeof") unary
                         | cast ;
 cast                    : call {"as" ["?"] type} ;
 call                    : (genericFunctionCall | genericClassFactoryCall | functionValueReference | primary)
@@ -111,15 +123,16 @@ arguments               : "(" [expression {"," expression}] ")" ;
 typeArguments           : "<" type {"," type} ">" ;
 type                    : ["&"] typeAtom ["?"] ;
 typeAtom                : qualifiedName ["<" typeArgumentsBody ">"]
-                        | "(" ")" "->" type
-                        | "(" type ")" ["->" type]
-                        | "(" type "," type {"," type} ")" "->" type ;
+                        | "(" ")" "->" type [raisesClause]
+                        | "(" type ")" ["->" type [raisesClause]]
+                        | "(" type "," type {"," type} ")" "->" type [raisesClause] ;
 typeArgumentsBody       : type {"," type} ;
 
 primary                 : INT
                         | DOUBLE
                         | STRING
                         | IDENTIFIER
+                        | handleExpr
                         | arrayLiteral
                         | lambda
                         | "true" | "false" | "null" | "this"
@@ -128,6 +141,8 @@ primary                 : INT
                         | "(" ")"
                         | "(" expression ")"
                         | range ;
+handleExpr              : "handle" "(" expression ")" "with" "{" handleArm+ "}" ;
+handleArm               : "case" type ["as" IDENTIFIER] "->" expression ";" ;
 arrayLiteral            : "[" expression {"," expression} "]" ;
 ifExpr                  : "if" "(" expression ")" "then" expression "else" expression ;
 matchExpr               : "match" "(" expression ")" "{" matchArm+ "}" ;
@@ -207,6 +222,13 @@ range                   : INT ".." INT ;
 #   `|`, `^`, `~` and shifts require `Int`; `>>>` is zero-filling. Shift distances follow JVM Int
 #   behavior (only the low five bits are used).
 # - Array literals are non-empty. A valueless `return` has type Unit and is rejected in non-Unit functions.
+# - Effects are nominal non-generic payload classes. Effects are supported in callable signatures
+#   and function types, but not in external Java signatures, entry-point `main`, or top-level
+#   initializers. A raised effect must be declared by the enclosing callable or handled by a typed
+#   `handle` case. Handler cases accept a single effect type, an optional whole-payload alias, or
+#   one named public-property pattern; there are no catch-all cases or effect subtyping in this
+#   slice. Unmatched effects
+#   propagate at runtime. `Result` remains an ordinary value type.
 #   Type argument arity is checked by resolution.
 # Parser productions describe syntax; declaration, type-argument, and return-flow constraints are
 # enforced by resolution.

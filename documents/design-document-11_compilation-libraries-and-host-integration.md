@@ -26,7 +26,7 @@ a source package a JVM module.
   resource generation; runtime loading uses the index, so adding a standard-library source does not
   require a separate registration-list edit. Standard-library declarations remain explicit imports,
   and the canonical source tree mirrors package names.
-- The compiler writes `META-INF/zeron/api-v13.bin`. The index has schema version 13 and carries the
+- The compiler writes `META-INF/zeron/api-v14.bin`. The index has schema version 14 and carries the
   required standard-library API version, currently 11.
 - Zeron libraries can be built into a class directory and consumed in compiled mode. Library loading
   validates the API-index schema and standard-library API versions and creates metadata-only
@@ -69,18 +69,19 @@ zero-argument `fn main(): Unit`, the generated entry class also includes the sta
 Run a generated launcher from `dist/` with `--run-class <path-to-class-file>`, for example
 `--run-class dist/main.class`. The command launches a child JVM with `dist/`, the compiler runtime,
 and a cached standard-library JAR named for the current API-index schema and standard-library API
-versions (for example, `target/zeron-stdlib-index-v13-api-v11.jar`). If that versioned JAR is missing,
+versions (for example, `target/zeron-stdlib-index-v14-api-v11.jar`). If that versioned JAR is missing,
 it is built; `--stdlib-jar <path>` overrides the default. Repeatable `--library` arguments add
 validated library JARs or class directories to the runtime classpath.
 
 ## Zeron Library Artifacts
 
-The API index is a binary sidecar at `META-INF/zeron/api-v13.bin`. Its schema version is separate from
+The API index is a binary sidecar at `META-INF/zeron/api-v14.bin`. Its schema version is separate from
 the standard-library API version. It records qualified public signatures, generated JVM owners,
 declaration and method generic parameters, nullability, reference views, mutability markers, callback
 shapes, and each callable's minimum accepted arity. Public property requirements and getter/setter
 capabilities are recorded alongside
-class and contract signatures. Sealed contracts additionally export their permitted class templates.
+class and contract signatures. Effect classes carry an effect marker, and callable signatures retain
+their declared raised-effect types. Sealed contracts additionally export their permitted class templates.
 Method type parameters and references to enclosing class or contract parameters use the same scoped
 type encoding as generic function signatures. Function and value exports carry an explicit namespace
 name when declared inside a namespace; ordinary top-level value exports have no namespace. Callable
@@ -112,7 +113,7 @@ provider's initializer bodies.
 `--jar-output <file.jar>` packages a successful source/project compilation from a temporary staging
 directory, leaving the default `dist/` output unchanged when the option is omitted. When combined
 with `--build-stdlib`, the requested class directory is preserved and also packaged as a JAR.
-Archives contain the compiled classes and `META-INF/zeron/api-v13.bin`, with entries in deterministic
+Archives contain the compiled classes and `META-INF/zeron/api-v14.bin`, with entries in deterministic
 order. The JAR is published only after packaging succeeds.
 
 Consumers may select a Zeron library class directory or JAR with `--library`; compiled standard
@@ -121,8 +122,8 @@ API-index loading and, when needed, as a normal runtime classpath entry. A consu
 whose schema version is unsupported or whose required standard-library API version does not exactly
 match its compiler. Increment `StandardLibrary.API_VERSION` when the bundled source contract changes
 incompatibly; do not use it as a substitute for the binary index schema version. The index schema is
-independent of its JAR packaging; schema version 13 adds extension-export metadata alongside existing
-callable and value exports.
+independent of its JAR packaging; schema version 14 preserves extension exports, effect markers, and
+raised-effect signatures alongside existing callable and value exports.
 
 `ZeronLibraryIndexDump` accepts an index file, a class directory, or a Zeron library JAR.
 

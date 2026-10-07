@@ -294,6 +294,11 @@ final class LambdaCompilationPlan {
                     collectLambdaShapes(arm.expression());
                 }
             }
+            case Expr.Raise raise -> collectLambdaShapes(raise.effect);
+            case Expr.Handle handle -> {
+                collectLambdaShapes(handle.expression);
+                for (final var arm : handle.arms) collectLambdaShapes(arm.expression());
+            }
             case Expr.Assignment assignment -> collectLambdaShapes(assignment.value);
             case Expr.Unary unary -> collectLambdaShapes(unary.right);
             case Expr.Variable variable -> {
@@ -483,6 +488,15 @@ final class LambdaCompilationPlan {
                     if (arm.alias() != null) armNames.add(arm.alias().lexeme());
                     if (arm.binding() != null) armNames.add(arm.binding().lexeme());
                     if (arm.guard() != null) collectCapturedVariables(arm.guard(), armNames, captured, seen);
+                    collectCapturedVariables(arm.expression(), armNames, captured, seen);
+                }
+            }
+            case Expr.Raise raise -> collectCapturedVariables(raise.effect, localNames, captured, seen);
+            case Expr.Handle handle -> {
+                collectCapturedVariables(handle.expression, localNames, captured, seen);
+                for (final var arm : handle.arms) {
+                    final var armNames = new HashSet<>(localNames);
+                    if (arm.alias() != null) armNames.add(arm.alias().lexeme());
                     collectCapturedVariables(arm.expression(), armNames, captured, seen);
                 }
             }

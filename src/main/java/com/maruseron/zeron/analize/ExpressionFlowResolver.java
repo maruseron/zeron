@@ -19,7 +19,19 @@ final class ExpressionFlowResolver {
 
     private static TypeDescriptor resolve(final ResolutionContext context, Expr expr) {
         return switch (expr) {
-            case Expr.MemberCall call -> MemberInteropResolver.resolveMemberCall(context, call);
+            case Expr.MemberCall call -> {
+                final var resolved = MemberInteropResolver.resolveMemberCall(context, call);
+                if (call.resolvedDescriptor() != null) {
+                    RaisedEffectFlow.add(context, new LinkedHashSet<>(call.resolvedDescriptor().raisedEffects()),
+                            call.name);
+                } else if (call.namespaceCall() != null
+                        && call.namespaceCall().genericFunctionType() != null) {
+                    RaisedEffectFlow.add(context,
+                            new LinkedHashSet<>(call.namespaceCall().genericFunctionType().raisedEffects()),
+                            call.name);
+                }
+                yield resolved;
+            }
             case Expr.PropertyAssignment assignment -> {
                 if (assignment.property.safeNavigation()) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
@@ -312,7 +324,19 @@ final class ExpressionFlowResolver {
                 binary.setType(resolvedType);
                 yield resolvedType;
             }
-            case Expr.Call call -> context.callResolver.resolve(call);
+            case Expr.Call call -> {
+                final var resolved = context.callResolver.resolve(call);
+                if (call.genericFunctionType() != null) {
+                    RaisedEffectFlow.add(context,
+                            new LinkedHashSet<>(call.genericFunctionType().raisedEffects()), call.callee);
+                }
+                if (call.implicitMemberCall() != null
+                        && call.implicitMemberCall().resolvedDescriptor() != null) {
+                    RaisedEffectFlow.add(context, new LinkedHashSet<>(
+                            call.implicitMemberCall().resolvedDescriptor().raisedEffects()), call.callee);
+                }
+                yield resolved;
+            }
             // |> (a) ::= typeof a
             // suggested type for groupings will always be inferred,
             // just unbox and send the expression down the resolution pipeline
@@ -340,6 +364,16 @@ final class ExpressionFlowResolver {
                 yield commonType;
             }
             case Expr.Match match -> resolveMatch(context, match);
+            case Expr.Raise raise -> {
+                final var effectType = resolve(context, raise.effect);
+                final var nominalType = effectType instanceof ReferenceDescriptor reference
+                        ? reference.baseType() : effectType;
+                TypeResolver.requireEffectType(context, nominalType, raise.keyword);
+                RaisedEffectFlow.add(context, nominalType, raise.keyword);
+                raise.setType(TypeDescriptor.ofNever());
+                yield TypeDescriptor.ofNever();
+            }
+            case Expr.Handle handle -> resolveHandle(context, handle);
             case Expr.Coalesce coalesce -> {
                 final var leftType = resolve(context, coalesce.left);
                 final var afterLeft = context.frame.flowState.copy();
@@ -528,6 +562,77 @@ final class ExpressionFlowResolver {
                 yield resolvedType;
             }
         };
+    }
+
+    private static TypeDescriptor resolveHandle(final ResolutionContext context, final Expr.Handle handle) {
+        final var enclosingEffects = RaisedEffectFlow.beginHandledExpression(context);
+        TypeDescriptor protectedType;
+        final var handledEffects = new LinkedHashSet<TypeDescriptor>();
+        try {
+            protectedType = resolve(context, handle.expression);
+            for (final var arm : handle.arms) {
+                final var effect = TypeResolver.requireEffectType(context, arm.effectType(), arm.keyword());
+                if (!handledEffects.add(effect)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
+                            arm.keyword(), "An effect may appear only once in a handler."));
+                }
+                arm.setResolvedEffectType(effect);
+                if (arm.namedPattern() != null) {
+                    final var property = MemberInteropResolver.findProperty(
+                            context, effect.name(), arm.namedPattern());
+                    if (property == null) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                                arm.namedPattern(), "Effect '" + simpleName(effect.name())
+                                + "' has no readable property named '"
+                                + arm.namedPattern().lexeme() + "'."));
+                    } else {
+                        if (!property.isPublic()) {
+                            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                                    arm.namedPattern(),
+                                    "Named handler patterns can only read public properties."));
+                        }
+                        arm.setResolvedPatternTypes(property.type(),
+                                MemberInteropResolver.resolvedPropertyType(
+                                        context, effect.name(), property, effect));
+                    }
+                }
+            }
+        } finally {
+            RaisedEffectFlow.endHandledExpression(context, enclosingEffects, handledEffects, handle.keyword);
+        }
+
+        TypeDescriptor resultType = protectedType instanceof NeverDescriptor ? null : protectedType;
+        final var armsFlow = new ArrayList<FlowState>();
+        final var incomingFlow = context.frame.flowState.copy();
+        for (final var arm : handle.arms) {
+            context.frame.flowState = incomingFlow.copy();
+            context.symbols.beginScope();
+            try {
+                if (arm.alias() != null) {
+                    context.symbols.declareSymbol(SYNTHETIC_VAR, arm.alias(),
+                            arm.resolvedEffectType(), BindingMutability.IMMUTABLE);
+                    context.symbols.define(arm.alias());
+                }
+                if (arm.binding() != null) {
+                    context.symbols.declareSymbol(SYNTHETIC_VAR, arm.binding(),
+                            arm.resolvedPatternType(), BindingMutability.IMMUTABLE);
+                    context.symbols.define(arm.binding());
+                }
+                final var armType = resolve(context, arm.expression());
+                resultType = resultType == null ? armType
+                        : ensureCommonParent(context, arm.keyword(), resultType, armType);
+                armsFlow.add(context.frame.flowState.copy());
+            } finally {
+                context.symbols.endScope();
+            }
+        }
+        var joined = FlowState.unreachable();
+        for (final var flow : armsFlow) joined = FlowState.join(joined, flow);
+        context.frame.flowState = joined;
+        if (resultType == null) resultType = protectedType;
+        handle.setType(resultType);
+        return resultType;
     }
 
     static TypeDescriptor resolveExpression(final ResolutionContext context, final Expr expression) {

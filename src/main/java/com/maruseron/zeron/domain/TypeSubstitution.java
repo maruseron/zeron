@@ -1,5 +1,6 @@
 package com.maruseron.zeron.domain;
 
+import java.util.List;
 import java.util.Map;
 
 public final class TypeSubstitution {
@@ -20,7 +21,7 @@ public final class TypeSubstitution {
                     generic.typeParameters().stream()
                             .map(argument -> substitute(argument, substitutions))
                             .toList());
-            case FunctionDescriptor function -> TypeDescriptor.genericFunctionOf(
+            case FunctionDescriptor function -> TypeDescriptor.functionWithEffectsOf(
                     function.name(),
                     substitute(function.returnType(), substitutions),
                     function.parameters().stream()
@@ -31,6 +32,9 @@ public final class TypeSubstitution {
                                     parameter.bounds().stream()
                                             .map(bound -> substitute(bound, substitutions))
                                             .toList()))
+                            .toList(),
+                    function.raisedEffects().stream()
+                            .map(effect -> substitute(effect, substitutions))
                             .toList());
             default -> type;
         };
@@ -43,10 +47,10 @@ public final class TypeSubstitution {
             case ReferenceDescriptor reference -> new ReferenceDescriptor(erase(reference.baseType()));
             case ArrayDescriptor array -> TypeDescriptor.arrayOf(erase(array.elementType()));
             case GenericDescriptor generic -> generic.baseType();
-            case FunctionDescriptor function -> TypeDescriptor.functionOf(
+            case FunctionDescriptor function -> TypeDescriptor.functionWithEffectsOf(
                     function.name(), erase(function.returnType()),
-                    function.parameters().stream().map(TypeSubstitution::erase)
-                            .toArray(TypeDescriptor[]::new));
+                    function.parameters().stream().map(TypeSubstitution::erase).toList(),
+                    List.of(), function.raisedEffects().stream().map(TypeSubstitution::erase).toList());
             default -> type;
         };
     }
@@ -60,7 +64,8 @@ public final class TypeSubstitution {
             case GenericDescriptor generic -> generic.typeParameters().stream()
                     .anyMatch(TypeSubstitution::containsTypeParameter);
             case FunctionDescriptor function -> containsTypeParameter(function.returnType())
-                    || function.parameters().stream().anyMatch(TypeSubstitution::containsTypeParameter);
+                    || function.parameters().stream().anyMatch(TypeSubstitution::containsTypeParameter)
+                    || function.raisedEffects().stream().anyMatch(TypeSubstitution::containsTypeParameter);
             default -> false;
         };
     }

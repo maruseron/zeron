@@ -125,6 +125,14 @@ public sealed interface TypeDescriptor
         return new FunctionDescriptor(name, returnType, parameterTypes, typeParameters);
     }
 
+    static FunctionDescriptor functionWithEffectsOf(final String name,
+                                                    final TypeDescriptor returnType,
+                                                    final List<TypeDescriptor> parameterTypes,
+                                                    final List<TypeParameterDescriptor> typeParameters,
+                                                    final List<TypeDescriptor> raisedEffects) {
+        return new FunctionDescriptor(name, returnType, parameterTypes, typeParameters, raisedEffects);
+    }
+
     static FunctionDescriptor lambdaOf(final TypeDescriptor returnType,
                                        final TypeDescriptor parameterType) {
         return functionOf("", returnType, parameterType == null

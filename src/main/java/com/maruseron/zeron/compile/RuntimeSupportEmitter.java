@@ -15,6 +15,8 @@ import java.nio.file.Path;
 
 final class RuntimeSupportEmitter {
     private static final ClassDesc UNIT_CLASS = ClassDesc.of("zeron.lang.Unit");
+    private static final ClassDesc RAISED_EFFECT_CLASS = ClassDesc.of("zeron.runtime.RaisedEffect");
+    private static final ClassDesc RUNTIME_EXCEPTION_CLASS = ClassDesc.of("java.lang.RuntimeException");
 
     private RuntimeSupportEmitter() {}
 
@@ -40,6 +42,32 @@ final class RuntimeSupportEmitter {
             builder.withMethodBody("toString", MethodTypeDesc.of(ConstantDescs.CD_String),
                     ClassFile.ACC_PUBLIC, code -> {
                         code.ldc("Unit");
+                        code.areturn();
+                    });
+        });
+    }
+
+    static void emitRaisedEffectClass(final Path outputDirectory) throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "RaisedEffect.class"));
+        Files.createDirectories(output.getParent());
+        ClassFile.of().buildTo(output, RAISED_EFFECT_CLASS, builder -> {
+            builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
+            builder.withSuperclass(RUNTIME_EXCEPTION_CLASS);
+            builder.withField("payload", ConstantDescs.CD_Object,
+                    field -> field.withFlags(ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL));
+            builder.withMethodBody("<init>", MethodTypeDesc.of(ConstantDescs.CD_void,
+                    ConstantDescs.CD_Object), ClassFile.ACC_PUBLIC, code -> {
+                code.aload(0);
+                code.invokespecial(RUNTIME_EXCEPTION_CLASS, "<init>", emptyVoidMethod());
+                code.aload(0);
+                code.aload(1);
+                code.putfield(RAISED_EFFECT_CLASS, "payload", ConstantDescs.CD_Object);
+                code.return_();
+            });
+            builder.withMethodBody("payload", MethodTypeDesc.of(ConstantDescs.CD_Object),
+                    ClassFile.ACC_PUBLIC, code -> {
+                        code.aload(0);
+                        code.getfield(RAISED_EFFECT_CLASS, "payload", ConstantDescs.CD_Object);
                         code.areturn();
                     });
         });

@@ -122,6 +122,7 @@ final class CallResolver {
             }
         }
 
+        call.setGenericFunctionType(descriptor);
         call.setType(descriptor.returnType());
         return descriptor.returnType();
     }

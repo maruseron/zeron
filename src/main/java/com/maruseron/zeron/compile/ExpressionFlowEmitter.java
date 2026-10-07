@@ -164,6 +164,90 @@ final class ExpressionFlowEmitter {
         context.lastEmittedType = match.getType();
     }
 
+    static void emitRaise(final CompilationContext context, final CodeBuilder composer, final Expr.Raise raise) {
+        final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+        composer.new_(carrier);
+        composer.dup();
+        emitExpr(context, composer, raise.effect);
+        emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
+        composer.invokespecial(carrier, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
+        composer.athrow();
+        context.lastEmittedType = TypeDescriptor.ofNever();
+    }
+
+    static void emitHandle(final CompilationContext context, final CodeBuilder composer, final Expr.Handle handle) {
+        final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+        final var start = composer.newLabel();
+        final var end = composer.newLabel();
+        final var handler = composer.newLabel();
+        final var done = composer.newLabel();
+
+        composer.labelBinding(start);
+        emitExpr(context, composer, handle.expression);
+        emitConversion(context, composer, context.lastEmittedType, handle.getType());
+        composer.goto_(done);
+        composer.labelBinding(end);
+        composer.labelBinding(handler);
+        final var exceptionSlot = composer.allocateLocal(TypeKind.REFERENCE);
+        final var payloadSlot = composer.allocateLocal(TypeKind.REFERENCE);
+        composer.storeLocal(TypeKind.REFERENCE, exceptionSlot);
+        composer.loadLocal(TypeKind.REFERENCE, exceptionSlot);
+        composer.invokevirtual(carrier, "payload", MethodTypeDesc.of(ConstantDescs.CD_Object));
+        composer.storeLocal(TypeKind.REFERENCE, payloadSlot);
+
+        for (final var arm : handle.arms) {
+            final var next = composer.newLabel();
+            final var effectClass = TypeDescriptor.toJavaClassDesc(arm.resolvedEffectType());
+            composer.loadLocal(TypeKind.REFERENCE, payloadSlot);
+            composer.instanceOf(effectClass);
+            composer.ifeq(next);
+            if (arm.alias() != null || arm.binding() != null) {
+                beginScope(context);
+                try {
+                    if (arm.alias() != null) {
+                        final var aliasSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.alias(),
+                                arm.resolvedEffectType(), BindingMutability.IMMUTABLE);
+                        context.symbols.define(arm.alias());
+                        composer.loadLocal(TypeKind.REFERENCE, payloadSlot);
+                        composer.checkcast(effectClass);
+                        composer.storeLocal(TypeKind.REFERENCE, aliasSlot + context.localSlotOffset);
+                    }
+                    if (arm.namedPattern() != null) {
+                        final var bindingSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.binding(),
+                                arm.resolvedPatternType(), BindingMutability.IMMUTABLE);
+                        context.symbols.define(arm.binding());
+                        composer.loadLocal(TypeKind.REFERENCE, payloadSlot);
+                        composer.checkcast(effectClass);
+                        final var erasedType = TypeSubstitution.erase(arm.declaredPatternType());
+                        composer.invokevirtual(effectClass, Stmt.propertyGetterName(arm.namedPattern().lexeme()),
+                                toJavaMethodDescriptor(TypeDescriptor.functionOf(
+                                        Stmt.propertyGetterName(arm.namedPattern().lexeme()), erasedType)));
+                        emitConversion(context, composer, erasedType, arm.resolvedPatternType());
+                        composer.storeLocal(TypeKind.fromDescriptor(
+                                TypeDescriptor.toJavaClassDesc(arm.resolvedPatternType()).descriptorString()),
+                                bindingSlot + context.localSlotOffset);
+                    }
+                    emitExpr(context, composer, arm.expression());
+                    emitConversion(context, composer, context.lastEmittedType, handle.getType());
+                } finally {
+                    endScope(context);
+                }
+            } else {
+                emitExpr(context, composer, arm.expression());
+                emitConversion(context, composer, context.lastEmittedType, handle.getType());
+            }
+            composer.goto_(done);
+            composer.labelBinding(next);
+        }
+
+        composer.loadLocal(TypeKind.REFERENCE, exceptionSlot);
+        composer.athrow();
+        composer.labelBinding(done);
+        composer.exceptionCatch(start, end, handler, carrier);
+        context.lastEmittedType = handle.getType();
+    }
+
     static void emitTypeTest(CompilationContext context, final CodeBuilder composer, final Expr.TypeTest test ){
         emitExpr(context, composer, test.value);
         emitBox(context, composer, context.lastEmittedType);

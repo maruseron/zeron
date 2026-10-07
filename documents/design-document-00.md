@@ -11,6 +11,7 @@
 - [Control flow](#control-flow)
 - [Ranges and Iterables](#ranges-and-iterables)
 - [Classes](#classes)
+- [Typed raised effects](#typed-raised-effects)
 - [Names, Packages, and Imports](#names-packages-and-imports)
 
 ## Languages to review for alternatives
@@ -34,6 +35,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Higher-order function calls and lambda values, including zero- and multi-parameter lambdas.
 - Nominal classes and contracts with private fields, declaration-ordered field initialization,
     canonical construction, methods, static conformance checking, and contract dispatch.
+- Nominal non-generic effect payload classes, declared `raises` sets, `raise` expressions, and
+    typed expression handlers. Calls propagate effects until handled or declared; `Result` remains
+    an ordinary value type. See [typed raised effects](design-document-13_typed-raised-effects.md).
 - Explicitly imported extension methods for Zeron classes and contracts. Extensions resolve
     statically, lower to receiver-first static functions, and cannot access private members.
     Instance-method overloads (including contract defaults) take precedence when applicable;
@@ -151,11 +155,11 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     and test doubles. Anonymous record values are excluded because they would introduce structural
     typing; capture, identity, and lowering rules remain to be designed.
 - Pattern assignment and derived creation.
-- Typed failure and effects: distinguish ordinary `Result<T, E>` values from declared raised effects,
-    proposed with a `raises E` signature clause and handled by `case raised E` arms in `match`.
-    Matching must cover or propagate the declared raised effects; effects raised by arm bodies remain
-    visible to the enclosing function. The Java interop boundary and any broader effect system remain
-    to be designed.
+- Typed raised effects have an initial implementation: callable `raises` clauses and function-type
+    annotations, `raise` expressions, and `handle (...) with { case Effect [as value] -> ...; }`.
+    Property patterns, catch-all cases, effect generics, effects in entry-point `main` and top-level
+    initializers, and automatic Java-exception conversion remain unsupported. See
+    [design-document-13](design-document-13_typed-raised-effects.md) for semantics and next steps.
 - Low priority: optional `do` notation for sequencing short-circuiting `Option`/`Result` values.
     A block may mix ordinary statements with `<-` binds; a bind short-circuits on the context's
     failure case, and all binds in the initial design use the same context and `Result` error type.
@@ -697,3 +701,29 @@ fn growPerson(person: &Person): Unit {
     person.grow();
 }
 ```
+
+### Typed raised effects
+
+An effect declaration names a nominal payload class. Functions, methods, extension methods, named
+constructors, and function types can declare the effects they may raise:
+
+```zeron
+public effect NotFound {
+    public property path: String;
+}
+
+fn read(path: String): String raises NotFound = raise NotFound.new(path);
+
+fn readOrEmpty(path: String): String = handle (read(path)) with {
+    case NotFound as failure -> "";
+};
+```
+
+Every raised effect in a callable body must either appear in its `raises` clause or be handled by
+an enclosing expression handler. A handler catches only its listed payload types; unmatched raised
+effects are rethrown. Handler arms are expressions, and their raised effects remain visible to the
+enclosing callable. The handler's result type includes the protected expression's normal result and
+the arm results. `raise` has type `Never`. `Result<T, E>` remains an ordinary value and is not
+implicitly translated to or from raised effects. See
+[design-document-13](design-document-13_typed-raised-effects.md) for compatibility, runtime, and
+roadmap details.

@@ -10,6 +10,7 @@ import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.GenericDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
+import com.maruseron.zeron.domain.NullableDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
@@ -137,7 +138,7 @@ public final class Parser {
         var braceDepth = 0;
         for (var index = current; index + 1 < tokens.size(); index++) {
             final var token = tokens.get(index);
-            if (braceDepth == 0 && (token.type() == CLASS || token.type() == CONTRACT)
+            if (braceDepth == 0 && (token.type() == CLASS || token.type() == EFFECT || token.type() == CONTRACT)
                     && tokens.get(index + 1).type() == IDENTIFIER) {
                 localTypeNames.add(tokens.get(index + 1).lexeme());
             }
@@ -151,6 +152,7 @@ public final class Parser {
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
             if (match(NAMESPACE)) return namespaceDeclaration();
+            if (match(EFFECT)) return effectDeclaration(false);
             if (match(EXTENSION)) return extensionDeclaration(false);
             if (match(EXTERNAL)) {
                 if (match(CLASS)) return externalClassDeclaration(false);
@@ -160,6 +162,7 @@ public final class Parser {
             if (levelMarker == null && match(PUBLIC)) {
                 if (match(LET)) return letDeclaration(true);
                 if (match(CLASS)) return classDeclaration(true);
+                if (match(EFFECT)) return effectDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
                 if (match(SEALED)) {
                     consume(CONTRACT, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION,
@@ -176,6 +179,7 @@ public final class Parser {
                         "Only values, functions, classes, contracts, and extensions may be public.");
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
+            if (levelMarker == null && match(EFFECT)) return effectDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
             if (levelMarker == null && match(SEALED)) {
                 consume(CONTRACT, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION,
@@ -248,8 +252,9 @@ public final class Parser {
                     final var allTypeParameters = new ArrayList<TypeParameterDescriptor>(
                             extensionTypeParameters.values());
                     allTypeParameters.addAll(methodTypeParameters.values());
-                    final var functionType = TypeDescriptor.genericFunctionOf(methodName.lexeme(),
-                            parsed.typeDescriptor().returnType(), functionParameters, allTypeParameters);
+                    final var functionType = TypeDescriptor.functionWithEffectsOf(methodName.lexeme(),
+                            parsed.typeDescriptor().returnType(), functionParameters, allTypeParameters,
+                            parsed.typeDescriptor().raisedEffects());
                     final var parameterTokens = new ArrayList<Token>();
                     parameterTokens.add(new Token(THIS, "this", null, methodName.span()));
                     parameterTokens.addAll(parsed.parameters());
@@ -475,6 +480,7 @@ public final class Parser {
                 error(name, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
                         "Generic functions require an explicit return type.");
             }
+            final var raisedEffects = parseRaisedEffects();
 
             final List<Stmt> body;
             if (match(EQUAL)) {
@@ -487,8 +493,8 @@ public final class Parser {
             }
 
             return new Stmt.Function(name, parameterNames,
-                    TypeDescriptor.genericFunctionOf(name.lexeme(), returnType, parameterTypes,
-                        List.copyOf(typeParameters.values())), body, isPublic, List.copyOf(defaultValues),
+                    TypeDescriptor.functionWithEffectsOf(name.lexeme(), returnType, parameterTypes,
+                        List.copyOf(typeParameters.values()), raisedEffects), body, isPublic, List.copyOf(defaultValues),
                     parameterNames.size() - (variadic ? 1 : 0) - defaultValues.size(), variadic);
         } finally {
             levelMarker = enclosingLevelMarker;
@@ -540,8 +546,20 @@ public final class Parser {
     }
 
     private Stmt.ClassDecl classDeclaration(final boolean isTopLevelPublic) {
+        return classDeclaration(isTopLevelPublic, false);
+    }
+
+    private Stmt.ClassDecl effectDeclaration(final boolean isPublic) {
+        return classDeclaration(isPublic, true);
+    }
+
+    private Stmt.ClassDecl classDeclaration(final boolean isTopLevelPublic, final boolean isEffect) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect class name."));
         final var typeParameters = typeParameterDeclaration(name, false);
+        if (isEffect && !typeParameters.isEmpty()) {
+            error(name, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                    "Effect declarations cannot be generic.");
+        }
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
@@ -611,7 +629,7 @@ public final class Parser {
             return new Stmt.ClassDecl(name, List.copyOf(typeParameters.values()), List.copyOf(contractUses),
                     List.copyOf(fields), List.copyOf(properties), constructor,
                     List.copyOf(namedConstructors), List.copyOf(methods),
-                    isTopLevelPublic);
+                    isTopLevelPublic, isEffect);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -730,8 +748,9 @@ public final class Parser {
 
         final var ownerType = classType(className, classTypeParameters);
         final TypeDescriptor returnType = new ReferenceDescriptor(ownerType);
-        final var descriptor = TypeDescriptor.functionOf(constructorName.lexeme(), returnType,
-                parameterTypes.toArray(TypeDescriptor[]::new));
+        final var raisedEffects = parseRaisedEffects();
+        final var descriptor = TypeDescriptor.functionWithEffectsOf(constructorName.lexeme(), returnType,
+                parameterTypes, List.of(), raisedEffects);
         final var enclosingLevelMarker = levelMarker;
         levelMarker = new LevelMarker(levelMarker);
         try {
@@ -869,11 +888,12 @@ public final class Parser {
 
         final var hasReturnType = match(COLON);
         final var returnType = hasReturnType ? collectType() : TypeDescriptor.ofUnit();
+        final var raisedEffects = parseRaisedEffects();
         if (!hasReturnType) error(name, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                 "Class and contract methods require an explicit return type.");
 
-        final var descriptor = TypeDescriptor.genericFunctionOf(name.lexeme(), returnType,
-                parameterTypes, typeParameters);
+        final var descriptor = TypeDescriptor.functionWithEffectsOf(name.lexeme(), returnType,
+                parameterTypes, typeParameters, raisedEffects);
         if (isContract) {
             consume(SEMICOLON, "Expect ';' after contract method signature.");
             return new ParsedMethod(List.copyOf(parameterNames), descriptor, List.of(),
@@ -887,8 +907,9 @@ public final class Parser {
             consume(SEMICOLON, "Expect ';' after method expression.");
             levelMarker = levelMarker.enclosing();
             return new ParsedMethod(List.copyOf(parameterNames),
-                    TypeDescriptor.genericFunctionOf(name.lexeme(), returnType,
-                            parameterTypes, typeParameters), body, List.copyOf(defaultValues), variadic);
+                    TypeDescriptor.functionWithEffectsOf(name.lexeme(), returnType,
+                            parameterTypes, typeParameters, raisedEffects),
+                    body, List.copyOf(defaultValues), variadic);
         }
 
         consume(LEFT_BRACE, "Expect '{' before method body.");
@@ -912,8 +933,9 @@ public final class Parser {
             consume(RIGHT_PAREN, "Expect ')' after lambda parameter types.");
             if (match(ARROW)) {
                 final var returnType = collectType();
-                type = TypeDescriptor.functionOf("", returnType,
-                        parameters.toArray(TypeDescriptor[]::new));
+                final var raisedEffects = parseRaisedEffects();
+                type = TypeDescriptor.functionWithEffectsOf("", returnType, parameters,
+                        List.of(), raisedEffects);
             } else if (parameters.size() == 1) {
                 type = parameters.getFirst();
             } else {
@@ -966,6 +988,15 @@ public final class Parser {
             typeArgs.add(collectType());
         } while (match(COMMA));
         return typeArgs;
+    }
+
+    private List<TypeDescriptor> parseRaisedEffects() {
+        if (!match(RAISES)) return List.of();
+        final var effects = new ArrayList<TypeDescriptor>();
+        do {
+            effects.add(collectType());
+        } while (match(COMMA));
+        return List.copyOf(effects);
     }
 
     private String parseQualifiedName(final String message) {
@@ -1410,6 +1441,10 @@ public final class Parser {
     }
 
     private Expr unary() {
+        if (match(RAISE)) {
+            final var keyword = previous();
+            return new Expr.Raise(keyword, unary());
+        }
         if (match(NOT, MINUS, PLUS, TYPEOF, TILDE)) {
             final var operator = previous();
             final var right = unary();
@@ -1547,6 +1582,7 @@ public final class Parser {
     }
 
     private Expr primary() {
+        if (match(HANDLE)) return handleExpression(previous());
         if (match(MATCH)) return matchExpression(previous());
 
         if (match(LEFT_BRACKET)) {
@@ -1686,6 +1722,58 @@ public final class Parser {
          */
 
         throw error(peek(), "Expect expression.");
+    }
+
+    private Expr.Handle handleExpression(final Token keyword) {
+        consume(LEFT_PAREN, "Expect '(' after 'handle'.");
+        final var protectedExpression = expression();
+        consume(RIGHT_PAREN, "Expect ')' after handled expression.");
+        consume(IDENTIFIER, "Expect 'with' after handled expression.");
+        if (!previous().lexeme().equals("with")) {
+            throw error(previous(), DiagnosticCatalog.EXPECTED_SYNTAX,
+                    "Expect 'with' after handled expression.");
+        }
+        consume(LEFT_BRACE, "Expect '{' before handler cases.");
+        final var arms = new ArrayList<Expr.HandleArm>();
+        while (match(CASE)) {
+            final var caseKeyword = previous();
+            final var previousStop = stopQualifiedTypeAtNamedPattern;
+            stopQualifiedTypeAtNamedPattern = true;
+            final TypeDescriptor effectType;
+            try {
+                effectType = collectType();
+            } finally {
+                stopQualifiedTypeAtNamedPattern = previousStop;
+            }
+            if (effectType instanceof GenericDescriptor || effectType instanceof ReferenceDescriptor
+                    || effectType instanceof NullableDescriptor) {
+                error(caseKeyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Handler cases must name a non-generic effect type.");
+            }
+            Token namedPattern = null;
+            Token binding = null;
+            if (match(DOT)) {
+                namedPattern = consume(IDENTIFIER, "Expect named pattern after '.'.");
+                consume(LEFT_PAREN, "Expect '(' after named pattern.");
+                if (check(IDENTIFIER) && peek().lexeme().equals("_")) {
+                    advance();
+                } else {
+                    binding = consume(IDENTIFIER, "Expect binding name or '_' in named pattern.");
+                }
+                consume(RIGHT_PAREN, "Expect ')' after named pattern argument.");
+            }
+            final var alias = match(AS)
+                    ? consume(IDENTIFIER, "Expect binding name after 'as'.")
+                    : null;
+            consume(ARROW, "Expect '->' after handler case.");
+            final var body = expression();
+            consume(SEMICOLON, "Expect ';' after handler case.");
+            arms.add(new Expr.HandleArm(caseKeyword, effectType, alias, namedPattern, binding, body));
+        }
+        consume(RIGHT_BRACE, "Expect '}' after handler cases.");
+        if (arms.isEmpty()) error(keyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                "A handler must contain at least one case.");
+        return new Expr.Handle(keyword, protectedExpression, arms);
     }
 
     private Expr matchExpression(final Token keyword) {

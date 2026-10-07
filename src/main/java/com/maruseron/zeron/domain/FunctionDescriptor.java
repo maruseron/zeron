@@ -9,17 +9,24 @@ public final class FunctionDescriptor implements TypeDescriptor {
     private final TypeDescriptor returnType;
     private final List<TypeDescriptor> parameters;
     private final List<TypeParameterDescriptor> typeParameters;
+    private final List<TypeDescriptor> raisedEffects;
 
     FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters) {
-        this(name, returnType, parameters, List.of());
+        this(name, returnType, parameters, List.of(), List.of());
     }
 
     FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters,
                        List<TypeParameterDescriptor> typeParameters) {
+        this(name, returnType, parameters, typeParameters, List.of());
+    }
+
+    FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters,
+                       List<TypeParameterDescriptor> typeParameters, List<TypeDescriptor> raisedEffects) {
         this.name = name;
         this.returnType = returnType;
         this.parameters = List.copyOf(parameters);
         this.typeParameters = List.copyOf(typeParameters);
+        this.raisedEffects = List.copyOf(raisedEffects);
     }
 
     public String name() {
@@ -49,6 +56,10 @@ public final class FunctionDescriptor implements TypeDescriptor {
         return typeParameters;
     }
 
+    public List<TypeDescriptor> raisedEffects() {
+        return raisedEffects;
+    }
+
     public boolean isGeneric() {
         return !typeParameters.isEmpty();
     }
@@ -62,7 +73,7 @@ public final class FunctionDescriptor implements TypeDescriptor {
     }
 
     public FunctionDescriptor toReturnType(final TypeDescriptor returnType) {
-        return new FunctionDescriptor(name, returnType, parameters, typeParameters);
+        return new FunctionDescriptor(name, returnType, parameters, typeParameters, raisedEffects);
     }
 
     @Override
@@ -71,12 +82,13 @@ public final class FunctionDescriptor implements TypeDescriptor {
         if (!(obj instanceof FunctionDescriptor that)) return false;
          return Objects.equals(this.parameters, that.parameters) &&
              Objects.equals(this.typeParameters, that.typeParameters) &&
-               Objects.equals(this.returnType, that.returnType);
+               Objects.equals(this.returnType, that.returnType) &&
+             Objects.equals(this.raisedEffects, that.raisedEffects);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(returnType, parameters, typeParameters);
+        return Objects.hash(returnType, parameters, typeParameters, raisedEffects);
     }
 
     @Override

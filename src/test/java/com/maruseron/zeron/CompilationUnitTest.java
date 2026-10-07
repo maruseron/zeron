@@ -185,6 +185,39 @@ public final class CompilationUnitTest {
     }
 
     @Test
+    public void importsBundledIoFunctionsByDefault() {
+        final var languageApi = parse("LanguageApi.zn", """
+                package zeron.lang;
+                public fn defaultImportMarker(): Int = 42;
+                """);
+        final var consumer = parse("Main.zn", """
+                package app;
+                fn identity(option: Option<Int>): Option<Int> = option;
+                fn created(): Option<Int> = Option.some(42);
+                fn result(): Int = defaultImportMarker();
+                fn main() {
+                    println("hello");
+                }
+                """);
+        final var explicitStarImport = parse("ExplicitImport.zn", """
+                package app;
+                import zeron.io.*;
+                import zeron.lang.*;
+                fn main() {
+                    println("hello");
+                }
+                """);
+
+        final var service = new ResolutionService();
+        final var defaultImports = service.resolveUnitsWithDiagnostics(
+                StandardLibrary.withBundledUnits(List.of(consumer, languageApi)));
+        assertTrue(defaultImports.errors().toString(), defaultImports.errors().isEmpty());
+        final var explicitImports = service.resolveUnitsWithDiagnostics(
+                StandardLibrary.withBundledUnits(List.of(explicitStarImport, languageApi)));
+        assertTrue(explicitImports.errors().toString(), explicitImports.errors().isEmpty());
+    }
+
+    @Test
     public void rejectsImportOfPackagePrivateType() {
         final var provider = parse("Hidden.zn", """
                 package geometry;

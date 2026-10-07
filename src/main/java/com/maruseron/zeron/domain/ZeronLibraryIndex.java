@@ -27,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 14;
+    public static final int VERSION = 15;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -80,7 +80,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         true, extension.mutating(), List.of(), List.of(),
                         extension.minimumArity() + 1, extension.variadic(), extension.receiverType(),
                         typeParameters.subList(0, receiverParameterCount),
-                        typeParameters.subList(receiverParameterCount, typeParameters.size()));
+                        typeParameters.subList(receiverParameterCount, typeParameters.size()),
+                        extension.property());
                 addNamespaceMember(statements, extension.namespaceName(), declaration);
             }
             case ValueExport value -> {
@@ -153,7 +154,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     public record ExtensionExport(String qualifiedName, String jvmOwner, String namespaceName,
                                  TypeDescriptor receiverType, int receiverTypeParameterCount,
                                  FunctionDescriptor signature, boolean mutating, int minimumArity,
-                                 boolean variadic) implements ExportedDeclaration {
+                                 boolean variadic, boolean property) implements ExportedDeclaration {
         public ExtensionExport {
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(jvmOwner);
@@ -162,13 +163,23 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             Objects.requireNonNull(signature);
             if (signature.parameters().isEmpty()
                     || receiverTypeParameterCount < 0
-                    || receiverTypeParameterCount > signature.typeParameters().size()) {
+                    || receiverTypeParameterCount > signature.typeParameters().size()
+                    || property && (mutating || signature.parameters().size() != 1
+                            || minimumArity != 0 || variadic)) {
                 throw new IllegalArgumentException("Invalid extension export.");
             }
             validateMinimumArity(TypeDescriptor.functionOf(signature.name(), signature.returnType(),
                     signature.parameters().subList(1, signature.parameters().size())
                             .toArray(TypeDescriptor[]::new)),
                     minimumArity, variadic);
+        }
+
+        public ExtensionExport(String qualifiedName, String jvmOwner, String namespaceName,
+                               TypeDescriptor receiverType, int receiverTypeParameterCount,
+                               FunctionDescriptor signature, boolean mutating, int minimumArity,
+                               boolean variadic) {
+            this(qualifiedName, jvmOwner, namespaceName, receiverType, receiverTypeParameterCount,
+                    signature, mutating, minimumArity, variadic, false);
         }
     }
 
@@ -324,7 +335,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         exports.add(new ExtensionExport(name, owner, member.namespaceName(),
                                 extension.receiverType(), extension.receiverTypeParameters().size(),
                                 functionTypes.apply(extension), extension.isMutating(),
-                                extension.minimumCallArity(), extension.variadic()));
+                                extension.minimumCallArity(), extension.variadic(), extension.property()));
                     }
                     case Stmt.FunctionDeclaration function when function.isPublic() -> {
                         final var name = member.namespaceName() == null
@@ -432,7 +443,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v14.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v15.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -458,7 +469,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v14.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v15.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -499,6 +510,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeBoolean(extension.mutating());
                 output.writeInt(extension.minimumArity());
                 output.writeBoolean(extension.variadic());
+                output.writeBoolean(extension.property());
             }
             case ValueExport value -> {
                 output.writeByte(4);
@@ -562,7 +574,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var signature = readFunction(input, context);
                 final var receiverType = readType(input, context);
                 yield new ExtensionExport(name, owner, namespace, receiverType, input.readInt(),
-                        signature, input.readBoolean(), input.readInt(), input.readBoolean());
+                        signature, input.readBoolean(), input.readInt(), input.readBoolean(), input.readBoolean());
             }
             case 4 -> new ValueExport(input.readUTF(), input.readUTF(), input.readUTF(),
                     readOptionalString(input), readType(input, new ReadContext()));

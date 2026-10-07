@@ -133,23 +133,39 @@ final class MemberInteropResolver {
             finishSafeNavigation(context, safeFlows);
             return resultType;
         }
+        if (owner != null) {
+            final var field = owner.fields().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
+                    .findFirst()
+                    .orElse(null);
+            if (field != null) {
+                ensureFieldAccessible(context, property.name, ownerName);
+                final var fieldType = TypeSubstitution.substitute(field.type(),
+                        TypeResolver.substitutionsFor(context, owner.typeParameters(), memberReceiverType));
+                final var resultType = property.safeNavigation() ? fieldType.toNullable() : fieldType;
+                property.setType(resultType);
+                finishSafeNavigation(context, safeFlows);
+                return resultType;
+            }
+        }
+        final var extensionReceiverType = property.safeNavigation() ? memberReceiverType : receiverType;
+        final var extensionCall = new Expr.MemberCall(property.receiver, property.name, property.name,
+                List.of(), List.of(), TypeDescriptor.ofInfer());
+        final var extensionResult = resolveImportedExtension(context, extensionCall, extensionReceiverType, true);
+        if (extensionResult != null) {
+            property.setExtensionCall(extensionCall);
+            final var resultType = property.safeNavigation() ? extensionResult.toNullable() : extensionResult;
+            property.setType(resultType);
+            RaisedEffectFlow.add(context,
+                    new LinkedHashSet<>(extensionCall.resolvedDescriptor().raisedEffects()), property.name);
+            finishSafeNavigation(context, safeFlows);
+            return resultType;
+        }
         if (owner == null) Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                 property.name, "Unknown property."));
-        final var field = owner.fields().stream()
-                .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
-                .findFirst()
-                .orElse(null);
-        if (field == null) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                    property.name, "Unknown field."));
-        }
-        ensureFieldAccessible(context, property.name, ownerName);
-        final var fieldType = TypeSubstitution.substitute(field.type(),
-                TypeResolver.substitutionsFor(context, owner.typeParameters(), memberReceiverType));
-        final var resultType = property.safeNavigation() ? fieldType.toNullable() : fieldType;
-        property.setType(resultType);
-        finishSafeNavigation(context, safeFlows);
-        return resultType;
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                property.name, "Unknown field."));
+        throw new IllegalStateException("Unreachable");
     }
 
     static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call) {
@@ -373,7 +389,7 @@ final class MemberInteropResolver {
                     return descriptor.returnType();
                 }
             }
-            final var extensionResult = resolveImportedExtension(context, call, receiverType);
+            final var extensionResult = resolveImportedExtension(context, call, receiverType, false);
             if (extensionResult != null) return extensionResult;
             final var javaClass = context.javaClassPath.find(ownerName);
             if (javaClass != null) return resolveJavaInstanceCall(context, call, receiverType, javaClass);
@@ -535,27 +551,163 @@ final class MemberInteropResolver {
                                       FunctionDescriptor descriptor,
                                       List<TypeDescriptor> comparisonTypes,
                                       int omittedDefaults,
-                                      boolean variadic) {}
+                                      boolean variadic,
+                                      TypeDescriptor receiverMatchType) {}
 
     private static TypeDescriptor resolveImportedExtension(final ResolutionContext context,
                                                             final Expr.MemberCall call,
-                                                            final TypeDescriptor receiverType) {
+                                                            final TypeDescriptor receiverType,
+                                                            final boolean propertyAccess) {
         final var extensionName = context.currentImports.extensions().get(call.name.lexeme());
-        if (extensionName == null) return null;
-        final var extensionDeclarations = context.functionOverloads.getOrDefault(extensionName, List.of()).stream()
-                .filter(Stmt.ExtensionMethod.class::isInstance)
-                .map(Stmt.ExtensionMethod.class::cast)
-                .toList();
-        if (extensionDeclarations.isEmpty()) return null;
+        final var explicitDeclarations = extensionName == null
+                ? List.<Stmt.ExtensionMethod>of()
+                : extensionDeclarations(context, List.of(extensionName));
+        final var starDeclarations = starExtensionDeclarations(context, call.name.lexeme());
+        final var matchingExplicitDeclarations = explicitDeclarations.stream()
+                .filter(method -> method.property() == propertyAccess).toList();
+        final var matchingStarDeclarations = starDeclarations.stream()
+                .filter(method -> method.property() == propertyAccess).toList();
+        if (matchingExplicitDeclarations.isEmpty() && matchingStarDeclarations.isEmpty()) return null;
         final var mutableReceiver = receiverType instanceof ReferenceDescriptor;
         var receiverBase = receiverType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : receiverType;
-        if (receiverBase instanceof NullableDescriptor nullable) receiverBase = nullable.baseType();
         final var normalizedReceiverBase = receiverBase;
         final var actualArguments = call.arguments.stream().map(argument ->
                 argument instanceof Expr.Lambda || LambdaResolver.isFunctionReferenceCandidate(context, argument)
                         ? null : ExpressionFlowResolver.resolveExpression(context, argument)).toList();
+        var applicable = findApplicableExtensions(
+                context, call, receiverType, receiverBase, mutableReceiver, actualArguments,
+                matchingExplicitDeclarations);
+        var consideredDeclarations = matchingExplicitDeclarations;
+        if (applicable.isEmpty() && !matchingStarDeclarations.isEmpty()) {
+            applicable = findApplicableExtensions(
+                    context, call, receiverType, receiverBase, mutableReceiver, actualArguments,
+                    matchingStarDeclarations);
+            consideredDeclarations = matchingStarDeclarations;
+        }
+        if (applicable.isEmpty() && consideredDeclarations.isEmpty()) return null;
+        if (applicable.isEmpty()) {
+            if (!mutableReceiver && consideredDeclarations.stream().anyMatch(method -> method.isMutating()
+                    && context.typeCompatibility.canAssign(method.receiverType(), normalizedReceiverBase))) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
+                        "Mutating extension method requires a mutable receiver."));
+            }
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    call.name, "No imported extension overload of '" + call.name.lexeme()
+                            + "' matches this receiver and these arguments."));
+        }
+        final var selectedExtensions = applicable;
+        var best = selectedExtensions.stream().filter(candidate -> selectedExtensions.stream().noneMatch(other ->
+                other != candidate && extensionMoreSpecific(context, other, candidate))).toList();
+        if (best.size() > 1) {
+            final var minOmitted = best.stream().mapToInt(ExtensionCandidate::omittedDefaults).min().orElse(0);
+            best = best.stream().filter(candidate -> candidate.omittedDefaults() == minOmitted).toList();
+            if (best.stream().anyMatch(ExtensionCandidate::variadic)
+                    && best.stream().anyMatch(candidate -> !candidate.variadic())) {
+                best = best.stream().filter(candidate -> !candidate.variadic()).toList();
+            }
+            if (best.stream().anyMatch(candidate -> !candidate.descriptor().isGeneric())
+                    && best.stream().anyMatch(candidate -> candidate.descriptor().isGeneric())) {
+                best = best.stream().filter(candidate -> !candidate.descriptor().isGeneric()).toList();
+            }
+        }
+        if (best.size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                    "Ambiguous imported extension call '" + call.name.lexeme() + "'."));
+        }
+        final var selected = best.getFirst();
+        final var method = selected.method();
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        TypeUnifier.unify(method.receiverType(), selected.receiverMatchType(), substitutions, call.name);
+        for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
+            final var explicitType = call.explicitTypeArguments.get(i);
+            TypeResolver.validateType(context, explicitType, call.name);
+            substitutions.put(method.methodTypeParameters().get(i), explicitType);
+        }
+        final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
+        final var signature = method.typeDescriptor();
+        final var fixedArity = method.fixedCallArity();
+        for (int i = 0; i < call.arguments.size(); i++) {
+            if (actualArguments.get(i) == null) continue;
+            resolvedArguments[i] = actualArguments.get(i);
+            final var formal = extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic());
+            if (TypeSubstitution.containsTypeParameter(formal)) {
+                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+            }
+        }
+        for (int i = 0; i < call.arguments.size(); i++) {
+            if (actualArguments.get(i) != null) continue;
+            final var formal = extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic());
+            final var expected = TypeSubstitution.substitute(formal, substitutions);
+            if (!(expected instanceof FunctionDescriptor)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        call.name, "Cannot infer the type of this function argument."));
+            }
+            resolvedArguments[i] = resolveArgument(context, call.arguments.get(i), expected);
+            if (TypeSubstitution.containsTypeParameter(formal)) {
+                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+            }
+        }
+        for (final var parameter : signature.typeParameters()) {
+            if (!substitutions.containsKey(parameter)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        call.name, "Cannot infer type parameter '" + parameter.name()
+                                + "' for imported extension method '" + call.name.lexeme()
+                                + "'; provide an explicit type argument."));
+            }
+            for (final var bound : parameter.bounds()) {
+                ensureAssignable(context, TypeSubstitution.substitute(bound, substitutions),
+                        substitutions.get(parameter), call.name);
+            }
+        }
+        final var instantiatedDescriptor = (FunctionDescriptor) TypeSubstitution.substitute(signature, substitutions);
+        call.setResolvedExtensionMethod(method);
+        call.setResolvedDescriptor(instantiatedDescriptor);
+        if (selected.variadic()) {
+            call.setVariadic(((ArrayDescriptor) instantiatedDescriptor.parameters().getLast())
+                    .elementType(), fixedArity);
+        }
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var expected = extensionArgumentType(instantiatedDescriptor.parameters(), i,
+                    fixedArity, selected.variadic());
+            ensureAssignable(context, expected, resolvedArguments[i], call.name);
+        }
+        call.setType(instantiatedDescriptor.returnType());
+        return instantiatedDescriptor.returnType();
+    }
+
+    private static List<Stmt.ExtensionMethod> extensionDeclarations(
+            final ResolutionContext context, final List<String> qualifiedNames) {
+        return qualifiedNames.stream()
+                .flatMap(name -> context.functionOverloads.getOrDefault(name, List.of()).stream())
+                .filter(Stmt.ExtensionMethod.class::isInstance)
+                .map(Stmt.ExtensionMethod.class::cast)
+                .toList();
+    }
+
+    private static List<Stmt.ExtensionMethod> starExtensionDeclarations(
+            final ResolutionContext context, final String methodName) {
+        return context.functionOverloads.values().stream()
+                .flatMap(Collection::stream)
+                .filter(Stmt.ExtensionMethod.class::isInstance)
+                .map(Stmt.ExtensionMethod.class::cast)
+                .filter(method -> method.name().lexeme().equals(methodName))
+                .filter(method -> context.currentImports.onDemandPackages().contains(
+                        context.namespaceMemberPackages.get(context.functionNamesByDeclaration.get(method.name()))))
+                .filter(method -> method.isPublic() || Objects.equals(
+                        context.namespaceMemberPackages.get(context.functionNamesByDeclaration.get(method.name())),
+                        context.packageName))
+                .distinct()
+                .toList();
+    }
+
+    private static ArrayList<ExtensionCandidate> findApplicableExtensions(
+            final ResolutionContext context, final Expr.MemberCall call, final TypeDescriptor receiverType,
+            final TypeDescriptor receiverBase,
+            final boolean mutableReceiver,
+            final List<TypeDescriptor> actualArguments, final List<Stmt.ExtensionMethod> extensionDeclarations) {
         final var applicable = new ArrayList<ExtensionCandidate>();
+        final var receiverProjections = extensionReceiverProjections(context, receiverBase);
         for (final var method : extensionDeclarations) {
             if (method.isMutating() && !mutableReceiver) continue;
             final var signature = method.typeDescriptor();
@@ -566,8 +718,20 @@ final class MemberInteropResolver {
                     || call.arguments.size() < method.minimumCallArity()
                     || !variadic && call.arguments.size() > fixedArity) continue;
             final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            TypeDescriptor receiverMatchType = null;
             try {
-                TypeUnifier.unify(method.receiverType(), receiverBase, substitutions, call.name);
+                for (final var projection : receiverProjections) {
+                    try {
+                        TypeUnifier.unify(method.receiverType(), projection,
+                                new LinkedHashMap<>(substitutions), call.name);
+                        receiverMatchType = projection;
+                        break;
+                    } catch (final ResolutionError _) {
+                        // Try the next receiver projection.
+                    }
+                }
+                if (receiverMatchType == null) continue;
+                TypeUnifier.unify(method.receiverType(), receiverMatchType, substitutions, call.name);
                 for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
                     final var explicitType = call.explicitTypeArguments.get(i);
                     TypeResolver.validateType(context, explicitType, call.name);
@@ -626,95 +790,32 @@ final class MemberInteropResolver {
             }
             if (!matches) continue;
             applicable.add(new ExtensionCandidate(method, instantiated, List.copyOf(comparison),
-                    Math.max(0, fixedArity - call.arguments.size()), variadic));
+                    Math.max(0, fixedArity - call.arguments.size()), variadic, receiverMatchType));
         }
-        if (applicable.isEmpty()) {
-            if (!mutableReceiver && extensionDeclarations.stream().anyMatch(method -> method.isMutating()
-                    && context.typeCompatibility.canAssign(method.receiverType(), normalizedReceiverBase))) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
-                        "Mutating extension method requires a mutable receiver."));
-            }
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                    call.name, "No imported extension overload of '" + call.name.lexeme()
-                            + "' matches this receiver and these arguments."));
+        return applicable;
+    }
+
+    private static List<TypeDescriptor> extensionReceiverProjections(final ResolutionContext context,
+                                                                     final TypeDescriptor receiverBase) {
+        final var projections = new ArrayList<TypeDescriptor>();
+        projections.add(receiverBase);
+        final var className = className(context, receiverBase);
+        final var declaration = context.classes.get(className);
+        if (declaration == null) return List.copyOf(projections);
+        final var classSubstitutions = TypeResolver.substitutionsFor(
+                context, declaration.typeParameters(), receiverBase);
+        for (final var contractUse : declaration.contractUses()) {
+            final var contract = context.contracts.get(contractUse.name().lexeme());
+            if (contract == null) continue;
+            final var arguments = contractUse.typeArguments().stream()
+                    .map(argument -> TypeSubstitution.substitute(argument, classSubstitutions))
+                    .toList();
+            final TypeDescriptor projection = arguments.isEmpty()
+                    ? TypeDescriptor.ofName(contractUse.name().lexeme())
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(contractUse.name().lexeme()), arguments);
+            if (!projections.contains(projection)) projections.add(projection);
         }
-        var best = applicable.stream().filter(candidate -> applicable.stream().noneMatch(other ->
-                other != candidate && extensionMoreSpecific(context, other, candidate))).toList();
-        if (best.size() > 1) {
-            final var minOmitted = best.stream().mapToInt(ExtensionCandidate::omittedDefaults).min().orElse(0);
-            best = best.stream().filter(candidate -> candidate.omittedDefaults() == minOmitted).toList();
-            if (best.stream().anyMatch(ExtensionCandidate::variadic)
-                    && best.stream().anyMatch(candidate -> !candidate.variadic())) {
-                best = best.stream().filter(candidate -> !candidate.variadic()).toList();
-            }
-            if (best.stream().anyMatch(candidate -> !candidate.descriptor().isGeneric())
-                    && best.stream().anyMatch(candidate -> candidate.descriptor().isGeneric())) {
-                best = best.stream().filter(candidate -> !candidate.descriptor().isGeneric()).toList();
-            }
-        }
-        if (best.size() != 1) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
-                    "Ambiguous imported extension call '" + call.name.lexeme() + "'."));
-        }
-        final var selected = best.getFirst();
-        final var method = selected.method();
-        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        TypeUnifier.unify(method.receiverType(), receiverBase, substitutions, call.name);
-        for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
-            final var explicitType = call.explicitTypeArguments.get(i);
-            TypeResolver.validateType(context, explicitType, call.name);
-            substitutions.put(method.methodTypeParameters().get(i), explicitType);
-        }
-        final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
-        final var signature = method.typeDescriptor();
-        final var fixedArity = method.fixedCallArity();
-        for (int i = 0; i < call.arguments.size(); i++) {
-            if (actualArguments.get(i) == null) continue;
-            resolvedArguments[i] = actualArguments.get(i);
-            final var formal = extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic());
-            if (TypeSubstitution.containsTypeParameter(formal)) {
-                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
-            }
-        }
-        for (int i = 0; i < call.arguments.size(); i++) {
-            if (actualArguments.get(i) != null) continue;
-            final var formal = extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic());
-            final var expected = TypeSubstitution.substitute(formal, substitutions);
-            if (!(expected instanceof FunctionDescriptor)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                        call.name, "Cannot infer the type of this function argument."));
-            }
-            resolvedArguments[i] = resolveArgument(context, call.arguments.get(i), expected);
-            if (TypeSubstitution.containsTypeParameter(formal)) {
-                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
-            }
-        }
-        for (final var parameter : signature.typeParameters()) {
-            if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                        call.name, "Cannot infer type parameter '" + parameter.name()
-                                + "' for imported extension method '" + call.name.lexeme()
-                                + "'; provide an explicit type argument."));
-            }
-            for (final var bound : parameter.bounds()) {
-                ensureAssignable(context, TypeSubstitution.substitute(bound, substitutions),
-                        substitutions.get(parameter), call.name);
-            }
-        }
-        final var instantiatedDescriptor = (FunctionDescriptor) TypeSubstitution.substitute(signature, substitutions);
-        call.setResolvedExtensionMethod(method);
-        call.setResolvedDescriptor(instantiatedDescriptor);
-        if (selected.variadic()) {
-            call.setVariadic(((ArrayDescriptor) instantiatedDescriptor.parameters().getLast())
-                    .elementType(), fixedArity);
-        }
-        for (int i = 0; i < call.arguments.size(); i++) {
-            final var expected = extensionArgumentType(instantiatedDescriptor.parameters(), i,
-                    fixedArity, selected.variadic());
-            ensureAssignable(context, expected, resolvedArguments[i], call.name);
-        }
-        call.setType(instantiatedDescriptor.returnType());
-        return instantiatedDescriptor.returnType();
+        return List.copyOf(projections);
     }
 
     private static TypeDescriptor extensionArgumentType(final List<TypeDescriptor> parameters,
@@ -1562,6 +1663,27 @@ final class MemberInteropResolver {
                 return importedNamespaceMember;
             }
         }
+        final var starNamespaceMembers = context.currentImports.onDemandPackages().stream()
+                .filter(importedPackage -> !importedPackage.equals(context.packageName))
+                .map(importedPackage -> importedPackage + "." + path + "." + memberName)
+                .filter(qualifiedName -> context.functions.containsKey(qualifiedName)
+                        || context.topLevelValues.containsKey(qualifiedName))
+                .filter(qualifiedName -> isNamespaceMemberAccessible(context, qualifiedName,
+                        context.functions.containsKey(qualifiedName)
+                                ? context.functionOverloads.getOrDefault(qualifiedName, List.of()).stream()
+                                    .anyMatch(Stmt.FunctionDeclaration::isPublic)
+                                : context.topLevelValues.get(qualifiedName).isPublic()))
+                .distinct()
+                .toList();
+        if (starNamespaceMembers.size() > 1) {
+            final var where = receiver instanceof Expr.Variable variable
+                    ? variable.name : ((Expr.Property) receiver).name;
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                    where,
+                    "Ambiguous namespace member '" + path + "." + memberName
+                            + "' from star imports; add an explicit import or alias."));
+        }
+        if (starNamespaceMembers.size() == 1) return starNamespaceMembers.getFirst();
         final var qualifiedName = path + "." + memberName;
         if (context.functions.containsKey(qualifiedName) || context.topLevelValues.containsKey(qualifiedName)) {
             return qualifiedName;

@@ -1,0 +1,7 @@
+package zeron.lang;
+
+public extension Int {
+    public property absoluteValue: Int {
+        get = if (this < 0) then -this else this;
+    }
+}

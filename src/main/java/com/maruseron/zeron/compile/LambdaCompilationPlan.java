@@ -224,7 +224,11 @@ final class LambdaCompilationPlan {
                 for (final var argument : call.arguments) collectLambdaShapes(argument);
             }
             case Expr.Property property -> {
-                collectFieldReadAdapter(property);
+                if (property.extensionCall() != null) {
+                    collectMemberCallAdapters(property.extensionCall());
+                } else {
+                    collectFieldReadAdapter(property);
+                }
                 collectLambdaShapes(property.receiver);
             }
             case Expr.PropertyAssignment assignment -> {
@@ -536,7 +540,8 @@ final class LambdaCompilationPlan {
                                          final Set<String> localNames,
                                          final List<Token> captured,
                                          final Set<String> seen) {
-        if (property.intrinsicOperation() == null && !property.resolvedAsProperty()) {
+        if (property.extensionCall() == null
+                && property.intrinsicOperation() == null && !property.resolvedAsProperty()) {
             lambdaFieldReads.add(new LambdaMemberKey(
                     nominalName(property.receiver.getType()), property.name.lexeme()));
         }

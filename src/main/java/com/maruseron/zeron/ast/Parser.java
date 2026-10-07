@@ -8,11 +8,17 @@ import com.maruseron.zeron.diagnostic.DiagnosticLabel;
 import com.maruseron.zeron.diagnostic.SourceSpan;
 import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.GenericDescriptor;
+import com.maruseron.zeron.domain.ArrayDescriptor;
+import com.maruseron.zeron.domain.BooleanDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
+import com.maruseron.zeron.domain.FloatDescriptor;
+import com.maruseron.zeron.domain.IntDescriptor;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.NullableDescriptor;
+import com.maruseron.zeron.domain.StringDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.UnitDescriptor;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 import com.maruseron.zeron.scan.ScanResult;
@@ -27,6 +33,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.maruseron.zeron.scan.TokenType.*;
 
 public final class Parser {
+    private static final Set<String> DEFAULT_ZERON_LANG_TYPES =
+            Set.of("Option", "Some", "None", "Result", "Ok", "Err");
+
     private static class ParseError extends RuntimeException {}
 
     private final List<Token> tokens;
@@ -224,17 +233,41 @@ public final class Parser {
             final var receiverType = collectType();
             final var receiverBase = receiverType instanceof GenericDescriptor generic
                     ? generic.baseType() : receiverType;
-            if (!(receiverBase instanceof NominalDescriptor)) {
+            if (!(receiverBase instanceof NominalDescriptor)
+                    && !isSupportedBuiltinExtensionReceiver(receiverBase)) {
                 error(declarationName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                        "Extensions can target only Zeron classes and contracts.");
+                        "Extensions can target only Zeron classes, contracts, and supported built-in types.");
             }
-            final var receiverName = ((NominalDescriptor) receiverBase).name();
+            final var receiverName = receiverBase instanceof NominalDescriptor nominal
+                    ? nominal.name() : receiverBase.name();
             final var simpleReceiverName = receiverName.substring(receiverName.lastIndexOf('.') + 1);
             consume(LEFT_BRACE, "Expect '{' before extension methods.");
             final var methods = new ArrayList<Stmt>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
                 final var methodPublic = match(PUBLIC);
                 final var isMutating = match(MUT);
+                if (match(PROPERTY)) {
+                    if (isMutating) {
+                        error(previous(), DiagnosticCatalog.INVALID_PROPERTY_DECLARATION,
+                                "Extension properties cannot be mutable.");
+                    }
+                    final var propertyName = consume(IDENTIFIER, "Expect extension property name.");
+                    consume(COLON, "Expect ':' after extension property name.");
+                    final var property = classProperty(propertyName, methodPublic, false);
+                    if (property.getterBody() == null || property.setterBody() != null
+                            || property.initializer() != null) {
+                        error(propertyName, DiagnosticCatalog.INVALID_PROPERTY_DECLARATION,
+                                "An extension property requires a getter and cannot have an initializer or setter.");
+                    }
+                    final var receiverParameter = new Token(THIS, "this", null, propertyName.span());
+                    final var functionType = TypeDescriptor.functionWithEffectsOf(propertyName.lexeme(),
+                            property.type(), List.of(receiverType), List.copyOf(extensionTypeParameters.values()),
+                            List.of());
+                    methods.add(new Stmt.ExtensionMethod(propertyName, List.of(receiverParameter), functionType,
+                            isPublic && property.isPublic(), false, property.getterBody(), List.of(), 1, false,
+                            receiverType, List.copyOf(extensionTypeParameters.values()), List.of(), true));
+                    continue;
+                }
                 consume(FN, "Extension methods must be declared with 'fn'.");
                 final var methodName = consume(IDENTIFIER, "Expect extension method name.");
                 final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
@@ -274,6 +307,15 @@ public final class Parser {
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
+    }
+
+    private static boolean isSupportedBuiltinExtensionReceiver(final TypeDescriptor receiverType) {
+        return receiverType instanceof ArrayDescriptor
+                || receiverType instanceof UnitDescriptor
+                || receiverType instanceof IntDescriptor
+                || receiverType instanceof FloatDescriptor
+                || receiverType instanceof BooleanDescriptor
+                || receiverType instanceof StringDescriptor;
     }
 
     private Stmt letDeclaration() {
@@ -1036,6 +1078,7 @@ public final class Parser {
             final var explicitPackageType = onDemandImports.getFirst() + "." + name;
             return explicitPackageType;
         }
+        if (DEFAULT_ZERON_LANG_TYPES.contains(name)) return "zeron.lang." + name;
         return packageName.isEmpty() ? name : packageName + "." + name;
     }
 

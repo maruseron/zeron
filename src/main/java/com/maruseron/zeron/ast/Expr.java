@@ -94,6 +94,7 @@ public sealed interface Expr {
         private JavaFieldTarget javaFieldTarget;
         private Token namespaceValueSymbol;
         private Stmt.Var namespaceValueDeclaration;
+        private MemberCall extensionCall;
 
         public Property(Expr receiver, Token name, TypeDescriptor type) {
             this(receiver, name, type, false);
@@ -123,6 +124,8 @@ public sealed interface Expr {
             namespaceValueSymbol = symbol;
             namespaceValueDeclaration = declaration;
         }
+        public MemberCall extensionCall() { return extensionCall; }
+        public void setExtensionCall(final MemberCall call) { extensionCall = call; }
     }
 
     final class PropertyAssignment implements Expr {

@@ -41,7 +41,7 @@ public sealed interface Stmt {
                            boolean isMutating, List<Stmt> body, List<Expr> defaultValues,
                            int minimumArity, boolean variadic, TypeDescriptor receiverType,
                            List<TypeParameterDescriptor> receiverTypeParameters,
-                           List<TypeParameterDescriptor> methodTypeParameters)
+                           List<TypeParameterDescriptor> methodTypeParameters, boolean property)
             implements FunctionDeclaration {
         public ExtensionMethod {
             parameters = List.copyOf(parameters);
@@ -53,10 +53,21 @@ public sealed interface Stmt {
             final var fixedArity = Stmt.fixedArity(parameters, variadic);
             if (parameters.isEmpty() || minimumArity < 1 || minimumArity > fixedArity
                     || defaultValues.size() > fixedArity - minimumArity
+                    || property && (isMutating || parameters.size() != 1 || minimumArity != 1 || variadic)
                     || !(typeDescriptor.parameters().getFirst() instanceof ReferenceDescriptor reference
                         ? reference.baseType() : typeDescriptor.parameters().getFirst()).equals(receiverType)) {
                 throw new IllegalArgumentException("Invalid extension method signature.");
             }
+        }
+
+        public ExtensionMethod(Token name, List<Token> parameters,
+                               FunctionDescriptor typeDescriptor, boolean isPublic,
+                               boolean isMutating, List<Stmt> body, List<Expr> defaultValues,
+                               int minimumArity, boolean variadic, TypeDescriptor receiverType,
+                               List<TypeParameterDescriptor> receiverTypeParameters,
+                               List<TypeParameterDescriptor> methodTypeParameters) {
+            this(name, parameters, typeDescriptor, isPublic, isMutating, body, defaultValues,
+                    minimumArity, variadic, receiverType, receiverTypeParameters, methodTypeParameters, false);
         }
 
         public int minimumCallArity() {

@@ -69,3 +69,4 @@
 - `documents/design-document-10_small-miscelaneous.md`: low-priority null and equality feature discussion.
 - `documents/design-document-11_compilation-libraries-and-host-integration.md`: project compilation, libraries, and Java interop.
 - `documents/design-document-12_intrinsics-and-external-bindings.md`: compiler intrinsic registry and external declaration design.
+- `documents/design-document-13_typed-raised-effects.md`: typed raised effects, runtime behavior, and open design questions.

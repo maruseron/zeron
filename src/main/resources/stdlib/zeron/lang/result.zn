@@ -1,5 +1,11 @@
 package zeron.lang;
 
+namespace Result {
+    public fn ok<T, E>(value: T): Ok<T, E> = Ok.from(value);
+
+    public fn err<T, E>(error: E): Err<T, E> = Err.from(error);
+}
+
 public sealed contract Result<T, E> permits Ok<T, E>, Err<T, E> {
     isOk(): Boolean;
     isErr(): Boolean;

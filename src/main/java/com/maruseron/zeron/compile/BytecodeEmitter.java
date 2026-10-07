@@ -101,7 +101,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v14.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v15.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -331,6 +331,10 @@ final class BytecodeEmitter {
                     break;
                 } else if (property.safeNavigation()) {
                     emitSafeProperty(context, composer, property);
+                    break;
+                } else if (property.extensionCall() != null) {
+                    emitExtensionCall(context, composer, property.extensionCall(), false);
+                    context.lastEmittedType = property.getType();
                     break;
                 }
                 if (property.intrinsicOperation() != null) {
@@ -992,6 +996,9 @@ final class BytecodeEmitter {
         if (property.intrinsicOperation() != null) {
             composer.arraylength();
             emitConversion(context, composer, property.intrinsicOperation().resultType(), property.getType());
+        } else if (property.extensionCall() != null) {
+            emitExtensionCall(context, composer, property.extensionCall(), true);
+            emitConversion(context, composer, property.extensionCall().getType(), property.getType());
         } else if (property.resolvedAsProperty()) {
             final var owner = property.resolvedOwnerName();
             final var declaredType = declarationPropertyType(context, owner, property.name.lexeme());

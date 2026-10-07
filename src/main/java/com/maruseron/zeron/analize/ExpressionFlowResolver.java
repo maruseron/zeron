@@ -43,6 +43,10 @@ final class ExpressionFlowResolver {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                             assignment.property.name, "External static properties are read-only."));
                 }
+                if (assignment.property.extensionCall() != null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                            assignment.property.name, "Extension properties are read-only."));
+                }
                 final var receiverType = assignment.property.receiver.getType();
                 final var ownerName = className(context, receiverType);
                 if (!(receiverType instanceof ReferenceDescriptor)) {
@@ -80,6 +84,10 @@ final class ExpressionFlowResolver {
                 if (assignment.property.javaFieldTarget() != null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                             assignment.property.name, "External static properties are read-only."));
+                }
+                if (assignment.property.extensionCall() != null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                            assignment.property.name, "Extension properties are read-only."));
                 }
                 final var receiverType = assignment.property.receiver.getType();
                 if (!(receiverType instanceof ReferenceDescriptor)) {

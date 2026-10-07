@@ -102,9 +102,11 @@ TopLevelDeclaration  ::= VariableDeclaration | FunctionDeclaration | ClassDeclar
 NamespaceDeclaration ::= "namespace" Identifier "{" NamespaceMember* "}"
 NamespaceMember      ::= ["public"] (FunctionDeclaration | VariableDeclaration)
 ExtensionDeclaration ::= ["public"] "extension" [TypeParameters] Type "{"
-                         ExtensionMethod* "}"
+                         (ExtensionMethod | ExtensionProperty)* "}"
 ExtensionMethod      ::= ["public"] ["mut"] "fn" Identifier [TypeParameters]
                          "(" [ParameterList] ")" ":" Type MethodBody
+ExtensionProperty   ::= ["public"] "property" Identifier ":" Type
+                         "{" "get" "=" Expression ";" "}"
 ```
 
 ### Named namespaces
@@ -198,8 +200,10 @@ public extension<T> List<T> {
 }
 ```
 
-A consumer imports each method family directly; aliases rename the extension name used after the
-receiver dot:
+A consumer may explicitly import each method family, or use a package star import to activate its
+public extension families. A package star import also considers extension groups nested under
+receiver-type namespaces, but does not recurse into subpackages. Explicit imports rename the
+extension name used after the receiver dot:
 
 ```zeron
 import collections.extensions.List.firstOr as first;
@@ -207,25 +211,45 @@ import collections.extensions.List.firstOr as first;
 let value = values.first(defaultValue);
 ```
 
-Importing the receiver type or star-importing its package does not activate extensions. An extension
-import does not make the function callable as a top-level function. Public use across packages
-requires both a public extension declaration and a public extension method; omitted visibility is
-package-visible.
+Importing the receiver type does not activate extensions. An extension import does not make the
+function callable as a top-level function. Public use across packages requires both a public
+extension declaration and a public extension method; omitted visibility is package-visible.
 
 Member lookup first resolves visible class or contract instance-method overloads, including contract
 default methods. If that tier has an applicable best candidate, it wins; ambiguity in that tier is
 reported rather than hidden by an extension. Only when no visible instance candidate applies does
-resolution consider explicitly imported extensions with the matching local method name. Extension
-overloads use receiver and ordinary argument types for generic inference and specificity; defaults
-and variadic parameters affect applicability. Return types do not select an overload. An alias
-changes only the extension method name recognized at the receiver dot.
+resolution consider imported extensions with the matching local method name. Applicable explicitly
+imported extension families take precedence over star-imported families; if none applies,
+star-imported families are considered together. Receiver and ordinary argument types drive generic
+inference and specificity; defaults and variadic parameters affect applicability. Return types do
+not select an overload. Equally specific star-imported candidates are ambiguous at the call site. An
+alias changes only the extension method name recognized at the receiver dot.
 
 An extension body receives an implicit `this` with read-only receiver capability unless its method
 is marked `mut`, in which case the receiver is `&T`. Mutating extensions can be called only through
 a mutable receiver view. Extension bodies can use public receiver members only: they are not class
 members, do not gain private access even in the receiver's package, and add no virtual dispatch.
-The compiler lowers each extension to a receiver-first static function. Extensions target only
-Zeron classes and contracts in this slice; Java and intrinsic receivers remain deferred.
+The compiler lowers each extension to a receiver-first static function. Read-only extension
+properties use the same lowering as zero-argument getter functions; they require an explicit type
+and getter, and cannot have an initializer, setter, or `mut` modifier. Extensions may target Zeron
+classes and contracts, and the intrinsic receivers `Unit`, `Int`, `Float`, `Boolean`, `String`, and
+`Array<T>`. Other pseudo-types, Java receivers, and nullable receivers are not extension targets.
+When a class implements a contract, an extension declared for that contract is also applicable to
+the concrete class, with generic contract arguments substituted from the class declaration. This is
+a compile-time projection and still emits a static call to the imported extension. An applicable
+class-specific extension is more specific than one reached through a contract projection; unrelated
+equally specific contract extensions are ambiguous. Instance and default methods retain precedence.
+An extension for `T` applies only when the receiver is known to be non-null; nullable receivers must
+be flow-narrowed or accessed with safe navigation.
+
+#### Extension receiver projections to explore
+
+Consider whether extensions should support projected candidates for nullable and mutable receivers,
+such as adapting a `T` extension to `T?` or a read-only `T` extension to `&T`. This requires deciding
+how null handling composes with safe navigation and flow narrowing, whether mutable projections can
+ever be implicit, and how projected and directly declared extensions interact in overload
+specificity and ambiguity. Until settled, nullable receivers do not match non-null extension targets,
+and mutability follows only the receiver and extension declarations themselves.
 
 ### Project value initialization
 
@@ -272,8 +296,11 @@ implementation. Existing default-package scripts remain mutually visible as befo
 Explicit imports target individual classes, contracts, functions, immutable values, and extension
 method families, with aliases. Star imports, re-exports, and value imports are distinct; imports do
 not re-export declarations.
-Built-in types remain
-implicitly available, but there is no implicit wildcard import of a standard library or `java.lang`.
+Built-in types remain implicitly available. When the selected standard library provides it,
+`zeron.io` is implicitly star-imported so standard output functions such as `println` are available
+without an explicit import. `zeron.lang` is also implicitly star-imported to make foundational
+library declarations available. These defaults follow ordinary star-import precedence and ambiguity
+rules. Other standard-library packages and `java.lang` are not implicitly imported.
 The CLI compiles the bundled
 `zeron.collections` and `zeron.ranges` source units as ordinary units.
 

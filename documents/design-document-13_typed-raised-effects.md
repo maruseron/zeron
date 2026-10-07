@@ -118,7 +118,7 @@ accepts a value whose effect set is a subset of the expected effect set. Erased 
 names and SAM descriptors do not include raised effects because JVM invocation types are unchanged.
 Runtime effect checking is preserved inside generated lambda bodies.
 
-The compiled-library index schema was bumped to version 14. The index serializes both the effect
+The compiled-library index schema was bumped to version 15. The index serializes both the effect
 marker on exported nominal classes and raised sets on exported callable signatures. The standard
 library API version remains independent of this binary schema version. Consumers of older schema
 files must rebuild or use a compatible compiler; an older index cannot communicate effect markers or
@@ -148,12 +148,35 @@ Other follow-up areas:
 1. Design effect subtyping and generic payloads, if needed, without conflating effect identity with
    nominal value-type inheritance.
 2. Design multi-property, nested, and OR handler patterns with coverage diagnostics.
-3. Define host-facing policy for effectful entry points and top-level initialization rather than
-   silently allowing carriers to escape the launch boundary.
+3. Settle the host-boundary policy for raised effects. The current rule requires effects in `main`
+   to be handled locally; explore whether unhandled effects may instead escape from `main` to the
+   host, either for all effect types or only for designated host-facing effects. This could keep
+   beginner programs from needing handlers for routine operations, but must define how the host
+   reports or handles an uncaught effect rather than silently dropping it. Decide separately how
+   top-level initializers should behave.
 4. Add an explicit Java exception bridge only as an opt-in boundary construct; ordinary external
    functions should remain effect-free and Java exceptions should continue to propagate unchanged.
 5. Explore effect-set polymorphism only after concrete callable and function-type compatibility has
    stabilized.
+6. Decide whether observable I/O belongs in the raised-effect system. `raises` currently describes
+   typed control-flow effects, not purity or the absence of observable side effects, so `println`
+   can have no declared raised effects without being pure. If operations such as `println` were to
+   raise a hypothetical `IO` effect, weigh the semantic benefit against the learning burden of
+   introducing effect handling early; consider that choice together with the proposed `main`
+   boundary policy.
+7. Explore first-class, typed effect-handler values that can be named and reused after `with`,
+   while keeping `match` for ordinary value inspection and `handle` for raised control flow.
+   Specify how handler result types relate to the protected expression's normal result, how
+   unhandled effects propagate, and how handler-raised effects are checked; consider composition
+   separately. Keep this distinct from resumable algebraic effect handlers unless continuation
+   resumption is explicitly designed.
+8. Decide whether raised effects should remain abortive or eventually grow into fully resumable
+   algebraic effects. Resumption is not part of the current runtime model: `raise` throws a carrier
+   and unwinds the JVM stack to a handler. Supporting resumable operations would require capturing
+   and invoking continuations and would change the compiler/runtime model substantially. Do not
+   assume Project Loom's virtual threads provide arbitrary continuation capture and resumption;
+   investigate a compiler-managed strategy such as CPS transformation, starting with one-shot
+   continuations, before committing to this direction.
 
 `Result<T, E>` remains ordinary and is not a migration target for this feature. The compiler does
 not automatically catch Java exceptions, convert a `Result` into a raised effect, or convert a

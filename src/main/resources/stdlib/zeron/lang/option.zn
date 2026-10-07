@@ -1,5 +1,11 @@
 package zeron.lang;
 
+namespace Option {
+    public fn some<T>(value: T): Option<T> = Some<T>.from(value);
+
+    public fn none<T>(): Option<T> = None<T>.none();
+}
+
 public sealed contract Option<T> permits Some<T>, None<T> {
     isSome(): Boolean;
     getOrElse(defaultValue: T): T;

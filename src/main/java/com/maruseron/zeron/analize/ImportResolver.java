@@ -75,11 +75,7 @@ final class ImportResolver {
                             importDeclaration.location(),
                             "Duplicate star import for package '" + target + "'."));
                 }
-                final var packageExists = classes.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
-                        || contracts.keySet().stream().anyMatch(name -> packageOf(name).equals(target))
-                        || declarationPackages.entrySet().stream()
-                            .anyMatch(entry -> entry.getValue().equals(target));
-                if (!packageExists) {
+                if (!packageExists(target)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
                             importDeclaration.location(),
                             "Unknown Zeron package '" + target + "' in star import."));
@@ -189,10 +185,21 @@ final class ImportResolver {
                 invalidAliases.add(importDeclaration.localName());
             }
         }
+        for (final var packageName : List.of("zeron.io", "zeron.lang")) {
+            if (packageExists(packageName) && !onDemandPackages.contains(packageName)) {
+                onDemandPackages.add(packageName);
+            }
+        }
         return new Validation(new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions),
                 Map.copyOf(importedValues), Map.copyOf(importedExtensions), List.copyOf(onDemandPackages)),
                 List.copyOf(errors),
                 Set.copyOf(invalidAliases));
+    }
+
+    private boolean packageExists(final String packageName) {
+        return classes.keySet().stream().anyMatch(name -> packageOf(name).equals(packageName))
+                || contracts.keySet().stream().anyMatch(name -> packageOf(name).equals(packageName))
+                || declarationPackages.containsValue(packageName);
     }
 
     private static String packageOf(final String qualifiedName) {

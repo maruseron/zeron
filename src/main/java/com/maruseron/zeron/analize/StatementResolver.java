@@ -70,16 +70,20 @@ final class StatementResolver {
                 TypeResolver.validateFunctionTypes(context, extension.typeDescriptor(), extension.name());
                 TypeResolver.validateTypeParameterBounds(context, extension.typeDescriptor(), extension.name());
                 final var receiverName = Resolver.className(context, extension.receiverType());
-                if (!context.classes.containsKey(receiverName) && !context.contracts.containsKey(receiverName)) {
+                final var isNominalReceiver = context.classes.containsKey(receiverName)
+                        || context.contracts.containsKey(receiverName);
+                if (!isNominalReceiver && !isSupportedBuiltinExtensionReceiver(extension.receiverType())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                            extension.name(), "Extensions can target only Zeron classes and contracts."));
+                            extension.name(), "Extensions can target only Zeron classes, contracts, and supported built-in types."));
                 }
-                final var receiverDeclaration = context.classes.containsKey(receiverName)
-                        ? context.classes.get(receiverName) : context.contracts.get(receiverName);
-                Resolver.ensureTypeAccessible(context, receiverName, extension.name(),
-                        receiverDeclaration instanceof Stmt.ClassDecl classDeclaration
-                                ? classDeclaration.isPublic()
-                                : ((Stmt.ContractDecl) receiverDeclaration).isPublic());
+                if (isNominalReceiver) {
+                    final var receiverDeclaration = context.classes.containsKey(receiverName)
+                            ? context.classes.get(receiverName) : context.contracts.get(receiverName);
+                    Resolver.ensureTypeAccessible(context, receiverName, extension.name(),
+                            receiverDeclaration instanceof Stmt.ClassDecl classDeclaration
+                                    ? classDeclaration.isPublic()
+                                    : ((Stmt.ContractDecl) receiverDeclaration).isPublic());
+                }
                 LambdaResolver.resolveExtensionMethod(context, extension);
             }
             case Stmt.ExternalFunction externalFunction -> {
@@ -165,6 +169,15 @@ final class StatementResolver {
             case Stmt.Var var -> resolveVariable(var);
             case Stmt.While(Token keyword, Expr condition, Stmt body) -> resolveWhile(keyword, condition, body);
         }
+    }
+
+    private static boolean isSupportedBuiltinExtensionReceiver(final TypeDescriptor receiverType) {
+        return receiverType instanceof ArrayDescriptor
+                || receiverType instanceof UnitDescriptor
+                || receiverType instanceof IntDescriptor
+                || receiverType instanceof FloatDescriptor
+                || receiverType instanceof BooleanDescriptor
+                || receiverType instanceof StringDescriptor;
     }
 
     private void resolveVariable(final Stmt.Var var) {

@@ -157,6 +157,9 @@ final class InitializationPlanner {
                 && projectValues.contains(property.namespaceValueDeclaration())) {
             dependencies.add(property.namespaceValueDeclaration());
         }
+        if (expression instanceof Expr.Property property && property.extensionCall() != null) {
+            collectDependencies(property.extensionCall(), dependencies, functions, visitedFunctions, projectValues);
+        }
         if (expression instanceof Expr.Call call && call.resolvedFunctionName() != null) {
             final var function = call.resolvedFunctionDeclaration() instanceof Stmt.Function selected
                     ? selected : functions.get(call.resolvedFunctionName());
@@ -168,6 +171,10 @@ final class InitializationPlanner {
         }
         if (expression instanceof Expr.MemberCall call && call.namespaceCall() != null) {
             collectDependencies(call.namespaceCall(), dependencies, functions, visitedFunctions, projectValues);
+        }
+        if (expression instanceof Expr.MemberCall call && call.resolvedExtensionMethod() != null) {
+            call.resolvedExtensionMethod().body().forEach(statement ->
+                    collectDependencies(statement, dependencies, functions, visitedFunctions, projectValues));
         }
         for (final var field : expression.getClass().getFields()) {
             try {

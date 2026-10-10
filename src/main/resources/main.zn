@@ -10,6 +10,8 @@ class PrintingSink<T> is Sink<T> {
     public mut add(value: T): Unit = println(value);
 }
 
+fn empty<C, T: Sink<C>>(): T = T.empty();
+
 fn main() {
     let users = [Person.new("marcelo", 24), Person.new("dario", 56)];
 
@@ -23,7 +25,7 @@ fn main() {
         flatMap i -> List<Int>.of(i, i + 10)
         filter i -> i % 2 == 0
         map i -> i * i
-        collect PrintingSink<Int>.empty();
+        collect empty<Int, List<Int>>();
 
-    println(result.count());
+    println(evenSquared);
 }

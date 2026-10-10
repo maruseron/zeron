@@ -33,7 +33,7 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v16.bin|class-directory|library.jar>");
+            System.err.println("Usage: ZeronLibraryIndexDump <api-v18.bin|class-directory|library.jar>");
             return;
         }
         final var path = Path.of(args[0]);
@@ -131,6 +131,16 @@ public final class ZeronLibraryIndexDump {
                         System.out.println("  " + (property.mutating() ? "mut " : "")
                                 + property.name() + ": " + formatType(property.type()));
                     }
+                }
+                case ZeronLibraryIndex.WitnessExport witness -> {
+                    System.out.println("witness " + witness.qualifiedName()
+                            + formatTypeParameters(witness.typeParameters()) + " "
+                            + formatType(witness.contractType()) + " for "
+                            + formatType(witness.targetType()) + " {");
+                    witness.mappings().forEach(mapping -> System.out.println("  "
+                            + mapping.requirementName() + " = " + formatType(mapping.targetType())
+                            + "." + mapping.constructorName() + ";"));
+                    System.out.println("}");
                 }
             }
         }

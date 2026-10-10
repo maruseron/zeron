@@ -137,6 +137,18 @@ public final class Resolver {
             context.currentImports = importsByUnit.get(unit);
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                if (entry.declaration() instanceof Stmt.Witness witness) {
+                    attempt(context, () -> TypeClassEvidence.register(
+                            context, witness, unit.packageName()));
+                }
+            }
+        }
+        for (final var unit : units) {
+            context.packageName = unit.packageName();
+            context.currentSourcePath = unit.sourcePath();
+            context.currentImports = importsByUnit.get(unit);
+            context.invalidImportAliases = invalidAliasesByUnit.get(unit);
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = entry.declaration();
                 if (!(declaration instanceof Stmt.Var variable)) continue;
                 if (variable.type() instanceof InferDescriptor) continue;
@@ -176,7 +188,8 @@ public final class Resolver {
             if (unit.metadataOnly()) continue;
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var statement = entry.declaration();
-                if (!(statement instanceof Stmt.Var) && !(statement instanceof Stmt.ExternalClass)) {
+                if (!(statement instanceof Stmt.Var) && !(statement instanceof Stmt.ExternalClass)
+                        && !(statement instanceof Stmt.Witness)) {
                     context.currentNamespaceName = entry.namespaceName();
                     attempt(context, () -> resolve(context, statement));
                 }
@@ -228,6 +241,7 @@ public final class Resolver {
             case Stmt.ClassDecl classDeclaration -> classDeclaration.name();
             case Stmt.ContractDecl contractDeclaration -> contractDeclaration.name();
             case Stmt.ExternalClass externalClass -> externalClass.name();
+            case Stmt.Witness witness -> witness.name();
             case Stmt.FunctionDeclaration function -> function.name();
             case Stmt.Var variable -> variable.name();
             default -> null;

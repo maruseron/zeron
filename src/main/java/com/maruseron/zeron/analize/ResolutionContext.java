@@ -14,6 +14,7 @@ final class ResolutionContext {
     final Map<String, Stmt.ClassDecl> classes = new LinkedHashMap<>();
     final Map<String, Stmt.ExternalClass> externalClasses = new LinkedHashMap<>();
     final Map<String, Stmt.ContractDecl> contracts = new LinkedHashMap<>();
+    final List<TypeClassEvidence.WitnessEntry> typeClassWitnesses = new ArrayList<>();
     final Map<String, Stmt.FunctionDeclaration> functions = new LinkedHashMap<>();
     final Map<String, List<Stmt.FunctionDeclaration>> functionOverloads = new LinkedHashMap<>();
     final Map<String, Stmt.Var> topLevelValues = new LinkedHashMap<>();

@@ -160,6 +160,7 @@ public final class Parser {
         try {
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
+            if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
             if (match(NAMESPACE)) return namespaceDeclaration();
             if (match(EFFECT)) return effectDeclaration(false);
             if (match(EXTENSION)) return extensionDeclaration(false);
@@ -188,6 +189,7 @@ public final class Parser {
                         "Only values, functions, classes, contracts, and extensions may be public.");
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
+            if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
             if (levelMarker == null && match(EFFECT)) return effectDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
             if (levelMarker == null && match(SEALED)) {
@@ -203,6 +205,56 @@ public final class Parser {
             synchronize();
             return null;
         }
+    }
+
+    private Stmt.Witness witnessDeclaration() {
+        final var name = previous();
+        final var typeParameters = typeParameterDeclaration(name, false);
+        final var enclosingTypeParameters = activeTypeParameters;
+        activeTypeParameters = new LinkedHashMap<>(typeParameters);
+        try {
+            final var contractType = collectType();
+            consume(FOR, "Expect 'for' between witness contract and target type.");
+            final var targetType = collectType();
+            consume(LEFT_BRACE, "Expect '{' before witness factory mappings.");
+            final var mappings = new ArrayList<Stmt.WitnessFactoryMapping>();
+            while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                final var requirement = consume(IDENTIFIER, "Expect contract factory requirement name.");
+                consume(EQUAL, "Expect '=' before witness constructor target.");
+                var mappedType = witnessMappedType();
+                if (!(mappedType instanceof GenericDescriptor)
+                        && mappedType.name().equals(targetType.name())
+                        && targetType instanceof GenericDescriptor) {
+                    mappedType = targetType;
+                }
+                consume(DOT, "Expect '.' before constructor name.");
+                final var constructor = consume(IDENTIFIER, "Expect named constructor target.");
+                consume(SEMICOLON, "Expect ';' after witness mapping.");
+                mappings.add(new Stmt.WitnessFactoryMapping(requirement, mappedType, constructor));
+            }
+            consume(RIGHT_BRACE, "Expect '}' after witness mappings.");
+            return new Stmt.Witness(name, List.copyOf(typeParameters.values()), contractType,
+                    targetType, mappings);
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
+        }
+    }
+
+    private TypeDescriptor witnessMappedType() {
+        final var name = consume(IDENTIFIER, "Expect target class before constructor name.");
+        TypeDescriptor type = activeTypeParameters.get(name.lexeme());
+        if (type == null) type = TypeDescriptor.of(qualifyTypeName(name.lexeme()));
+        if (match(LESS)) {
+            final var arguments = collectTypeArguments();
+            consume(GREATER, "Expect '>' after target class type arguments.");
+            if (!(type instanceof NominalDescriptor nominal)) {
+                error(name, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                        "Only nominal types can have type arguments.");
+            } else {
+                type = TypeDescriptor.genericOf(nominal, arguments);
+            }
+        }
+        return type;
     }
 
     private Stmt.Namespace namespaceDeclaration() {
@@ -1735,7 +1787,9 @@ public final class Parser {
             if (check(ARROW)) {
                 return finishLambda(List.of(ident));
             }
-            return new Expr.Variable(ident, TypeDescriptor.ofInfer());
+            final var typeParameter = activeTypeParameters.get(ident.lexeme());
+            return new Expr.Variable(ident,
+                    typeParameter == null ? TypeDescriptor.ofInfer() : typeParameter);
         }
 
         // Parentheses may start a lambda, a Unit literal, or a grouped expression.

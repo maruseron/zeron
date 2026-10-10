@@ -1,6 +1,7 @@
 package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.analize.Resolver.IterationProtocol;
 import com.maruseron.zeron.analize.Resolver.SinkProtocol;
 import com.maruseron.zeron.domain.FunctionDescriptor;
@@ -8,11 +9,25 @@ import com.maruseron.zeron.domain.JavaCallTarget;
 import com.maruseron.zeron.domain.JavaFieldTarget;
 import com.maruseron.zeron.domain.ResolvedIntrinsicOperation;
 import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 
 import java.util.List;
 import java.util.Objects;
 
 public sealed interface Expr {
+
+    record EvidenceArgument(TypeParameterDescriptor parameter, int boundIndex, int constructorIndex,
+                            String ownerName, String constructorName, FunctionDescriptor signature,
+                            Token forwardToken) {}
+
+    static Token evidenceToken(final TypeParameterDescriptor parameter,
+                               final int boundIndex,
+                               final int constructorIndex) {
+        return new Token(TokenType.IDENTIFIER,
+                "$zeron$evidence$" + parameter.scopeId() + "$" + parameter.name()
+                        + "$" + boundIndex + "$" + constructorIndex,
+                null, -1);
+    }
 
     TypeDescriptor getType();
     void setType(final TypeDescriptor type);
@@ -36,6 +51,9 @@ public sealed interface Expr {
         private JavaCallTarget javaCallTarget;
         private TypeDescriptor variadicElementType;
         private int variadicFixedArity = -1;
+        private Token witnessEvidenceToken;
+        private FunctionDescriptor witnessFactoryType;
+        private List<EvidenceArgument> evidenceArguments = List.of();
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -82,6 +100,16 @@ public sealed interface Expr {
         public void setVariadic(final TypeDescriptor elementType, final int fixedArity) {
             variadicElementType = elementType;
             variadicFixedArity = fixedArity;
+        }
+        public Token witnessEvidenceToken() { return witnessEvidenceToken; }
+        public FunctionDescriptor witnessFactoryType() { return witnessFactoryType; }
+        public void setWitnessEvidence(final Token token, final FunctionDescriptor factoryType) {
+            witnessEvidenceToken = token;
+            witnessFactoryType = factoryType;
+        }
+        public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
+        public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
+            evidenceArguments = List.copyOf(arguments);
         }
     }
 
@@ -508,6 +536,7 @@ public sealed interface Expr {
         private ResolvedIntrinsicOperation intrinsicOperation;
         private TypeDescriptor variadicElementType;
         private int variadicFixedArity = -1;
+        private List<EvidenceArgument> evidenceArguments = List.of();
 
         public Call(Token callee, Token paren, List<Expr> arguments,
                     List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -549,6 +578,10 @@ public sealed interface Expr {
         public void setVariadic(final TypeDescriptor elementType, final int fixedArity) {
             variadicElementType = elementType;
             variadicFixedArity = fixedArity;
+        }
+        public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
+        public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
+            evidenceArguments = List.copyOf(arguments);
         }
 
         public void setGenericFunctionType(final FunctionDescriptor functionType) {

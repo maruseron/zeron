@@ -27,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 16;
+    public static final int VERSION = 18;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -42,6 +42,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 case FunctionExport function -> packageName(function.jvmOwner());
                 case ExtensionExport extension -> packageName(extension.jvmOwner());
                 case ValueExport value -> packageName(value.jvmOwner());
+                case WitnessExport witness -> packageName(witness.qualifiedName());
                 default -> packageName(exported.qualifiedName());
             };
             final var statements = declarationsByPackage.computeIfAbsent(packageName, _ -> new ArrayList<>());
@@ -134,6 +135,14 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(),
                             constructors, methods, properties, true, contract.sealed(), permittedClasses));
                 }
+                case WitnessExport witness -> {
+                    final var mappings = witness.mappings().stream()
+                            .map(mapping -> new Stmt.WitnessFactoryMapping(token(mapping.requirementName()),
+                                    mapping.targetType(), token(mapping.constructorName())))
+                            .toList();
+                    statements.add(new Stmt.Witness(token(simpleName(witness.qualifiedName())),
+                            witness.typeParameters(), witness.contractType(), witness.targetType(), mappings));
+                }
             }
         }
         return declarationsByPackage.entrySet().stream()
@@ -142,7 +151,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             .toList();
         }
 
-    public sealed interface ExportedDeclaration permits NamespacedDeclaration, ClassExport, ContractExport {
+    public sealed interface ExportedDeclaration permits NamespacedDeclaration, ClassExport, ContractExport,
+            WitnessExport {
         String qualifiedName();
     }
 
@@ -270,6 +280,28 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             Objects.requireNonNull(qualifiedName);
             typeArguments = List.copyOf(typeArguments);
         }
+
+    }
+
+    public record WitnessExport(String qualifiedName, List<TypeParameterDescriptor> typeParameters,
+                                TypeDescriptor contractType, TypeDescriptor targetType,
+                                List<WitnessFactoryMappingExport> mappings) implements ExportedDeclaration {
+        public WitnessExport {
+            Objects.requireNonNull(qualifiedName);
+            typeParameters = List.copyOf(typeParameters);
+            Objects.requireNonNull(contractType);
+            Objects.requireNonNull(targetType);
+            mappings = List.copyOf(mappings);
+        }
+    }
+
+    public record WitnessFactoryMappingExport(String requirementName, TypeDescriptor targetType,
+                                              String constructorName) {
+        public WitnessFactoryMappingExport {
+            Objects.requireNonNull(requirementName);
+            Objects.requireNonNull(targetType);
+            Objects.requireNonNull(constructorName);
+        }
     }
 
     public record NamedConstructorExport(String name, FunctionDescriptor signature, boolean variadic) {
@@ -335,6 +367,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                     final String initializationOwner,
                                                     final boolean includeBundledSources) {
         final var exports = new ArrayList<ExportedDeclaration>();
+        var witnessIndex = 0;
         for (final var unit : units) {
             if (unit.metadataOnly()
                     || !includeBundledSources && StandardLibrary.isBundledSourcePath(unit.sourcePath())) continue;
@@ -430,6 +463,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                             .map(use -> new ContractUseExport(
                                                     use.name().lexeme(), use.typeArguments()))
                                             .toList()));
+                    case Stmt.Witness witness -> {
+                        final var qualifiedName = (unit.packageName().isEmpty() ? ""
+                                : unit.packageName() + ".") + "$zeron$witness$" + witnessIndex++;
+                        exports.add(new WitnessExport(qualifiedName, witness.typeParameters(),
+                                witness.contractType(), witness.targetType(),
+                                witness.mappings().stream()
+                                        .map(mapping -> new WitnessFactoryMappingExport(
+                                                mapping.requirementName().lexeme(),
+                                                mapping.targetType(),
+                                                mapping.constructorName().lexeme()))
+                                        .toList()));
+                    }
                     default -> {}
                 }
             }
@@ -465,7 +510,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v16.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v18.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -491,7 +536,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v16.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v18.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -587,6 +632,20 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     for (final var type : permitted.typeArguments()) writeType(output, type, context);
                 }
             }
+            case WitnessExport witness -> {
+                output.writeByte(6);
+                output.writeUTF(witness.qualifiedName());
+                final var context = new WriteContext();
+                writeTypeParameters(output, witness.typeParameters(), context);
+                writeType(output, witness.contractType(), context);
+                writeType(output, witness.targetType(), context);
+                output.writeInt(witness.mappings().size());
+                for (final var mapping : witness.mappings()) {
+                    output.writeUTF(mapping.requirementName());
+                    writeType(output, mapping.targetType(), context);
+                    output.writeUTF(mapping.constructorName());
+                }
+            }
         }
     }
 
@@ -658,6 +717,19 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     permitted.add(new ContractUseExport(permittedName, arguments));
                 }
                 yield new ContractExport(name, typeParameters, constructors, methods, properties, sealed, permitted);
+            }
+            case 6 -> {
+                final var name = input.readUTF();
+                final var context = new ReadContext();
+                final var typeParameters = readTypeParameters(input, context);
+                final var contractType = readType(input, context);
+                final var targetType = readType(input, context);
+                final var mappings = new ArrayList<WitnessFactoryMappingExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    mappings.add(new WitnessFactoryMappingExport(input.readUTF(),
+                            readType(input, context), input.readUTF()));
+                }
+                yield new WitnessExport(name, typeParameters, contractType, targetType, mappings);
             }
             default -> throw new IOException("Unknown declaration kind in Zeron library index.");
         };

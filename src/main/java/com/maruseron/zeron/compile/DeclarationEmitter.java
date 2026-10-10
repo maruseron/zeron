@@ -45,6 +45,9 @@ final class DeclarationEmitter {
                     final var functionType = function.typeDescriptor().returnType() instanceof InferDescriptor
                             ? context.symbols.getFunctionType(context.resolution.functionSymbolToken(name))
                             : function.typeDescriptor();
+                    final var witnessSlots = BytecodeEmitter.witnessSlots(context, typeDescriptor);
+                    final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
+                            toJavaMethodDescriptor(functionType), witnessSlots.size());
                     if (entryHolder && name.lexeme().equals("main")
                             && functionType.parameters().isEmpty()
                             && functionType.returnType() instanceof UnitDescriptor) {
@@ -52,11 +55,11 @@ final class DeclarationEmitter {
                     }
                     classBuilder.withMethod(
                             name.lexeme(),
-                            toJavaMethodDescriptor(functionType),
+                            methodDescriptor,
                             ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL,
                             methodBuilder -> {
                                 final var signature = ClassSignatureEmitter.methodSignature(typeDescriptor);
-                                if (signature != null) {
+                                if (signature != null && witnessSlots.isEmpty()) {
                                     methodBuilder.with(SignatureAttribute.of(
                                             methodBuilder.constantPool().utf8Entry(signature)));
                                 }
@@ -69,6 +72,12 @@ final class DeclarationEmitter {
                                         context.symbols.declareSymbol(declaration, parameters.get(i), paramTypes.get(i),
                                                 BindingMutability.IMMUTABLE);
                                         context.symbols.define(parameters.get(i));
+                                    }
+                                    for (final var witnessToken : witnessSlots) {
+                                        context.symbols.declareSymbol(declaration, witnessToken,
+                                                TypeDescriptor.ofName("java.lang.invoke.MethodHandle"),
+                                                BindingMutability.IMMUTABLE);
+                                        context.symbols.define(witnessToken);
                                     }
                                     //currentFunction = new FunctionModel(name.lexeme(), functionType);
                                     final var binding = externalFunction == null

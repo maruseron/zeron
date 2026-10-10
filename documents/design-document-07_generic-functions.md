@@ -51,12 +51,18 @@ let stringIdentity: (String) -> String = identity;
 ```
 
 Type parameters are scoped to one declaration. Generic functions and generic methods may give each
-parameter one or more contract bounds, such as `T: Named + Encodable`. Each bound exposes its
-non-mutating methods in the generic body and every bound is checked against inferred or explicit
-type arguments. Class bounds, bounds on generic classes/contracts, and mutating bound methods remain
-unsupported. Type parameters may appear recursively in parameters, results, function signatures,
-nullable and reference types, and the built-in `Array<T>` descriptor. Function type annotations
-accept zero or multiple parameters.
+parameter one or more contract bounds, including applied generic bounds such as `C: Box<E>`. Each
+bound exposes its non-mutating methods in the generic body and every applied bound is checked
+against inferred or explicit type arguments. Class bounds, bounds on generic classes/contracts, and
+mutating bound methods remain unsupported. Generic functions and methods may also call class-side
+factory requirements through bounds; the compiler selects a compatible public named constructor,
+honoring explicit witness remapping, and passes its method handle as hidden evidence. Witness
+metadata is preserved in API-index v18 for separately compiled libraries. Full generic-pattern
+overlap analysis remains future work. See
+[design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
+Type parameters may appear recursively in parameters, results, function signatures, nullable and
+reference types, and the built-in `Array<T>` descriptor. Function type annotations accept zero or
+multiple parameters.
 
 Class factory calls use the same bounded structural unification rules for class type parameters.
 `List.of(1, 2)` infers `List<Int>`, while `let items: List<Int> = List.empty()` obtains its type
@@ -83,14 +89,14 @@ and used in supported structural positions, but unary and binary operators are r
 require constraints. A bounded type variable exposes the non-mutating methods declared by any of its
 contract bounds.
 
-Contract named constructors are different: they are class-side factory requirements, not instance
-methods, and a bounded value does not identify the class whose factory should run. Calls such as
-`T.empty()` through a generic bound are therefore not part of the current bounded-type model.
-Supporting them requires an explicit type witness or equivalent class-side dictionary, including a
-defined way to preserve generic contract arguments and the selected factory across inference,
-separate compilation, and JVM erasure. Generic class and contract bounds are not currently supported;
-their interaction with constructor witnesses remains an open design question rather than an implicit
-extension of ordinary contract bounds.
+Contract named constructors are class-side factory requirements, not instance methods; an erased
+bounded value alone cannot select their implementation. Generic functions may call a required
+factory through the type parameter, such as `C.empty()`. Concrete call sites select a compatible
+public constructor from declared conformance and any explicit witness mapping, while generic callers
+forward hidden evidence. Applied contract arguments remain available to source-level checking even
+though the evidence ABI uses erased method handles. Complete overlap checking for distinct generic
+witness patterns remains future work; see
+[design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
 
 Lambdas with an expected function type remain monomorphic. An immutable let-bound lambda with safe
 unresolved parameters may generalize them into a rank-1 scheme, instantiated freshly at each use.

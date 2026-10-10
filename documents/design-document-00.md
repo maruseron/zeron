@@ -6,6 +6,7 @@
 - [Variables](#variables)
 - [Functions](#functions)
 - [Generic functions](#generic-functions-first-slice)
+- [Type-class witnesses](design-document-15_type-class-witnesses-and-generic-bounds.md)
 - [Simplest program](#sidetrack-simplest-zeron-program)
 - [Higher order functions and Lambdas](#higher-order-functions-and-lambdas)
 - [Control flow](#control-flow)
@@ -116,8 +117,11 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     Arrays support nullable element types, while broader nullable collection behavior remains limited.
 - Generic functions and methods support multiple contract bounds per type parameter. Generic
     function references can be specialized explicitly with `name::<Type>` or inferred from an
-    expected function type; these are monomorphic values, not polymorphic lambdas.     Variance, generic class/contract bounds, and first-class generic function values without
-    specialization remain unsupported.
+    expected function type; these are monomorphic values, not polymorphic lambdas. Variance, generic
+    class/contract bounds, and first-class generic function values without specialization remain
+    unsupported. Class-side witness declarations and applied factory evidence are implemented;
+    complete generic-pattern overlap analysis remains future work. See
+    [design-document-15](design-document-15_type-class-witnesses-and-generic-bounds.md).
     Generic callback adaptation works across top-level functions, specialized function references,
     and nominal members; broader shape coverage and adapter reuse remain.
 
@@ -164,10 +168,13 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     denotes a zero-parameter lambda. Multiline call chains and nested trailing lambdas need
     readability evaluation; ordinary parenthesized lambdas remain an escape hatch. Multiple
     trailing lambdas per call are out of scope.
-- Import-scoped contract conformances represented by explicit witnesses. A type satisfies a contract
-    only where the matching witness is imported; witnesses travel with generic and library APIs, and
-    conflicting witnesses require disambiguation or are rejected. Witnesses are separate from object
-    identity; adapter wrappers may be an implementation detail, not the language's model.
+- Generic bounds over applied contracts and coherent type-class witnesses. Declared nominal
+    conformance supplies instance-method evidence; explicit witness mappings may select or remap
+    class-side factories, whose result is `&Self`. Evidence is passed implicitly to generic
+    implementations, with compile-time selection independent of imports. The initial implementation
+    rejects duplicate nominal contract/target witnesses and excludes non-nominal instances and
+    witness-dispatched instance methods; see
+    [design-document-15](design-document-15_type-class-witnesses-and-generic-bounds.md).
 - Richer pattern matching, including multiple named-property patterns per case, nested patterns, and
     OR-patterns.
 - Named object patterns that define explicit, potentially partial views for matching; overlap,

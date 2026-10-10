@@ -494,7 +494,18 @@ final class DeclarationResolver {
                                     constructor.typeDescriptor(), constructor.variadic()))
                     .findFirst()
                     .orElse(null);
-            if (implementation == null) {
+            final var contractType = contractUse.typeArguments().isEmpty()
+                    ? TypeDescriptor.ofName(contractUse.name().lexeme())
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(contractUse.name().lexeme()),
+                            contractUse.typeArguments());
+            final var targetType = declaration.typeParameters().isEmpty()
+                    ? TypeDescriptor.ofName(declaration.name().lexeme())
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(declaration.name().lexeme()),
+                            declaration.typeParameters().stream()
+                                    .map(parameter -> (TypeDescriptor) parameter).toList());
+            final var explicitMapping = TypeClassEvidence.explicitMapping(context,
+                    contractType, targetType, required.name().lexeme());
+            if (implementation == null && explicitMapping == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         contractUse.name(),
                         "Class does not provide a compatible public contract constructor '"
@@ -618,7 +629,7 @@ final class DeclarationResolver {
         return substitutions;
     }
 
-    private static boolean compatibleMethodSignatures(final ResolutionContext context,
+    static boolean compatibleMethodSignatures(final ResolutionContext context,
                                                final FunctionDescriptor required,
                                                final boolean requiredVariadic,
                                                final FunctionDescriptor implementation,

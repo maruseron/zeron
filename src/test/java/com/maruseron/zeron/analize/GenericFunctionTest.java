@@ -308,6 +308,49 @@ public final class GenericFunctionTest {
     }
 
     @Test
+    public void resolvesAppliedGenericContractBoundsAndInstanceCalls() {
+        final var parsed = Parser.of(Scanner.from("""
+                contract Box<T> {
+                    unwrap(): T;
+                }
+                class Holder<T> is Box<T> {
+                    value: T;
+                    public constructor new;
+                    public unwrap(): T = this.value;
+                }
+                fn fetchBound<E, C: Box<E>>(value: C): E = value.unwrap();
+                fn fetchBoundInt(): Int = fetchBound::<Int, Holder<Int>>(Holder<Int>.new(42));
+                """).scanTokens()).parseCompilationUnitWithDiagnostics("applied-bounds.zn");
+        assertTrue(parsed.diagnostics().toString(), parsed.diagnostics().isEmpty());
+        final List<Stmt> statements = parsed.compilationUnit().declarations();
+        assertTrue(statements.toString(), statements.stream()
+                .anyMatch(statement -> statement instanceof Stmt.Function function
+                        && function.name().lexeme().equals("fetchBound")));
+
+        final var result = new ResolutionService().resolve(statements);
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
+    }
+
+    @Test
+    public void appliedGenericContractBoundsRetainTheirTypeArguments() {
+        final var source = """
+                contract Box<T> {
+                    unwrap(): T;
+                }
+                class Holder<T> is Box<T> {
+                    value: T;
+                    public constructor new;
+                    public unwrap(): T = this.value;
+                }
+                fn fetchBound<E, C: Box<E>>(value: C): E = value.unwrap();
+                fn invalid(): Int = fetchBound::<Int, Holder<String>>(Holder<String>.new("text"));
+                """;
+        assertThrows(source, ResolutionError.class,
+                () -> new ResolutionService().resolve(parse(source)));
+    }
+
+    @Test
     public void rejectsBoundsOnClassAndContractDeclarationTypeParameters() {
         for (final var source : List.of(
                 "contract Named { name(): String; } class Box<T: Named> {}",

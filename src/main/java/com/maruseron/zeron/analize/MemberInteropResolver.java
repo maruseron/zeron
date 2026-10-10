@@ -1340,6 +1340,8 @@ final class MemberInteropResolver {
             }
         }
 
+        call.setEvidenceArguments(TypeClassEvidence.selectArguments(
+                context, typeParameters, substitutions, call.name));
         final var instantiatedParameters = genericType.parameters().stream()
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
                 .toList();
@@ -1504,10 +1506,26 @@ final class MemberInteropResolver {
         TypeDescriptor bound = null;
         Stmt.ContractDecl contract = null;
         Stmt.ContractMethod method = null;
+        Stmt.NamedContractConstructor factory = null;
+        int selectedBoundIndex = -1;
+        int selectedFactoryIndex = -1;
         var hasMutatingMethod = false;
-        for (final var candidateBound : parameter.bounds()) {
+        for (int boundIndex = 0; boundIndex < parameter.bounds().size(); boundIndex++) {
+            final var candidateBound = parameter.bounds().get(boundIndex);
             final var candidateName = className(context, candidateBound);
             final var candidateContract = context.contracts.get(candidateName);
+            final var candidateFactory = candidateContract == null ? null
+                    : candidateContract.namedConstructors().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
+                    .findFirst().orElse(null);
+            if (candidateFactory != null) {
+                bound = candidateBound;
+                contract = candidateContract;
+                factory = candidateFactory;
+                selectedBoundIndex = boundIndex;
+                selectedFactoryIndex = candidateContract.namedConstructors().indexOf(candidateFactory);
+                break;
+            }
             final var candidateMethod = candidateContract == null ? null : candidateContract.methods().stream()
                     .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
                     .findFirst().orElse(null);
@@ -1521,6 +1539,42 @@ final class MemberInteropResolver {
                 method = candidateMethod;
                 break;
             }
+        }
+        if (factory != null) {
+            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            final var boundBase = bound instanceof ReferenceDescriptor reference ? reference.baseType() : bound;
+            if (boundBase instanceof GenericDescriptor genericBound) {
+                if (genericBound.typeParameters().size() != contract.typeParameters().size()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            call.name, "Invalid generic contract bound '" + bound + "'."));
+                }
+                for (int index = 0; index < contract.typeParameters().size(); index++) {
+                    substitutions.put(contract.typeParameters().get(index), genericBound.typeParameters().get(index));
+                }
+            }
+            final var declaredType = (FunctionDescriptor) TypeSubstitution.substitute(
+                    factory.typeDescriptor(), substitutions);
+            final var factoryType = TypeDescriptor.functionOf(factory.name().lexeme(),
+                    new ReferenceDescriptor(parameter), declaredType.parameters().toArray(TypeDescriptor[]::new));
+            if (call.arguments.size() < factoryType.arity()
+                    || !factory.variadic() && call.arguments.size() != factoryType.arity()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                        call.name, "Wrong number of arguments for class-side constructor '" + call.name.lexeme() + "'."));
+            }
+            for (int index = 0; index < call.arguments.size(); index++) {
+                final var expected = factory.variadic()
+                        && index >= factoryType.arity() - 1
+                        ? ((ArrayDescriptor) factoryType.parameters().getLast()).elementType()
+                        : factoryType.parameters().get(index);
+                ensureAssignable(context, expected,
+                        resolveArgument(context, call.arguments.get(index), expected), call.name);
+            }
+            call.setWitnessEvidence(Expr.evidenceToken(parameter, selectedBoundIndex, selectedFactoryIndex),
+                    factoryType);
+            call.setResolvedDescriptor(factoryType);
+            call.setType(factoryType.returnType());
+            call.setResolvedOwnerName(className(context, bound));
+            return factoryType.returnType();
         }
         if (method == null) {
             if (hasMutatingMethod) {

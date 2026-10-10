@@ -512,6 +512,9 @@ final class ExpressionFlowResolver {
                 yield TypeDescriptor.ofInfer();
             }
             case Expr.Variable variable -> {
+                if (variable.getType() instanceof TypeParameterDescriptor parameter) {
+                    yield parameter;
+                }
                 if (variable.resolvedFunctionName() != null) {
                     yield variable.specializedFunctionType();
                 }

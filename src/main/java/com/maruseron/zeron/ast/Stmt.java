@@ -2,7 +2,6 @@ package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
-import com.maruseron.zeron.ast.Stmt.ExternalFunction;
 import com.maruseron.zeron.domain.ArrayDescriptor;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
@@ -110,6 +109,19 @@ public sealed interface Stmt {
         public ContractUse {
             typeArguments = List.copyOf(typeArguments);
         }
+    }
+
+    record Witness(Token name, List<TypeParameterDescriptor> typeParameters,
+                   TypeDescriptor contractType, TypeDescriptor targetType,
+                   List<WitnessFactoryMapping> mappings) implements Stmt, Decl {
+        public Witness {
+            typeParameters = List.copyOf(typeParameters);
+            mappings = List.copyOf(mappings);
+        }
+    }
+
+    record WitnessFactoryMapping(Token requirementName, TypeDescriptor targetType,
+                                 Token constructorName) {
     }
 
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,

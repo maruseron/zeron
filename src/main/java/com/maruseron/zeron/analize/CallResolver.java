@@ -329,6 +329,9 @@ final class CallResolver {
             }
         }
 
+        call.setEvidenceArguments(TypeClassEvidence.selectArguments(
+                context, typeParameters, substitutions, call.callee));
+
         final var instantiatedParameters = genericType.parameters().stream()
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
                 .toList();

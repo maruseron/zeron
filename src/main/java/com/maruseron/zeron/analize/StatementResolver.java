@@ -30,6 +30,7 @@ final class StatementResolver {
             case Stmt.ClassDecl declaration -> DeclarationResolver.resolveClass(context, declaration);
             case Stmt.ContractDecl declaration -> DeclarationResolver.resolveContract(context, declaration);
             case Stmt.ExternalClass _ -> {}
+            case Stmt.Witness _ -> {}
             case Stmt.Block(List<Stmt> statements) -> {
                 context.symbols.beginScope();
                 resolveStatements(statements);

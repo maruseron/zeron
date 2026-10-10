@@ -209,14 +209,17 @@ The implementation is called statically through the concrete class name (for exa
 `Token.from(42)`). Constructor requirements are carried in the compiled-library API index so
 conformance can also be checked across compiled-library boundaries.
 
-This static model leaves an open question for generic bounds. The current bounded-type model exposes
-contract instance methods on a value of the bounded type; it does not provide a concrete class name
-or a runtime receiver for selecting a named constructor. In particular, a future `T: Sink<Int>`
-bound cannot safely infer which class factory `T.empty()` should call from the erased `T` alone.
-Supporting constructor calls through generic bounds will need a type witness (or another explicit
-class-side dictionary) that identifies the concrete factory implementation. The design must also
-specify how such witnesses retain the arguments of generic contract bounds through inference,
-separate compilation, and JVM erasure. No implicit virtual constructor dispatch is intended.
+Generic functions can now make this statically dispatched call through an applied generic bound.
+The compiler selects a compatible same-name public named constructor from the target class's
+declared conformance and passes a method handle as hidden evidence. Applied contract arguments
+remain part of source-level selection even though they erase on the JVM; the factory result is
+`&Self`, which is `&T` through a bound on `T`. This adds no virtual constructor dispatch and does
+not reify generic arguments. Explicit witness declarations can remap factories to public named
+constructors, including generic target patterns; generic methods can call factories through bounds.
+The current overlap check rejects repeated nominal contract/target pairs, while complete generic
+pattern overlap analysis remains future work. The design and remaining questions are
+recorded in
+[design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
 
 ### Mutation and references
 

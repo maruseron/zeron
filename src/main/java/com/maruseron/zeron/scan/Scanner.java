@@ -76,6 +76,7 @@ public final class Scanner {
             entry("type",        TYPE),
             entry("typeof",      TYPEOF),
             entry("until",       UNTIL),
+            entry("witness",     WITNESS),
             entry("while",       WHILE));
 
     Scanner(final String source, final String sourcePath) {

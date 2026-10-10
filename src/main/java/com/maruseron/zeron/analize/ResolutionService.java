@@ -30,7 +30,8 @@ public final class ResolutionService {
                              final FunctionBindingRegistry functionBindings) {
         this.packageName = packageName == null ? "" : packageName;
         this.javaClassPathRoots = List.copyOf(javaClassPathRoots);
-        this.functionBindings = Objects.requireNonNull(functionBindings);
+        this.functionBindings = FunctionBindingRegistry.standard()
+                .withBindings(Objects.requireNonNull(functionBindings));
     }
 
     public ResolutionResult resolve(final List<Stmt> statements) {

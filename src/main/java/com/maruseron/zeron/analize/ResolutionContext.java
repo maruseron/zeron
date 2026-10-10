@@ -25,6 +25,7 @@ final class ResolutionContext {
             externalFunctionBindings = new IdentityHashMap<>();
     final Map<Token, TypeDescriptor> iterationElementTypes = new IdentityHashMap<>();
     final Map<Token, Resolver.IterationProtocol> iterationProtocols = new IdentityHashMap<>();
+    final Map<Token, Resolver.SinkProtocol> sinkProtocols = new IdentityHashMap<>();
     final List<Expr.Lambda> resolvedLambdas = new ArrayList<>();
     private final Set<Expr.Lambda> trackedLambdas = Collections.newSetFromMap(new IdentityHashMap<>());
     final IdentityHashMap<Stmt, String> sourcePathsByDeclaration = new IdentityHashMap<>();

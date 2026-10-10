@@ -80,6 +80,9 @@ public final class NamespaceTest {
                     public let answer: Int = compute();
                     public fn compute(): Int = 42;
                 }
+                public extension Int {
+                    public fn twice(): Int = this * 2;
+                }
                 """.formatted(libraryPackage));
         final var clientMain = clientPackage + ".Main";
         final var client = parse("Main.zn", """
@@ -96,7 +99,7 @@ public final class NamespaceTest {
             libraryCompiler.resolve();
             libraryCompiler.compile();
             final var index = ZeronLibraryIndex.readFrom(
-                    Path.of("dist", "META-INF", "zeron", "api-v15.bin"));
+                    Path.of("dist", "META-INF", "zeron", "api-v16.bin"));
             final var computeExport = index.declarations().stream()
                     .filter(ZeronLibraryIndex.FunctionExport.class::isInstance)
                     .map(ZeronLibraryIndex.FunctionExport.class::cast)
@@ -117,12 +120,14 @@ public final class NamespaceTest {
                 try (var redirectedOutput = new PrintStream(dumpOutput)) {
                     System.setOut(redirectedOutput);
                     ZeronLibraryIndexDump.main(
-                            Path.of("dist", "META-INF", "zeron", "api-v15.bin").toString());
+                            Path.of("dist", "META-INF", "zeron", "api-v16.bin").toString());
                 }
             } finally {
                 System.setOut(originalOutput);
             }
-            assertTrue(dumpOutput.toString().contains("Namespace: Settings"));
+            assertTrue(dumpOutput.toString().contains("namespace " + libraryPackage + ".Settings ("));
+            assertTrue(dumpOutput.toString().contains("namespace " + libraryPackage + ".Int"));
+            assertTrue(dumpOutput.toString().contains("  extension fn twice(): Int"));
 
             final var clientCompiler = CompilationService.forCompilationUnits(
                     List.of(client), clientMain, clientPackage, List.of(index));

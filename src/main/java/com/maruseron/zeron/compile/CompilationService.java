@@ -106,7 +106,8 @@ public final class CompilationService {
                 ? StandardLibrary.withBundledUnits(combinedUnits)
                 : List.copyOf(combinedUnits);
         return new CompilationService(new CompilationContext(compilationUnits, mainClassName,
-                libraries, outputDirectory, false, false, javaClassPathRoots, functionBindings));
+                libraries, outputDirectory, false, false, javaClassPathRoots,
+                FunctionBindingRegistry.standard().withBindings(functionBindings)));
     }
 
     public static CompilationService forStandardLibrary(final Path outputDirectory) {

@@ -23,7 +23,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public final class ZeronLibraryIndexDump {
@@ -31,7 +33,7 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v15.bin|class-directory|library.jar>");
+            System.err.println("Usage: ZeronLibraryIndexDump <api-v16.bin|class-directory|library.jar>");
             return;
         }
         final var path = Path.of(args[0]);
@@ -49,7 +51,13 @@ public final class ZeronLibraryIndexDump {
         System.out.println("  Standard-library API version: " + index.standardLibraryApiVersion());
         System.out.println("  Public declarations: " + index.declarations().size());
 
+        final var namespacedItems = new LinkedHashMap<String, List<ZeronLibraryIndex.NamespacedDeclaration>>();
         for (final var declaration : index.declarations()) {
+            if (declaration instanceof ZeronLibraryIndex.NamespacedDeclaration namespaced && namespaced.namespaceName() != null) {
+                namespacedItems.computeIfAbsent(getNamespace(namespaced), _ -> new ArrayList<>())
+                        .add(namespaced);
+                continue;
+            }
             System.out.println();
             switch (declaration) {
                 case ZeronLibraryIndex.FunctionExport function -> {
@@ -57,25 +65,16 @@ public final class ZeronLibraryIndexDump {
                             + formatTypeParameters(function.signature().typeParameters())
                             + formatParameters(function.signature(), function.variadic()) + ": "
                             + formatType(function.signature().returnType()));
-                    System.out.println("  Namespace: " + namespaceLabel(function.namespaceName()));
+                    // System.out.println("  Namespace: " + namespaceLabel(function.namespaceName()));
                     System.out.println("  JVM owner: " + function.jvmOwner());
                     printMinimumArity(function.signature(), function.minimumArity(), function.variadic());
                     printVariadic(function.variadic());
                 }
-                case ZeronLibraryIndex.ExtensionExport extension -> {
-                    System.out.println("extension " + extension.qualifiedName()
-                            + formatTypeParameters(extension.signature().typeParameters())
-                            + formatParameters(extension.signature(), extension.variadic()) + ": "
-                            + formatType(extension.signature().returnType()));
-                    System.out.println("  Receiver: " + formatType(extension.receiverType()));
-                    System.out.println("  Mutating: " + extension.mutating());
-                    System.out.println("  JVM owner: " + extension.jvmOwner());
-                    printMinimumArity(extension.signature(), extension.minimumArity(), extension.variadic());
-                    printVariadic(extension.variadic());
-                }
+                case ZeronLibraryIndex.ExtensionExport _ -> throw new IllegalStateException(
+                        "Extension exports must be grouped before declaration printing.");
                 case ZeronLibraryIndex.ValueExport value -> {
                     System.out.println("value " + value.qualifiedName() + ": " + formatType(value.type()));
-                    System.out.println("  Namespace: " + namespaceLabel(value.namespaceName()));
+                    // System.out.println("  Namespace: " + namespaceLabel(value.namespaceName()));
                     System.out.println("  JVM owner: " + value.jvmOwner());
                     System.out.println("  Initialization owner: " + value.initializationOwner());
                 }
@@ -104,6 +103,7 @@ public final class ZeronLibraryIndexDump {
                     }
                     for (final var method : classExport.methods()) {
                         System.out.println("  public " + (method.mutating() ? "mut " : "") + method.name()
+                                + formatTypeParameters(method.signature().typeParameters())
                                 + formatParameters(method.signature(), method.variadic()) + ": "
                                 + formatType(method.signature().returnType()));
                         printMinimumArity(method.signature(), method.minimumArity(), method.variadic());
@@ -111,6 +111,7 @@ public final class ZeronLibraryIndexDump {
                     }
                     for (final var property : classExport.properties()) {
                         System.out.println("  public " + (property.mutating() ? "mut " : "")
+                                + "property "
                                 + property.name() + ": " + formatType(property.type()));
                     }
                 }
@@ -120,6 +121,7 @@ public final class ZeronLibraryIndexDump {
                     for (final var method : contract.methods()) {
                         System.out.println("  " + (method.defaultMethod() ? "default " : "")
                                 + (method.mutating() ? "mut " : "") + method.name()
+                                + formatTypeParameters(method.signature().typeParameters())
                                 + formatParameters(method.signature(), method.variadic()) + ": "
                                 + formatType(method.signature().returnType()));
                         printMinimumArity(method.signature(), method.minimumArity(), method.variadic());
@@ -132,11 +134,65 @@ public final class ZeronLibraryIndexDump {
                 }
             }
         }
+        printNamespacedItems(namespacedItems);
+    }
+
+    private static void printNamespacedItems(
+            final Map<String, List<ZeronLibraryIndex.NamespacedDeclaration>> namespacedItems) {
+        for (final var namespace : namespacedItems.entrySet()) {
+            System.out.println();
+            System.out.println("namespace " + namespace.getKey() + " (" + namespace.getValue().getFirst().jvmOwner() + ")");
+            for (final var namespacedItem : namespace.getValue()) {
+                final var simpleName = simpleName(namespacedItem.qualifiedName());
+                switch (namespacedItem) {
+                    case ZeronLibraryIndex.ValueExport ve -> {
+                        System.out.println("value " + ve.qualifiedName() + ": " + formatType(ve.type()));
+                    }
+                    case ZeronLibraryIndex.FunctionExport function -> {
+                        System.out.println("  function " + simpleName
+                                + formatTypeParameters(function.signature().typeParameters())
+                                + formatParameters(function.signature(), function.variadic()) + ": "
+                                + formatType(function.signature().returnType()));
+                        // System.out.println("  Namespace: " + namespaceLabel(function.namespaceName()));
+                        // System.out.println("  JVM owner: " + function.jvmOwner());
+                        printMinimumArity(function.signature(), function.minimumArity(), function.variadic());
+                        printVariadic(function.variadic());
+                    }
+                    case ZeronLibraryIndex.ExtensionExport extension -> {
+                        final var signature = extension.signature();
+                        final var parameters = signature.parameters().subList(1, signature.arity());
+                        System.out.println("  extension " + (extension.mutating() ? "mut " : "")
+                                + (extension.property() ? "property " : "fn ") + simpleName
+                                + formatTypeParameters(signature.typeParameters())
+                                + formatParameters(parameters, extension.variadic()) + ": "
+                                + formatType(signature.returnType()));
+                        // System.out.println("    Receiver: " + formatType(extension.receiverType()));
+                        // System.out.println("    JVM owner: " + extension.jvmOwner());
+                        printMinimumArity(parameters.size(), extension.minimumArity(), extension.variadic());
+                        printVariadic(extension.variadic());
+                    }
+                }
+            }
+        }
+    }
+
+    private static String getNamespace(final ZeronLibraryIndex.NamespacedDeclaration extension) {
+        final var name = simpleName(extension.qualifiedName());
+        return extension.qualifiedName().substring(
+                0, extension.qualifiedName().length() - name.length() - 1);
+    }
+
+    private static String simpleName(final String qualifiedName) {
+        return qualifiedName.substring(qualifiedName.lastIndexOf('.') + 1);
     }
 
     private static void printMinimumArity(final FunctionDescriptor signature, final int minimumArity,
                                           final boolean variadic) {
-        final var fixedArity = signature.arity() - (variadic ? 1 : 0);
+        printMinimumArity(signature.arity(), minimumArity, variadic);
+    }
+
+    private static void printMinimumArity(final int arity, final int minimumArity, final boolean variadic) {
+        final var fixedArity = arity - (variadic ? 1 : 0);
         if (minimumArity < fixedArity) {
             System.out.println("    Minimum arity: " + minimumArity);
         }
@@ -168,10 +224,14 @@ public final class ZeronLibraryIndexDump {
     }
 
     private static String formatParameters(final FunctionDescriptor function, final boolean variadic) {
-        final var fixedArity = function.arity() - (variadic ? 1 : 0);
-        final var parameters = new ArrayList<String>(function.arity());
-        for (int i = 0; i < function.arity(); i++) {
-            final var type = function.parameters().get(i);
+        return formatParameters(function.parameters(), variadic);
+    }
+
+    private static String formatParameters(final List<TypeDescriptor> parameterTypes, final boolean variadic) {
+        final var fixedArity = parameterTypes.size() - (variadic ? 1 : 0);
+        final var parameters = new ArrayList<String>(parameterTypes.size());
+        for (int i = 0; i < parameterTypes.size(); i++) {
+            final var type = parameterTypes.get(i);
             parameters.add(variadic && i == fixedArity
                     ? formatType(((ArrayDescriptor) type).elementType()) + "..."
                     : formatType(type));

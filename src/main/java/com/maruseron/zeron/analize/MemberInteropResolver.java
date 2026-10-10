@@ -17,6 +17,16 @@ final class MemberInteropResolver {
     private record SafeNavigationFlows(FlowState nonNull, FlowState nullPath) {}
     private record JavaCandidate(JavaClassPath.JavaMethod method, List<TypeDescriptor> parameterTypes,
                                  TypeDescriptor returnType, int cost, boolean varArgs) {}
+
+    private static FunctionDescriptor instantiateDefaultMethodType(
+            final ResolutionContext context,
+            final Stmt.ClassDecl owner,
+            final TypeDescriptor receiverType,
+            final Resolver.DefaultMethodSelection selection) {
+        return (FunctionDescriptor) TypeSubstitution.substitute(selection.instantiatedType(),
+                TypeResolver.substitutionsFor(context, owner.typeParameters(), receiverType));
+    }
+
     static TypeDescriptor resolveImplicitFieldRead(final ResolutionContext context, final Expr.Variable variable) {
         if (context.frame.currentMethodOwner == null) return null;
         final var availableFields = context.frame.initializerVisibleFields == null
@@ -303,7 +313,7 @@ final class MemberInteropResolver {
 
             if (!defaults.isEmpty()) {
                 final var defaultMethod = defaults.getFirst();
-                final var descriptor = defaultMethod.instantiatedType();
+                final var descriptor = instantiateDefaultMethodType(context, owner, receiverType, defaultMethod);
                 if (defaultMethod.method().isMutating()
                         && !(receiverType instanceof ReferenceDescriptor)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -350,7 +360,7 @@ final class MemberInteropResolver {
                 }
                 if (!defaults.isEmpty()) {
                     final var defaultMethod = defaults.getFirst();
-                    final var descriptor = defaultMethod.instantiatedType();
+                    final var descriptor = instantiateDefaultMethodType(context, owner, receiverType, defaultMethod);
                     if (defaultMethod.method().isMutating()
                             && !(receiverType instanceof ReferenceDescriptor)) {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -558,16 +568,20 @@ final class MemberInteropResolver {
                                                             final Expr.MemberCall call,
                                                             final TypeDescriptor receiverType,
                                                             final boolean propertyAccess) {
+        final var localDeclarations = localExtensionDeclarations(context, call.name.lexeme());
         final var extensionName = context.currentImports.extensions().get(call.name.lexeme());
         final var explicitDeclarations = extensionName == null
                 ? List.<Stmt.ExtensionMethod>of()
                 : extensionDeclarations(context, List.of(extensionName));
         final var starDeclarations = starExtensionDeclarations(context, call.name.lexeme());
+        final var matchingLocalDeclarations = localDeclarations.stream()
+                .filter(method -> method.property() == propertyAccess).toList();
         final var matchingExplicitDeclarations = explicitDeclarations.stream()
                 .filter(method -> method.property() == propertyAccess).toList();
         final var matchingStarDeclarations = starDeclarations.stream()
                 .filter(method -> method.property() == propertyAccess).toList();
-        if (matchingExplicitDeclarations.isEmpty() && matchingStarDeclarations.isEmpty()) return null;
+        if (matchingLocalDeclarations.isEmpty() && matchingExplicitDeclarations.isEmpty()
+                && matchingStarDeclarations.isEmpty()) return null;
         final var mutableReceiver = receiverType instanceof ReferenceDescriptor;
         var receiverBase = receiverType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : receiverType;
@@ -577,9 +591,16 @@ final class MemberInteropResolver {
                         ? null : ExpressionFlowResolver.resolveExpression(context, argument)).toList();
         var applicable = findApplicableExtensions(
                 context, call, receiverType, receiverBase, mutableReceiver, actualArguments,
-                matchingExplicitDeclarations);
-        var consideredDeclarations = matchingExplicitDeclarations;
-        if (applicable.isEmpty() && !matchingStarDeclarations.isEmpty()) {
+                matchingLocalDeclarations);
+        var consideredDeclarations = matchingLocalDeclarations;
+        if (applicable.isEmpty() && !matchingExplicitDeclarations.isEmpty()) {
+            applicable = findApplicableExtensions(
+                    context, call, receiverType, receiverBase, mutableReceiver, actualArguments,
+                    matchingExplicitDeclarations);
+            consideredDeclarations = matchingExplicitDeclarations;
+        }
+        if (applicable.isEmpty() && matchingExplicitDeclarations.isEmpty()
+                && !matchingStarDeclarations.isEmpty()) {
             applicable = findApplicableExtensions(
                     context, call, receiverType, receiverBase, mutableReceiver, actualArguments,
                     matchingStarDeclarations);
@@ -674,6 +695,18 @@ final class MemberInteropResolver {
         }
         call.setType(instantiatedDescriptor.returnType());
         return instantiatedDescriptor.returnType();
+    }
+
+    private static List<Stmt.ExtensionMethod> localExtensionDeclarations(
+            final ResolutionContext context, final String methodName) {
+        if (context.currentSourcePath == null) return List.of();
+        return context.functionOverloads.values().stream()
+                .flatMap(Collection::stream)
+                .filter(Stmt.ExtensionMethod.class::isInstance)
+                .map(Stmt.ExtensionMethod.class::cast)
+                .filter(method -> method.name().lexeme().equals(methodName))
+                .filter(method -> Objects.equals(context.sourcePath(method.name()), context.currentSourcePath))
+                .toList();
     }
 
     private static List<Stmt.ExtensionMethod> extensionDeclarations(

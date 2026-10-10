@@ -402,6 +402,14 @@ final class LambdaResolver {
             case Expr.If iff -> referencesAnyVariable(context, iff.condition, names)
                 || referencesAnyVariable(context, iff.thenExpr, names)
                 || referencesAnyVariable(context, iff.elseExpr, names);
+            case Expr.Pipeline pipeline -> referencesAnyVariable(context, pipeline.source, names)
+                || pipeline.stages.stream().anyMatch(stage -> {
+                    final var stageNames = new HashSet<>(names);
+                    if (stage instanceof Expr.PipelineStage.Map m && m.binding() != null) stageNames.remove(m.binding().lexeme());
+                    if (stage instanceof Expr.PipelineStage.FlatMap f && f.binding() != null) stageNames.remove(f.binding().lexeme());
+                    if (stage instanceof Expr.PipelineStage.Filter f && f.binding() != null) stageNames.remove(f.binding().lexeme());
+                    return referencesAnyVariable(context, stage.expression(), stageNames);
+                });
             case Expr.Match match -> referencesAnyVariable(context, match.scrutinee, names)
                 || match.arms.stream().anyMatch(arm -> {
                     final var armNames = new HashSet<>(names);

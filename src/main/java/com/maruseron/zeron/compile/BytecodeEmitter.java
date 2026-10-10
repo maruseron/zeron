@@ -101,7 +101,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v15.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v16.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -247,8 +247,8 @@ final class BytecodeEmitter {
         switch (operation.id()) {
             case ARRAY_LITERAL -> emitArrayLiteral(context, composer, (Expr.ArrayLiteral) expression, operation);
             case ARRAY_FILL -> throw new IllegalStateException("Array fill is not a syntax expression.");
-            case ARRAY_ALLOC, ARRAY_CLEAR_SLOT, OPTION_UNWRAP_SOME ->
-                    throw new IllegalStateException("Array storage intrinsic is not a syntax expression.");
+            case ARRAY_ALLOC, ARRAY_CLEAR_SLOT, OPTION_UNWRAP_SOME, INT_TO_FLOAT, FLOAT_TO_INT_OPTION ->
+                    throw new IllegalStateException("Function intrinsic is not a syntax expression.");
             case ARRAY_LENGTH -> {
                 final var property = (Expr.Property) expression;
                 emitExpr(context, composer, property.receiver);
@@ -448,6 +448,7 @@ final class BytecodeEmitter {
             }
             case Expr.Grouping grouping -> emitExpr(context, composer, grouping.expression);
             case Expr.If iff -> ExpressionFlowEmitter.emitIfExpression(context, composer, iff);
+            case Expr.Pipeline pipeline -> ExpressionFlowEmitter.emitForExpression(context, composer, pipeline);
             case Expr.Match match -> ExpressionFlowEmitter.emitMatchExpression(context, composer, match);
             case Expr.Raise raise -> ExpressionFlowEmitter.emitRaise(context, composer, raise);
             case Expr.Handle handle -> ExpressionFlowEmitter.emitHandle(context, composer, handle);
@@ -1057,6 +1058,23 @@ final class BytecodeEmitter {
                                       final FunctionDescriptor signature,
                                       final FunctionBindingRegistry.Binding binding ){
         final var target = binding.target();
+        if (target instanceof FunctionBindingRegistry.IntrinsicBinding intrinsicBinding) {
+            emitExternalFunctionArguments(context, composer, signature);
+            switch (intrinsicBinding.id()) {
+                case INT_TO_FLOAT -> {
+                    composer.i2d();
+                    composer.dreturn();
+                }
+                case FLOAT_TO_INT_OPTION -> {
+                    emitFloatToIntOption(context, composer);
+                    composer.areturn();
+                }
+                default -> throw new IllegalStateException("Unexpected external-function intrinsic: "
+                        + intrinsicBinding.id().stableName());
+            }
+            context.lastEmittedType = signature.returnType();
+            return;
+        }
         final MethodTypeDesc methodDescriptor;
         if (target instanceof FunctionBindingRegistry.StaticMethod staticMethod) {
             methodDescriptor = staticMethod.descriptor();
@@ -1077,6 +1095,41 @@ final class BytecodeEmitter {
             composer.return_(TypeKind.fromDescriptor(methodDescriptor.returnType().descriptorString()));
         }
         context.lastEmittedType = signature.returnType();
+    }
+
+    private static void emitFloatToIntOption(final CompilationContext context,
+                                             final CodeBuilder composer) {
+        final var noValue = composer.newLabel();
+        final var done = composer.newLabel();
+        final var someClass = ClassDesc.of("zeron.lang.Some");
+        final var noneClass = ClassDesc.of("zeron.lang.None");
+
+        composer.dup2();
+        composer.dup2();
+        composer.dcmpg();
+        composer.ifne(noValue);
+        composer.dup2();
+        composer.ldc(-2147483649.0);
+        composer.dcmpg();
+        composer.ifle(noValue);
+        composer.dup2();
+        composer.ldc(2147483648.0);
+        composer.dcmpl();
+        composer.ifge(noValue);
+        composer.d2i();
+        composer.invokestatic(ClassDesc.of("java.lang.Integer"), "valueOf",
+                MethodTypeDesc.of(ClassDesc.of("java.lang.Integer"), ConstantDescs.CD_int));
+        composer.invokestatic(someClass, "from",
+                MethodTypeDesc.of(someClass, ConstantDescs.CD_Object));
+        composer.goto_(done);
+
+        composer.labelBinding(noValue);
+        composer.pop2();
+        composer.invokestatic(noneClass, "none", MethodTypeDesc.of(noneClass));
+        composer.labelBinding(done);
+        composer.checkcast(ClassDesc.of("zeron.lang.Option"));
+        context.lastEmittedType = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName("zeron.lang.Option"), TypeDescriptor.ofInt());
     }
 
     private static void emitExternalFunctionArguments(CompilationContext context, final CodeBuilder composer,

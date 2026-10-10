@@ -1,6 +1,8 @@
 package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.analize.Resolver.IterationProtocol;
+import com.maruseron.zeron.analize.Resolver.SinkProtocol;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.JavaCallTarget;
 import com.maruseron.zeron.domain.JavaFieldTarget;
@@ -659,6 +661,160 @@ public sealed interface Expr {
                     "elseExpr=" + elseExpr + ", " +
                     "type=" + type + ']';
         }
+    }
+
+    sealed interface PipelineStage permits PipelineStage.Map, PipelineStage.FlatMap,
+            PipelineStage.Filter, PipelineStage.Collect {
+        public Token keyword();
+        public Expr expression();
+        public TypeDescriptor type();
+
+        public final static class Map implements PipelineStage {
+            private final Token keyword;
+            private final Token binding;
+            private final boolean wildcard;
+            private final Expr expression;
+
+            private TypeDescriptor type;
+            private Lambda lambda;
+
+            public Map(Token keyword, Token binding, boolean wildcard, Expr expression) {
+                this.keyword = keyword;
+                this.binding = binding;
+                this.wildcard = wildcard;
+                this.expression = expression;
+            }
+
+            public Token keyword() { return keyword; }
+            public Token binding() { return binding; }
+            public boolean wildcard() { return wildcard; }
+            public Expr expression() { return expression; }
+            public TypeDescriptor type() { return type; }
+            public Lambda lambda() { return lambda; }
+
+            public void setType(TypeDescriptor type) {
+                this.type = type;
+            }
+
+            public void setLambda(Lambda lambda) {
+                this.lambda = lambda;
+            }
+        }
+
+        public final static class FlatMap implements PipelineStage {
+            private final Token keyword;
+            private final Token binding;
+            private final boolean wildcard;
+            private final Expr expression;
+
+            private TypeDescriptor type;
+            private Lambda lambda;
+
+            public FlatMap(Token keyword, Token binding, boolean wildcard, Expr expression) {
+                this.keyword = keyword;
+                this.binding = binding;
+                this.wildcard = wildcard;
+                this.expression = expression;
+            }
+
+            public Token keyword() { return keyword; }
+            public Token binding() { return binding; }
+            public boolean wildcard() { return wildcard; }
+            public Expr expression() { return expression; }
+            public TypeDescriptor type() { return type; }
+            public Lambda lambda() { return lambda; }
+
+            public void setType(TypeDescriptor type) {
+                this.type = type;
+            }
+
+            public void setLambda(Lambda lambda) {
+                this.lambda = lambda;
+            }
+        }
+
+        public final static class Filter implements PipelineStage {
+            private final Token keyword;
+            private final Token binding;
+            private final boolean wildcard;
+            private final Expr expression;
+
+            private TypeDescriptor type = TypeDescriptor.ofBoolean();
+            private Lambda lambda;
+
+            public Filter(Token keyword, Token binding, boolean wildcard, Expr expression) {
+                this.keyword = keyword;
+                this.binding = binding;
+                this.wildcard = wildcard;
+                this.expression = expression;
+            }
+
+            public Token keyword() { return keyword; }
+            public Token binding() { return binding; }
+            public boolean wildcard() { return wildcard; }
+            public Expr expression() { return expression; }
+            public TypeDescriptor type() { return type; }
+            public Lambda lambda() { return lambda; }
+
+            public void setType(TypeDescriptor type) {
+                this.type = type;
+            }
+
+            public void setLambda(Lambda lambda) {
+                this.lambda = lambda;
+            }
+        }
+
+        public final static class Collect implements PipelineStage {
+            private final Token keyword;
+            private final Expr expression;
+
+            private TypeDescriptor type;
+
+            public Collect(Token keyword, Expr expression) {
+                this.keyword = keyword;
+                this.expression = expression;
+            }
+
+            public Token keyword() { return keyword; }
+            public Expr expression() { return expression; }
+            public TypeDescriptor type() { return type; }
+
+            public void setType(TypeDescriptor type) {
+                this.type = type;
+            }
+        }
+    }
+
+    final class Pipeline implements Expr  {
+        public final Token keyword;
+        public final Expr source;
+        public final List<PipelineStage> stages;
+        public final boolean isTerminal;
+
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+        private TypeDescriptor sourceElementType = TypeDescriptor.ofInfer();
+
+        private IterationProtocol iterationProtocol;
+        private SinkProtocol sinkProtocol;
+
+        public Pipeline(final Token keyword, final Expr source, final List<PipelineStage> stages, final boolean isTerminal) {
+            this.keyword = keyword;
+            this.source = source;
+            this.stages = List.copyOf(stages);
+            this.isTerminal = isTerminal;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor resolvedType) { type = resolvedType; }
+        public TypeDescriptor sourceElementType() { return sourceElementType; }
+        public void setSourceElementType(final TypeDescriptor elementType) { sourceElementType = elementType; }
+
+        public IterationProtocol getIterationProtocol() { return iterationProtocol; }
+        public void setIterationProtocol(IterationProtocol iterationProtocol) { this.iterationProtocol = iterationProtocol; }
+
+        public SinkProtocol getSinkProtocol() { return sinkProtocol; }
+        public void setSinkProtocol(SinkProtocol sinkProtocol) { this.sinkProtocol = sinkProtocol; }
     }
 
     final class Lambda implements Expr {

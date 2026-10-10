@@ -277,8 +277,11 @@ final class ExpressionFlowResolver {
                         context, binary.right, rightType, leftType);
                 Zeron.debug("resolving binary   " + refinedLeftType + " "
                     + binary.operator.lexeme() + " " + refinedRightType);
-                if (TypeSubstitution.containsTypeParameter(refinedLeftType)
-                    || TypeSubstitution.containsTypeParameter(refinedRightType)) {
+                final var equalityOperator = binary.operator.type() == TokenType.EQUAL_EQUAL
+                        || binary.operator.type() == TokenType.BANG_EQUAL;
+                if (!equalityOperator
+                        && (TypeSubstitution.containsTypeParameter(refinedLeftType)
+                        || TypeSubstitution.containsTypeParameter(refinedRightType))) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                             binary.operator,
                         "Operators on generic type parameters require constraints, which are not supported."));
@@ -345,18 +348,11 @@ final class ExpressionFlowResolver {
                 }
                 yield resolved;
             }
-            // |> (a) ::= typeof a
-            // suggested type for groupings will always be inferred,
-            // just unbox and send the expression down the resolution pipeline
             case Expr.Grouping grouping -> {
                 final var resolvedType = resolve(context, grouping.expression);
                 grouping.setType(resolvedType);
                 yield resolvedType;
             }
-            // suggested type for if expressions will always be inferred,
-            // resolve the condition, ensure it is a boolean,
-            // resolve each branch, ensure they have a common parent, and
-            // return the expression tagged with the resolved type
             case Expr.If iff -> {
                 final var incoming = context.frame.flowState.copy();
                 final var conditionFlows = resolveCondition(context, iff.condition, incoming, iff.paren);
@@ -371,6 +367,7 @@ final class ExpressionFlowResolver {
                 iff.setType(commonType);
                 yield commonType;
             }
+            case Expr.Pipeline pipeline -> resolvePipeline(context, pipeline);
             case Expr.Match match -> resolveMatch(context, match);
             case Expr.Raise raise -> {
                 final var effectType = resolve(context, raise.effect);
@@ -663,6 +660,86 @@ final class ExpressionFlowResolver {
         literal.setIntrinsicOperation(operation);
         literal.setType(operation.resultType());
         return operation.resultType();
+    }
+
+    private static TypeDescriptor resolvePipeline(final ResolutionContext context, final Expr.Pipeline pipeline) {
+        var sourceType = resolve(context, pipeline.source);
+        if (sourceType instanceof ReferenceDescriptor ref) {
+            sourceType = ref.baseType();
+        }
+        if (sourceType instanceof NullableDescriptor) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
+                    pipeline.keyword,
+                    "For-expressions cannot take nullable values as a source; prove the value non-null first."));
+        }
+        var elementType = Resolver.ensureIterable(context, sourceType, pipeline.keyword);
+        pipeline.setSourceElementType(elementType);
+        if (!(sourceType instanceof ArrayDescriptor)) {
+            pipeline.setIterationProtocol(context.iterationProtocols.get(pipeline.keyword));
+        }
+        TypeDescriptor sinkType = null;
+        TypeDescriptor sinkElementType = null;
+        for (int stageIndex = 0; stageIndex < pipeline.stages.size(); stageIndex++) {
+            final var stage = pipeline.stages.get(stageIndex);
+            if (stage instanceof Expr.PipelineStage.Collect && stageIndex != pipeline.stages.size() - 1) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_PIPELINE_OPERATION,
+                        stage.keyword(), "The collect stage must be the final for-expression stage."));
+            }
+            elementType = switch (stage) {
+                case Expr.PipelineStage.Map m -> {
+                    final var parameter = m.wildcard() ? Resolver.SYNTHETIC_IDENTIFIER : m.binding();
+                    final var lambda = new Expr.Lambda(m.keyword(), List.of(parameter),
+                            List.of(new Stmt.Return(m.expression(), m.keyword())),
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), elementType));
+                    final var mappedType = Resolver.resolveLambda(context, lambda,
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), elementType)).returnType();
+                    m.setLambda(lambda);
+                    m.setType(mappedType);
+                    yield mappedType;
+                }
+                case Expr.PipelineStage.FlatMap f -> {
+                    final var parameter = f.wildcard() ? Resolver.SYNTHETIC_IDENTIFIER : f.binding();
+                    final var lambda = new Expr.Lambda(f.keyword(), List.of(parameter),
+                            List.of(new Stmt.Return(f.expression(), f.keyword())),
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), elementType));
+                    final var resultType = Resolver.resolveLambda(context, lambda,
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), elementType)).returnType();
+                    final var flattenedType = Resolver.ensureIterable(context, resultType, f.keyword());
+                    if (resultType instanceof ArrayDescriptor
+                            || resultType instanceof ReferenceDescriptor reference
+                            && reference.baseType() instanceof ArrayDescriptor) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_PIPELINE_OPERATION,
+                                f.keyword(), "A flatMap stage must return an Iterable<T> value."));
+                    }
+                    f.setLambda(lambda);
+                    f.setType(flattenedType);
+                    yield flattenedType;
+                }
+                case Expr.PipelineStage.Filter f -> {
+                    final var parameter = f.wildcard() ? Resolver.SYNTHETIC_IDENTIFIER : f.binding();
+                    final var lambda = new Expr.Lambda(f.keyword(), List.of(parameter),
+                            List.of(new Stmt.Return(f.expression(), f.keyword())),
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(), elementType));
+                    Resolver.resolveLambda(context, lambda,
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(), elementType));
+                    f.setLambda(lambda);
+                    yield elementType;
+                }
+                case Expr.PipelineStage.Collect c -> {
+                    sinkType = resolveExpression(context, stage.expression());
+                    c.setType(sinkType);
+                    sinkElementType = Resolver.ensureSink(context, sinkType, c.keyword());
+                    Resolver.ensureAssignable(context, sinkElementType, elementType, c.keyword());
+                    yield elementType;
+                }
+            };
+        }
+        pipeline.setSinkProtocol(new Resolver.SinkProtocol("zeron.collections.Sink", "empty", "add"));
+        final var resultType = sinkType == null
+                ? TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.collections.Stream"), elementType)
+                : sinkType;
+        pipeline.setType(resultType);
+        return resultType;
     }
 
     private static TypeDescriptor resolveMatch(final ResolutionContext context, final Expr.Match match) {

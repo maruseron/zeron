@@ -629,7 +629,7 @@ public final class Parser {
                 if (match(PUBLIC, PRIVATE)) {
                     final var isPublic = previous().type() == PUBLIC;
                     if (match(CONSTRUCTOR)) {
-                        final var constructorName = consume(IDENTIFIER, "Expect 'new' after 'constructor'.");
+                        final var constructorName = consume(IDENTIFIER, "Expect constructor name after 'constructor'.");
                         if (constructorName.lexeme().equals("new")) {
                             if (constructor != null) error(constructorName,
                                     DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
@@ -848,13 +848,29 @@ public final class Parser {
                         : "Only sealed contracts may declare permitted classes.");
             }
             consume(LEFT_BRACE, "Expect '{' before contract members.");
+            final var namedConstructors = new ArrayList<Stmt.NamedContractConstructor>();
             final var methods = new ArrayList<Stmt.ContractMethod>();
             final var properties = new ArrayList<Stmt.ContractProperty>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
                 final var isDefault = match(DEFAULT);
                 final var isMutating = match(MUT);
+                if (match(CONSTRUCTOR)) {
+                    if (isMutating) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            "Contract constructors cannot be marked mut.");
+                    if (isDefault) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            "Contract constructors cannot have default implementations.");
+                    final var constructorName = consume(IDENTIFIER, "Expect constructor name.");
+                    if (constructorName.lexeme().equals("new")) {
+                        error(constructorName, DiagnosticCatalog.INVALID_DECLARATION,
+                            "Contracts cannot declare canonical constructors");
+                    }
+                    namedConstructors.add(namedContractConstructor(
+                            constructorName, name, List.copyOf(typeParameters.values())));
+                    consume(SEMICOLON, "Expect ';' after contract constructor.");
+                    continue;
+                }
                 if (match(PROPERTY)) {
-                    if (isDefault) error(previous(), DiagnosticCatalog.INVALID_PROPERTY_DECLARATION,
+                    if (isDefault) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
                             "Contract properties cannot have default implementations.");
                     final var propertyName = consume(IDENTIFIER, "Expect property name.");
                     consume(COLON, "Expect ':' after property name.");
@@ -880,11 +896,43 @@ public final class Parser {
                 }
             }
             consume(RIGHT_BRACE, "Expect '}' after contract members.");
-                return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()), List.copyOf(methods),
-                    List.copyOf(properties), isTopLevelPublic, isSealed, permittedClasses);
+                return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()), List.copyOf(namedConstructors),
+                        List.copyOf(methods), List.copyOf(properties), isTopLevelPublic, isSealed, permittedClasses);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
+    }
+
+    private Stmt.NamedContractConstructor namedContractConstructor(final Token constructorName,
+                                                                   final Token contractName,
+                                                                   final List<TypeParameterDescriptor> classTypeParameters) {
+        consume(LEFT_PAREN, "Expect '(' after named constructor name.");
+        final var parameterNames = new ArrayList<Token>();
+        final var parameterTypes = new ArrayList<TypeDescriptor>();
+        var variadic = false;
+        if (!check(RIGHT_PAREN)) {
+            do {
+                if (variadic) {
+                    throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A variadic parameter must be last.");
+                }
+                if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                        "Can't have more than 254 parameters.");
+                parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
+                consume(COLON, "Expect ':' after parameter name.");
+                final var parameterType = collectType();
+                variadic = match(ELLIPSIS);
+                parameterTypes.add(variadic ? TypeDescriptor.arrayOf(parameterType) : parameterType);
+            } while (match(COMMA));
+        }
+        consume(RIGHT_PAREN, "Expect ')' after named constructor parameters.");
+
+        final var ownerType = classType(contractName, classTypeParameters);
+        final TypeDescriptor returnType = new ReferenceDescriptor(ownerType);
+        final var raisedEffects = parseRaisedEffects();
+        final var descriptor = TypeDescriptor.functionWithEffectsOf(constructorName.lexeme(), returnType,
+                parameterTypes, List.of(), raisedEffects);
+        return new Stmt.NamedContractConstructor(constructorName, parameterNames, descriptor, variadic);
     }
 
     private record ParsedMethod(List<Token> parameters,
@@ -1627,6 +1675,7 @@ public final class Parser {
     private Expr primary() {
         if (match(HANDLE)) return handleExpression(previous());
         if (match(MATCH)) return matchExpression(previous());
+        if (match(FOR)) return forExpression(previous());
 
         if (match(LEFT_BRACKET)) {
             final var elements = new ArrayList<Expr>();
@@ -1868,6 +1917,56 @@ public final class Parser {
         if (arms.isEmpty()) error(keyword, DiagnosticCatalog.INVALID_MATCH_EXPRESSION,
                 "A match expression must contain at least one case.");
         return new Expr.Match(keyword, scrutinee, arms);
+    }
+
+    private Expr forExpression(final Token keyword) {
+        final var source = expression();
+        final var stages = new ArrayList<Expr.PipelineStage>();
+        boolean isTerminal = false;
+        while (isPipelineStage()) {
+            final var opKeyword = consume(IDENTIFIER, "Expect operation after source expression.");
+            if (isTerminal) {
+                error(opKeyword, DiagnosticCatalog.INVALID_PIPELINE_OPERATION,
+                        "The collect stage must be the final for-expression stage.");
+            }
+            switch (opKeyword.lexeme()) {
+                case "map", "flatMap", "filter" -> {
+                    final var wildcard = check(IDENTIFIER) && peek().lexeme().equals("_");
+                    Token binding = null;
+                    if (wildcard) {
+                        advance();
+                    } else {
+                        binding = consume(IDENTIFIER, "Expect binding name or _.");
+                    }
+                    consume(ARROW, "Expect '->' after binding.");
+                    final var expression = expression();
+                    stages.add(makeStage(opKeyword, binding, wildcard, expression));
+                }
+                case "collect" -> {
+                    isTerminal = true;
+                    stages.add(new Expr.PipelineStage.Collect(opKeyword, expression()));
+                }
+            }
+        }
+        return new Expr.Pipeline(keyword, source, stages, isTerminal);
+    }
+
+    private Expr.PipelineStage makeStage(final Token opKeyword, final Token binding,
+                                         final boolean wildcard, final Expr expression) {
+        return switch (opKeyword.lexeme()) {
+            case "map" -> new Expr.PipelineStage.Map(opKeyword, binding, wildcard, expression);
+            case "flatMap" -> new Expr.PipelineStage.FlatMap(opKeyword, binding, wildcard, expression);
+            case "filter" -> new Expr.PipelineStage.Filter(opKeyword, binding, wildcard, expression);
+            default -> throw new IllegalStateException("Unreachable");
+        };
+    }
+
+    private boolean isPipelineStage() {
+        return check(IDENTIFIER)
+            && (peek().lexeme().equals("map")
+            ||  peek().lexeme().equals("flatMap")
+            ||  peek().lexeme().equals("filter")
+            ||  peek().lexeme().equals("collect"));
     }
 
     private boolean looksLikeParenthesizedLambda() {

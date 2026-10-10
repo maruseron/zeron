@@ -21,6 +21,7 @@ The goal is to establish useful object semantics before adding inheritance or ad
   exhaustive.
 - Parameterized nominal types retain source-level identity but erase to one raw JVM class or interface per declaration. Generic contract bridges adapt differing erased signatures.
 - Named constructors are static factories with expression or block bodies and an implicit mutable class-reference result. Omitted canonical declarations synthesize public construction; `private constructor new;` restricts it.
+- Contracts may require named constructors. A conforming class must provide a public named factory with a compatible signature; the requirement is checked statically and does not add a virtual constructor slot to the contract interface.
 - `Iterator<T>` and `Iterable<T>` are ordinary bundled contracts. `Iterator<T>.next()` returns
   `zeron.lang.Option<T>`; `None` signals exhaustion and `Some` carries a value. The `for` loop
   lowers this protocol and extracts elements only from `Some`.
@@ -184,6 +185,38 @@ must agree; inference does not choose a common supertype. If a parameter remains
 class type argument or a more informative expected type is required. Explicit class arguments remain
 supported and are checked against constructor arguments. This inference applies to constructor calls,
 not standalone class references or arbitrary generic expressions.
+
+### Contract constructor requirements
+
+A contract may declare named constructor signatures without bodies:
+
+```zeron
+public contract TokenFactory {
+    constructor from(value: Int);
+}
+
+public class Token is TokenFactory {
+    value: Int;
+    public constructor from(value: Int) = Token.new(value);
+}
+```
+
+The contract constructor describes a class-side factory requirement. Each conforming class must
+provide a public named constructor with the same name, compatible parameter and result types after
+substituting the contract's type arguments, and the same variadic shape. A contract constructor is
+not an instance method: it has no receiver and is not invoked by interface dispatch on a value.
+The implementation is called statically through the concrete class name (for example,
+`Token.from(42)`). Constructor requirements are carried in the compiled-library API index so
+conformance can also be checked across compiled-library boundaries.
+
+This static model leaves an open question for generic bounds. The current bounded-type model exposes
+contract instance methods on a value of the bounded type; it does not provide a concrete class name
+or a runtime receiver for selecting a named constructor. In particular, a future `T: Sink<Int>`
+bound cannot safely infer which class factory `T.empty()` should call from the erased `T` alone.
+Supporting constructor calls through generic bounds will need a type witness (or another explicit
+class-side dictionary) that identifies the concrete factory implementation. The design must also
+specify how such witnesses retain the arguments of generic contract bounds through inference,
+separate compilation, and JVM erasure. No implicit virtual constructor dispatch is intended.
 
 ### Mutation and references
 

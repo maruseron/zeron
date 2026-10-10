@@ -21,9 +21,17 @@ An intrinsic is not a Java class lookup mechanism and does not imply JDK module 
 - `FunctionBindingRegistry` maps signature-only top-level external declarations to typed JVM targets
   by qualified source name. The resolver checks the declaration signature, and the compiler emits a
   Zeron bridge for the binding. Trailing defaults are supported on these declarations through
-  generated shorter-arity Zeron wrappers; the registered target remains full arity.
+  generated shorter-arity Zeron wrappers; the registered target remains full arity. Registered
+  intrinsic bindings are also supported as targets, with signature checking against the intrinsic
+  registry.
 - Array literal, fill, length, read, and write operations are intrinsics. `zeron.io.print` and
   `zeron.io.println` are ordinary Zeron functions implemented through the curated Java class facade.
+- `Int.toFloat()` is a public extension that calls the private external helper `zeron.lang.intToFloat`;
+  the helper is bound to the `INT_TO_FLOAT` intrinsic and lowers to JVM `i2d`.
+- `Float.toInt()` is a public checked conversion returning `Option<Int>`. It truncates toward zero,
+  returning `None` for NaN, infinities, or values whose truncated result is outside the 32-bit
+  `Int` range; fractional values in the fringe around either endpoint are accepted when truncation
+  yields a representable `Int`.
 - Intrinsic IDs and function bindings are internal. There is no source-level `intrinsic` keyword or
   expected-class declaration. A narrowly curated external-class form is implemented for the
   `System.out` printing facade only.
@@ -54,6 +62,9 @@ Ordinary Zeron functions have bodies and compile normally. An external function 
 signature but no body; its implementation is selected by `FunctionBindingRegistry`. Resolution
 verifies that the declaration signature matches the registered binding. Calls still use ordinary
 function-call resolution and lowering; compilation emits a bridge for the external target.
+Each compilation starts with the standard typed bindings and composes any caller-provided bindings
+with them; conflicting qualified names are rejected. An intrinsic binding selects a registered
+intrinsic ID and is checked against that ID's signature before its bridge is emitted.
 
 The bundled output functions now compose ordinary member calls through the external-class facade:
 
@@ -92,10 +103,16 @@ Stable identifiers are versioned independently of source spelling. The current i
 | `zeron.array.length.v1` | `array.length` / `.length` | `array.length<T>(array: Array<T>) -> Int` |
 | `zeron.array.read.v1` | Index read syntax | `array.read<T>(array: Array<T>, index: Int) -> T` |
 | `zeron.array.write.v1` | Index assignment syntax | `array.write<T>(array: &Array<T>, index: Int, value: T) -> Unit` |
+| `zeron.option.unwrap-some.v1` | `zeron.internal.unwrapSome<T>` | `unwrapSome<T>(option: Option<T>) -> T` |
+| `zeron.numeric.int-to-float.v1` | Private external helper `zeron.lang.intToFloat` | `intToFloat(value: Int) -> Float` |
+| `zeron.numeric.float-to-int-option.v1` | Private external helper `zeron.lang.floatToInt` | `floatToInt(value: Float) -> Option<Int>`; truncates toward zero and fails outside representable `Int` results |
 
 The `...` in the array-literal signature describes the registry's repeated-parameter rule; it is not
 callable source syntax. `Array<T>` remains a built-in invariant type constructor. It is not declared
 by this registry.
+
+`OPTION_UNWRAP_SOME` remains in use by collection sequence implementations through
+`zeron.internal.unwrapSome`; it must not be removed while those call sites exist.
 
 External function bindings are separate from intrinsic IDs and are keyed by qualified source name.
 The standard registry currently contains no output bindings; `zeron.io` calls compile from the
@@ -150,3 +167,4 @@ all compiler-provided behavior depend on a class-file owner. A deliberately cura
 - Java class discovery remains independent from compiler-owned intrinsic registration.
 - External top-level functions resolve only to public static methods with supported, exactly matching
   signatures; unsupported, missing, ambiguous, or mismatched targets fail during resolution.
+  

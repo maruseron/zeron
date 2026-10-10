@@ -298,6 +298,25 @@ final class LambdaCompilationPlan {
                     collectLambdaShapes(arm.expression());
                 }
             }
+            case Expr.Pipeline pipeline -> {
+                collectLambdaShapes(pipeline.source);
+                for (final var stage : pipeline.stages) {
+                    switch (stage) {
+                        case Expr.PipelineStage.Map map -> collectPipelineLambda(map.lambda(),
+                                TypeDescriptor.functionOf("", TypeDescriptor.ofName("java.lang.Object"),
+                                        TypeDescriptor.ofName("java.lang.Object")));
+                        case Expr.PipelineStage.FlatMap flatMap -> collectPipelineLambda(flatMap.lambda(),
+                                TypeDescriptor.functionOf("", TypeDescriptor.genericOf(
+                                                TypeDescriptor.ofName("zeron.collections.Iterable"),
+                                                TypeDescriptor.ofAny()),
+                                        TypeDescriptor.ofName("java.lang.Object")));
+                        case Expr.PipelineStage.Filter filter -> collectPipelineLambda(filter.lambda(),
+                                TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(),
+                                        TypeDescriptor.ofName("java.lang.Object")));
+                        case Expr.PipelineStage.Collect collect -> collectLambdaShapes(collect.expression());
+                    }
+                }
+            }
             case Expr.Raise raise -> collectLambdaShapes(raise.effect);
             case Expr.Handle handle -> {
                 collectLambdaShapes(handle.expression);
@@ -317,6 +336,12 @@ final class LambdaCompilationPlan {
             case null -> {}
             default -> {}
         }
+    }
+
+    private void collectPipelineLambda(final Expr.Lambda lambda, final FunctionDescriptor targetType) {
+        collectLambdaShapes(lambda);
+        collectFunctionShapes(targetType);
+        collectFunctionAdapters(lambda.getType(), targetType);
     }
 
     private void collectFunctionReference(final Expr.Variable expression) {
@@ -617,6 +642,25 @@ final class LambdaCompilationPlan {
                 }
                 return;
             }
+        }
+
+        final var resolvedContractMethod = call.resolvedContractMethod();
+        if (resolvedContractMethod != null) {
+            final var descriptor = resolvedContractMethod.typeDescriptor();
+            final var variadic = resolvedContractMethod.variadic();
+            final var fixedArity = Stmt.fixedArity(resolvedContractMethod.parameters(), variadic);
+            for (int i = 0; i < call.arguments.size(); i++) {
+                final var expected = variadic && i >= fixedArity
+                        ? ((ArrayDescriptor) descriptor.parameters().getLast()).elementType()
+                        : descriptor.parameters().get(i);
+                collectFunctionAdapters(call.arguments.get(i).getType(), TypeSubstitution.erase(expected));
+            }
+            if (call.resolvedDescriptor() != null
+                    && TypeSubstitution.containsTypeParameter(descriptor.returnType())) {
+                collectFunctionAdapters(TypeSubstitution.erase(descriptor.returnType()),
+                        call.resolvedDescriptor().returnType());
+            }
+            return;
         }
 
         final var ownerName = nominalName(call.receiver.getType());

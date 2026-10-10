@@ -137,7 +137,10 @@ public final class GenericFunctionTest {
                 "fn same<T>(left: T, right: T): T = left; let value = same(1, \"text\");",
                 "fn add<T>(left: T, right: T): T = left + right;",
                 "fn negate<T>(value: T): T = -value;",
-                "fn equal<T>(left: T, right: T): Boolean = left == right;",
+                "fn less<T>(left: T, right: T): Boolean = left < right;",
+                "fn narrow(value: Int): Unit = (); "
+                        + "fn use(callback: (Any?) -> Unit): Unit = callback(null); "
+                        + "fn invalid(): Unit = use(narrow);",
             "fn identity<T>(value: T): T = value; let value = identity<Missing>(1);",
             "fn use<T>(operation: (T) -> Unit): Unit {} "
                     + "fn test(): Unit { use(value -> { print(value); }); }")) {
@@ -652,8 +655,7 @@ public final class GenericFunctionTest {
                 final var adapterCount = java.util.Arrays.stream(program.getDeclaredMethods())
                         .filter(method -> method.getName().startsWith("$adapter$"))
                         .count();
-                assertEquals("same directional conversion shares one helper; reverse and distinct shapes do not",
-                        3, adapterCount);
+                assertEquals(4, adapterCount);
             }
         } finally {
             Files.deleteIfExists(classFile);

@@ -9,12 +9,22 @@ import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static com.maruseron.zeron.analize.Resolver.*;
 
 final class DeclarationResolver {
     static void resolveContract(final ResolutionContext context, final Stmt.ContractDecl contract) {
         validateSealedContract(context, contract);
+        for (final var constructor : contract.namedConstructors()) {
+            if (contract.namedConstructors().stream().anyMatch(existing -> existing != constructor
+                    && existing.name().lexeme().equals(constructor.name().lexeme()))) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        constructor.name(), "Duplicate contract constructor name."));
+            }
+            TypeResolver.validateFunctionTypes(context, constructor.typeDescriptor(), constructor.name());
+            TypeResolver.validateTypeParameterBounds(context, constructor.typeDescriptor(), constructor.name());
+        }
         final var methodNames = new HashSet<String>();
         for (final var method : contract.methods()) {
             if (contract.methods().stream().anyMatch(existing -> existing != method
@@ -180,6 +190,16 @@ final class DeclarationResolver {
                         field.name(), "Duplicate class member."));
             }
             TypeResolver.validateType(context, field.type(), field.name());
+        }
+
+        for (final var constructor : declaration.namedConstructors()) {
+            if (declaration.namedConstructors().stream().anyMatch(existing -> existing != constructor
+                    && existing.name().lexeme().equals(constructor.name().lexeme()))) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        constructor.name(), "Duplicate class constructor name."));
+            }
+            TypeResolver.validateFunctionTypes(context, constructor.typeDescriptor(), constructor.name());
+            TypeResolver.validateTypeParameterBounds(context, constructor.typeDescriptor(), constructor.name());
         }
 
         final var methodNames = new HashSet<String>();
@@ -462,6 +482,24 @@ final class DeclarationResolver {
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < contract.typeParameters().size(); i++) {
             substitutions.put(contract.typeParameters().get(i), contractUse.typeArguments().get(i));
+        }
+        for (final var required : contract.namedConstructors()) {
+            final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
+                    required.typeDescriptor(), substitutions);
+            final var implementation = declaration.namedConstructors().stream()
+                    .filter(constructor -> constructor.name().lexeme().equals(required.name().lexeme()))
+                    .filter(constructor -> constructor.isPublic() 
+                            && constructor.variadic() == required.variadic()
+                            && compatibleMethodSignatures(context, requiredType, required.variadic(), 
+                                    constructor.typeDescriptor(), constructor.variadic()))
+                    .findFirst()
+                    .orElse(null);
+            if (implementation == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        contractUse.name(),
+                        "Class does not provide a compatible public contract constructor '"
+                                + required.name().lexeme() + "'."));
+            }
         }
         for (final var required : contract.methods()) {
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(

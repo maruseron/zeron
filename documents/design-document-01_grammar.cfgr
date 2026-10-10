@@ -3,159 +3,179 @@ module ZeronGrammar;
 # IDENTIFIER, INT, DOUBLE, and STRING denote scanner token kinds.
 # `type` below is source syntax; design-document-02 describes encoded descriptors.
 
-program                 : [packageDeclaration] {importDeclaration} {topLevelDeclaration} EOF ;
-packageDeclaration      : "package" qualifiedName ";" ;
-qualifiedName           : IDENTIFIER {"." IDENTIFIER} ;
-importDeclaration       : "import" qualifiedName ["as" IDENTIFIER] ";" ;
+program                    : [packageDeclaration] {importDeclaration} {topLevelDeclaration} EOF ;
+packageDeclaration         : "package" qualifiedName ";" ;
+qualifiedName              : IDENTIFIER {"." IDENTIFIER} ;
+importDeclaration          : "import" qualifiedName ["as" IDENTIFIER] ";" ;
 
-topLevelDeclaration     : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl
-                        | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
-                        | externalClassDecl | publicExternalClassDecl
-                        | effectDecl | publicEffectDecl | extensionDecl | publicExtensionDecl
-                        | publicClassDecl | publicContractDecl | publicSealedContractDecl ;
-publicFunDecl           : "public" funDecl ;
+topLevelDeclaration        : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl
+                           | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
+                           | externalClassDecl | publicExternalClassDecl
+                           | effectDecl | publicEffectDecl | extensionDecl | publicExtensionDecl
+                           | publicClassDecl | publicContractDecl | publicSealedContractDecl ;
+publicFunDecl              : "public" funDecl ;
 publicExternalFunctionDecl : "public" externalFunctionDecl ;
-publicEffectDecl        : "public" effectDecl ;
-publicExtensionDecl     : "public" extensionDecl ;
-publicExternalClassDecl : "public" externalClassDecl ;
-publicClassDecl         : "public" classDecl ;
-publicContractDecl      : "public" contractDecl ;
-publicSealedContractDecl : "public" sealedContractDecl ;
-sealedContractDecl      : "sealed" contractDecl ;
-declaration             : varDecl | funDecl | statement ;
+publicEffectDecl           : "public" effectDecl ;
+publicExtensionDecl        : "public" extensionDecl ;
+publicExternalClassDecl    : "public" externalClassDecl ;
+publicClassDecl            : "public" classDecl ;
+publicContractDecl         : "public" contractDecl ;
+publicSealedContractDecl   : "public" sealedContractDecl ;
+sealedContractDecl         : "sealed" contractDecl ;
+declaration                : varDecl | funDecl | statement ;
 
-varDecl                 : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
-funDecl                 : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type] [raisesClause]
-                          ("=" expression ";" | block) ;
-raisesClause            : "raises" type {"," type} ;
-externalFunctionDecl   : "external" "fn" IDENTIFIER "(" parameters ")" ":" type ";" ;
-externalClassDecl      : "external" "class" IDENTIFIER "=" STRING "{" externalClassMember* "}" ;
-externalClassMember    : ["public"] ["mut"] IDENTIFIER "(" plainParameters ")" ":" type ";"
-                        | ["public"] "static" "property" IDENTIFIER ":" type ";" ;
-typeParameters          : "<" typeParameter {"," typeParameter} ">" ;
-typeParameter           : IDENTIFIER [":" type {"+" type}] ;
-parameters              : [parameter {"," parameter}] ;
-parameter               : IDENTIFIER ":" type ["..."] ["=" expression] ;
-plainParameters         : [plainParameter {"," plainParameter}] ;
-plainParameter          : IDENTIFIER ":" type ;
+varDecl                    : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
+funDecl                    : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type] [raisesClause]
+                             ("=" expression ";" | block) ;
+raisesClause               : "raises" type {"," type} ;
+externalFunctionDecl       : "external" "fn" IDENTIFIER "(" parameters ")" ":" type ";" ;
+externalClassDecl          : "external" "class" IDENTIFIER "=" STRING "{" externalClassMember* "}" ;
+externalClassMember        : ["public"] ["mut"] IDENTIFIER "(" plainParameters ")" ":" type ";"
+                           | ["public"] "static" "property" IDENTIFIER ":" type ";" ;
+typeParameters             : "<" typeParameter {"," typeParameter} ">" ;
+typeParameter              : IDENTIFIER [":" type {"+" type}] ;
+parameters                 : [parameter {"," parameter}] ;
+parameter                  : IDENTIFIER ":" type ["..."] ["=" expression] ;
+plainParameters            : [plainParameter {"," plainParameter}] ;
+plainParameter             : IDENTIFIER ":" type ;
 
-classDecl               : "class" IDENTIFIER [typeParameters]
-                          ["is" contractUse {"," contractUse}]
-                          "{" classMember* "}" ;
-effectDecl              : "effect" IDENTIFIER "{" classMember* "}" ;
-extensionDecl           : "extension" [typeParameters] type "{" extensionMethod* "}" ;
-extensionMethod         : ["public"] ["mut"] "fn" IDENTIFIER [typeParameters]
-                          "(" parameters ")" ":" type [raisesClause]
-                          ("=" expression ";" | block) ;
-contractUse             : qualifiedName [typeArguments] ;
-classMember             : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl | methodDecl ;
-fieldDecl               : IDENTIFIER ":" type ";" ;
-propertyDecl            : visibility ["mut"] "property" IDENTIFIER ":" type ["=" expression]
-                          (";" | "{" propertyAccessor+ "}") ;
-propertyAccessor        : "get" ("=" expression ";" | block)
-                        | "set" "(" IDENTIFIER ")" ("=" expression ";" | block) ;
-constructorDecl         : visibility "constructor" "new" ";" ;
-namedConstructorDecl    : visibility "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause]
-                          ("=" expression ";" | block) ;
+classDecl                  : "class" IDENTIFIER [typeParameters]
+                             ["is" contractUse {"," contractUse}]
+                             "{" classMember* "}" ;
+effectDecl                 : "effect" IDENTIFIER "{" classMember* "}" ;
+extensionDecl              : "extension" [typeParameters] type "{" extensionMethod* "}" ;
+extensionMethod            : ["public"] ["mut"] "fn" IDENTIFIER [typeParameters]
+                             "(" parameters ")" ":" type [raisesClause]
+                             ("=" expression ";" | block) ;
+contractUse                : qualifiedName [typeArguments] ;
+classMember                : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl | methodDecl ;
+fieldDecl                  : IDENTIFIER ":" type ";" ;
+propertyDecl               : visibility ["mut"] "property" IDENTIFIER ":" type ["=" expression]
+                             (";" | "{" propertyAccessor+ "}") ;
+propertyAccessor           : "get" ("=" expression ";" | block)
+                           | "set" "(" IDENTIFIER ")" ("=" expression ";" | block) ;
+constructorDecl            : visibility "constructor" "new" ";" ;
+namedConstructorDecl       : visibility "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause]
+                             ("=" expression ";" | block) ;
 namedConstructorParameters : [namedConstructorParameter {"," namedConstructorParameter}] ;
-namedConstructorParameter : IDENTIFIER ":" type ["..."] ;
-methodDecl              : visibility ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
-                          [raisesClause]
-                          ("=" expression ";" | block) ;
-contractDecl            : "contract" IDENTIFIER [typeParameters] ["permits" permittedClass
-                          {"," permittedClass}] "{" contractMember* "}" ;
-permittedClass          : qualifiedName [typeArguments] ;
-contractMember          : contractProperty | contractMethod ;
-contractProperty        : ["mut"] "property" IDENTIFIER ":" type ";" ;
-contractMethod          : ["default"] ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
-                          [raisesClause]
-                          (";" | "=" expression ";" | block) ;
-visibility              : "public" | "private" ;
+namedConstructorParameter  : IDENTIFIER ":" type ["..."] ;
+methodDecl                 : visibility ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
+                             [raisesClause]
+                             ("=" expression ";" | block) ;
+contractDecl               : "contract" IDENTIFIER [typeParameters] ["permits" permittedClass
+                             {"," permittedClass}] "{" contractMember* "}" ;
+permittedClass             : qualifiedName [typeArguments] ;
+contractMember             : contractProperty | contractMethod | contractConstructor ;
+contractProperty           : ["mut"] "property" IDENTIFIER ":" type ";" ;
+contractMethod             : ["default"] ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
+                             [raisesClause]
+                             (";" | "=" expression ";" | block) ;
+contractConstructor        : "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause] ;
+visibility                 : "public" | "private" ;
 
-statement               : exprStmt
-                        | breakStmt
-                        | continueStmt
-                        | forStmt
-                        | ifStmt
-                        | returnStmt
-                        | loopStmt
-                        | whileStmt
-                        | untilStmt
-                        | block ;
-exprStmt                : expression ";" ;
-breakStmt               : "break" ";" ;
-continueStmt            : "continue" ";" ;
-forStmt                 : "for" "(" "let" IDENTIFIER "in" expression ")" statement ;
-ifStmt                  : "if" "(" expression ")" statement ["else" statement] ;
-returnStmt              : "return" [expression] ";" ;
-loopStmt                : "loop" statement ;
-whileStmt               : "while" "(" expression ")" statement ;
-untilStmt               : "until" "(" expression ")" statement ;
-block                   : "{" { declaration } "}" ;
+statement                  : exprStmt
+                           | breakStmt
+                           | continueStmt
+                           | forStmt
+                           | ifStmt
+                           | returnStmt
+                           | loopStmt
+                           | whileStmt
+                           | untilStmt
+                           | block ;
+exprStmt                   : expression ";" ;
+breakStmt                  : "break" ";" ;
+continueStmt               : "continue" ";" ;
+forStmt                    : "for" "(" "let" IDENTIFIER "in" expression ")" statement ;
+ifStmt                     : "if" "(" expression ")" statement ["else" statement] ;
+returnStmt                 : "return" [expression] ";" ;
+loopStmt                   : "loop" statement ;
+whileStmt                  : "while" "(" expression ")" statement ;
+untilStmt                  : "until" "(" expression ")" statement ;
+block                      : "{" { declaration } "}" ;
 
-expression              : assignment ;
-assignment              : coalesce [assignmentOperator assignment] ;
-assignmentOperator      : "=" | "+=" | "-=" | "*=" | "/=" | "%="
-                        | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>=" | "??=" ;
-coalesce                : logicOr ["??" coalesce] ;
-logicOr                 : logicAnd {"or" logicAnd} ;
-logicAnd                : bitwiseOr {"and" bitwiseOr} ;
-bitwiseOr               : bitwiseXor {"|" bitwiseXor} ;
-bitwiseXor              : bitwiseAnd {"^" bitwiseAnd} ;
-bitwiseAnd              : equality {"&" equality} ;
-equality                : typeTest {("!=" | "==" | "===") typeTest} ;
-typeTest                : comparison ["is" ["not"] type] ;
-comparison              : shift {(">" | ">=" | "<" | "<=") shift} ;
-shift                   : term {("<<" | ">>" | ">>>") term} ;
-term                    : factor {("-" | "+") factor} ;
-factor                  : unary {("/" | "*" | "%") unary} ;
-unary                   : "raise" unary
-                        | ("not" | "-" | "+" | "~" | "typeof") unary
-                        | cast ;
-cast                    : call {"as" ["?"] type} ;
-call                    : (genericFunctionCall | genericClassFactoryCall | functionValueReference | primary)
-                          {callSuffix} ;
-callSuffix              : arguments | "[" expression "]" | ("." | "?.") IDENTIFIER ;
-genericFunctionCall     : IDENTIFIER typeArguments arguments ;
-functionValueReference : IDENTIFIER "::" typeArguments ;
-genericClassFactoryCall : IDENTIFIER [typeArguments] "." IDENTIFIER arguments ;
-arguments               : "(" [expression {"," expression}] ")" ;
-typeArguments           : "<" type {"," type} ">" ;
-type                    : ["&"] typeAtom ["?"] ;
-typeAtom                : qualifiedName ["<" typeArgumentsBody ">"]
-                        | "(" ")" "->" type [raisesClause]
-                        | "(" type ")" ["->" type [raisesClause]]
-                        | "(" type "," type {"," type} ")" "->" type [raisesClause] ;
-typeArgumentsBody       : type {"," type} ;
+expression                 : assignment ;
+assignment                 : coalesce [assignmentOperator assignment] ;
+assignmentOperator         : "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                           | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>=" | "??=" ;
+coalesce                   : logicOr ["??" coalesce] ;
+logicOr                    : logicAnd {"or" logicAnd} ;
+logicAnd                   : bitwiseOr {"and" bitwiseOr} ;
+bitwiseOr                  : bitwiseXor {"|" bitwiseXor} ;
+bitwiseXor                 : bitwiseAnd {"^" bitwiseAnd} ;
+bitwiseAnd                 : equality {"&" equality} ;
+equality                   : typeTest {("!=" | "==" | "===") typeTest} ;
+typeTest                   : comparison ["is" ["not"] type] ;
+comparison                 : shift {(">" | ">=" | "<" | "<=") shift} ;
+shift                      : term {("<<" | ">>" | ">>>") term} ;
+term                       : factor {("-" | "+") factor} ;
+factor                     : unary {("/" | "*" | "%") unary} ;
+unary                      : "raise" unary
+                           | ("not" | "-" | "+" | "~" | "typeof") unary
+                           | cast ;
+cast                       : call {"as" ["?"] type} ;
+call                       : (genericFunctionCall | genericClassFactoryCall | functionValueReference | primary)
+                             {callSuffix} ;
+callSuffix                 : arguments | "[" expression "]" | ("." | "?.") IDENTIFIER ;
+genericFunctionCall        : IDENTIFIER typeArguments arguments ;
+functionValueReference     : IDENTIFIER "::" typeArguments ;
+genericClassFactoryCall    : IDENTIFIER [typeArguments] "." IDENTIFIER arguments ;
+arguments                  : "(" [expression {"," expression}] ")" ;
+typeArguments              : "<" type {"," type} ">" ;
+type                       : ["&"] typeAtom ["?"] ;
+typeAtom                   : qualifiedName ["<" typeArgumentsBody ">"]
+                           | "(" ")" "->" type [raisesClause]
+                           | "(" type ")" ["->" type [raisesClause]]
+                           | "(" type "," type {"," type} ")" "->" type [raisesClause] ;
+typeArgumentsBody          : type {"," type} ;
 
-primary                 : INT
-                        | DOUBLE
-                        | STRING
-                        | IDENTIFIER
-                        | handleExpr
-                        | arrayLiteral
-                        | lambda
-                        | "true" | "false" | "null" | "this"
-                        | ifExpr
-                        | matchExpr
-                        | "(" ")"
-                        | "(" expression ")"
-                        | range ;
-handleExpr              : "handle" "(" expression ")" "with" "{" handleArm+ "}" ;
-handleArm               : "case" type ["as" IDENTIFIER] "->" expression ";" ;
-arrayLiteral            : "[" expression {"," expression} "]" ;
-ifExpr                  : "if" "(" expression ")" "then" expression "else" expression ;
-matchExpr               : "match" "(" expression ")" "{" matchArm+ "}" ;
-matchArm                : "case" matchPattern ["if" expression] "->" expression ";" ;
-matchPattern            : type ["." IDENTIFIER "(" (IDENTIFIER | "_") ")"] ["as" IDENTIFIER]
-                        | "_" ;
-lambda                  : IDENTIFIER "->" lambdaBody
-                        | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
-lambdaBody              : expression | block ;
-range                   : INT ".." INT ;
+primary                    : INT
+                           | DOUBLE
+                           | STRING
+                           | IDENTIFIER
+                           | handleExpr
+                           | arrayLiteral
+                           | lambda
+                           | "true" | "false" | "null" | "this"
+                           | ifExpr
+                           | matchExpr
+                           | forExpr
+                           | "(" ")"
+                           | "(" expression ")"
+                           | range ;
+handleExpr                 : "handle" "(" expression ")" "with" "{" handleArm+ "}" ;
+handleArm                  : "case" type ["as" IDENTIFIER] "->" expression ";" ;
+arrayLiteral               : "[" expression {"," expression} "]" ;
+ifExpr                     : "if" "(" expression ")" "then" expression "else" expression ;
+matchExpr                  : "match" "(" expression ")" "{" matchArm+ "}" ;
+matchArm                   : "case" matchPattern ["if" expression] "->" expression ";" ;
+matchPattern               : type ["." IDENTIFIER "(" (IDENTIFIER | "_") ")"] ["as" IDENTIFIER]
+                           | "_" ;
+forExpr                    : "for" expr { forStage } [ collectStage ] ;
+forStage                   : forMapStage | forFlatMapStage | forFilterStage ;
+forMapStage                : "map" ( IDENTIFIER | "_" ) "->" expression ;
+forFlatMapStage            : "flatMap" ( IDENTIFIER | "_" ) "->" expression ;
+forFilterStage             : "filter" ( IDENTIFIER | "_" ) "->" expression ;
+collectStage               : "collect" expression ;
+lambda                     : IDENTIFIER "->" lambdaBody
+                           | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
+lambdaBody                 : expression | block ;
+range                      : INT ".." INT ;
 
 # Semantic/parser constraints:
 # - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
+# - A for-expression evaluates its source once. Without collect, it returns a lazy Stream and creates
+#   stage callbacks in source order; callback bodies run during traversal. Every traversal requests a
+#   new iterator, but the source need not be replayable. Stages execute in order; filters skip later
+#   stages for rejected elements, and terminal consumers may stop traversal early.
+# - A collect expression is the final stage and must evaluate to a Sink<T>; the expression returns
+#   that sink. Before traversal, evaluate the source and acquire its iterator for iterable inputs, then
+#   evaluate the collector, then create stage callbacks in source order. Callback bodies run per
+#   relevant element during traversal.
+# - A flatMap stage expression must evaluate to an Iterable<T>, fully traversed before the next source
+#   element. The expression in a filter stage must always resolve to a Boolean-valued result.
+# - Contract constructors are static factory requirements; conforming classes provide compatible
+#   public named constructors, and contract conformance does not add runtime constructor dispatch.
 # - Contract bounds are permitted only on generic functions and generic methods; class and contract
 #   declaration type parameters remain unbounded. Multiple ordinary contract bounds use `+`.
 # - Sealed contracts require a non-empty permits list. Permitted classes must be in the contract's
@@ -167,6 +187,7 @@ range                   : INT ".." INT ;
 #   with an immutable binding or `_`, an immutable whole-value alias with `as`, and an optional
 #   Boolean guard. Guard-failing cases do not count toward exhaustiveness. Nullable matches, multiple
 #   properties, nested patterns, and OR-patterns are not supported.
+# - For expressions require a non-null valid iterable as per Resolver.resolveIterable semantics.
 # - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
 #   An explicit `private constructor new;` makes canonical construction private.
 # - Fields and auto-properties may have initializers. Initialized members are omitted from canonical

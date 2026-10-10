@@ -265,6 +265,17 @@ final class DeclarationRegistry {
                     "External JVM functions cannot be generic."));
         }
         final var target = binding.target();
+        if (target instanceof FunctionBindingRegistry.IntrinsicBinding intrinsicBinding) {
+            final var signature = IntrinsicRegistry.standard().require(intrinsicBinding.id()).signature();
+            if (!signature.typeParameters().isEmpty() || signature.variadic()
+                    || !signature.parameterTypes().equals(binding.signature().parameters())
+                    || !signature.returnType().equals(binding.signature().returnType())
+                    || !binding.signature().raisedEffects().isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                        name, "External function signature does not match its registered intrinsic."));
+            }
+            return;
+        }
         final MethodTypeDesc methodDescriptor;
         if (target instanceof FunctionBindingRegistry.StaticMethod methodTarget) {
             methodDescriptor = methodTarget.descriptor();

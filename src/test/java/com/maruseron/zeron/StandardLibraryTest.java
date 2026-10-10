@@ -915,7 +915,7 @@ public final class StandardLibraryTest {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var className = "app.BundledIterableGenerated" + suffix;
         final var iteratorName = "BundledIterator" + suffix;
-        final var iterableName = "BundledSequence" + suffix;
+        final var iterableName = "BundledStream" + suffix;
         final var classFile = Path.of("dist", "app", className.substring("app.".length()) + ".class");
         final var iteratorFile = Path.of("dist", "app", iteratorName + ".class");
         final var iterableFile = Path.of("dist", "app", iterableName + ".class");
@@ -1427,14 +1427,98 @@ public final class StandardLibraryTest {
     }
 
     @Test
-    public void lazySequenceOperatorsComposeAndSupportOrdinaryIteration() throws Exception {
+    public void forExpressionsCreateLazyStreamsAndCollectDirectly() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "forExpressionClient" + suffix;
+        final var className = packageName + ".ForExpressionTest" + suffix;
+        final var source = parse("ForExpressionTest.zn", """
+                package %s;
+                import zeron.collections.List;
+                import zeron.collections.Stream;
+                class Calls {
+                    value: Int;
+                    public constructor new;
+                    public mut record(item: Int): Int {
+                        this.value = this.value + 1;
+                        return item;
+                    }
+                    public read(): Int = this.value;
+                }
+                fn lazyArrayPipeline(): Int {
+                    let calls = Calls.new(0);
+                    let values: Stream<Int> = for [1, 2, 3]
+                        map item -> calls.record(item)
+                        filter item -> item > 1;
+                    let before = calls.read();
+                    let total = values.fold(0, (sum, item) -> sum + item);
+                    return before * 100 + total * 10 + calls.read();
+                }
+                fn collectedArrayPipeline(): Int {
+                    let values = for [1, 2, 3, 4]
+                        filter item -> item %% 2 == 0
+                        map item -> item * 3
+                        collect List<Int>.empty();
+                    return values.size * 100 + values.at(0) + values.at(1);
+                }
+                fn collectedIterablePipeline(): Int {
+                    let values = for Stream<Int>.fromArray([2, 5])
+                        map item -> item + 1
+                        collect List<Int>.empty();
+                    return values.at(0) * 10 + values.at(1);
+                }
+                fn lazyFlatMapPipeline(): Int {
+                    let calls = Calls.new(0);
+                    let values = for [1, 2, 3]
+                        flatMap item -> List<Int>.of(calls.record(item), calls.record(item + 10));
+                    let before = calls.read();
+                    let sum = values.fold(0, (total, item) -> total + item);
+                    return before * 1000 + calls.read() * 100 + sum;
+                }
+                fn collectedFlatMapPipeline(): Int {
+                    let values = for [1, 2, 3]
+                        flatMap item -> List<Int>.of(item, item + 1)
+                        filter item -> item %% 2 == 0
+                        collect List<Int>.empty();
+                    return values.size * 100 + values.at(0) + values.at(1) + values.at(2);
+                }
+                fn nestedFlatMapPipeline(): Int {
+                    let values = for [1, 2]
+                        flatMap item -> List<Int>.of(item, item + 1)
+                        flatMap item -> List<Int>.of(item * 10, item * 100)
+                        collect List<Int>.empty();
+                    return values.size * 1000 + values.at(0) + values.at(1) + values.at(7);
+                }
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(List.of(source), className, packageName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var test = loader.loadClass(className);
+                assertEquals(53, test.getMethod("lazyArrayPipeline").invoke(null));
+                assertEquals(218, test.getMethod("collectedArrayPipeline").invoke(null));
+                assertEquals(36, test.getMethod("collectedIterablePipeline").invoke(null));
+                assertEquals(642, test.getMethod("lazyFlatMapPipeline").invoke(null));
+                assertEquals(308, test.getMethod("collectedFlatMapPipeline").invoke(null));
+                assertEquals(8410, test.getMethod("nestedFlatMapPipeline").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void lazyStreamOperatorsComposeAndSupportOrdinaryIteration() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var packageName = "sequenceClient" + suffix;
-        final var className = packageName + ".SequenceTest" + suffix;
-        final var source = parse("SequenceTest.zn", """
+        final var className = packageName + ".StreamTest" + suffix;
+        final var source = parse("StreamTest.zn", """
                 package %s;
-                import zeron.collections.Sequence;
-                import zeron.collections.generateArray;
+                import zeron.collections.Stream;
+                import zeron.internal.generateArray;
                 class Total {
                     value: Int;
                     public constructor new;
@@ -1463,7 +1547,7 @@ public final class StandardLibraryTest {
                     public read(): Int = this.value;
                 }
                 fn transformed(): Int {
-                    let values = Sequence<Int>.fromArray([1, 2, 3, 4, 5, 6])
+                    let values = Stream<Int>.fromArray([1, 2, 3, 4, 5, 6])
                         .map(value -> value * 2)
                         .filter(value -> value > 4)
                         .drop(1)
@@ -1472,34 +1556,34 @@ public final class StandardLibraryTest {
                     for (let value in values) total += value;
                     return total;
                 }
-                fn folded(): Int = Sequence<Int>.fromArray([1, 2, 3, 4]).fold(0,
+                fn folded(): Int = Stream<Int>.fromArray([1, 2, 3, 4]).fold(0,
                     (total, value) -> total + value);
                 fn predicates(): Boolean {
-                    let values = Sequence<Int>.fromArray([2, 4, 6]);
+                    let values = Stream<Int>.fromArray([2, 4, 6]);
                     return values.any(value -> value == 4) and values.all(value -> value > 0);
                 }
-                fn count(): Int = Sequence<Int>.fromArray([1, 2, 3]).filter(value -> value > 1).count();
+                fn count(): Int = Stream<Int>.fromArray([1, 2, 3]).filter(value -> value > 1).count();
                 fn forEachTotal(): Int {
                     let total = Total.new(0);
-                    Sequence<Int>.fromArray([3, 5, 7]).forEach(value -> total.add(value));
+                    Stream<Int>.fromArray([3, 5, 7]).forEach(value -> total.add(value));
                     return total.read();
                 }
                 fn lazyEvaluation(): Int {
                     let calls = Total.new(0);
-                    let values = Sequence<Int>.fromArray([4, 5, 6])
+                    let values = Stream<Int>.fromArray([4, 5, 6])
                         .map(value -> calls.record(value));
                     let beforeConsumption = calls.read();
                     let first = values.take(1).fold(0, (sum, value) -> sum + value);
                     return beforeConsumption * 100 + first * 10 + calls.read();
                 }
-                fn emptySequencePredicates(): Boolean {
-                    let values = Sequence<Int>.fromArray([1, 2, 3]).filter(value -> false);
+                fn emptyStreamPredicates(): Boolean {
+                    let values = Stream<Int>.fromArray([1, 2, 3]).filter(value -> false);
                     return values.count() == 0 and not values.any(value -> true)
                         and values.all(value -> false);
                 }
                 fn lazyCallbackOrder(): Int {
                     let trace = Trace.new(0);
-                    let values = Sequence<Int>.fromArray([1, 2, 3])
+                    let values = Stream<Int>.fromArray([1, 2, 3])
                         .map(value -> trace.map(value))
                         .filter(value -> trace.keep(value))
                         .take(1);
@@ -1508,18 +1592,18 @@ public final class StandardLibraryTest {
                     return beforeConsumption * 100000 + trace.read() * 10 + total;
                 }
                 fn zeroAndNegativeCounts(): Int {
-                    let values = Sequence<Int>.fromArray([1, 2, 3]);
+                    let values = Stream<Int>.fromArray([1, 2, 3]);
                     return values.take(0).count() * 1000
                         + values.take(-1).count() * 100
                         + values.drop(0).count() * 10
                         + values.drop(-1).count();
                 }
-                fn repeatedSequenceTraversal(): Int {
-                    let values = Sequence<Int>.fromArray([2, 3]);
+                fn repeatedStreamTraversal(): Int {
+                    let values = Stream<Int>.fromArray([2, 3]);
                     return values.count() * 10 + values.count();
                 }
-                fn nullableSequenceElements(): Int {
-                    let values = Sequence<String?>.fromArray(["a", null, "b"]);
+                fn nullableStreamElements(): Int {
+                    let values = Stream<String?>.fromArray(["a", null, "b"]);
                     return values.count();
                 }
                 fn generatedArray(): Int {
@@ -1537,7 +1621,7 @@ public final class StandardLibraryTest {
                 fn contextuallyEmptyArray(): Int {
                     let values: &Array<Int> = [];
                     let throughParameter = arrayLength([]);
-                    return values.length + throughParameter + Sequence<Int>.fromArray([]).count();
+                    return values.length + throughParameter + Stream<Int>.fromArray([]).count();
                 }
                 fn arrayLength(values: Array<Int>): Int = values.length;
                 fn emptyArrayIteration(): Int {
@@ -1562,11 +1646,11 @@ public final class StandardLibraryTest {
                 assertEquals(2, test.getMethod("count").invoke(null));
                 assertEquals(15, test.getMethod("forEachTotal").invoke(null));
                 assertEquals(41, test.getMethod("lazyEvaluation").invoke(null));
-                assertEquals(true, test.getMethod("emptySequencePredicates").invoke(null));
+                assertEquals(true, test.getMethod("emptyStreamPredicates").invoke(null));
                 assertEquals(12122, test.getMethod("lazyCallbackOrder").invoke(null));
                 assertEquals(33, test.getMethod("zeroAndNegativeCounts").invoke(null));
-                assertEquals(22, test.getMethod("repeatedSequenceTraversal").invoke(null));
-                assertEquals(3, test.getMethod("nullableSequenceElements").invoke(null));
+                assertEquals(22, test.getMethod("repeatedStreamTraversal").invoke(null));
+                assertEquals(3, test.getMethod("nullableStreamElements").invoke(null));
                 assertEquals(123136, test.getMethod("generatedArray").invoke(null));
                 assertEquals(0, test.getMethod("generatedEmptyArray").invoke(null));
                 assertEquals(0, test.getMethod("contextuallyEmptyArray").invoke(null));
@@ -1692,9 +1776,9 @@ public final class StandardLibraryTest {
             libraryCompiler.compile();
 
             copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
-            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v15.bin"));
+            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v16.bin"));
             Files.createDirectories(libraryIndex.getParent());
-            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v15.bin"), libraryIndex);
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v16.bin"), libraryIndex);
 
             deleteTree(Path.of("dist"));
             Files.writeString(clientSource, """
@@ -1760,7 +1844,7 @@ public final class StandardLibraryTest {
             assertEquals(0, Zeron.runCli(librarySource.toString(), "--jar-output", secondLibraryJar.toString()));
             assertArrayEquals(Files.readAllBytes(libraryJar), Files.readAllBytes(secondLibraryJar));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v15.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v16.bin") != null);
                 assertTrue(jar.stream().anyMatch(entry -> entry.getName().equals(
                         libraryPackage.replace('.', '/') + "/Answer.class")));
             }
@@ -1788,7 +1872,7 @@ public final class StandardLibraryTest {
         final var libraryJar = Path.of("target", "zeron-stdlib-" + suffix + ".jar");
         final var sourceFile = Path.of("target", "CompiledStdlibClient" + suffix + ".zn");
         final var entryName = sourceFile.getFileName().toString().replaceFirst("\\.zn$", "");
-        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v15.bin"));
+        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v16.bin"));
         final var iterableClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterable.class"));
         final var iteratorClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterator.class"));
         final var arrayIteratorClass = libraryOutput.resolve(
@@ -1835,8 +1919,8 @@ public final class StandardLibraryTest {
             assertTrue(Files.exists(rangeClass));
             assertTrue(Files.exists(unitClass));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v15.bin") != null);
-                assertTrue(jar.getJarEntry("zeron/collections/Sequence.class") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v16.bin") != null);
+                assertTrue(jar.getJarEntry("zeron/collections/Stream.class") != null);
                 assertTrue(jar.getJarEntry("zeron/lang/Unit.class") != null);
             }
 

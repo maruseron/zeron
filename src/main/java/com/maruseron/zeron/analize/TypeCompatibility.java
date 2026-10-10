@@ -62,7 +62,7 @@ final class TypeCompatibility {
         if (expectedType instanceof FunctionDescriptor expectedFunction
                 && resolvedType instanceof FunctionDescriptor resolvedFunction
                 && expectedFunction.arity() == resolvedFunction.arity()
-                && expectedFunction.parameters().equals(resolvedFunction.parameters())
+                && functionParametersAccept(expectedFunction, resolvedFunction)
                 && canAssign(expectedFunction.returnType(), resolvedFunction.returnType())
                 && expectedFunction.raisedEffects().containsAll(resolvedFunction.raisedEffects())) {
             return true;
@@ -82,6 +82,16 @@ final class TypeCompatibility {
                 && (nullable.baseType().equals(resolvedType)
                 || resolvedType instanceof ReferenceDescriptor reference
                 && nullable.baseType().equals(reference.baseType()));
+    }
+
+    private boolean functionParametersAccept(final FunctionDescriptor expectedFunction,
+                                             final FunctionDescriptor resolvedFunction) {
+        for (int i = 0; i < expectedFunction.arity(); i++) {
+            if (!canAssign(resolvedFunction.parameters().get(i), expectedFunction.parameters().get(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     boolean canTypeTest(final TypeDescriptor sourceType, final TypeDescriptor targetType) {

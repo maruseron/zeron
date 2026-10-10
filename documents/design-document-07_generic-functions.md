@@ -82,6 +82,16 @@ Unbounded type variables remain opaque inside a generic body. Values can be pass
 and used in supported structural positions, but unary and binary operators are rejected when they
 require constraints. A bounded type variable exposes the non-mutating methods declared by any of its
 contract bounds.
+
+Contract named constructors are different: they are class-side factory requirements, not instance
+methods, and a bounded value does not identify the class whose factory should run. Calls such as
+`T.empty()` through a generic bound are therefore not part of the current bounded-type model.
+Supporting them requires an explicit type witness or equivalent class-side dictionary, including a
+defined way to preserve generic contract arguments and the selected factory across inference,
+separate compilation, and JVM erasure. Generic class and contract bounds are not currently supported;
+their interaction with constructor witnesses remains an open design question rather than an implicit
+extension of ordinary contract bounds.
+
 Lambdas with an expected function type remain monomorphic. An immutable let-bound lambda with safe
 unresolved parameters may generalize them into a rank-1 scheme, instantiated freshly at each use.
 The first slice handles direct parameter identity and constant results. Mutable bindings, nested

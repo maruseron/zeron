@@ -50,6 +50,10 @@ public final class DiagnosticCatalog {
             entry("ZR1113", "Invalid assignment form");
     public static final Entry INVALID_MATCH_EXPRESSION =
             entry("ZR1114", "Invalid match expression");
+    public static final Entry INVALID_PIPELINE_OPERATION = 
+            entry("ZR1115", "Invalid for expression operation");
+    public static final Entry INVALID_CONTRACT_MEMBER =
+            entry("ZR1116", "Invalid contract member declaration");
 
     public static final Entry NAME_NOT_FOUND =
             entry("ZR2001", "Name not found");

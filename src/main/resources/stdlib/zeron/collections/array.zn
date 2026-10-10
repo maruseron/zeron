@@ -1,0 +1,39 @@
+package zeron.collections;
+
+public extension <T> Array<T> {
+    public fn contains(item: T): Boolean = this.indexOf(item) >= 0;
+
+    public fn indexOf(item: T): Int {
+        let mut index = 0;
+        while (index < this.length) {
+            if (item == this[index]) {
+                return index;
+            }
+            index += 1;
+        }
+        return -1;
+    }
+
+    public fn isEmpty(): Boolean = this.length > 0;
+
+    public fn lastIndexOf(item: T): Int {
+        let mut index = this.length - 1;
+        while (index >= 0) {
+            if (item == this[index]) {
+                return index;
+            }
+            index -= 1;
+        }
+        return -1;
+    }
+
+    public fn fold<R>(initial: R, accumulator: (R, T) -> R): R {
+        let mut result = initial;
+        for (let item in this) result = accumulator(result, item);
+        return result;
+    }
+
+    public fn stream(): Stream<T> {
+        return Stream.fromArray(this);
+    }
+}

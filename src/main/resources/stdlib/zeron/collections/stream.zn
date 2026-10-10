@@ -1,0 +1,258 @@
+package zeron.collections;
+
+import zeron.lang.Option;
+import zeron.lang.Some;
+import zeron.lang.None;
+import zeron.internal.unwrapSome;
+
+class ArrayStream<T> is Iterable<T> {
+    values: Array<T>;
+    
+    public iterator(): &Iterator<T> = ArrayIterator<T>.from(values);
+}
+
+class MappedStream<T, R> is Iterable<R> {
+    source: Iterable<T>;
+    transform: (T) -> R;
+
+    public iterator(): &Iterator<R> =
+        MappedIterator<T, R>.new(source.iterator(), transform);
+}
+
+class MappedIterator<T, R> is Iterator<R> {
+    source: &Iterator<T>;
+    transform: (T) -> R;
+
+    public mut next(): Option<R> {
+        let f = transform;
+        let item = source.next();
+        if (not item.isSome()) return None<R>.none();
+        return Some<R>.from(f(unwrapSome(item)));
+    }
+}
+
+class FlatMappedStream<T, R> is Iterable<R> {
+    source: Iterable<T>;
+    transform: (T) -> Iterable<R>;
+
+    public iterator(): &Iterator<R> =
+        FlatMappedIterator<T, R>.from(source.iterator(), transform);
+}
+
+class FlatMappedIterator<T, R> is Iterator<R> {
+    source: &Iterator<T>;
+    transform: (T) -> Iterable<R>;
+    inner: &Iterator<R>;
+
+    private constructor new;
+
+    public constructor from(source: &Iterator<T>, transform: (T) -> Iterable<R>) =
+        FlatMappedIterator<T, R>.new(source, transform, Stream<R>.fromArray([]).iterator());
+
+    public mut next(): Option<R> {
+        let f = transform;
+        while (true) {
+            let item = this.inner.next();
+            if (item.isSome()) return item;
+            let outerItem = this.source.next();
+            if (not outerItem.isSome()) return None<R>.none();
+            this.inner = f(unwrapSome(outerItem)).iterator();
+        }
+        return None<R>.none();
+    }
+}
+
+class FilteredStream<T> is Iterable<T> {
+    source: Iterable<T>;
+    predicate: (T) -> Boolean;
+
+    public iterator(): &Iterator<T> =
+        FilteredIterator<T>.new(source.iterator(), predicate);
+}
+
+class FilteredIterator<T> is Iterator<T> {
+    source: &Iterator<T>;
+    predicate: (T) -> Boolean;
+
+    public mut next(): Option<T> {
+        let f = predicate;
+        let mut item = source.next();
+        while (item.isSome()) {
+            if (f(unwrapSome(item))) return item;
+            item = source.next();
+        }
+        return None<T>.none();
+    }
+}
+
+class TakenStream<T> is Iterable<T> {
+    source: Iterable<T>;
+    count: Int;
+
+    public iterator(): &Iterator<T> =
+        TakenIterator<T>.new(source.iterator(), count);
+}
+
+class TakenIterator<T> is Iterator<T> {
+    source: &Iterator<T>;
+    remaining: Int;
+
+    public mut next(): Option<T> {
+        if (remaining <= 0) return None<T>.none();
+        this.remaining = remaining - 1;
+        return source.next();
+    }
+}
+
+class DroppedStream<T> is Iterable<T> {
+    source: Iterable<T>;
+    count: Int;
+
+    public iterator(): &Iterator<T> =
+        DroppedIterator<T>.new(source.iterator(), count);
+}
+
+class DroppedIterator<T> is Iterator<T> {
+    source: &Iterator<T>;
+    count: Int;
+    initialized: Boolean = false;
+
+    public mut next(): Option<T> {
+        if (not initialized) {
+            let mut skipped = 0;
+            while (skipped < count) {
+                let item = source.next();
+                if (not item.isSome()) {
+                    this.initialized = true;
+                    return item;
+                }
+                skipped += 1;
+            }
+            this.initialized = true;
+        }
+        return source.next();
+    }
+}
+
+class DroppedWhileStream<T> is Iterable<T> {
+    source: Iterable<T>;
+    predicate: (T) -> Boolean;
+
+    public iterator(): &Iterator<T> =
+        DroppedWhileIterator<T>.new(source.iterator(), predicate);
+}
+
+class DroppedWhileIterator<T> is Iterator<T> {
+    source: &Iterator<T>;
+    predicate: (T) -> Boolean;
+    dropping: Boolean = true;
+
+    public mut next(): Option<T> {
+        while (dropping) {
+            let f = predicate;
+            let item = source.next();
+            if (not item.isSome()) return item;
+
+            if (not f(unwrapSome(item))) {
+                this.dropping = false;
+                return item;
+            }
+        }
+        return source.next();
+    }
+}
+
+class TakenWhileStream<T> is Iterable<T> {
+    source: Iterable<T>;
+    predicate: (T) -> Boolean;
+
+    public iterator(): &Iterator<T> =
+        TakenWhileIterator<T>.new(source.iterator(), predicate);
+}
+
+class TakenWhileIterator<T> is Iterator<T> {
+    source: &Iterator<T>;
+    predicate: (T) -> Boolean;
+    done: Boolean = false;
+
+    public mut next(): Option<T> {
+        if (done) return Option<T>.none();
+
+        let f = predicate;
+        let item = source.next();
+        if (not item.isSome()) {
+            this.done = true;
+            return Option<T>.none();
+        }
+
+        if (f(unwrapSome(item))) {
+            return item;
+        } else {
+            this.done = true;
+            return Option<T>.none();
+        }
+    }
+}
+
+public class Stream<T> is Iterable<T> {
+    source: Iterable<T>;
+
+    private constructor new;
+
+    public constructor of(elements: T...) = 
+        Stream<T>.fromArray(elements);
+
+    public constructor from(source: Iterable<T>) = 
+        Stream<T>.new(source);
+
+    public constructor fromArray(source: Array<T>) =
+        Stream<T>.from(ArrayStream<T>.new(source));
+
+    public iterator(): &Iterator<T> = source.iterator();
+
+    public map<R>(transform: (T) -> R): Stream<R> =
+        Stream<R>.new(MappedStream<T, R>.new(source, transform));
+
+    public flatMap<R>(transform: (T) -> Iterable<R>): Stream<R> =
+        Stream<R>.new(FlatMappedStream<T, R>.new(source, transform));
+
+    public filter(predicate: (T) -> Boolean): Stream<T> =
+        Stream<T>.new(FilteredStream<T>.new(source, predicate));
+
+    public fold<R>(initial: R, accumulator: (R, T) -> R): R {
+        let mut result = initial;
+        for (let item in this) result = accumulator(result, item);
+        return result;
+    }
+
+    public drop(count: Int): Stream<T> =
+        Stream<T>.new(DroppedStream<T>.new(source, count));
+
+    public take(count: Int): Stream<T> =
+        Stream<T>.new(TakenStream<T>.new(source, count));
+
+    public dropWhile(predicate: (T) -> Boolean): Stream<T> =
+        Stream<T>.new(DroppedWhileStream<T>.new(source, predicate));
+
+    public takeWhile(predicate: (T) -> Boolean): Stream<T> =
+        Stream<T>.new(TakenWhileStream<T>.new(source, predicate));
+
+    public count(): Int =
+        fold(0, (a, _) -> a + 1);
+
+    public any(predicate: (T) -> Boolean): Boolean {
+        for (let item in this) if (predicate(item)) return true;
+        return false;
+    }
+
+    public all(predicate: (T) -> Boolean): Boolean {
+        for (let item in this) if (not predicate(item)) return false;
+        return true;
+    }
+
+    public toList(): List<T> {
+        let mut result = List<T>.empty();
+        for (let item in this) result.add(item);
+        return result;
+    }
+}

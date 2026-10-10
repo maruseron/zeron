@@ -128,7 +128,8 @@ final class CallResolver {
     }
 
     private void attachIntrinsicOperation(final Expr.Call call) {
-        if ("zeron.collections.allocateArray".equals(call.resolvedFunctionName())) {
+        if ("zeron.collections.allocateArray".equals(call.resolvedFunctionName())
+                || "zeron.internal.allocateArray".equals(call.resolvedFunctionName())) {
             final var arrayElement = IntrinsicResolver.arrayElementType(context, call.getType(), call.callee);
             call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.ARRAY_ALLOC,
                     List.of(arrayElement),
@@ -139,7 +140,7 @@ final class CallResolver {
             call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.ARRAY_CLEAR_SLOT,
                     List.of(arrayElement),
                     call.arguments.stream().map(Expr::getType).toList(), call.callee));
-        } else if ("zeron.collections.unwrapSome".equals(call.resolvedFunctionName())) {
+        } else if ("zeron.internal.unwrapSome".equals(call.resolvedFunctionName())) {
             var optionType = call.arguments.getFirst().getType();
             if (optionType instanceof ReferenceDescriptor reference) optionType = reference.baseType();
             final var optionValue = ((GenericDescriptor) optionType).typeParameters().getFirst();

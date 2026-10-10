@@ -1,5 +1,6 @@
 package com.maruseron.zeron.analize;
 
+import com.maruseron.zeron.StandardLibrary;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.compile.CompilationService;
@@ -16,6 +17,196 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public final class ExtensionMethodTest {
+    @Test
+    public void passesBroadlyAcceptingFunctionToGenericCollectionCallback() throws Exception {
+        final var output = Files.createTempDirectory("zeron-broad-function-callback");
+        try {
+            final var app = unit("""
+                    package app;
+                    import zeron.collections.*;
+                    fn main() {
+                        List.of(1, 2, 3).forEach(println);
+                    }
+                    """, "Main.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app), "app.Main", "app", List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                loader.loadClass("app.Main").getMethod("main").invoke(null);
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void infersNullableGenericExtensionArgumentFromReceiverWhenArgumentIsNull() throws Exception {
+        final var output = Files.createTempDirectory("zeron-null-generic-extension-argument");
+        try {
+            final var app = unit("""
+                    package app;
+                    import zeron.collections.*;
+                    fn indexOfNull(): Int {
+                        let values: Array<Int?> = [1, 2, 3, null, 5];
+                        return values.indexOf(null);
+                    }
+                    """, "Main.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app), "app.Main", "app", List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(3, loader.loadClass("app.Main").getMethod("indexOfNull").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void extensionsForSameReceiverShareNamespaceOwnerAcrossFiles() throws Exception {
+        final var output = Files.createTempDirectory("zeron-shared-extension-namespace");
+        try {
+            final var model = unit("""
+                    package model;
+                    public class Box {
+                        public constructor new;
+                    }
+                    """, "Box.zn");
+            final var firstExtension = unit("""
+                    package extras;
+                    import model.Box;
+                    public extension Box {
+                        public fn first(): Int = 1;
+                    }
+                    """, "FirstExtension.zn");
+            final var secondExtension = unit("""
+                    package extras;
+                    import model.Box;
+                    public extension Box {
+                        public fn second(): Int = 2;
+                    }
+                    namespace Box {
+                        public fn fromArray(values: Array<Int>): Int = values[0];
+                    }
+                    """, "SecondExtension.zn");
+            final var app = unit("""
+                    package app;
+                    import model.Box;
+                    import extras.Box.first;
+                    import extras.Box.second;
+                    import extras.Box.fromArray;
+                    fn extensionResults(): Int {
+                        let box = Box.new();
+                        return box.first() + box.second();
+                    }
+                    fn namespaceResult(): Int = fromArray([3, 4]);
+                    """, "Main.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app, firstExtension, secondExtension, model),
+                    "app.SharedExtensionNamespace", "app", List.of(), false, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+
+            final var sharedOwner = output.resolve("extras").resolve("$zeron$Namespace$Box.class");
+            assertTrue(Files.exists(sharedOwner));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass("app.SharedExtensionNamespace");
+                assertEquals(3, generated.getMethod("extensionResults").invoke(null));
+                assertEquals(3, generated.getMethod("namespaceResult").invoke(null));
+                final var namespace = loader.loadClass("extras.$zeron$Namespace$Box");
+                assertEquals(1, namespace.getMethod("first", loader.loadClass("model.Box")).invoke(null,
+                        loader.loadClass("model.Box").getConstructor().newInstance()));
+                assertEquals(2, namespace.getMethod("second", loader.loadClass("model.Box")).invoke(null,
+                        loader.loadClass("model.Box").getConstructor().newInstance()));
+                final var fromArray = java.util.Arrays.stream(namespace.getMethods())
+                        .filter(method -> method.getName().equals("fromArray"))
+                        .filter(method -> method.getParameterCount() == 1)
+                        .filter(method -> method.getParameterTypes()[0].isArray())
+                        .findFirst()
+                        .orElseThrow();
+                final var values = java.lang.reflect.Array.newInstance(
+                        fromArray.getParameterTypes()[0].getComponentType(), 2);
+                java.lang.reflect.Array.set(values, 0, 3);
+                java.lang.reflect.Array.set(values, 1, 4);
+                assertEquals(3, fromArray.invoke(null, values));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void rejectsNamespaceFunctionAndExtensionNameCollision() {
+        final var model = unit("""
+                package model;
+                public class Box {
+                    public constructor new;
+                }
+                """, "Box.zn");
+        final var declarations = unit("""
+                package extras;
+                import model.Box;
+                public extension Box {
+                    public fn inspect(): Int = 1;
+                }
+                namespace Box {
+                    public fn inspect(box: Box): Int = 2;
+                }
+                """, "Declarations.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
+                List.of(declarations, model));
+
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .anyMatch(error -> error.message().contains("An extension method and a namespace function")));
+    }
+
+    @Test
+    public void extensionsAreAvailableWithinTheirDeclaringFileOnly() throws Exception {
+        final var output = Files.createTempDirectory("zeron-file-local-extension");
+        try {
+            final var app = unit("""
+                    package app;
+                    fn result(): Int = 4.twice();
+                    public extension Int {
+                        public fn twice(): Int = this * 2;
+                    }
+                    """, "App.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app), "app.FileLocalExtension", "app", List.of(), false,
+                    List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(8, loader.loadClass("app.FileLocalExtension")
+                        .getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+
+        final var extension = unit("""
+                package extras;
+                public extension Int {
+                    public fn twice(): Int = this * 2;
+                }
+                """, "IntExtensions.zn");
+        final var appWithoutImport = unit("""
+                package app;
+                fn result(): Int = 4.twice();
+                """, "AppWithoutImport.zn");
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
+                List.of(appWithoutImport, extension));
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .anyMatch(error -> error.message().contains("Unknown method")));
+    }
+
     @Test
     public void starImportsExtensionsAndExplicitImportsTakePrecedence() throws Exception {
         final var output = Files.createTempDirectory("zeron-extension-star-import");
@@ -392,6 +583,90 @@ public final class ExtensionMethodTest {
             try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
                     getClass().getClassLoader())) {
                 assertEquals(12, loader.loadClass("app.BuiltinExtensions").getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void convertsNumericTypesThroughPrivateIntrinsicBindings() throws Exception {
+        final var output = Files.createTempDirectory("zeron-int-to-float");
+        try {
+            final var app = unit("""
+                    package app;
+                    fn positive(): Float = 2147483647.toFloat();
+                    fn negative(): Float = (-2147483647 - 1).toFloat();
+                    fn converted(value: Float): Int = value.toInt().getOrElse(0);
+                    fn hasValue(value: Float): Boolean = value.toInt().isSome();
+                    """, "App.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app), "app.IntToFloat", "app", List.of(), true,
+                    List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                final var generated = loader.loadClass("app.IntToFloat");
+                assertEquals(2147483647.0, generated.getMethod("positive").invoke(null));
+                assertEquals(-2147483648.0, generated.getMethod("negative").invoke(null));
+                final var converted = generated.getMethod("converted", double.class);
+                final var hasValue = generated.getMethod("hasValue", double.class);
+                assertEquals(2147483647, converted.invoke(null, 2147483647.9));
+                assertEquals(-2147483648, converted.invoke(null, -2147483648.9));
+                assertTrue((Boolean) hasValue.invoke(null, 2147483647.9));
+                assertEquals(0, converted.invoke(null, Double.NaN));
+                assertEquals(0, converted.invoke(null, Double.POSITIVE_INFINITY));
+                assertEquals(0, converted.invoke(null, 2147483648.0));
+                assertEquals(0, converted.invoke(null, -2147483649.0));
+                assertEquals(false, hasValue.invoke(null, Double.NaN));
+                assertEquals(false, hasValue.invoke(null, Double.POSITIVE_INFINITY));
+                assertEquals(false, hasValue.invoke(null, Double.NEGATIVE_INFINITY));
+                assertEquals(false, hasValue.invoke(null, 2147483648.0));
+                assertEquals(false, hasValue.invoke(null, -2147483649.0));
+            }
+        } finally {
+            deleteTree(output);
+        }
+
+        final var unauthorizedImport = unit("""
+                package app;
+                import zeron.lang.intToFloat;
+                import zeron.lang.floatToInt;
+                fn result(): Float = intToFloat(1);
+                """, "UnauthorizedImport.zn");
+        final var libraryAndUnauthorizedImport = new java.util.ArrayList<>(StandardLibrary.bundledUnits());
+        libraryAndUnauthorizedImport.add(unauthorizedImport);
+        final var importResult = new ResolutionService().resolveUnitsWithDiagnostics(libraryAndUnauthorizedImport);
+        assertTrue(importResult.errors().toString(), importResult.errors().stream()
+                .anyMatch(error -> error.message().contains("is not public")));
+    }
+
+    @Test
+    public void supportsEqualityOperatorsOnGenericTypeParameters() throws Exception {
+        final var output = Files.createTempDirectory("zeron-generic-equality");
+        try {
+            final var app = unit("""
+                    package app;
+                    fn equal<T>(left: T, right: T): Boolean = left == right;
+                    fn notEqual<T>(left: T, right: T): Boolean = left != right;
+                    fn sameValues(): Boolean = equal("value", "value") and notEqual(1, 2);
+                    fn differentValues(): Boolean = notEqual("left", "right") and equal(3, 3);
+                    """, "GenericEquality.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app), "app.GenericEquality", "app", List.of(), false,
+                    List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass("app.GenericEquality");
+                assertEquals(true, generated.getMethod("equal", Object.class, Object.class)
+                        .invoke(null, "value", "value"));
+                assertEquals(true, generated.getMethod("notEqual", Object.class, Object.class)
+                        .invoke(null, 1, 2));
+                assertEquals(true, generated.getMethod("sameValues").invoke(null));
+                assertEquals(true, generated.getMethod("differentValues").invoke(null));
             }
         } finally {
             deleteTree(output);

@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class Resolver {
     public record IterationProtocol(String iterableName, String iteratorName) {}
+    public record SinkProtocol(String sinkName, String emptyName, String addName) {}
 
     public record DefaultMethodSelection(String ownerName, Stmt.ContractMethod method,
                                          FunctionDescriptor instantiatedType) {}
@@ -459,11 +460,37 @@ public final class Resolver {
             }
         }
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, where,
-                "For loops require Array<T>, an integer range literal, or a type conforming to Iterable<T>."));
+                "Iterative control flow requires Array<T>, an integer range literal, or a type conforming to Iterable<T>."));
         return TypeDescriptor.ofInfer();
     }
 
-    private static void recordIterationProtocol(final ResolutionContext context, final Token iterationBind, final String iterableName) {
+    static TypeDescriptor ensureSink(final ResolutionContext context, final TypeDescriptor type, final Token where) {
+        final var baseType = type instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : type;
+        final var baseName = className(context, baseType);
+        final var sinkName = "zeron.collections.Sink";
+        if (baseName.equals(sinkName) && baseType instanceof GenericDescriptor generic
+                && generic.typeParameters().size() == 1) {
+            recordSinkProtocol(context, where, sinkName);
+            return generic.typeParameters().getFirst();
+        }
+        final var declaration = context.classes.get(baseName);
+        if (declaration != null) {
+            final var substitutions = substitutionsFor(context, declaration.typeParameters(), baseType);
+            for (final var contractUse : declaration.contractUses()) {
+                if (!sinkName.equals(contractUse.name().lexeme())
+                        || contractUse.typeArguments().size() != 1) continue;
+                recordSinkProtocol(context, where, sinkName);
+                return TypeSubstitution.substitute(contractUse.typeArguments().getFirst(), substitutions);
+            }
+        }
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, where,
+                "For expression collection requires a type conforming to Sink<T>."));
+        return TypeDescriptor.ofInfer();
+    }
+
+    public static IterationProtocol getIterationProtocolFor(final ResolutionContext context, final Token iterationBind, final String iterableName) {
         final var iterable = context.contracts.get(iterableName);
         if (iterable == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
@@ -486,6 +513,52 @@ public final class Resolver {
                     iterationBind,
                     "Iterable.iterator() must return an Iterator<T> reference."));
         }
-        context.iterationProtocols.put(iterationBind, new Resolver.IterationProtocol(iterableName, iteratorName));
+        return new Resolver.IterationProtocol(iterableName, iteratorName);
+    }
+
+    private static void recordIterationProtocol(final ResolutionContext context, final Token iterationBind, final String iterableName) {
+        context.iterationProtocols.put(iterationBind, getIterationProtocolFor(context, iterationBind, iterableName));
+    }
+
+    private static void recordSinkProtocol(final ResolutionContext context, final Token where, final String sinkName) {
+        final var sink = context.contracts.get(sinkName);
+        if (sink == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    where,
+                    "Missing sink protocol contract '" + sinkName + "'."));
+        }
+        final var emptyConstructor = sink.namedConstructors().stream()
+                .filter(constructor -> constructor.name().lexeme().equals("empty"))
+                .findFirst()
+                .orElseThrow(() -> new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        where,
+                        "Sink contract must declare empty()."));
+        final var addMethod = sink.methods().stream()
+                .filter(method -> method.name().lexeme().equals("add"))
+                .findFirst()
+                .orElseThrow(() -> new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        where,
+                        "Sink contract must declare add(T)."));
+        var emptyType = emptyConstructor.typeDescriptor().returnType();
+        // System.out.println("Empty type: " + emptyType);
+        if (emptyType instanceof ReferenceDescriptor reference) emptyType = reference.baseType();
+        final String emptyName = emptyType instanceof GenericDescriptor generic
+                ? generic.baseType().name()
+                : emptyType instanceof NominalDescriptor nominal ? nominal.name() : null;
+        if (emptyName == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    where,
+                    "Sink.empty() must return a Sink<T> reference."));
+        }
+        var addType = addMethod.typeDescriptor().parameters().getFirst();
+        // System.out.println("Sink.add(T) type: " + addType);
+        if (addType instanceof ReferenceDescriptor reference) addType = reference.baseType();
+        final String addName = addType instanceof TypeParameterDescriptor typeParameter ? typeParameter.name() : null;
+        if (addName == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    where,
+                    "Sink.add(T) must take a T."));
+        }
+        context.sinkProtocols.put(where, new Resolver.SinkProtocol(sinkName, emptyName, addName));
     }
 }

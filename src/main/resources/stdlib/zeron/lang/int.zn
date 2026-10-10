@@ -1,7 +1,15 @@
 package zeron.lang;
 
 public extension Int {
-    public property absoluteValue: Int {
-        get = if (this < 0) then -this else this;
+    public property sign: Int {
+        get {
+                 if (this == 0) return  0;
+            else if (this  < 0) return -1;
+            else                return  1;
+        }
     }
+
+    public fn toFloat(): Float = intToFloat(this);
 }
+
+external fn intToFloat(value: Int): Float;

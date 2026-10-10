@@ -27,25 +27,12 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 15;
+    public static final int VERSION = 16;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
     public ZeronLibraryIndex {
         declarations = List.copyOf(declarations);
-    }
-
-    public record ValueExport(String qualifiedName,
-                              String jvmOwner,
-                              String initializationOwner,
-                              String namespaceName,
-                              TypeDescriptor type) implements ExportedDeclaration {
-        public ValueExport {
-            Objects.requireNonNull(qualifiedName);
-            Objects.requireNonNull(jvmOwner);
-            Objects.requireNonNull(initializationOwner);
-            Objects.requireNonNull(type);
-        }
     }
 
         public List<CompilationUnit> toCompilationUnits(final String sourceLabel) {
@@ -59,85 +46,94 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             };
             final var statements = declarationsByPackage.computeIfAbsent(packageName, _ -> new ArrayList<>());
             switch (exported) {
-            case FunctionExport function -> {
-                final var functionName = token(simpleName(function.qualifiedName()));
-                final var declaration = new Stmt.Function(functionName,
-                    parameterNames(function.signature(), functionName.line()),
-                    function.signature(), List.of(), true, List.of(), function.minimumArity(),
-                    function.variadic());
-                if (function.namespaceName() == null) {
-                    statements.add(declaration);
-                } else {
-                    addNamespaceMember(statements, function.namespaceName(), declaration);
+                case FunctionExport function -> {
+                    final var functionName = token(simpleName(function.qualifiedName()));
+                    final var declaration = new Stmt.Function(functionName,
+                        parameterNames(function.signature(), functionName.line()),
+                        function.signature(), List.of(), true, List.of(), function.minimumArity(),
+                        function.variadic());
+                    if (function.namespaceName() == null) {
+                        statements.add(declaration);
+                    } else {
+                        addNamespaceMember(statements, function.namespaceName(), declaration);
+                    }
                 }
-            }
-            case ExtensionExport extension -> {
-                final var name = token(simpleName(extension.qualifiedName()));
-                final var receiverParameterCount = extension.receiverTypeParameterCount();
-                final var typeParameters = extension.signature().typeParameters();
-                final var declaration = new Stmt.ExtensionMethod(name,
-                        parameterNames(extension.signature(), name.line()), extension.signature(),
-                        true, extension.mutating(), List.of(), List.of(),
-                        extension.minimumArity() + 1, extension.variadic(), extension.receiverType(),
-                        typeParameters.subList(0, receiverParameterCount),
-                        typeParameters.subList(receiverParameterCount, typeParameters.size()),
-                        extension.property());
-                addNamespaceMember(statements, extension.namespaceName(), declaration);
-            }
-            case ValueExport value -> {
-                final var valueName = token(simpleName(value.qualifiedName()));
-                final var declaration = new Stmt.Var(valueName, value.type(), null,
-                        BindingMutability.IMMUTABLE, true);
-                if (value.namespaceName() == null) statements.add(declaration);
-                else addNamespaceMember(statements, value.namespaceName(), declaration);
-            }
-            case ClassExport classExport -> {
-                final var className = token(classExport.qualifiedName());
-                final var fields = new ArrayList<Stmt.Field>();
-                for (int i = 0; i < classExport.canonicalConstructorParameters().size(); i++) {
-                fields.add(new Stmt.Field(token("field" + i),
-                    classExport.canonicalConstructorParameters().get(i)));
+                case ExtensionExport extension -> {
+                    final var name = token(simpleName(extension.qualifiedName()));
+                    final var receiverParameterCount = extension.receiverTypeParameterCount();
+                    final var typeParameters = extension.signature().typeParameters();
+                    final var declaration = new Stmt.ExtensionMethod(name,
+                            parameterNames(extension.signature(), name.line()), extension.signature(),
+                            true, extension.mutating(), List.of(), List.of(),
+                            extension.minimumArity() + 1, extension.variadic(), extension.receiverType(),
+                            typeParameters.subList(0, receiverParameterCount),
+                            typeParameters.subList(receiverParameterCount, typeParameters.size()),
+                            extension.property());
+                    addNamespaceMember(statements, extension.namespaceName(), declaration);
                 }
-                final var contractUses = classExport.contracts().stream()
-                    .map(use -> new Stmt.ContractUse(token(use.qualifiedName()), use.typeArguments()))
-                    .toList();
-                final var constructor = new Stmt.Constructor(token("new"),
-                    classExport.canonicalConstructorPublic());
-                final var namedConstructors = classExport.namedConstructors().stream()
-                    .map(named -> new Stmt.NamedConstructor(token(named.name()),
-                        parameterNames(named.signature(), className.line()), named.signature(), true,
-                        List.of(), named.variadic()))
-                    .toList();
-                final var methods = classExport.methods().stream()
-                    .map(method -> new Stmt.Method(token(method.name()),
-                        parameterNames(method.signature(), className.line()), method.signature(), true,
-                        method.mutating(), List.of(), List.of(), method.minimumArity(), method.variadic()))
-                    .toList();
-                final var properties = classExport.properties().stream()
-                    .map(property -> new Stmt.Property(token(property.name()), property.type(), null,
-                            true, property.mutating(), null, null, null, false))
-                    .toList();
-                statements.add(new Stmt.ClassDecl(className, classExport.typeParameters(), contractUses,
-                    fields, properties, constructor, namedConstructors, methods, true, classExport.effect()));
-            }
-            case ContractExport contract -> {
-                final var contractName = token(contract.qualifiedName());
-                final var methods = contract.methods().stream()
-                    .map(method -> new Stmt.ContractMethod(token(method.name()),
-                        parameterNames(method.signature(), contractName.line()), method.signature(),
-                        method.mutating(), method.defaultMethod(), List.of(), List.of(),
-                        method.minimumArity(), method.variadic()))
-                    .toList();
-                final var properties = contract.properties().stream()
-                    .map(property -> new Stmt.ContractProperty(token(property.name()),
-                            property.type(), property.mutating()))
-                    .toList();
-                final var permittedClasses = contract.permittedClasses().stream()
-                    .map(use -> new Stmt.ContractUse(token(use.qualifiedName()), use.typeArguments()))
-                    .toList();
-                statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(),
-                        methods, properties, true, contract.sealed(), permittedClasses));
-            }
+                case ValueExport value -> {
+                    final var valueName = token(simpleName(value.qualifiedName()));
+                    final var declaration = new Stmt.Var(valueName, value.type(), null,
+                            BindingMutability.IMMUTABLE, true);
+                    if (value.namespaceName() == null) statements.add(declaration);
+                    else addNamespaceMember(statements, value.namespaceName(), declaration);
+                }
+                case ClassExport classExport -> {
+                    final var className = token(classExport.qualifiedName());
+                    final var fields = new ArrayList<Stmt.Field>();
+                    for (int i = 0; i < classExport.canonicalConstructorParameters().size(); i++) {
+                    fields.add(new Stmt.Field(token("field" + i),
+                        classExport.canonicalConstructorParameters().get(i)));
+                    }
+                    final var contractUses = classExport.contracts().stream()
+                        .map(use -> new Stmt.ContractUse(token(use.qualifiedName()), use.typeArguments()))
+                        .toList();
+                    final var constructor = new Stmt.Constructor(token("new"),
+                        classExport.canonicalConstructorPublic());
+                    final var namedConstructors = classExport.namedConstructors().stream()
+                        .map(named -> new Stmt.NamedConstructor(token(named.name()),
+                            parameterNames(named.signature(), className.line()), named.signature(), true,
+                            List.of(), named.variadic()))
+                        .toList();
+                    final var methods = classExport.methods().stream()
+                        .map(method -> new Stmt.Method(token(method.name()),
+                            parameterNames(method.signature(), className.line()), method.signature(), true,
+                            method.mutating(), List.of(), List.of(), method.minimumArity(), method.variadic()))
+                        .toList();
+                    final var properties = classExport.properties().stream()
+                        .map(property -> new Stmt.Property(token(property.name()), property.type(), null,
+                                true, property.mutating(), null, null, null, false))
+                        .toList();
+                    statements.add(new Stmt.ClassDecl(className, classExport.typeParameters(), contractUses,
+                        fields, properties, constructor, namedConstructors, methods, true, classExport.effect()));
+                }
+                case ContractExport contract -> {
+                    final var contractName = token(contract.qualifiedName());
+                    final var constructors = contract.constructors().stream()
+                        .map(constructor -> new Stmt.NamedContractConstructor(
+                                token(constructor.name()),
+                                parameterNames(constructor.signature(), contractName.line()),
+                                constructor.signature(),
+                                constructor.variadic()))
+                        .toList();
+                    final var methods = contract.methods().stream()
+                        .map(method -> new Stmt.ContractMethod(
+                                token(method.name()),
+                                parameterNames(method.signature(), contractName.line()), method.signature(),
+                                method.mutating(), method.defaultMethod(), List.of(), List.of(),
+                                method.minimumArity(), method.variadic()))
+                        .toList();
+                    final var properties = contract.properties().stream()
+                        .map(property -> new Stmt.ContractProperty(
+                                token(property.name()),
+                                property.type(), property.mutating()))
+                        .toList();
+                    final var permittedClasses = contract.permittedClasses().stream()
+                        .map(use -> new Stmt.ContractUse(token(use.qualifiedName()), use.typeArguments()))
+                        .toList();
+                    statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(),
+                            constructors, methods, properties, true, contract.sealed(), permittedClasses));
+                }
             }
         }
         return declarationsByPackage.entrySet().stream()
@@ -146,15 +142,32 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             .toList();
         }
 
-    public sealed interface ExportedDeclaration permits FunctionExport, ExtensionExport,
-            ValueExport, ClassExport, ContractExport {
+    public sealed interface ExportedDeclaration permits NamespacedDeclaration, ClassExport, ContractExport {
         String qualifiedName();
+    }
+
+    public sealed interface NamespacedDeclaration extends ExportedDeclaration permits FunctionExport, ExtensionExport, ValueExport {
+        String namespaceName();
+        String jvmOwner();
+    }
+
+    public record ValueExport(String qualifiedName,
+                              String jvmOwner,
+                              String initializationOwner,
+                              String namespaceName,
+                              TypeDescriptor type) implements NamespacedDeclaration {
+        public ValueExport {
+            Objects.requireNonNull(qualifiedName);
+            Objects.requireNonNull(jvmOwner);
+            Objects.requireNonNull(initializationOwner);
+            Objects.requireNonNull(type);
+        }
     }
 
     public record ExtensionExport(String qualifiedName, String jvmOwner, String namespaceName,
                                  TypeDescriptor receiverType, int receiverTypeParameterCount,
                                  FunctionDescriptor signature, boolean mutating, int minimumArity,
-                                 boolean variadic, boolean property) implements ExportedDeclaration {
+                                 boolean variadic, boolean property) implements NamespacedDeclaration {
         public ExtensionExport {
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(jvmOwner);
@@ -188,7 +201,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                  String namespaceName,
                                  FunctionDescriptor signature,
                                  int minimumArity,
-                                 boolean variadic) implements ExportedDeclaration {
+                                 boolean variadic) implements NamespacedDeclaration {
         public FunctionExport {
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(jvmOwner);
@@ -229,6 +242,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     public record ContractExport(String qualifiedName,
                                  List<TypeParameterDescriptor> typeParameters,
+                                 List<NamedConstructorExport> constructors,
                                  List<MethodExport> methods,
                                  List<PropertyExport> properties,
                                  boolean sealed,
@@ -236,6 +250,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         public ContractExport {
             Objects.requireNonNull(qualifiedName);
             typeParameters = List.copyOf(typeParameters);
+            constructors = List.copyOf(constructors);
             methods = List.copyOf(methods);
             properties = List.copyOf(properties);
             permittedClasses = List.copyOf(permittedClasses);
@@ -243,9 +258,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
         public ContractExport(String qualifiedName,
                               List<TypeParameterDescriptor> typeParameters,
+                              List<NamedConstructorExport> constructors,
                               List<MethodExport> methods,
                               List<PropertyExport> properties) {
-            this(qualifiedName, typeParameters, methods, properties, false, List.of());
+            this(qualifiedName, typeParameters, constructors, methods, properties, false, List.of());
         }
     }
 
@@ -393,6 +409,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     }
                     case Stmt.ContractDecl contract when contract.isPublic() ->
                             exports.add(new ContractExport(contract.name().lexeme(), contract.typeParameters(),
+                                    contract.namedConstructors().stream()
+                                            .map(constructor -> new NamedConstructorExport(
+                                                    constructor.name().lexeme(),
+                                                    constructor.typeDescriptor(),
+                                                    constructor.variadic()))
+                                            .toList(),
                                     contract.methods().stream()
                                             .map(method -> new MethodExport(method.name().lexeme(),
                                                     method.typeDescriptor(), method.isMutating(),
@@ -443,7 +465,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v15.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v16.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -469,7 +491,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v15.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v16.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -549,6 +571,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeUTF(contract.qualifiedName());
                 final var context = new WriteContext();
                 writeTypeParameters(output, contract.typeParameters(), context);
+                output.writeInt(contract.constructors().size());
+                for (final var constructor : contract.constructors()) {
+                    output.writeUTF(constructor.name());
+                    writeFunction(output, constructor.signature(), context);
+                    output.writeBoolean(constructor.variadic());
+                }
                 writeMethods(output, contract.methods(), context);
                 writeProperties(output, contract.properties(), context);
                 output.writeBoolean(contract.sealed());
@@ -611,6 +639,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var name = input.readUTF();
                 final var context = new ReadContext();
                 final var typeParameters = readTypeParameters(input, context);
+                final var constructors = new ArrayList<NamedConstructorExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var constructorName = input.readUTF();
+                    final var signature = readFunction(input, context);
+                    constructors.add(new NamedConstructorExport(constructorName, signature, input.readBoolean()));
+                }
                 final var methods = readMethods(input, context);
                 final var properties = readProperties(input, context);
                 final var sealed = input.readBoolean();
@@ -623,7 +657,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     }
                     permitted.add(new ContractUseExport(permittedName, arguments));
                 }
-                yield new ContractExport(name, typeParameters, methods, properties, sealed, permitted);
+                yield new ContractExport(name, typeParameters, constructors, methods, properties, sealed, permitted);
             }
             default -> throw new IOException("Unknown declaration kind in Zeron library index.");
         };

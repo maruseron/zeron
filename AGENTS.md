@@ -70,3 +70,4 @@
 - `documents/design-document-11_compilation-libraries-and-host-integration.md`: project compilation, libraries, and Java interop.
 - `documents/design-document-12_intrinsics-and-external-bindings.md`: compiler intrinsic registry and external declaration design.
 - `documents/design-document-13_typed-raised-effects.md`: typed raised effects, runtime behavior, and open design questions.
+- `documents/design-document-14_sum-product-types-and-newtypes.md`: exploratory design for algebraic sums, products, and value-class-like newtypes.

@@ -18,7 +18,7 @@ updated; assigning it to `Array<T>` projects that view to read-only. `array[inde
 Indexes are zero-based; compiled
 programs use `Objects.checkIndex` and throw `IndexOutOfBoundsException` for an invalid index.
 Each literal creates a distinct backing array. The standard library exposes
-`generateArray(length, initializer)`, which initializes each slot before returning. The bundled
+`zeron.internal.generateArray(length, initializer)`, which initializes each slot before returning. The bundled
 list implementation may use raw allocation internally for private capacity, but never exposes
 unused slots as `T` values.
 
@@ -119,13 +119,13 @@ The implemented first slice settles the basic collection contract as follows:
 - `.length` returns the number of slots.
 - Indexes are zero-based; invalid indexes throw `IndexOutOfBoundsException` in compiled programs.
 - Reads work through `Array<T>`; writes require `&Array<T>`.
-- Literals initialize every slot before exposing the array. `generateArray(length, initializer)`
-  invokes its initializer exactly once per index in ascending order before returning the mutable
-  array; a zero-length array invokes it zero times. Negative lengths fail during JVM array allocation
-  with `NegativeArraySizeException`. Internal capacity allocation may leave unused slots null only
-  while those slots remain inaccessible as `T` values.
+- Literals initialize every slot before exposing the array. `zeron.internal.generateArray(length,
+  initializer)` invokes its initializer exactly once per index in ascending order before returning the
+  mutable array; a zero-length array invokes it zero times. Negative lengths fail during JVM array
+  allocation with `NegativeArraySizeException`. Internal capacity allocation may leave unused slots
+  null only while those slots remain inaccessible as `T` values.
 - Each literal allocates a distinct array. Structural equality and slicing remain deferred.
-  `for` loops over arrays retain dedicated index-based lowering; `Sequence.fromArray` and
+  `for` loops over arrays retain dedicated index-based lowering; `Stream.fromArray` and
   `ArrayIterator` adapt arrays to the ordinary `Iterable<T>` protocol without making JVM arrays
   themselves implement a Zeron interface.
 
@@ -157,8 +157,8 @@ if the JVM array representation has its own runtime store checks.
 
 1. **Freeze the implemented contract.** Contextually typed empty and non-empty literals, fixed length,
   `.length`, zero-based indexing, checked bounds, initialized slots, fresh-array identity, and
-  specialized `for` iteration are the current choices. Public initialized allocation is provided by
-  `generateArray`; raw allocation remains internal. Resizing, slicing, and structural equality remain
+  specialized `for` iteration are the current choices. Initialized allocation is provided by
+  `zeron.internal.generateArray`; raw allocation remains internal. Resizing, slicing, and structural equality remain
   deferred.
 2. **Represent `Array<T>`.** Implemented with a dedicated element-aware descriptor, invariant
   equality, and composition with nullability, reference views, and function types.
@@ -198,7 +198,7 @@ if the JVM array representation has its own runtime store checks.
 - Should `Array<T>` interoperate directly with Java arrays, or should an intrinsic runtime wrapper
   mediate Java's covariant array behavior?
 - Should arrays directly conform to the standard `Iterable<T>` contract, or continue to use dedicated
-  index-based `for` lowering plus an explicit `Sequence`/`ArrayIterator` adapter?
+  index-based `for` lowering plus an explicit `Stream`/`ArrayIterator` adapter?
 - If first-class element-slot references are eventually added, what lifetime and escape rules govern
   them without exclusive borrowing?
 - Which future array operations justify new compiler intrinsics, and what initialization contract

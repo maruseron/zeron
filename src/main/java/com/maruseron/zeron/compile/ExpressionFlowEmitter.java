@@ -1,18 +1,20 @@
 package com.maruseron.zeron.compile;
 
+import com.maruseron.zeron.analize.Bind;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
-import com.maruseron.zeron.domain.BindingMutability;
-import com.maruseron.zeron.domain.FloatDescriptor;
+import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.lang.classfile.*;
 import java.lang.constant.*;
+import java.util.IdentityHashMap;
+
 import static com.maruseron.zeron.compile.BytecodeEmitter.*;
 
 final class ExpressionFlowEmitter {
-    static void emitLogical(CompilationContext context, final CodeBuilder composer, final Expr.Logical logical ){
+    static void emitLogical(CompilationContext context, final CodeBuilder composer, final Expr.Logical logical) {
         final var shortCircuit = composer.newLabel();
         final var done = composer.newLabel();
         emitExpr(context, composer, logical.left);
@@ -27,7 +29,7 @@ final class ExpressionFlowEmitter {
         context.lastEmittedType = TypeDescriptor.ofBoolean();
     }
 
-    static void emitCoalesce(CompilationContext context, final CodeBuilder composer, final Expr.Coalesce coalesce ){
+    static void emitCoalesce(CompilationContext context, final CodeBuilder composer, final Expr.Coalesce coalesce) {
         if (coalesce.left.getType() instanceof NullDescriptor) {
             emitExpr(context, composer, coalesce.right);
             emitConversion(context, composer, context.lastEmittedType, coalesce.getType());
@@ -51,7 +53,7 @@ final class ExpressionFlowEmitter {
     }
 
     static void emitCoalesceAssignment(CompilationContext context, final CodeBuilder composer,
-                                        final Expr.CoalesceAssignment assignment ){
+                                        final Expr.CoalesceAssignment assignment) {
         final var binding = context.symbols.getSymbol(assignment.name);
         final var fallback = composer.newLabel();
         final var done = composer.newLabel();
@@ -70,7 +72,7 @@ final class ExpressionFlowEmitter {
         context.lastEmittedType = assignment.getType();
     }
 
-    static void emitIfExpression(CompilationContext context, final CodeBuilder composer, final Expr.If iff ){
+    static void emitIfExpression(CompilationContext context, final CodeBuilder composer, final Expr.If iff) {
         final var elseLabel = composer.newLabel();
         final var doneLabel = composer.newLabel();
         emitExpr(context, composer, iff.condition);
@@ -85,7 +87,310 @@ final class ExpressionFlowEmitter {
         context.lastEmittedType = iff.getType();
     }
 
-    static void emitMatchExpression(CompilationContext context, final CodeBuilder composer, final Expr.Match match ){
+    static void emitForExpression(CompilationContext context, final CodeBuilder composer, final Expr.Pipeline pipeline) {
+        beginScope(context);
+        try {
+            if (pipeline.isTerminal) {
+                emitCollectedPipeline(context, composer, pipeline);
+            } else {
+                emitLazyPipeline(context, composer, pipeline);
+            }
+        } finally {
+            endScope(context);
+        }
+    }
+
+    private static final ClassDesc STREAM_CLASS = ClassDesc.of("zeron.collections.Stream");
+    private static final ClassDesc ITERABLE_CLASS = ClassDesc.of("zeron.collections.Iterable");
+    private static final ClassDesc ITERATOR_CLASS = ClassDesc.of("zeron.collections.Iterator");
+    private static final ClassDesc OPTION_CLASS = ClassDesc.of("zeron.lang.Option");
+    private static final ClassDesc SINK_CLASS = ClassDesc.of("zeron.collections.Sink");
+
+    private static void emitLazyPipeline(final CompilationContext context, final CodeBuilder composer,
+                                         final Expr.Pipeline pipeline) {
+        final var sourceType = pipeline.source.getType() instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : pipeline.source.getType();
+        emitExpr(context, composer, pipeline.source);
+        if (sourceType instanceof ArrayDescriptor arrayType) {
+            final var erasedArrayType = TypeSubstitution.erase(arrayType);
+            composer.invokestatic(STREAM_CLASS, "fromArray",
+                    MethodTypeDesc.of(STREAM_CLASS, TypeDescriptor.toJavaClassDesc(erasedArrayType)));
+        } else {
+            final var iterableType = TypeDescriptor.genericOf(
+                    TypeDescriptor.ofName("zeron.collections.Iterable"), pipeline.sourceElementType());
+            emitConversion(context, composer, context.lastEmittedType, iterableType);
+            composer.invokestatic(STREAM_CLASS, "from",
+                    MethodTypeDesc.of(STREAM_CLASS, ITERABLE_CLASS));
+        }
+
+        var elementType = pipeline.sourceElementType();
+        for (final var stage : pipeline.stages) {
+            final Expr.Lambda lambda;
+            final String methodName;
+            final TypeDescriptor resultElementType;
+            switch (stage) {
+                case Expr.PipelineStage.Map map -> {
+                    lambda = map.lambda();
+                    methodName = "map";
+                    resultElementType = map.type();
+                }
+                case Expr.PipelineStage.Filter filter -> {
+                    lambda = filter.lambda();
+                    methodName = "filter";
+                    resultElementType = elementType;
+                }
+                case Expr.PipelineStage.FlatMap flatMap -> {
+                    lambda = flatMap.lambda();
+                    methodName = "flatMap";
+                    resultElementType = flatMap.type();
+                }
+                case Expr.PipelineStage.Collect _ -> throw new IllegalStateException(
+                        "A lazy for-expression cannot contain a collect stage.");
+            }
+            final var functionType = (FunctionDescriptor) lambda.getType();
+            final var invocationFunctionType = TypeDescriptor.functionOf("", methodName.equals("map")
+                    ? TypeDescriptor.ofName("java.lang.Object")
+                    : methodName.equals("filter") ? TypeDescriptor.ofBoolean()
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.collections.Iterable"),
+                    TypeDescriptor.ofAny()), TypeDescriptor.ofName("java.lang.Object"));
+            emitExpr(context, composer, lambda);
+            emitConversion(context, composer, functionType, invocationFunctionType);
+            composer.invokevirtual(STREAM_CLASS, methodName,
+                    MethodTypeDesc.of(STREAM_CLASS, TypeDescriptor.toJavaClassDesc(invocationFunctionType)));
+            elementType = resultElementType;
+        }
+        context.lastEmittedType = pipeline.getType();
+    }
+
+    private static void emitCollectedPipeline(final CompilationContext context, final CodeBuilder composer,
+                                              final Expr.Pipeline pipeline) {
+        final var sourceType = pipeline.source.getType() instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : pipeline.source.getType();
+        final var isArray = sourceType instanceof ArrayDescriptor;
+        final var sourceElementType = pipeline.sourceElementType();
+        final var initialValueToken = nextLoopTemporary(context, "value");
+        final var initialValue = declareLoopLocal(context, initialValueToken, sourceElementType);
+        final Bind arrayLocal;
+        final Bind indexLocal;
+        final Bind iteratorLocal;
+        final Bind optionLocal;
+
+        if (isArray) {
+            final var arrayType = (ArrayDescriptor) sourceType;
+            emitExpr(context, composer, pipeline.source);
+            emitConversion(context, composer, context.lastEmittedType, arrayType);
+            arrayLocal = declareLoopLocal(context, nextLoopTemporary(context, "array"), arrayType);
+            composer.astore(arrayLocal.lvt() + context.localSlotOffset);
+            composer.iconst_0();
+            indexLocal = declareLoopLocal(context, nextLoopTemporary(context, "index"), TypeDescriptor.ofInt());
+            composer.istore(indexLocal.lvt() + context.localSlotOffset);
+            iteratorLocal = null;
+            optionLocal = null;
+        } else {
+            final var iterableType = TypeDescriptor.genericOf(
+                    TypeDescriptor.ofName("zeron.collections.Iterable"), sourceElementType);
+            emitExpr(context, composer, pipeline.source);
+            emitConversion(context, composer, context.lastEmittedType, iterableType);
+            composer.invokeinterface(ITERABLE_CLASS, "iterator", MethodTypeDesc.of(ITERATOR_CLASS));
+            iteratorLocal = declareLoopLocal(context, nextLoopTemporary(context, "iterator"),
+                    new ReferenceDescriptor(TypeDescriptor.genericOf(
+                            TypeDescriptor.ofName("zeron.collections.Iterator"), sourceElementType)));
+            composer.astore(iteratorLocal.lvt() + context.localSlotOffset);
+            optionLocal = declareLoopLocal(context, nextLoopTemporary(context, "option"),
+                    TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), sourceElementType));
+            arrayLocal = null;
+            indexLocal = null;
+        }
+
+        final var collect = (Expr.PipelineStage.Collect) pipeline.stages.getLast();
+        emitExpr(context, composer, collect.expression());
+        final var sinkLocal = declareLoopLocal(context, nextLoopTemporary(context, "sink"),
+                collect.expression().getType());
+        composer.astore(sinkLocal.lvt() + context.localSlotOffset);
+
+        final var stageFunctions = new IdentityHashMap<Expr.PipelineStage, Bind>();
+        for (final var stage : pipeline.stages) {
+            if (stage instanceof Expr.PipelineStage.Collect) continue;
+            final var lambda = switch (stage) {
+                case Expr.PipelineStage.Map map -> map.lambda();
+                case Expr.PipelineStage.FlatMap flatMap -> flatMap.lambda();
+                case Expr.PipelineStage.Filter filter -> filter.lambda();
+                case Expr.PipelineStage.Collect _ -> throw new IllegalStateException(
+                        "A collect stage does not have a callback.");
+            };
+            emitExpr(context, composer, lambda);
+            final var functionLocal = declareLoopLocal(context, nextLoopTemporary(context, "stage"),
+                    lambda.getType());
+            composer.astore(functionLocal.lvt() + context.localSlotOffset);
+            stageFunctions.put(stage, functionLocal);
+        }
+
+        final var loopStart = composer.newLabel();
+        final var loopContinue = composer.newLabel();
+        final var loopExit = composer.newLabel();
+        composer.labelBinding(loopStart);
+        if (isArray) {
+            final var arrayType = (ArrayDescriptor) sourceType;
+            composer.iload(indexLocal.lvt() + context.localSlotOffset);
+            composer.aload(arrayLocal.lvt() + context.localSlotOffset);
+            composer.arraylength();
+            composer.if_icmpge(loopExit);
+            composer.aload(arrayLocal.lvt() + context.localSlotOffset);
+            composer.iload(indexLocal.lvt() + context.localSlotOffset);
+            composer.aaload();
+            emitArrayReadConversion(context, composer, arrayType.elementType());
+            storePipelineValue(context, composer, initialValue, sourceElementType);
+        } else {
+            composer.aload(iteratorLocal.lvt() + context.localSlotOffset);
+            composer.invokeinterface(ITERATOR_CLASS, "next", MethodTypeDesc.of(OPTION_CLASS));
+            composer.astore(optionLocal.lvt() + context.localSlotOffset);
+            composer.aload(optionLocal.lvt() + context.localSlotOffset);
+            composer.invokeinterface(OPTION_CLASS, "isSome", MethodTypeDesc.of(ConstantDescs.CD_boolean));
+            composer.ifeq(loopExit);
+            composer.aload(optionLocal.lvt() + context.localSlotOffset);
+            composer.aconst_null();
+            composer.invokeinterface(OPTION_CLASS, "getOrElse",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+            emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), sourceElementType);
+            storePipelineValue(context, composer, initialValue, sourceElementType);
+        }
+
+        emitCollectedStages(context, composer, pipeline, 0, initialValue, sourceElementType,
+                stageFunctions, sinkLocal, loopContinue);
+
+        composer.labelBinding(loopContinue);
+        if (isArray) {
+            composer.iload(indexLocal.lvt() + context.localSlotOffset);
+            composer.iconst_1();
+            composer.iadd();
+            composer.istore(indexLocal.lvt() + context.localSlotOffset);
+        }
+        composer.goto_(loopStart);
+        composer.labelBinding(loopExit);
+        composer.aload(sinkLocal.lvt() + context.localSlotOffset);
+        context.lastEmittedType = pipeline.getType();
+    }
+
+    private static void emitCollectedStages(final CompilationContext context, final CodeBuilder composer,
+                                            final Expr.Pipeline pipeline, final int stageIndex,
+                                            final Bind currentValue, final TypeDescriptor currentType,
+                                            final IdentityHashMap<Expr.PipelineStage, Bind> stageFunctions,
+                                            final Bind sinkLocal, final Label continueLabel) {
+        final var collect = (Expr.PipelineStage.Collect) pipeline.stages.getLast();
+        if (stageIndex == pipeline.stages.size() - 1) {
+            composer.aload(sinkLocal.lvt() + context.localSlotOffset);
+            final var sinkInterfaceType = TypeDescriptor.genericOf(
+                    TypeDescriptor.ofName("zeron.collections.Sink"), TypeDescriptor.ofAny());
+            emitConversion(context, composer, collect.expression().getType(), sinkInterfaceType);
+            loadPipelineValue(context, composer, currentValue, currentType);
+            emitConversion(context, composer, currentType, TypeDescriptor.ofAny());
+            composer.invokeinterface(SINK_CLASS, "add",
+                    MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(TypeDescriptor.ofUnit()),
+                            ConstantDescs.CD_Object));
+            emitPop(context, composer, TypeDescriptor.ofUnit());
+            composer.goto_(continueLabel);
+            return;
+        }
+
+        final var stage = pipeline.stages.get(stageIndex);
+        final var lambda = switch (stage) {
+            case Expr.PipelineStage.Map map -> map.lambda();
+            case Expr.PipelineStage.FlatMap flatMap -> flatMap.lambda();
+            case Expr.PipelineStage.Filter filter -> filter.lambda();
+            case Expr.PipelineStage.Collect _ -> throw new IllegalStateException(
+                    "A collect stage must be the final pipeline stage.");
+        };
+        final var functionType = (FunctionDescriptor) lambda.getType();
+        composer.aload(stageFunctions.get(stage).lvt() + context.localSlotOffset);
+        loadPipelineValue(context, composer, currentValue, currentType);
+        emitConversion(context, composer, currentType, functionType.parameters().getFirst());
+        composer.invokeinterface(TypeDescriptor.toJavaClassDesc(functionType), "invoke",
+                toJavaMethodDescriptor(functionType));
+        context.lastEmittedType = functionType.returnType();
+
+        switch (stage) {
+            case Expr.PipelineStage.Map map -> {
+                final var mappedType = map.type();
+                final var mappedValue = declareLoopLocal(context, nextLoopTemporary(context, "mapped"), mappedType);
+                emitConversion(context, composer, functionType.returnType(), mappedType);
+                storePipelineValue(context, composer, mappedValue, mappedType);
+                emitCollectedStages(context, composer, pipeline, stageIndex + 1, mappedValue, mappedType,
+                        stageFunctions, sinkLocal, continueLabel);
+            }
+            case Expr.PipelineStage.Filter _ -> {
+                final var next = composer.newLabel();
+                composer.ifeq(continueLabel);
+                emitCollectedStages(context, composer, pipeline, stageIndex + 1, currentValue, currentType,
+                        stageFunctions, sinkLocal, continueLabel);
+                composer.labelBinding(next);
+            }
+            case Expr.PipelineStage.FlatMap flatMap -> {
+                final var flattenedType = flatMap.type();
+                final var iterableType = TypeDescriptor.genericOf(
+                        TypeDescriptor.ofName("zeron.collections.Iterable"), flattenedType);
+                emitConversion(context, composer, functionType.returnType(), iterableType);
+                composer.invokeinterface(ITERABLE_CLASS, "iterator", MethodTypeDesc.of(ITERATOR_CLASS));
+                final var iteratorLocal = declareLoopLocal(context, nextLoopTemporary(context, "flatIterator"),
+                        new ReferenceDescriptor(TypeDescriptor.genericOf(
+                                TypeDescriptor.ofName("zeron.collections.Iterator"), flattenedType)));
+                composer.astore(iteratorLocal.lvt() + context.localSlotOffset);
+                final var optionLocal = declareLoopLocal(context, nextLoopTemporary(context, "flatOption"),
+                        TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), flattenedType));
+                final var innerStart = composer.newLabel();
+                final var innerExit = composer.newLabel();
+                composer.labelBinding(innerStart);
+                composer.aload(iteratorLocal.lvt() + context.localSlotOffset);
+                composer.invokeinterface(ITERATOR_CLASS, "next", MethodTypeDesc.of(OPTION_CLASS));
+                composer.astore(optionLocal.lvt() + context.localSlotOffset);
+                composer.aload(optionLocal.lvt() + context.localSlotOffset);
+                composer.invokeinterface(OPTION_CLASS, "isSome",
+                        MethodTypeDesc.of(ConstantDescs.CD_boolean));
+                composer.ifeq(innerExit);
+                composer.aload(optionLocal.lvt() + context.localSlotOffset);
+                composer.aconst_null();
+                composer.invokeinterface(OPTION_CLASS, "getOrElse",
+                        MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+                emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), flattenedType);
+                final var flattenedValue =
+                        declareLoopLocal(context, nextLoopTemporary(context, "flatValue"), flattenedType);
+                storePipelineValue(context, composer, flattenedValue, flattenedType);
+                emitCollectedStages(context, composer, pipeline, stageIndex + 1, flattenedValue, flattenedType,
+                        stageFunctions, sinkLocal, innerStart);
+                composer.goto_(innerStart);
+                composer.labelBinding(innerExit);
+            }
+            case Expr.PipelineStage.Collect _ -> throw new IllegalStateException(
+                    "A collect stage must be the final pipeline stage.");
+        }
+    }
+
+    private static void storePipelineValue(final CompilationContext context, final CodeBuilder composer,
+                                           final Bind binding, final TypeDescriptor type) {
+        composer.storeLocal(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(type).descriptorString()),
+                binding.lvt() + context.localSlotOffset);
+        context.lastEmittedType = type;
+    }
+
+    private static void loadPipelineValue(final CompilationContext context, final CodeBuilder composer,
+                                          final Bind binding, final TypeDescriptor type) {
+        composer.loadLocal(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(type).descriptorString()),
+                binding.lvt() + context.localSlotOffset);
+        context.lastEmittedType = type;
+    }
+
+    private static Bind declareLoopLocal(CompilationContext context, final Token name, final TypeDescriptor type ){
+        context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, name, type, BindingMutability.IMMUTABLE);
+        context.symbols.define(name);
+        return context.symbols.getSymbol(name);
+    }
+
+    private static Token nextLoopTemporary(CompilationContext context, final String name ){
+        return new Token(TokenType.IDENTIFIER, "$for$" + name + "$" + context.loopTemporaryCount++, null, -1);
+    }
+
+    static void emitMatchExpression(CompilationContext context, final CodeBuilder composer, final Expr.Match match) {
         final var done = composer.newLabel();
         emitExpr(context, composer, match.scrutinee);
         final var failure = composer.newLabel();
@@ -248,14 +553,14 @@ final class ExpressionFlowEmitter {
         context.lastEmittedType = handle.getType();
     }
 
-    static void emitTypeTest(CompilationContext context, final CodeBuilder composer, final Expr.TypeTest test ){
+    static void emitTypeTest(CompilationContext context, final CodeBuilder composer, final Expr.TypeTest test) {
         emitExpr(context, composer, test.value);
         emitBox(context, composer, context.lastEmittedType);
         composer.instanceOf(runtimeTypeTestClass(context, test.targetType));
         context.lastEmittedType = TypeDescriptor.ofBoolean();
     }
 
-    static void emitCast(CompilationContext context, final CodeBuilder composer, final Expr.Cast cast ){
+    static void emitCast(CompilationContext context, final CodeBuilder composer, final Expr.Cast cast) {
         emitExpr(context, composer, cast.value);
         emitBox(context, composer, context.lastEmittedType);
         final var targetClass = runtimeTypeTestClass(context, cast.targetType);
@@ -285,7 +590,7 @@ final class ExpressionFlowEmitter {
         context.lastEmittedType = cast.getType();
     }
 
-    private static ClassDesc runtimeTypeTestClass(CompilationContext context, final TypeDescriptor type ){
+    private static ClassDesc runtimeTypeTestClass(CompilationContext context, final TypeDescriptor type) {
         return switch (type) {
             case IntDescriptor _ -> ConstantDescs.CD_Integer;
             case FloatDescriptor _ -> ConstantDescs.CD_Double;
@@ -298,7 +603,7 @@ final class ExpressionFlowEmitter {
         };
     }
 
-    static void emitComparison(CompilationContext context, final CodeBuilder composer, final Expr.Binary binary ){
+    static void emitComparison(CompilationContext context, final CodeBuilder composer, final Expr.Binary binary) {
         final var operandDescriptor = TypeDescriptor.toJavaClassDesc(binary.left.getType()).descriptorString();
         final var matched = composer.newLabel();
         final var done = composer.newLabel();
@@ -347,7 +652,7 @@ final class ExpressionFlowEmitter {
 
     private static void branchIntegerComparison(CompilationContext context, final CodeBuilder composer,
                                         final TokenType operator,
-                                        final Label target ){
+                                        final Label target) {
         switch (operator) {
             case EQUAL_EQUAL -> composer.if_icmpeq(target);
             case BANG_EQUAL -> composer.if_icmpne(target);

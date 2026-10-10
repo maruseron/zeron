@@ -7,7 +7,13 @@ import java.util.Map;
 import java.util.Objects;
 
 public final class FunctionBindingRegistry {
-    public sealed interface JvmTarget permits StaticMethod, StaticFieldInstanceMethod {}
+    public sealed interface JvmTarget permits StaticMethod, StaticFieldInstanceMethod, IntrinsicBinding {}
+
+    public record IntrinsicBinding(IntrinsicId id) implements JvmTarget {
+        public IntrinsicBinding {
+            Objects.requireNonNull(id);
+        }
+    }
 
     public record StaticMethod(ClassDesc owner,
                                String methodName,
@@ -69,11 +75,31 @@ public final class FunctionBindingRegistry {
         return new FunctionBindingRegistry(updated);
     }
 
+    public FunctionBindingRegistry withBindings(final FunctionBindingRegistry additionalBindings) {
+        final var updated = new LinkedHashMap<>(bindings);
+        additionalBindings.bindings.forEach((name, binding) -> {
+            final var existing = updated.putIfAbsent(name, binding);
+            if (existing != null && !existing.equals(binding)) {
+                throw new IllegalArgumentException("Conflicting function binding: " + name);
+            }
+        });
+        return new FunctionBindingRegistry(updated);
+    }
+
     public Binding find(final String qualifiedName) {
         return bindings.get(qualifiedName);
     }
 
     private static FunctionBindingRegistry createStandard() {
-        return new FunctionBindingRegistry(Map.of());
+        final var numericConversion = TypeDescriptor.functionOf("intToFloat",
+                TypeDescriptor.ofFloat(), TypeDescriptor.ofInt());
+        final var checkedNumericConversion = TypeDescriptor.functionOf("floatToInt",
+                TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), TypeDescriptor.ofInt()),
+                TypeDescriptor.ofFloat());
+        return new FunctionBindingRegistry(Map.of(
+                "zeron.lang.intToFloat",
+                new Binding(numericConversion, new IntrinsicBinding(IntrinsicId.INT_TO_FLOAT)),
+                "zeron.lang.floatToInt",
+                new Binding(checkedNumericConversion, new IntrinsicBinding(IntrinsicId.FLOAT_TO_INT_OPTION))));
     }
 }

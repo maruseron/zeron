@@ -18,6 +18,9 @@ not a proposed feature in this note. See [design-document-05_classes-and-contrac
 - `==` and `!=` compare primitive values and strings by value. Reference comparisons currently use
   `Objects.equals`; generated classes inherit `Object.equals` unless behavior is supplied elsewhere,
   so nominal instances currently compare by identity.
+- `==` and `!=` are also allowed on matching generic type parameters without an explicit equality
+  constraint. At generic erasure they use `Objects.equals`; other operators on unconstrained type
+  parameters remain rejected.
 - Compound assignments are supported for variables, but not for properties or array indices.
 
 ## Conditional Navigation: `?.`
@@ -124,6 +127,17 @@ The operator does not call `equals` and never inspects fields. It has the same e
 Structural equality remains deferred. If added later, it should require an explicit equality
 contract or opt-in; the language must not derive it silently from private fields. Recursive values,
 cycles, `Any`, and generic constraints remain open design questions for that separate feature.
+
+### Equality on generic type parameters
+
+Generic functions may compare two operands of the same unconstrained type parameter with `==` or
+`!=`. This narrow exception does not add general operator constraints or overload resolution.
+Resolved operand types must still match exactly, and arithmetic or relational operations on
+unconstrained type parameters remain unsupported.
+
+Generic type parameters erase to reference values, so their equality currently lowers through
+`Objects.equals`. This can differ from direct primitive `Float` comparison for NaN and signed zero.
+Whether `Float` equality should consistently follow boxed `Double.equals` semantics remains open.
 
 ## Suggested Order
 

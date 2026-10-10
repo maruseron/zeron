@@ -14,8 +14,8 @@ final class TypeUnifier {
                       TypeDescriptor actual,
                       final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                       final Token where) {
-        if (pattern.equals(actual)) return;
         if (pattern instanceof TypeParameterDescriptor parameter) {
+            if (actual instanceof NullDescriptor) return;
             final var previous = substitutions.putIfAbsent(parameter, actual);
             if (previous != null && !previous.equals(actual)
                 && !acceptsAny(previous, actual)
@@ -27,6 +27,9 @@ final class TypeUnifier {
             }
             return;
         }
+        if (pattern.equals(actual)
+                && !(pattern instanceof NullableDescriptor || pattern instanceof ReferenceDescriptor
+                        || pattern instanceof ArrayDescriptor || pattern instanceof GenericDescriptor)) return;
         if (pattern instanceof NullableDescriptor nullablePattern) {
             if (actual instanceof NullDescriptor) return;
             final var actualBase = actual instanceof NullableDescriptor nullableActual
@@ -72,6 +75,7 @@ final class TypeUnifier {
             unify(functionPattern.returnType(), functionActual.returnType(), substitutions, where);
             return;
         }
+        if (pattern.equals(actual)) return;
         if (!pattern.equals(actual)
                 && !(actual instanceof ReferenceDescriptor reference && pattern.equals(reference.baseType()))) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,

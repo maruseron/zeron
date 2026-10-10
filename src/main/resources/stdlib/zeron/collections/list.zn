@@ -26,7 +26,7 @@ class ListIterator<T> is Iterator<T> {
     }
 }
 
-public class List<T> is Iterable<T> {
+public class List<T> is Iterable<T>, Sink<T> {
     values: &Array<T>;
     count: Int;
 

@@ -4,7 +4,6 @@ import com.maruseron.zeron.analize.Bind;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
-import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
@@ -51,7 +50,9 @@ final class StatementEmitter {
                 } else {
                     emitExpr(context, composer, condition);
                     if (elseBranch != null) {
-                        composer.ifThenElse(c -> emitStmt(context, c, thenBranch), c -> emitStmt(context, c, elseBranch));
+                        composer.ifThenElse(
+                            c -> emitStmt(context, c, thenBranch), 
+                            c -> emitStmt(context, c, elseBranch));
                     } else {
                         composer.ifThen(c -> emitStmt(context, c, thenBranch));
                     }
@@ -127,7 +128,7 @@ final class StatementEmitter {
     private static void emitFor(CompilationContext context, final CodeBuilder composer,
                          final Token iterationBind,
                          final Expr iterable,
-                         final Stmt body ){
+                         final Stmt body) {
         beginScope(context);
         try {
             final var iterableType = iterable.getType() instanceof ReferenceDescriptor reference
@@ -146,7 +147,7 @@ final class StatementEmitter {
     private static void emitProtocolFor(CompilationContext context, final CodeBuilder composer,
                                 final Token iterationBind,
                                 final Expr iterable,
-                                final Stmt body ){
+                                final Stmt body) {
         final var elementType = context.resolution.iterationElementType(iterationBind);
         final var protocol = context.resolution.iterationProtocol(iterationBind);
         final var iteratorName = protocol.iteratorName();

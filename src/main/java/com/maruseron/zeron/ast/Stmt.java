@@ -2,6 +2,7 @@ package com.maruseron.zeron.ast;
 
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
+import com.maruseron.zeron.ast.Stmt.ExternalFunction;
 import com.maruseron.zeron.domain.ArrayDescriptor;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
@@ -105,6 +106,12 @@ public sealed interface Stmt {
         }
     }
 
+    record ContractUse(Token name, List<TypeDescriptor> typeArguments) {
+        public ContractUse {
+            typeArguments = List.copyOf(typeArguments);
+        }
+    }
+
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                      List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
                      Constructor constructor, List<NamedConstructor> namedConstructors,
@@ -139,9 +146,9 @@ public sealed interface Stmt {
         }
     }
 
-    record ContractUse(Token name, List<TypeDescriptor> typeArguments) {
-        public ContractUse {
-            typeArguments = List.copyOf(typeArguments);
+    record Field(Token name, TypeDescriptor type, Expr initializer) {
+        public Field(final Token name, final TypeDescriptor type) {
+            this(name, type, null);
         }
     }
 
@@ -163,7 +170,46 @@ public sealed interface Stmt {
         }
     }
 
+    record Method(Token name, List<Token> parameters,
+                  FunctionDescriptor typeDescriptor, boolean isPublic,
+                  boolean isMutating, List<Stmt> body, List<Expr> defaultValues,
+                  int minimumArity, boolean variadic) {
+        public Method {
+            parameters = List.copyOf(parameters);
+            body = List.copyOf(body);
+            defaultValues = List.copyOf(defaultValues);
+            Stmt.validateVariadic(parameters, typeDescriptor, variadic);
+            final var fixedArity = Stmt.fixedArity(parameters, variadic);
+            if (minimumArity < 0 || minimumArity > fixedArity
+                    || defaultValues.size() > fixedArity - minimumArity) {
+                throw new IllegalArgumentException("Invalid method minimum arity.");
+            }
+        }
+
+        public Method(Token name, List<Token> parameters,
+                      FunctionDescriptor typeDescriptor, boolean isPublic,
+                      boolean isMutating, List<Stmt> body) {
+            this(name, parameters, typeDescriptor, isPublic, isMutating, body, List.of(),
+                    parameters.size(), false);
+        }
+
+        public Method(Token name, List<Token> parameters,
+                      FunctionDescriptor typeDescriptor, boolean isPublic,
+                      boolean isMutating, List<Stmt> body, List<Expr> defaultValues) {
+            this(name, parameters, typeDescriptor, isPublic, isMutating, body, defaultValues,
+                    Stmt.minimumArity(parameters, defaultValues), false);
+        }
+
+        public Method(Token name, List<Token> parameters, FunctionDescriptor typeDescriptor,
+                      boolean isPublic, boolean isMutating, List<Stmt> body,
+                      List<Expr> defaultValues, int minimumArity) {
+            this(name, parameters, typeDescriptor, isPublic, isMutating, body, defaultValues,
+                    minimumArity, false);
+        }
+    }
+
     record ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                        List<NamedContractConstructor> namedConstructors,
                         List<ContractMethod> methods, List<ContractProperty> properties,
                         boolean isPublic, boolean isSealed,
                         List<ContractUse> permittedClasses) implements Stmt, Decl {
@@ -171,15 +217,30 @@ public sealed interface Stmt {
             permittedClasses = List.copyOf(permittedClasses);
         }
 
-        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters, 
+                            List<NamedContractConstructor> namedConstructors,
                             List<ContractMethod> methods, boolean isPublic) {
-            this(name, typeParameters, methods, List.of(), isPublic, false, List.of());
+            this(name, typeParameters, namedConstructors, methods, List.of(), isPublic, false, List.of());
         }
 
-        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters, 
+                            List<NamedContractConstructor> namedConstructors,
                             List<ContractMethod> methods, List<ContractProperty> properties,
                             boolean isPublic) {
-            this(name, typeParameters, methods, properties, isPublic, false, List.of());
+            this(name, typeParameters, namedConstructors, methods, properties, isPublic, false, List.of());
+        }
+    }
+
+    record NamedContractConstructor(Token name, List<Token> parameters,
+                            FunctionDescriptor typeDescriptor, boolean variadic) {
+        public NamedContractConstructor {
+            parameters = List.copyOf(parameters);
+            Stmt.validateVariadic(parameters, typeDescriptor, variadic);
+        }
+
+        public NamedContractConstructor(Token name, List<Token> parameters,
+                                FunctionDescriptor typeDescriptor) {
+            this(name, parameters, typeDescriptor, false);
         }
     }
 
@@ -244,12 +305,6 @@ public sealed interface Stmt {
 
         public boolean isCustom() {
             return getterBody != null || setterBody != null;
-        }
-    }
-
-    record Field(Token name, TypeDescriptor type, Expr initializer) {
-        public Field(final Token name, final TypeDescriptor type) {
-            this(name, type, null);
         }
     }
 
@@ -350,44 +405,6 @@ public sealed interface Stmt {
     }
 
     record ExternalStaticProperty(Token name, TypeDescriptor type, boolean isPublic) {}
-
-    record Method(Token name, List<Token> parameters,
-                  FunctionDescriptor typeDescriptor, boolean isPublic,
-                  boolean isMutating, List<Stmt> body, List<Expr> defaultValues,
-                  int minimumArity, boolean variadic) {
-        public Method {
-            parameters = List.copyOf(parameters);
-            body = List.copyOf(body);
-            defaultValues = List.copyOf(defaultValues);
-            Stmt.validateVariadic(parameters, typeDescriptor, variadic);
-            final var fixedArity = Stmt.fixedArity(parameters, variadic);
-            if (minimumArity < 0 || minimumArity > fixedArity
-                    || defaultValues.size() > fixedArity - minimumArity) {
-                throw new IllegalArgumentException("Invalid method minimum arity.");
-            }
-        }
-
-        public Method(Token name, List<Token> parameters,
-                      FunctionDescriptor typeDescriptor, boolean isPublic,
-                      boolean isMutating, List<Stmt> body) {
-            this(name, parameters, typeDescriptor, isPublic, isMutating, body, List.of(),
-                    parameters.size(), false);
-        }
-
-        public Method(Token name, List<Token> parameters,
-                      FunctionDescriptor typeDescriptor, boolean isPublic,
-                      boolean isMutating, List<Stmt> body, List<Expr> defaultValues) {
-            this(name, parameters, typeDescriptor, isPublic, isMutating, body, defaultValues,
-                    Stmt.minimumArity(parameters, defaultValues), false);
-        }
-
-        public Method(Token name, List<Token> parameters, FunctionDescriptor typeDescriptor,
-                      boolean isPublic, boolean isMutating, List<Stmt> body,
-                      List<Expr> defaultValues, int minimumArity) {
-            this(name, parameters, typeDescriptor, isPublic, isMutating, body, defaultValues,
-                    minimumArity, false);
-        }
-    }
 
     record If(Token paren, Expr condition, Stmt thenBranch, Stmt elseBranch) implements Stmt {}
 

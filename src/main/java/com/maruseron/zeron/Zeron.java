@@ -31,7 +31,7 @@ import static java.lang.IO.print;
 
 public class Zeron {
     private static final java.util.Set<String> STANDARD_LIBRARY_TYPES = java.util.Set.of(
-            "zeron.collections.Iterator", "zeron.collections.Iterable",
+            "zeron.collections.Iterator", "zeron.collections.Iterable", "zeron.collections.Sink",
             "zeron.ranges.IntIterator", "zeron.ranges.IntRange");
 
     static boolean hadError = false;

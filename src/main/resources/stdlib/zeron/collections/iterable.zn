@@ -2,4 +2,8 @@ package zeron.collections;
 
 public contract Iterable<T> {
     iterator(): &Iterator<T>;
+
+    default forEach(consumer: (T) -> Unit): Unit {
+        for (let element in this) consumer(element);
+    }
 }

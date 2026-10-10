@@ -122,7 +122,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     external classes and member declarations, and expected-class declarations, remain future work.
     See the [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
     Native algebraic data-type declarations, discriminated unions beyond sealed contracts, and
-    structural or nominal tuples are also future work.
+    structural or nominal tuples are also future work. Native sum declarations, standalone product
+    types, and value-class-like newtypes remain design explorations; see
+    [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
 - Immutable collection types, list comprehensions, and explicit resource management.
 - Safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`), and explicit
     reference identity (`===`) are implemented. Structural equality remains future work; existing
@@ -186,6 +188,24 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     `value |> f(option)` means `f(value, option)`. The piped value becomes the first argument;
     stages evaluate left to right. No partial application, method lookup, or implicit nullable/result
     propagation is intended.
+For-expressions support ordered `map`, `flatMap`, and `filter` stages. A `flatMap` expression must
+return an `Iterable<T>`; each produced iterable is traversed before advancing to the next source
+element. An expression without `collect` evaluates its source once and produces a lazy `Stream<T>`.
+Stage callbacks are created in source order when the pipeline is built, while their bodies run only
+as traversal demands elements. Each traversal requests a new iterator from the source; this does not
+guarantee that the source is replayable or yields the same values on every traversal. Stages execute
+in order, with filters skipping later stages for rejected elements; terminal operations may stop
+traversal early.
+
+A final `collect` expression is evaluated as a `Sink<T>` and the pipeline is lowered directly to
+iteration and sink additions; the expression returns that sink. Before traversal, the collected form
+evaluates the source and acquires its iterator for iterable inputs, then evaluates the collector, then
+creates stage callbacks in source order. Stage bodies run for each relevant element during traversal.
+Stream fusion, `find`, and `take` stages are not part of the current syntax. The current lowering
+represents stage expressions as callbacks: future work could inline expressions into collected loops
+to avoid per-element callback calls, then investigate a fused lazy iterator/state machine to avoid
+intermediate stream objects while preserving laziness, captures, repeated traversal, and `flatMap`
+ordering.
 
 ---
 
@@ -290,8 +310,9 @@ Generic top-level function callbacks have bridge adaptation. Callback values cro
 member boundaries are also adapted through generated helpers and erased contract bridges; broader
 shape coverage remains follow-up work. `Array<T>` is an implemented built-in invariant type
 constructor with its own descriptor, not a user-defined generic class; literals, indexing, and
-`.length` are supported. Empty literals require an expected array type, and `generateArray` initializes
-every slot through an index callback. The `Type[]` spelling and discriminated unions remain design proposals.
+`.length` are supported. Empty literals require an expected array type, and
+`zeron.internal.generateArray` initializes every slot through an index callback. The `Type[]` spelling
+and discriminated unions remain design proposals.
 Mutable-reference capability (`&Type`) is preserved in resolved
 types and enforced for array-slot writes, function-view projection, class member mutation, and
 mutable-to-read-only projections.
@@ -600,19 +621,23 @@ type. Range values can be stored and iterated later like any other iterable.
 `Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`,
 defined in `src/main/resources/stdlib/zeron/collections/iterator.zn` and
 `src/main/resources/stdlib/zeron/collections/iterable.zn`, respectively. The standard library also
-provides a lazy `Sequence<T>` API in `src/main/resources/stdlib/zeron/collections/sequence.zn` and
-an array-backed mutable `List<T>` in `src/main/resources/stdlib/zeron/collections/list.zn`. The
+provides a lazy `Stream<T>` in `src/main/resources/stdlib/zeron/collections/stream.zn`, a
+`Sink<T>` contract, and an array-backed mutable `List<T>` in
+`src/main/resources/stdlib/zeron/collections/list.zn`. The
 `for` protocol recognizes only the fully-qualified `zeron.collections.Iterable<T>` contract; a
 same-named contract in another package
 does not make a type iterable. A custom iterable imports and implements these public contracts
 through ordinary class conformance; arrays retain specialized lowering and ranges use ordinary
 protocol dispatch.
 
-`Sequence<T>` operators `map`, `filter`, `take`, and `drop` are lazy; each traversal obtains a fresh
-iterator from the source. Negative `take`/`drop` counts behave like zero. Terminal operations
+`Stream<T>` operators `map`, `flatMap`, `filter`, `take`, and `drop` are lazy; each traversal requests
+a fresh iterator from the source, without guaranteeing that the source is replayable. `flatMap`
+traverses each returned `Iterable<T>` before advancing the source. Negative `take`/`drop` counts
+behave like zero. Terminal operations
 `forEach`, `fold`, `count`, `any`, and `all` consume the sequence, with `any` and `all` short-circuiting.
-`Sequence.fromArray` and `ArrayIterator` adapt arrays to `Iterable<T>`; direct array `for` loops keep
-their specialized index-based lowering.
+`Stream.fromArray` and `ArrayIterator` adapt arrays to `Iterable<T>`; direct array `for` loops keep
+their specialized index-based lowering. For-expressions over arrays likewise retain direct array
+iteration in the collected form, while an uncollected expression builds a lazy stream.
 
 `List<T>.empty()` creates a growable list, and `List<T>.fromArray(values)` copies an array. Its
 read operations (`size`, `isEmpty`, `at`, and iteration) work through `List<T>`; structural
@@ -665,8 +690,10 @@ declaration synthesizes a public constructor; `private constructor new;` restric
 construction. Fields remain private. Visibility-marked properties generate getters, and `mut`
 properties also generate setters; custom accessors use explicitly declared backing fields. Named
 factories have no `this`; block bodies must return `&Class` on every normal path, and all object
-allocation still goes through canonical `new`. Methods and properties provide the class API.
-Contracts can require method signatures and read-only or writable properties; the
+allocation still goes through canonical `new`. Contracts can also require named factories; conforming
+classes must provide compatible public factories, which are statically dispatched through the
+concrete class name rather than dynamically through a contract value. Methods and properties provide
+the instance API. Contracts can require method signatures and read-only or writable properties; the
 source design permits multiple declaration-site conformances, checked statically, and calls through
 contract-typed references use interface dispatch, including when a class conforms to multiple
 contracts. Default contract methods are implemented. Separate `implement` declarations,

@@ -1,0 +1,15 @@
+package zeron.lang;
+
+public extension Float {
+    public property sign: Int {
+        get {
+                 if (this == 0.0) return  0;
+            else if (this  < 0.0) return -1;
+            else                  return  1;
+        }
+    }
+
+    public fn toInt(): Option<Int> = floatToInt(this);
+}
+
+external fn floatToInt(value: Float): Option<Int>;

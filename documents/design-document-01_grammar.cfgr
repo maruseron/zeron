@@ -170,8 +170,8 @@ range                      : INT ".." INT ;
 #   stages for rejected elements, and terminal consumers may stop traversal early.
 # - A collect expression is the final stage and must evaluate to a Sink<T>; the expression returns
 #   that sink. Before traversal, evaluate the source and acquire its iterator for iterable inputs, then
-#   evaluate the collector, then create stage callbacks in source order. Callback bodies run per
-#   relevant element during traversal.
+#   evaluate the collector, then snapshot stage captures in source order. Stage expressions are
+#   inlined in the collected loop, and their bodies run per relevant element during traversal.
 # - A flatMap stage expression must evaluate to an Iterable<T>, fully traversed before the next source
 #   element. The expression in a filter stage must always resolve to a Boolean-valued result.
 # - Contract constructors are static factory requirements; conforming classes provide compatible

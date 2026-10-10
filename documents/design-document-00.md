@@ -76,6 +76,25 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Basic nullable types: a non-null value can be widened to `T?`, and `null` can initialize an
     explicitly nullable binding or parameter.
 - Single-expression function bodies and range-literal syntax.
+- For-expressions support ordered `map`, `flatMap`, and `filter` stages. A `flatMap` expression must
+    return an `Iterable<T>`; each produced iterable is traversed before advancing to the next source
+    element. An expression without `collect` evaluates its source once and produces a lazy `Stream<T>`.
+    Stage callbacks are created in source order when the pipeline is built, while their bodies run only
+    as traversal demands elements. Each traversal requests a new iterator from the source; this does not
+    guarantee that the source is replayable or yields the same values on every traversal. Stages execute
+    in order, with filters skipping later stages for rejected elements; terminal operations may stop
+    traversal early.
+    A final `collect` expression is evaluated as a `Sink<T>` and the pipeline is lowered directly to
+    iteration and sink additions; the expression returns that sink. Before traversal, the collected form
+    evaluates the source and acquires its iterator for iterable inputs, then evaluates the collector, then
+    snapshots each stage's captured values in source order. Stage expressions are emitted inline in the
+    collected loop, so there is no per-element stage callback invocation; stage bodies still run for each
+    relevant element during traversal. Stream fusion, `find`, and `take` stages are not part of the current
+    syntax. Lazy for-expressions compose ordinary `Stream<T>` operators and therefore retain intermediate
+    stream/iterator wrappers and per-element callback calls. A fused lazy iterator/state machine could
+    reduce that overhead, but would add machinery for stage state, captures, repeated traversal,
+    short-circuiting, exceptions, and `flatMap` ordering; defer it until measurements show the wrappers or
+    callback dispatch are a meaningful cost.
 
 #### Prototypes and partial support
 
@@ -188,24 +207,6 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     `value |> f(option)` means `f(value, option)`. The piped value becomes the first argument;
     stages evaluate left to right. No partial application, method lookup, or implicit nullable/result
     propagation is intended.
-For-expressions support ordered `map`, `flatMap`, and `filter` stages. A `flatMap` expression must
-return an `Iterable<T>`; each produced iterable is traversed before advancing to the next source
-element. An expression without `collect` evaluates its source once and produces a lazy `Stream<T>`.
-Stage callbacks are created in source order when the pipeline is built, while their bodies run only
-as traversal demands elements. Each traversal requests a new iterator from the source; this does not
-guarantee that the source is replayable or yields the same values on every traversal. Stages execute
-in order, with filters skipping later stages for rejected elements; terminal operations may stop
-traversal early.
-
-A final `collect` expression is evaluated as a `Sink<T>` and the pipeline is lowered directly to
-iteration and sink additions; the expression returns that sink. Before traversal, the collected form
-evaluates the source and acquires its iterator for iterable inputs, then evaluates the collector, then
-creates stage callbacks in source order. Stage bodies run for each relevant element during traversal.
-Stream fusion, `find`, and `take` stages are not part of the current syntax. The current lowering
-represents stage expressions as callbacks: future work could inline expressions into collected loops
-to avoid per-element callback calls, then investigate a fused lazy iterator/state machine to avoid
-intermediate stream objects while preserving laziness, captures, repeated traversal, and `flatMap`
-ordering.
 
 ---
 

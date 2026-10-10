@@ -1466,6 +1466,15 @@ public final class StandardLibraryTest {
                         collect List<Int>.empty();
                     return values.at(0) * 10 + values.at(1);
                 }
+                fn collectedCapturePipeline(factor: Int): Int {
+                    let values = for [1, 2, 3]
+                        map item -> item * factor
+                        filter item -> item > factor
+                        flatMap item -> List<Int>.of(item, item + factor)
+                        collect List<Int>.empty();
+                    return values.size * 100 + values.at(0) + values.at(1)
+                        + values.at(2) + values.at(3);
+                }
                 fn lazyFlatMapPipeline(): Int {
                     let calls = Calls.new(0);
                     let values = for [1, 2, 3]
@@ -1501,6 +1510,7 @@ public final class StandardLibraryTest {
                 assertEquals(53, test.getMethod("lazyArrayPipeline").invoke(null));
                 assertEquals(218, test.getMethod("collectedArrayPipeline").invoke(null));
                 assertEquals(36, test.getMethod("collectedIterablePipeline").invoke(null));
+                assertEquals(424, test.getMethod("collectedCapturePipeline", int.class).invoke(null, 2));
                 assertEquals(642, test.getMethod("lazyFlatMapPipeline").invoke(null));
                 assertEquals(308, test.getMethod("collectedFlatMapPipeline").invoke(null));
                 assertEquals(8410, test.getMethod("nestedFlatMapPipeline").invoke(null));

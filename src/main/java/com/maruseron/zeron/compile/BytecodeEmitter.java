@@ -1186,7 +1186,7 @@ final class BytecodeEmitter {
         return MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(functionType.returnType()), javaParameters);
     }
 
-    private static void emitVariable(CompilationContext context, final CodeBuilder composer, final Token name) {
+    static void emitVariable(CompilationContext context, final CodeBuilder composer, final Token name) {
         if (!context.symbols.containsSymbol(name)) {
             if (context.symbols.containsAnySymbol(name)) {
                 final var binding = context.symbols.getAnySymbol(name);

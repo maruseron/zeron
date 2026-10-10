@@ -392,46 +392,92 @@ public sealed interface Expr {
         }
     }
 
-    final class MatchArm {
+    final class MatchPattern {
         private final Token keyword;
-        private final TypeDescriptor patternType;
-        private final Token alias;
-        private final Token namedPattern;
+        private final TypeDescriptor type;
+        private final Token extractor;
+        private final List<MatchPattern> arguments;
         private final Token binding;
-        private final Expr guard;
+        private final Token alias;
         private final boolean wildcard;
-        private final Expr expression;
+        private final List<MatchPattern> alternatives;
+        private Stmt.Pattern declaration;
+        private TypeDescriptor resolvedType;
         private TypeDescriptor declaredPatternType;
         private TypeDescriptor resolvedPatternType;
+        private boolean legacyProperty;
 
-        public MatchArm(Token keyword, TypeDescriptor patternType, Token alias,
-                        Token namedPattern, Token binding, Expr guard,
-                        boolean wildcard, Expr expression) {
+        public MatchPattern(final Token keyword, final TypeDescriptor type, final Token extractor,
+                            final List<MatchPattern> arguments, final Token binding, final Token alias,
+                            final boolean wildcard, final List<MatchPattern> alternatives) {
             this.keyword = keyword;
-            this.patternType = patternType;
-            this.alias = alias;
-            this.namedPattern = namedPattern;
+            this.type = type;
+            this.extractor = extractor;
+            this.arguments = List.copyOf(arguments);
             this.binding = binding;
-            this.guard = guard;
+            this.alias = alias;
             this.wildcard = wildcard;
+            this.alternatives = List.copyOf(alternatives);
+        }
+
+        public Token keyword() { return keyword; }
+        public TypeDescriptor type() { return type; }
+        public Token extractor() { return extractor; }
+        public List<MatchPattern> arguments() { return arguments; }
+        public Token binding() { return binding; }
+        public Token alias() { return alias; }
+        public boolean wildcard() { return wildcard; }
+        public List<MatchPattern> alternatives() { return alternatives; }
+        public Stmt.Pattern declaration() { return declaration; }
+        public TypeDescriptor resolvedType() { return resolvedType; }
+        public TypeDescriptor declaredPatternType() { return declaredPatternType; }
+        public TypeDescriptor resolvedPatternType() { return resolvedPatternType; }
+        public boolean legacyProperty() { return legacyProperty; }
+
+        public void resolve(final Stmt.Pattern declaration, final TypeDescriptor resolvedType,
+                            final boolean legacyProperty) {
+            this.declaration = declaration;
+            this.resolvedType = resolvedType;
+            this.legacyProperty = legacyProperty;
+        }
+
+        public void setResolvedPatternTypes(final TypeDescriptor declaredType, final TypeDescriptor resolvedType) {
+            this.declaredPatternType = declaredType;
+            this.resolvedPatternType = resolvedType;
+        }
+    }
+
+    final class MatchArm {
+        private final Token keyword;
+        private final MatchPattern pattern;
+        private final Expr guard;
+        private final Expr expression;
+
+        public MatchArm(Token keyword, MatchPattern pattern, Expr guard, Expr expression) {
+            this.keyword = keyword;
+            this.pattern = pattern;
+            this.guard = guard;
             this.expression = expression;
         }
 
         public Token keyword() { return keyword; }
-        public TypeDescriptor patternType() { return patternType; }
-        public Token alias() { return alias; }
-        public Token namedPattern() { return namedPattern; }
-        public Token binding() { return binding; }
-        public Expr guard() { return guard; }
-        public boolean wildcard() { return wildcard; }
-        public Expr expression() { return expression; }
-        public TypeDescriptor declaredPatternType() { return declaredPatternType; }
-        public TypeDescriptor resolvedPatternType() { return resolvedPatternType; }
-
-        public void setResolvedPatternTypes(TypeDescriptor declaredType, TypeDescriptor resolvedType) {
-            declaredPatternType = declaredType;
-            resolvedPatternType = resolvedType;
+        public MatchPattern pattern() { return pattern; }
+        public TypeDescriptor patternType() { return pattern.type(); }
+        public Token alias() { return pattern.alias(); }
+        public Token namedPattern() { return pattern.extractor(); }
+        public Token binding() {
+            if (pattern.arguments().size() != 1) return null;
+            final var argument = pattern.arguments().getFirst();
+            return argument.binding() != null ? argument.binding() : null;
         }
+        public boolean wildcard() { return pattern.wildcard(); }
+        public TypeDescriptor declaredPatternType() { return pattern.declaredPatternType(); }
+        public TypeDescriptor resolvedPatternType() { return pattern.resolvedPatternType(); }
+        public void setResolvedPatternTypes(final TypeDescriptor declaredType, final TypeDescriptor resolvedType) {
+            pattern.setResolvedPatternTypes(declaredType, resolvedType);
+        }
+        public Expr guard() { return guard; }
+        public Expr expression() { return expression; }
     }
 
     final class Match implements Expr {

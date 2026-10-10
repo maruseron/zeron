@@ -424,6 +424,10 @@ final class MemberInteropResolver {
         final var variadic = classMethod != null
                 ? classMethod.variadic()
                 : contractMethod.variadic();
+        if (context.frame.resolvingPattern && isMutating) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                    call.name, "Pattern bodies cannot call mutating methods."));
+        }
         final var fixedArity = classMethod != null
                 ? Stmt.fixedArity(classMethod.parameters(), variadic)
                 : Stmt.fixedArity(contractMethod.parameters(), variadic);
@@ -638,6 +642,10 @@ final class MemberInteropResolver {
         }
         final var selected = best.getFirst();
         final var method = selected.method();
+        if (context.frame.resolvingPattern && method.isMutating()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                    call.name, "Pattern bodies cannot call mutating extension methods."));
+        }
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         TypeUnifier.unify(method.receiverType(), selected.receiverMatchType(), substitutions, call.name);
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {

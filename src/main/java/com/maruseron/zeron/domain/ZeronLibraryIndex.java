@@ -27,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 18;
+    public static final int VERSION = 19;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -105,8 +105,17 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         .map(property -> new Stmt.Property(token(property.name()), property.type(), null,
                                 true, property.mutating(), null, null, null, false))
                         .toList();
+                    final var patterns = classExport.patterns().stream()
+                            .map(pattern -> new Stmt.Pattern(token(pattern.name()),
+                                    pattern.outputs().stream()
+                                            .map(output -> new Stmt.PatternOutput(
+                                                    token(output.name()), output.type()))
+                                            .toList(),
+                                    null, List.of(), true, pattern.refutable()))
+                            .toList();
                     statements.add(new Stmt.ClassDecl(className, classExport.typeParameters(), contractUses,
-                        fields, properties, constructor, namedConstructors, methods, true, classExport.effect()));
+                        fields, properties, constructor, namedConstructors, methods, patterns,
+                        true, classExport.effect()));
                 }
                 case ContractExport contract -> {
                     final var contractName = token(contract.qualifiedName());
@@ -238,7 +247,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                               boolean effect,
                               List<NamedConstructorExport> namedConstructors,
                               List<MethodExport> methods,
-                              List<PropertyExport> properties) implements ExportedDeclaration {
+                              List<PropertyExport> properties,
+                              List<PatternExport> patterns) implements ExportedDeclaration {
         public ClassExport {
             Objects.requireNonNull(qualifiedName);
             typeParameters = List.copyOf(typeParameters);
@@ -247,6 +257,20 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             namedConstructors = List.copyOf(namedConstructors);
             methods = List.copyOf(methods);
             properties = List.copyOf(properties);
+            patterns = List.copyOf(patterns);
+        }
+
+        public ClassExport(String qualifiedName,
+                           List<TypeParameterDescriptor> typeParameters,
+                           List<ContractUseExport> contracts,
+                           List<TypeDescriptor> canonicalConstructorParameters,
+                           boolean canonicalConstructorPublic,
+                           boolean effect,
+                           List<NamedConstructorExport> namedConstructors,
+                           List<MethodExport> methods,
+                           List<PropertyExport> properties) {
+            this(qualifiedName, typeParameters, contracts, canonicalConstructorParameters,
+                    canonicalConstructorPublic, effect, namedConstructors, methods, properties, List.of());
         }
     }
 
@@ -359,6 +383,20 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
     }
 
+    public record PatternExport(String name, List<PatternOutputExport> outputs, boolean refutable) {
+        public PatternExport {
+            Objects.requireNonNull(name);
+            outputs = List.copyOf(outputs);
+        }
+    }
+
+    public record PatternOutputExport(String name, TypeDescriptor type) {
+        public PatternOutputExport {
+            Objects.requireNonNull(name);
+            Objects.requireNonNull(type);
+        }
+    }
+
     public static ZeronLibraryIndex fromCompilation(final List<CompilationUnit> units,
                                                     final Function<Stmt.FunctionDeclaration, String> functionOwners,
                                                     final Function<Stmt.FunctionDeclaration, FunctionDescriptor> functionTypes,
@@ -438,6 +476,15 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                         .filter(Stmt.Property::isPublic)
                                         .map(property -> new PropertyExport(property.name().lexeme(),
                                                 property.type(), property.isMutating()))
+                                        .toList(),
+                                classDeclaration.patterns().stream()
+                                        .filter(Stmt.Pattern::isPublic)
+                                        .map(pattern -> new PatternExport(pattern.name().lexeme(),
+                                                pattern.outputs().stream()
+                                                        .map(output -> new PatternOutputExport(
+                                                                output.name().lexeme(), output.type()))
+                                                        .toList(),
+                                                pattern.refutable()))
                                         .toList()));
                     }
                     case Stmt.ContractDecl contract when contract.isPublic() ->
@@ -510,7 +557,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v18.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v19.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -536,7 +583,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v18.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v19.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -610,6 +657,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 }
                 writeMethods(output, classExport.methods(), context);
                 writeProperties(output, classExport.properties(), context);
+                output.writeInt(classExport.patterns().size());
+                for (final var pattern : classExport.patterns()) {
+                    output.writeUTF(pattern.name());
+                    output.writeBoolean(pattern.refutable());
+                    output.writeInt(pattern.outputs().size());
+                    for (final var outputParameter : pattern.outputs()) {
+                        output.writeUTF(outputParameter.name());
+                        writeType(output, outputParameter.type(), context);
+                    }
+                }
             }
             case ContractExport contract -> {
                 output.writeByte(3);
@@ -691,8 +748,21 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     constructors.add(new NamedConstructorExport(constructorName, signature, input.readBoolean()));
                 }
                 final var methods = readMethods(input, context);
+                final var properties = readProperties(input, context);
+                final var patterns = new ArrayList<PatternExport>();
+                final var patternCount = readCount(input);
+                for (int i = 0; i < patternCount; i++) {
+                    final var patternName = input.readUTF();
+                    final var refutable = input.readBoolean();
+                    final var outputCount = readCount(input);
+                    final var outputs = new ArrayList<PatternOutputExport>();
+                    for (int j = 0; j < outputCount; j++) {
+                        outputs.add(new PatternOutputExport(input.readUTF(), readType(input, context)));
+                    }
+                    patterns.add(new PatternExport(patternName, outputs, refutable));
+                }
                 yield new ClassExport(name, typeParameters, contracts, constructorParameters, canonicalPublic, effect,
-                        constructors, methods, readProperties(input, context));
+                        constructors, methods, properties, patterns);
             }
             case 3 -> {
                 final var name = input.readUTF();

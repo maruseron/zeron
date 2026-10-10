@@ -676,6 +676,7 @@ public final class Parser {
             final var properties = new ArrayList<Stmt.Property>();
             final var namedConstructors = new ArrayList<Stmt.NamedConstructor>();
             final var methods = new ArrayList<Stmt.Method>();
+            final var patterns = new ArrayList<Stmt.Pattern>();
             Stmt.Constructor constructor = null;
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
                 if (match(PUBLIC, PRIVATE)) {
@@ -694,7 +695,11 @@ public final class Parser {
                         }
                     } else {
                         final var isMutating = match(MUT);
-                        if (match(PROPERTY)) {
+                        if (match(PATTERN)) {
+                            if (isMutating) error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                    "Patterns cannot be marked mut.");
+                            patterns.add(classPattern(isPublic));
+                        } else if (match(PROPERTY)) {
                             final var propertyName = consume(IDENTIFIER, "Expect property name.");
                             consume(COLON, "Expect ':' after property name.");
                             properties.add(classProperty(propertyName, isPublic, isMutating));
@@ -722,11 +727,36 @@ public final class Parser {
                 }
             return new Stmt.ClassDecl(name, List.copyOf(typeParameters.values()), List.copyOf(contractUses),
                     List.copyOf(fields), List.copyOf(properties), constructor,
-                    List.copyOf(namedConstructors), List.copyOf(methods),
+                    List.copyOf(namedConstructors), List.copyOf(methods), List.copyOf(patterns),
                     isTopLevelPublic, isEffect);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
+    }
+
+    private Stmt.Pattern classPattern(final boolean isPublic) {
+        final var name = consume(IDENTIFIER, "Expect pattern name.");
+        consume(LEFT_PAREN, "Expect '(' after pattern name.");
+        final var outputs = new ArrayList<Stmt.PatternOutput>();
+        if (!check(RIGHT_PAREN)) {
+            do {
+                final var outputName = consume(IDENTIFIER, "Expect pattern output name.");
+                consume(COLON, "Expect ':' after pattern output name.");
+                outputs.add(new Stmt.PatternOutput(outputName, collectType()));
+            } while (match(COMMA));
+        }
+        consume(RIGHT_PAREN, "Expect ')' after pattern outputs.");
+        final var condition = match(WHEN) ? expression() : null;
+        consume(LEFT_BRACE, "Expect '{' before pattern body.");
+        final var previousLevelMarker = levelMarker;
+        levelMarker = new LevelMarker(levelMarker);
+        final List<Stmt> body;
+        try {
+            body = block();
+        } finally {
+            levelMarker = previousLevelMarker;
+        }
+        return new Stmt.Pattern(name, outputs, condition, body, isPublic);
     }
 
     private Stmt.Method classMethod(final boolean isPublic,
@@ -1930,47 +1960,73 @@ public final class Parser {
         final var arms = new ArrayList<Expr.MatchArm>();
         while (match(CASE)) {
             final var caseKeyword = previous();
-            final boolean wildcard = check(IDENTIFIER) && peek().lexeme().equals("_");
-            final TypeDescriptor patternType;
-            final Token alias;
-            Token namedPattern = null;
-            Token binding = null;
-            Expr guard = null;
-            if (wildcard) {
-                advance();
-                patternType = null;
-                alias = null;
-            } else {
-                final var previousStop = stopQualifiedTypeAtNamedPattern;
-                stopQualifiedTypeAtNamedPattern = true;
-                try {
-                    patternType = collectType();
-                } finally {
-                    stopQualifiedTypeAtNamedPattern = previousStop;
+            var pattern = matchPattern(true);
+            if (pattern.alternatives().isEmpty() && !pattern.wildcard()) {
+                final var alias = match(AS) ? consume(IDENTIFIER, "Expect binding name after 'as'.") : null;
+                if (alias != null) {
+                    pattern = new Expr.MatchPattern(pattern.keyword(), pattern.type(), pattern.extractor(),
+                            pattern.arguments(), pattern.binding(), alias, false, List.of());
                 }
-                if (match(DOT)) {
-                    namedPattern = consume(IDENTIFIER, "Expect named pattern after '.'.");
-                    consume(LEFT_PAREN, "Expect '(' after named pattern.");
-                    if (check(IDENTIFIER) && peek().lexeme().equals("_")) {
-                        advance();
-                    } else {
-                        binding = consume(IDENTIFIER, "Expect binding name or '_' in named pattern.");
-                    }
-                    consume(RIGHT_PAREN, "Expect ')' after named pattern argument.");
-                }
-                alias = match(AS) ? consume(IDENTIFIER, "Expect binding name after 'as'.") : null;
             }
+            Expr guard = null;
             if (match(IF)) guard = expression();
             consume(ARROW, "Expect '->' after match pattern.");
             final var body = expression();
             consume(SEMICOLON, "Expect ';' after match arm.");
-            arms.add(new Expr.MatchArm(caseKeyword, patternType, alias,
-                    namedPattern, binding, guard, wildcard, body));
+            arms.add(new Expr.MatchArm(caseKeyword, pattern, guard, body));
         }
         consume(RIGHT_BRACE, "Expect '}' after match cases.");
         if (arms.isEmpty()) error(keyword, DiagnosticCatalog.INVALID_MATCH_EXPRESSION,
                 "A match expression must contain at least one case.");
         return new Expr.Match(keyword, scrutinee, arms);
+    }
+
+    private Expr.MatchPattern matchPattern(final boolean root) {
+        final var alternatives = new ArrayList<Expr.MatchPattern>();
+        alternatives.add(matchPatternAtom(root));
+        while (match(PIPE)) alternatives.add(matchPatternAtom(root));
+        final var first = alternatives.getFirst();
+        if (alternatives.size() == 1) return first;
+        return new Expr.MatchPattern(first.keyword(), null, null, List.of(), null, null,
+                false, alternatives);
+    }
+
+    private Expr.MatchPattern matchPatternAtom(final boolean root) {
+        final var keyword = peek();
+        if (check(IDENTIFIER) && peek().lexeme().equals("_")) {
+            advance();
+            return new Expr.MatchPattern(keyword, null, null, List.of(), null, null, true, List.of());
+        }
+        if (!root && check(IDENTIFIER)
+                && (tokens.get(current + 1).type() == COMMA || tokens.get(current + 1).type() == RIGHT_PAREN)) {
+            final var binding = advance();
+            return new Expr.MatchPattern(keyword, null, null, List.of(), binding, null, false, List.of());
+        }
+
+        final var previousStop = stopQualifiedTypeAtNamedPattern;
+        stopQualifiedTypeAtNamedPattern = true;
+        final TypeDescriptor type;
+        try {
+            type = collectType();
+        } finally {
+            stopQualifiedTypeAtNamedPattern = previousStop;
+        }
+        Token extractor = null;
+        final var arguments = new ArrayList<Expr.MatchPattern>();
+        if (match(DOT)) {
+            extractor = consume(IDENTIFIER, "Expect named pattern after '.'.");
+            consume(LEFT_PAREN, "Expect '(' after named pattern.");
+            if (!check(RIGHT_PAREN)) {
+                do {
+                    arguments.add(matchPattern(false));
+                } while (match(COMMA));
+            }
+            consume(RIGHT_PAREN, "Expect ')' after pattern arguments.");
+        }
+        final var alias = !root && match(AS)
+                ? consume(IDENTIFIER, "Expect binding name after 'as'.")
+                : null;
+        return new Expr.MatchPattern(keyword, type, extractor, arguments, null, alias, false, List.of());
     }
 
     private Expr forExpression(final Token keyword) {

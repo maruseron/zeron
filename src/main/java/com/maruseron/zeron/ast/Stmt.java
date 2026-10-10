@@ -127,13 +127,26 @@ public sealed interface Stmt {
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                      List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
                      Constructor constructor, List<NamedConstructor> namedConstructors,
-                     List<Method> methods, boolean isPublic, boolean isEffect) implements Stmt, Decl {
+                     List<Method> methods, List<Pattern> patterns,
+                     boolean isPublic, boolean isEffect) implements Stmt, Decl {
+        public ClassDecl {
+            patterns = List.copyOf(patterns);
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, boolean isPublic, boolean isEffect) {
+            this(name, typeParameters, contractUses, fields, properties, constructor,
+                    namedConstructors, methods, List.of(), isPublic, isEffect);
+        }
+
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                          List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
                          Constructor constructor, List<NamedConstructor> namedConstructors,
                          List<Method> methods, boolean isPublic) {
             this(name, typeParameters, contractUses, fields, properties, constructor,
-                    namedConstructors, methods, isPublic, false);
+                    namedConstructors, methods, List.of(), isPublic, false);
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -141,7 +154,7 @@ public sealed interface Stmt {
                          Constructor constructor, List<NamedConstructor> namedConstructors,
                          List<Method> methods, boolean isPublic) {
             this(name, typeParameters, contractUses, fields, List.of(), constructor,
-                    namedConstructors, methods, isPublic, false);
+                    namedConstructors, methods, List.of(), isPublic, false);
         }
 
         public List<Token> contractNames() {
@@ -219,6 +232,25 @@ public sealed interface Stmt {
                     minimumArity, false);
         }
     }
+
+    record Pattern(Token name, List<PatternOutput> outputs, Expr condition,
+                   List<Stmt> body, boolean isPublic, boolean refutable) {
+        public Pattern {
+            outputs = List.copyOf(outputs);
+            body = List.copyOf(body);
+        }
+
+        public Pattern(Token name, List<PatternOutput> outputs, Expr condition,
+                       List<Stmt> body, boolean isPublic) {
+            this(name, outputs, condition, body, isPublic, condition != null);
+        }
+
+        public static String helperName(final String patternName) {
+            return "$zeron$pattern$" + patternName;
+        }
+    }
+
+    record PatternOutput(Token name, TypeDescriptor type) {}
 
     record ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                         List<NamedContractConstructor> namedConstructors,

@@ -207,6 +207,10 @@ final class ExpressionFlowResolver {
 
                 if (context.frame.flowState.isReachable()) {
                     context.frame.flowState.remove(binding.name());
+                    if (context.frame.resolvingPattern
+                            && context.frame.patternOutputNames.contains(binding.name().lexeme())) {
+                        context.frame.flowState.recordWrite(binding.name());
+                    }
                     for (final var writeScope : context.frame.flowWriteScopes) writeScope.add(binding.name());
                 }
                 context.symbols.define(symbolName);
@@ -786,14 +790,24 @@ final class ExpressionFlowResolver {
         TypeDescriptor resultType = null;
 
         for (final var arm : match.arms) {
+            if (matchedNames.containsAll(permittedNames)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        arm.keyword(), "A match case follows an irrefutable case and is unreachable."));
+            }
             if (wildcardSeen) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         arm.keyword(),
                         "A match case after '_' is unreachable."));
             }
-
-            TypeDescriptor armType = null;
-            if (arm.wildcard()) {
+            final var pattern = resolveMatchPattern(context, arm.pattern(), scrutineeType, true,
+                    permittedNames, contractArguments);
+            if (!arm.pattern().wildcard() && pattern.matchedType() != null
+                    && matchedNames.contains(pattern.matchedType().name())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        arm.keyword(), "A match case for '" + pattern.matchedType().name()
+                                + "' follows an unguarded case and is unreachable."));
+            }
+            if (arm.pattern().wildcard()) {
                 if (arm.guard() != null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                             arm.keyword(), "A wildcard match case cannot have a guard."));
@@ -804,79 +818,16 @@ final class ExpressionFlowResolver {
                             "A wildcard case is unreachable because every permitted case is covered."));
                 }
                 wildcardSeen = true;
-            } else {
-                armType = arm.patternType();
-                TypeResolver.validateType(context, armType, arm.keyword());
-                if (armType instanceof NullableDescriptor || armType instanceof ReferenceDescriptor) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                            arm.keyword(),
-                            "Match case types must be non-null class types."));
-                }
-                final var classDeclaration = context.classes.get(armType.name());
-                if (classDeclaration == null) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                            arm.keyword(),
-                            "Match cases must name permitted classes."));
-                }
-                if (!permittedNames.contains(armType.name())) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                            arm.keyword(),
-                            "Class '" + armType.name() + "' is not permitted by sealed contract '"
-                                    + sealedContract.name().lexeme() + "'."));
-                }
-                if (matchedNames.contains(armType.name())) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                            arm.keyword(),
-                            "A match case for '" + armType.name()
-                                    + "' follows an unguarded case and is unreachable."));
-                }
-                final var classArguments = armType instanceof GenericDescriptor generic
-                        ? generic.typeParameters()
-                        : List.<TypeDescriptor>of();
-                if (!classArguments.equals(contractArguments)) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                            arm.keyword(),
-                            "Match case type arguments must match the sealed contract's type arguments."));
-                }
-                if (arm.namedPattern() != null) {
-                    final var property = MemberInteropResolver.findProperty(
-                            context, armType.name(), arm.namedPattern());
-                    if (property == null) {
-                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                                arm.namedPattern(), "Class '" + simpleName(armType.name())
-                                        + "' has no readable property named '"
-                                        + arm.namedPattern().lexeme() + "'."));
-                    }
-                    if (!property.isPublic()) {
-                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
-                                arm.namedPattern(), "Named patterns can only read public properties."));
-                    }
-                    arm.setResolvedPatternTypes(property.type(),
-                            MemberInteropResolver.resolvedPropertyType(
-                                    context, armType.name(), property, armType));
-                }
             }
 
             context.frame.flowState = incomingFlow.copy();
             beginScope(context);
             try {
-                if (arm.alias() != null) {
-                    if (arm.wildcard()) {
-                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                                arm.keyword(),
-                                "A wildcard match case cannot bind a value."));
-                    }
-                    declare(context, new Stmt.Var(arm.alias(), armType, null,
+                for (final var binding : pattern.bindings().values()) {
+                    declare(context, new Stmt.Var(binding.name(), binding.type(), null,
                                     BindingMutability.IMMUTABLE, false),
-                            arm.alias(), armType, BindingMutability.IMMUTABLE);
-                    define(context, arm.alias());
-                }
-                if (arm.binding() != null) {
-                    final var bindingType = arm.resolvedPatternType();
-                    declare(context, new Stmt.Var(arm.binding(), bindingType, null,
-                                    BindingMutability.IMMUTABLE, false),
-                            arm.binding(), bindingType, BindingMutability.IMMUTABLE);
-                    define(context, arm.binding());
+                            binding.name(), binding.type(), BindingMutability.IMMUTABLE);
+                    define(context, binding.name());
                 }
                 if (arm.guard() != null) {
                     final var guardType = resolve(context, arm.guard());
@@ -892,7 +843,9 @@ final class ExpressionFlowResolver {
             } finally {
                 endScope(context);
             }
-            if (!arm.wildcard() && arm.guard() == null) matchedNames.add(armType.name());
+            if (arm.guard() == null && pattern.irrefutable() && !arm.pattern().wildcard()) {
+                matchedNames.addAll(pattern.coveredClasses());
+            }
         }
 
         if (!wildcardSeen && !matchedNames.containsAll(permittedNames)) {
@@ -910,6 +863,181 @@ final class ExpressionFlowResolver {
         context.frame.flowState = joinedFlow;
         match.setType(resultType);
         return resultType;
+    }
+
+    private record MatchBinding(Token name, TypeDescriptor type) {}
+
+    private record MatchPatternResolution(Map<String, MatchBinding> bindings,
+                                          Set<String> coveredClasses,
+                                          boolean irrefutable,
+                                          TypeDescriptor matchedType) {}
+
+    private static MatchPatternResolution resolveMatchPattern(
+            final ResolutionContext context,
+            final Expr.MatchPattern pattern,
+            final TypeDescriptor inputType,
+            final boolean root,
+            final Set<String> permittedNames,
+            final List<TypeDescriptor> contractArguments) {
+        if (!pattern.alternatives().isEmpty()) {
+            pattern.resolve(null, inputType, false);
+            final var alternatives = pattern.alternatives().stream()
+                    .map(alternative -> resolveMatchPattern(context, alternative, inputType, root,
+                            permittedNames, contractArguments))
+                    .toList();
+            final var first = alternatives.getFirst();
+            final var names = first.bindings().keySet();
+            final var covered = new LinkedHashSet<String>();
+            boolean irrefutable = false;
+            for (int i = 0; i < alternatives.size(); i++) {
+                final var alternative = alternatives.get(i);
+                if (!alternative.bindings().keySet().equals(names)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                            pattern.keyword(), "Every OR-pattern alternative must bind the same names."));
+                }
+                for (final var name : names) {
+                    final var firstBinding = first.bindings().get(name);
+                    final var otherBinding = alternative.bindings().get(name);
+                    if (!context.typeCompatibility.canAssign(firstBinding.type(), otherBinding.type())
+                            || !context.typeCompatibility.canAssign(otherBinding.type(), firstBinding.type())) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH, otherBinding.name(),
+                                "OR-pattern bindings must have compatible types."));
+                    }
+                }
+                covered.addAll(alternative.coveredClasses());
+                irrefutable |= alternative.irrefutable();
+            }
+            return new MatchPatternResolution(first.bindings(), covered, irrefutable, inputType);
+        }
+
+        if (pattern.wildcard()) {
+            pattern.resolve(null, inputType, false);
+            return new MatchPatternResolution(Map.of(), root ? permittedNames : Set.of(), true, inputType);
+        }
+        if (pattern.binding() != null) {
+            pattern.resolve(null, inputType, false);
+            final var bindings = new LinkedHashMap<String, MatchBinding>();
+            addPatternBinding(context, bindings, pattern.binding(), inputType);
+            return new MatchPatternResolution(bindings, Set.of(), true, inputType);
+        }
+        if (pattern.type() == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                    pattern.keyword(), "Expected a type, binding, or wildcard pattern."));
+        }
+
+        final var patternType = pattern.type();
+        TypeResolver.validateType(context, patternType, pattern.keyword());
+        if (patternType instanceof NullableDescriptor || patternType instanceof ReferenceDescriptor) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                    pattern.keyword(), "Match case types must be non-null class types."));
+        }
+        final var classDeclaration = context.classes.get(patternType.name());
+        if (classDeclaration == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                    pattern.keyword(), "Match cases must name classes."));
+        }
+        if (root) {
+            if (!permittedNames.contains(patternType.name())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.keyword(), "Class '" + patternType.name()
+                                + "' is not permitted by the sealed contract."));
+            }
+            final var classArguments = patternType instanceof GenericDescriptor generic
+                    ? generic.typeParameters()
+                    : List.<TypeDescriptor>of();
+            if (!classArguments.equals(contractArguments)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        pattern.keyword(),
+                        "Match case type arguments must match the sealed contract's type arguments."));
+            }
+        } else if (!context.typeCompatibility.canTypeTest(inputType, patternType)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                    pattern.keyword(), "Nested pattern type is incompatible with its extracted value."));
+        }
+
+        pattern.resolve(null, patternType, false);
+        final var bindings = new LinkedHashMap<String, MatchBinding>();
+        if (pattern.alias() != null) addPatternBinding(context, bindings, pattern.alias(), patternType);
+        boolean refutable = !root && !patternType.equals(inputType);
+        if (pattern.extractor() != null) {
+            final var declaration = classDeclaration.patterns().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(pattern.extractor().lexeme()))
+                    .findFirst().orElse(null);
+            if (declaration != null) {
+                if (!declaration.isPublic()
+                        && !Objects.equals(context.frame.currentClassName, patternType.name())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                            pattern.extractor(), "Pattern is private."));
+                }
+                if (declaration.outputs().size() != pattern.arguments().size()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                            pattern.extractor(), "Pattern expects " + declaration.outputs().size()
+                                    + " outputs, found " + pattern.arguments().size() + "."));
+                }
+                pattern.resolve(declaration, patternType, false);
+                refutable = declaration.refutable();
+                final var substitutions = TypeResolver.substitutionsFor(
+                        context, classDeclaration.typeParameters(), patternType);
+                for (int i = 0; i < declaration.outputs().size(); i++) {
+                    final var outputType = TypeSubstitution.substitute(
+                            declaration.outputs().get(i).type(), substitutions);
+                    final var nested = resolveMatchPattern(context, pattern.arguments().get(i), outputType,
+                            false, permittedNames, contractArguments);
+                    mergePatternBindings(context, bindings, nested.bindings(), pattern.arguments().get(i).keyword());
+                    refutable |= !nested.irrefutable();
+                }
+            } else {
+                final var property = MemberInteropResolver.findProperty(
+                        context, patternType.name(), pattern.extractor());
+                if (property == null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                            pattern.extractor(), "Class '" + simpleName(patternType.name())
+                                    + "' has no public pattern named '" + pattern.extractor().lexeme() + "'."));
+                }
+                if (!property.isPublic()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                            pattern.extractor(), "Named patterns can only read public properties."));
+                }
+                if (pattern.arguments().size() != 1) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                            pattern.extractor(), "Legacy property patterns require exactly one argument."));
+                }
+                final var resolvedOutput = MemberInteropResolver.resolvedPropertyType(
+                        context, patternType.name(), property, patternType);
+                pattern.resolve(null, patternType, true);
+                pattern.setResolvedPatternTypes(property.type(), resolvedOutput);
+                final var nested = resolveMatchPattern(context, pattern.arguments().getFirst(), resolvedOutput,
+                        false, permittedNames, contractArguments);
+                mergePatternBindings(context, bindings, nested.bindings(), pattern.arguments().getFirst().keyword());
+                refutable = !nested.irrefutable();
+            }
+        }
+        return new MatchPatternResolution(bindings,
+                root && !refutable ? Set.of(patternType.name()) : Set.of(),
+                !refutable, patternType);
+    }
+
+    private static void addPatternBinding(final ResolutionContext context,
+                                          final Map<String, MatchBinding> bindings,
+                                          final Token name,
+                                          final TypeDescriptor type) {
+        if (bindings.putIfAbsent(name.lexeme(), new MatchBinding(name, type)) != null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                    name, "A pattern cannot bind the same name more than once."));
+        }
+    }
+
+    private static void mergePatternBindings(final ResolutionContext context,
+                                             final Map<String, MatchBinding> destination,
+                                             final Map<String, MatchBinding> source,
+                                             final Token location) {
+        for (final var entry : source.entrySet()) {
+            if (destination.putIfAbsent(entry.getKey(), entry.getValue()) != null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        location, "A pattern cannot bind the same name more than once."));
+            }
+        }
     }
 
     private static TypeDescriptor resolveTypeTest(final ResolutionContext context, final Expr.TypeTest test) {
@@ -968,6 +1096,10 @@ final class ExpressionFlowResolver {
                 context.frame.flowState.put(binding.name(), nonNullFact(context, binding.type()));
             } else {
                 context.frame.flowState.remove(binding.name());
+            }
+            if (context.frame.resolvingPattern
+                    && context.frame.patternOutputNames.contains(binding.name().lexeme())) {
+                context.frame.flowState.recordWrite(binding.name());
             }
             for (final var writeScope : context.frame.flowWriteScopes) writeScope.add(binding.name());
         }

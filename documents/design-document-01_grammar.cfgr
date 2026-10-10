@@ -48,7 +48,8 @@ extensionMethod            : ["public"] ["mut"] "fn" IDENTIFIER [typeParameters]
                              "(" parameters ")" ":" type [raisesClause]
                              ("=" expression ";" | block) ;
 contractUse                : qualifiedName [typeArguments] ;
-classMember                : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl | methodDecl ;
+classMember                : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl
+                           | methodDecl | patternDecl ;
 fieldDecl                  : IDENTIFIER ":" type ";" ;
 propertyDecl               : visibility ["mut"] "property" IDENTIFIER ":" type ["=" expression]
                              (";" | "{" propertyAccessor+ "}") ;
@@ -62,6 +63,9 @@ namedConstructorParameter  : IDENTIFIER ":" type ["..."] ;
 methodDecl                 : visibility ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
                              [raisesClause]
                              ("=" expression ";" | block) ;
+patternDecl                : visibility "pattern" IDENTIFIER "(" [patternOutput {"," patternOutput}] ")"
+                             ["when" expression] block ;
+patternOutput              : IDENTIFIER ":" type ;
 contractDecl               : "contract" IDENTIFIER [typeParameters] ["permits" permittedClass
                              {"," permittedClass}] "{" contractMember* "}" ;
 permittedClass             : qualifiedName [typeArguments] ;
@@ -149,8 +153,10 @@ arrayLiteral               : "[" expression {"," expression} "]" ;
 ifExpr                     : "if" "(" expression ")" "then" expression "else" expression ;
 matchExpr                  : "match" "(" expression ")" "{" matchArm+ "}" ;
 matchArm                   : "case" matchPattern ["if" expression] "->" expression ";" ;
-matchPattern               : type ["." IDENTIFIER "(" (IDENTIFIER | "_") ")"] ["as" IDENTIFIER]
-                           | "_" ;
+matchPattern               : patternAlternative {"|" patternAlternative} ;
+patternAlternative         : "_" | IDENTIFIER | type ["." IDENTIFIER "("
+                             [patternArgument {"," patternArgument}] ")"] ["as" IDENTIFIER] ;
+patternArgument            : "_" | IDENTIFIER | matchPattern ;
 forExpr                    : "for" expr { forStage } [ collectStage ] ;
 forStage                   : forMapStage | forFlatMapStage | forFilterStage ;
 forMapStage                : "map" ( IDENTIFIER | "_" ) "->" expression ;
@@ -183,10 +189,10 @@ range                      : INT ".." INT ;
 #   correspond by position. Permitted implementation classes are final.
 # - Match expressions require a non-null sealed-contract value. Every permitted class must be covered
 #   by an unguarded case, unless a final unguarded `_` covers remaining values. Case generic arguments
-#   must match the scrutinee's contract arguments. Cases may use one named public-property pattern
-#   with an immutable binding or `_`, an immutable whole-value alias with `as`, and an optional
-#   Boolean guard. Guard-failing cases do not count toward exhaustiveness. Nullable matches, multiple
-#   properties, nested patterns, and OR-patterns are not supported.
+#   must match the scrutinee's contract arguments. Cases may invoke declared class patterns with
+#   positional nested/bound/ignored outputs, OR alternatives with identical binding environments,
+#   an immutable whole-value alias with `as`, and an optional Boolean guard. Guard- or
+#   refutation-failing cases do not count toward exhaustiveness. Nullable matches are unsupported.
 # - For expressions require a non-null valid iterable as per Resolver.resolveIterable semantics.
 # - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
 #   An explicit `private constructor new;` makes canonical construction private.
@@ -234,6 +240,11 @@ range                      : INT ".." INT ;
 #   external-class methods do not support variadics.
 # - `..` constructs an inclusive `zeron.ranges.IntRange`; `for` accepts arrays and values conforming
 #   to the bundled Iterable<T> contract.
+# - Class patterns declare typed outputs and may be refutable with `when`. Output names are assigned
+#   exactly once on every completing path. Pattern bodies cannot call `mut` methods.
+# - Match patterns support named class patterns, nested patterns, ignored/bound outputs, and OR
+#   alternatives. OR alternatives must bind the same names with compatible types. Legacy
+#   one-public-property match patterns remain supported when no class pattern has that name.
 # - Output uses ordinary imported calls to `zeron.io.print` and `zeron.io.println`; `print` is not a
 #   statement keyword.
 # - Assignment targets are variables, properties, or array indices. Compound assignment is supported

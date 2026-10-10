@@ -30,6 +30,79 @@ import static org.junit.Assert.assertTrue;
 public final class StandardLibraryTest {
 
     @Test
+    public void classPatternsExtractMultipleOutputsAndShortCircuitNestedRefutation() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "patternFixture" + suffix;
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-pattern-");
+        final var entry = sourceRoot.resolve(packageName).resolve("Main.zn");
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, """
+                package %s;
+                public sealed contract Tree permits Node, Leaf, End {}
+                public class Node is Tree {
+                    head: Int;
+                    tail: Tree;
+                    public pattern uncons(value: Int, rest: Tree) {
+                        value = this.head;
+                        rest = this.tail;
+                    }
+                    public pattern positive(value: Int) when this.head > 0 {
+                        value = this.head;
+                    }
+                }
+                public class Leaf is Tree {
+                    value: Int;
+                    rest: Tree;
+                    public pattern uncons(number: Int, tail: Tree) {
+                        number = this.value;
+                        tail = this.rest;
+                    }
+                }
+                public class End is Tree {}
+                fn nested(value: Tree): Int = match (value) {
+                    case Node.uncons(first, Node.uncons(second, _)) -> first + second;
+                    case _ -> 0;
+                };
+                fn positive(value: Tree): Int = match (value) {
+                    case Node.positive(number) -> number;
+                    case _ -> 0;
+                };
+                fn alternative(value: Tree): Int = match (value) {
+                    case Node.uncons(number, _) | Leaf.uncons(number, _) -> number;
+                    case _ -> 0;
+                };
+                """.formatted(packageName));
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of(packageName, "Main.zn").toString()));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + ".Main");
+                final var node = loader.loadClass(packageName + ".Node");
+                final var end = loader.loadClass(packageName + ".End");
+                final var tree = loader.loadClass(packageName + ".Tree");
+                final var endValue = end.getConstructor().newInstance();
+                final var nested = node.getConstructor(int.class, tree).newInstance(20,
+                        node.getConstructor(int.class, tree).newInstance(22, endValue));
+                assertEquals(42, main.getMethod("nested", loader.loadClass(packageName + ".Tree"))
+                        .invoke(null, nested));
+                assertEquals(7, main.getMethod("positive", loader.loadClass(packageName + ".Tree"))
+                        .invoke(null, node.getConstructor(int.class, tree).newInstance(7, endValue)));
+                assertEquals(0, main.getMethod("positive", loader.loadClass(packageName + ".Tree"))
+                        .invoke(null, node.getConstructor(int.class, tree).newInstance(-1, endValue)));
+                final var leaf = loader.loadClass(packageName + ".Leaf")
+                        .getConstructor(int.class, tree).newInstance(9, endValue);
+                assertEquals(9, main.getMethod("alternative", tree).invoke(null, leaf));
+            }
+        } finally {
+            deleteTree(sourceRoot);
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
     public void matchExhaustivelySelectsOptionCasesAndEvaluatesScrutineeOnce() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var packageName = "matchFixture" + suffix;
@@ -1786,9 +1859,9 @@ public final class StandardLibraryTest {
             libraryCompiler.compile();
 
             copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
-            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v18.bin"));
+            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v19.bin"));
             Files.createDirectories(libraryIndex.getParent());
-            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v18.bin"), libraryIndex);
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v19.bin"), libraryIndex);
 
             deleteTree(Path.of("dist"));
             Files.writeString(clientSource, """
@@ -1854,7 +1927,7 @@ public final class StandardLibraryTest {
             assertEquals(0, Zeron.runCli(librarySource.toString(), "--jar-output", secondLibraryJar.toString()));
             assertArrayEquals(Files.readAllBytes(libraryJar), Files.readAllBytes(secondLibraryJar));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v18.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v19.bin") != null);
                 assertTrue(jar.stream().anyMatch(entry -> entry.getName().equals(
                         libraryPackage.replace('.', '/') + "/Answer.class")));
             }
@@ -1882,7 +1955,7 @@ public final class StandardLibraryTest {
         final var libraryJar = Path.of("target", "zeron-stdlib-" + suffix + ".jar");
         final var sourceFile = Path.of("target", "CompiledStdlibClient" + suffix + ".zn");
         final var entryName = sourceFile.getFileName().toString().replaceFirst("\\.zn$", "");
-        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v18.bin"));
+        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v19.bin"));
         final var iterableClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterable.class"));
         final var iteratorClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterator.class"));
         final var arrayIteratorClass = libraryOutput.resolve(
@@ -1929,7 +2002,7 @@ public final class StandardLibraryTest {
             assertTrue(Files.exists(rangeClass));
             assertTrue(Files.exists(unitClass));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v18.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v19.bin") != null);
                 assertTrue(jar.getJarEntry("zeron/collections/Stream.class") != null);
                 assertTrue(jar.getJarEntry("zeron/lang/Unit.class") != null);
             }

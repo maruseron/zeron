@@ -1,6 +1,8 @@
 package com.maruseron.zeron;
 
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.ast.Expr;
+import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
@@ -60,5 +62,33 @@ public final class ParserDiagnosticsTest {
 
         assertFalse(result.diagnostics().isEmpty());
         assertEquals("ZR1101", result.diagnostics().getFirst().code().toString());
+    }
+
+    @Test
+    public void parsesPatternDeclarationsAndRecursiveOrPatterns() {
+        final var result = Parser.of(Scanner.from("""
+                class Box {
+                    public pattern split(left: Int, right: Box) {
+                        left = 1;
+                        right = this;
+                    }
+                }
+                fn extract(value: Box): Int = match (value) {
+                    case Box.split(_, Box.split(item, _)) | Box.split(item, _) -> item;
+                    case _ -> 0;
+                };
+                """).scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("patterns.zn");
+
+        assertEquals(result.diagnostics().toString(), 0, result.diagnostics().size());
+        final var declaration = (Stmt.ClassDecl) result.compilationUnit().declarations().getFirst();
+        assertEquals(1, declaration.patterns().size());
+        assertEquals(2, declaration.patterns().getFirst().outputs().size());
+
+        final var function = (Stmt.Function) result.compilationUnit().declarations().get(1);
+        final var match = (Expr.Match) ((Stmt.Return) function.body().getFirst()).value();
+        final var alternatives = match.arms.getFirst().pattern().alternatives();
+        assertEquals(2, alternatives.size());
+        assertEquals(2, alternatives.getFirst().arguments().size());
     }
 }

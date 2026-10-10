@@ -56,7 +56,7 @@ sealed permits list, including when contract metadata comes from a compiled libr
 
 ### Matching sealed contracts
 
-`match` is an expression over a non-null sealed-contract value:
+The implemented `match` expression operates on a non-null sealed-contract value:
 
 ```zeron
 match (option) {
@@ -66,22 +66,28 @@ match (option) {
 }
 ```
 
-Each arm is an expression followed by `;`. A type case must name one of the contract's directly
-permitted classes, and its generic arguments must match the scrutinee contract's arguments. The
-initial named-pattern form is `Type.property(binding)` or `Type.property(_)`; it reads one public
-property of the matched class. A binding and an optional `as` alias are immutable and arm-scoped.
-An optional `if` guard follows the pattern and alias and must have type `Boolean`. A false guard
-continues matching later arms. Multiple guarded cases for one variant are allowed, but only an
-unguarded case covers that variant for exhaustiveness. A guarded `_` is invalid; an unguarded `_`
-is an optional final catch-all. Duplicate covered cases and cases after `_` are errors. The arms
-must have a common result type, and the scrutinee is evaluated once.
+Each arm is an expression followed by `;`. A root type case must name one of the contract's directly
+permitted classes, and its generic arguments must match the scrutinee contract's arguments. Class
+designers may declare named patterns with typed outputs and an optional `when` condition; output
+names must be assigned exactly once on every completing path. Pattern bodies have an immutable
+receiver, cannot call `mut` methods, and may otherwise have effects. Pattern names cannot collide
+with properties. At a call site, output arguments bind immutable arm-local names, ignore values with
+`_`, or recursively apply nested patterns. OR alternatives must bind the same names to compatible
+types. Whole-value aliases use `as`. An optional `if` guard follows the pattern and must have type
+`Boolean`. A false guard or refutation continues matching later arms. Only unguarded irrefutable
+patterns cover permitted variants for exhaustiveness. A guarded `_` is invalid; an unguarded `_` is
+an optional final catch-all. Duplicate covered cases and cases after exhaustive coverage are errors.
+The arms must have a common result type, and the scrutinee is evaluated once.
 
-Nullable values must be proven non-null before matching. Named-pattern property types are substituted
+Nullable values must be proven non-null before matching. Pattern output types are substituted
 statically from the matched generic class type; JVM dispatch remains based on erased class identity.
-At runtime the compiler dispatches with `instanceof`, reads the selected property through its getter,
-then evaluates the guard and arm. A runtime null injected through Java interop is rejected before
-dispatch, and a non-wildcard match has a defensive `IllegalStateException` fallback. Multiple
-properties, nested patterns, and OR-patterns remain deferred.
+At runtime the compiler dispatches with `instanceof`, invokes a synthetic class helper once, applies
+nested tests, and then evaluates the guard and arm. A runtime null injected through Java interop and
+an unmatched value both reach a defensive `IllegalStateException` fallback. The legacy
+`Type.property(binding)` form remains as a single-public-property compatibility fallback when there
+is no class pattern of that name. See
+[design-document-16_patterns-and-pattern-matching.md](design-document-16_patterns-and-pattern-matching.md)
+for syntax, semantics, coverage rules, and implementation details.
 
 ### Nominal identity
 

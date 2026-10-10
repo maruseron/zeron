@@ -1258,6 +1258,56 @@ public final class ClassContractTest {
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(conflicting)));
     }
 
+    @Test
+    public void validatesPatternOutputAssignmentMutabilityAndMemberCollisions() {
+        final var validBranchAssignment = """
+                class Box {
+                    value: Int;
+                    public pattern choose(result: Int) {
+                        if (this.value > 0) { result = 1; } else { result = 2; }
+                    }
+                }
+                """;
+        new ResolutionService().resolve(parse(validBranchAssignment));
+
+        final var missingAssignment = """
+                class Box {
+                    value: Int;
+                    public pattern missing(result: Int) {
+                        if (this.value > 0) { result = 1; }
+                    }
+                }
+                """;
+        final var repeatedAssignment = """
+                class Box {
+                    public pattern repeated(result: Int) {
+                        result = 1;
+                        result = 2;
+                    }
+                }
+                """;
+        final var mutatingCall = """
+                class Box {
+                    value: Int;
+                    public mut increment(): Unit { this.value += 1; }
+                    public pattern invalid(result: Int) {
+                        this.increment();
+                        result = this.value;
+                    }
+                }
+                """;
+        final var propertyCollision = """
+                class Box {
+                    public property split: Int;
+                    public pattern split(result: Int) { result = 1; }
+                }
+                """;
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(missingAssignment)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(repeatedAssignment)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(mutatingCall)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(propertyCollision)));
+    }
+
     private static List<Stmt> parse(final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
     }

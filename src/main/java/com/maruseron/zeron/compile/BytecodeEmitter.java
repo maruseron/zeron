@@ -101,7 +101,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v18.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v19.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){

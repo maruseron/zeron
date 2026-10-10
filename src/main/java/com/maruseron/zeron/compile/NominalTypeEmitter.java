@@ -158,9 +158,13 @@ final class NominalTypeEmitter {
                                 });
                         emitClassDefaultOverloads(context, builder, declaration, classDesc, method, flags);
                     }
+                    for (final var pattern : declaration.patterns()) {
+                        emitClassPattern(context, builder, declaration, pattern);
+                    }
                     for (final var property : declaration.properties()) {
                         emitPropertyMethods(context, builder, declaration, property, classDesc);
                     }
+
                     for (final var constructor : declaration.namedConstructors()) {
                         final var factoryType = (FunctionDescriptor) TypeSubstitution.erase(
                                 constructor.typeDescriptor());
@@ -204,6 +208,67 @@ final class NominalTypeEmitter {
                             emitPropertyContractBridge(context, builder, classDesc, required, implementation,
                                     generatedBridges);
                         }
+                    }
+                });
+    }
+
+    private static void emitClassPattern(final CompilationContext context,
+                                         final ClassBuilder builder,
+                                         final Stmt.ClassDecl owner,
+                                         final Stmt.Pattern pattern) {
+        final var flags = ClassFile.ACC_PUBLIC | ClassFile.ACC_SYNTHETIC;
+        final var objectArrayType = ConstantDescs.CD_Object.arrayType();
+        builder.withMethodBody(Stmt.Pattern.helperName(pattern.name().lexeme()),
+                MethodTypeDesc.of(objectArrayType), flags, code -> {
+                    final var previousReturnType = context.currentReturnType;
+                    final var previousOffset = context.localSlotOffset;
+                    context.currentReturnType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny());
+                    context.localSlotOffset = 0;
+                    beginScope(context);
+                    final TypeDescriptor ownerType = owner.typeParameters().isEmpty()
+                            ? TypeDescriptor.of(owner.name().lexeme())
+                            : TypeDescriptor.genericOf(TypeDescriptor.ofName(owner.name().lexeme()),
+                                    owner.typeParameters().stream()
+                                            .map(parameter -> (TypeDescriptor) parameter).toList());
+                    final var thisToken = new Token(TokenType.THIS, "this", null, pattern.name().span());
+                    context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, thisToken,
+                            ownerType, BindingMutability.IMMUTABLE);
+                    context.symbols.define(thisToken);
+                    for (final var output : pattern.outputs()) {
+                        context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, output.name(),
+                                output.type(), BindingMutability.REASSIGNABLE);
+                        context.symbols.define(output.name());
+                    }
+                    try {
+                        final var refuted = code.newLabel();
+                        if (pattern.condition() != null) {
+                            BytecodeEmitter.emitExpr(context, code, pattern.condition());
+                            code.ifeq(refuted);
+                        }
+                        StatementEmitter.emitStmts(context, code, pattern.body());
+                        code.ldc(pattern.outputs().size());
+                        code.anewarray(ConstantDescs.CD_Object);
+                        for (int i = 0; i < pattern.outputs().size(); i++) {
+                            final var output = pattern.outputs().get(i);
+                            final var binding = context.symbols.getSymbol(output.name());
+                            code.dup();
+                            code.ldc(i);
+                            code.loadLocal(TypeKind.fromDescriptor(
+                                    TypeDescriptor.toJavaClassDesc(output.type()).descriptorString()),
+                                    binding.lvt() + context.localSlotOffset);
+                            BytecodeEmitter.emitConversion(context, code, output.type(), TypeDescriptor.ofAny());
+                            code.aastore();
+                        }
+                        code.areturn();
+                        if (pattern.condition() != null) {
+                            code.labelBinding(refuted);
+                            code.aconst_null();
+                            code.areturn();
+                        }
+                    } finally {
+                        endScope(context);
+                        context.localSlotOffset = previousOffset;
+                        context.currentReturnType = previousReturnType;
                     }
                 });
     }

@@ -237,6 +237,26 @@ final class DeclarationResolver {
             TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
             TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
         }
+        final var patternNames = new HashSet<String>();
+        for (final var pattern : declaration.patterns()) {
+            if (!patternNames.add(pattern.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        pattern.name(), "Duplicate class pattern name."));
+            }
+            if (declaration.properties().stream()
+                    .anyMatch(property -> property.name().lexeme().equals(pattern.name().lexeme()))) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        pattern.name(), "A class pattern cannot have the same name as a property."));
+            }
+            final var outputNames = new HashSet<String>();
+            for (final var output : pattern.outputs()) {
+                if (!outputNames.add(output.name().lexeme())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            output.name(), "Duplicate pattern output name."));
+                }
+                TypeResolver.validateType(context, output.type(), output.name());
+            }
+        }
 
         final var contractNames = new HashSet<String>();
         for (final var contractUse : declaration.contractUses()) {
@@ -285,6 +305,7 @@ final class DeclarationResolver {
                 if (property.isCustom()) resolvePropertyAccessors(context, declaration, property);
             }
             for (final var method : declaration.methods()) resolveMethod(context, declaration, method);
+            for (final var pattern : declaration.patterns()) resolvePattern(context, declaration, pattern);
             for (final var constructor : declaration.namedConstructors()) {
                 resolveNamedConstructor(context, constructor);
             }
@@ -294,6 +315,56 @@ final class DeclarationResolver {
         } finally {
             context.frame.currentClassName = previousClass;
             context.frame.initializerVisibleFields = previousInitializerFields;
+        }
+    }
+
+    private static void resolvePattern(final ResolutionContext context,
+                                       final Stmt.ClassDecl owner,
+                                       final Stmt.Pattern pattern) {
+        final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
+        final var enclosingFlow = context.frame.flowState;
+        final var previousOwner = context.frame.currentMethodOwner;
+        final var previousPattern = context.frame.resolvingPattern;
+        final var previousPatternOutputs = context.frame.patternOutputNames;
+        context.frame.currentMethodOwner = owner;
+        context.frame.resolvingPattern = true;
+        context.frame.patternOutputNames = pattern.outputs().stream()
+                .map(output -> output.name().lexeme()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        context.frame.flowState = new FlowState();
+        beginScope(context);
+        final TypeDescriptor ownerType = TypeResolver.classType(context, owner);
+        final var thisToken = new Token(TokenType.THIS, "this", null, pattern.name().span());
+        declare(context, SYNTHETIC_VAR, thisToken, ownerType, BindingMutability.IMMUTABLE);
+        define(context, thisToken);
+        try {
+            if (pattern.condition() != null) {
+                final var conditionType = ExpressionFlowResolver.resolveExpression(context, pattern.condition());
+                ensureAssignable(context, TypeDescriptor.ofBoolean(), conditionType, pattern.name());
+            }
+            for (final var output : pattern.outputs()) {
+                declare(context, SYNTHETIC_VAR, output.name(), output.type(), BindingMutability.REASSIGNABLE);
+            }
+            context.statementResolver.resolveStatements(pattern.body());
+            if (context.frame.flowState.isReachable()) {
+                for (final var output : pattern.outputs()) {
+                    final var writes = context.frame.flowState.writeCount(context.symbols.getSymbol(output.name()).name());
+                    if (writes != 1) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW,
+                                output.name(), writes == 0
+                                        ? "Pattern output must be assigned on every completing path."
+                                        : "Pattern output must be assigned exactly once on every completing path."));
+                    }
+                }
+            }
+            RaisedEffectFlow.verifyCallable(context, List.of(), pattern.name());
+        } finally {
+            context.frame.resolvingPattern = previousPattern;
+            context.frame.patternOutputNames = previousPatternOutputs;
+            context.frame.currentMethodOwner = previousOwner;
+            context.frame.flowState = enclosingFlow;
+            endScope(context);
+            RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
 

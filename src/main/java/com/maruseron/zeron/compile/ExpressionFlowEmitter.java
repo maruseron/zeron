@@ -414,62 +414,26 @@ final class ExpressionFlowEmitter {
     }
 
     static void emitMatchExpression(CompilationContext context, final CodeBuilder composer, final Expr.Match match) {
-        final var done = composer.newLabel();
+        beginScope(context);
+        final var scrutinee = emitMatchTemporary(context, "scrutinee", match.scrutinee.getType());
         emitExpr(context, composer, match.scrutinee);
-        final var failure = composer.newLabel();
-        composer.dup();
-        composer.ifnull(failure);
+        storePipelineValue(context, composer, scrutinee, match.scrutinee.getType());
+        final var done = composer.newLabel();
+        final var noMatch = composer.newLabel();
+        loadPipelineValue(context, composer, scrutinee, match.scrutinee.getType());
+        composer.ifnull(noMatch);
         for (final var arm : match.arms) {
-            if (arm.wildcard()) {
-                composer.pop();
-                emitExpr(context, composer, arm.expression());
-                emitConversion(context, composer, context.lastEmittedType, match.getType());
-                composer.goto_(done);
-                break;
-            }
-
             final var next = composer.newLabel();
-            final var targetClass = TypeDescriptor.toJavaClassDesc(arm.patternType());
-            composer.dup();
-            composer.instanceOf(targetClass);
-            composer.ifeq(next);
-
             beginScope(context);
             try {
-                if (arm.alias() != null) {
-                    final var aliasSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.alias(),
-                            arm.patternType(), BindingMutability.IMMUTABLE);
-                    context.symbols.define(arm.alias());
-                    composer.dup();
-                    composer.checkcast(targetClass);
-                    composer.storeLocal(TypeKind.REFERENCE, aliasSlot + context.localSlotOffset);
-                }
-                if (arm.namedPattern() != null) {
-                    final var propertyType = arm.declaredPatternType();
-                    final var erasedPropertyType = TypeSubstitution.erase(propertyType);
-                    composer.dup();
-                    composer.checkcast(targetClass);
-                    final var getterName = Stmt.propertyGetterName(arm.namedPattern().lexeme());
-                    composer.invokevirtual(targetClass, getterName,
-                            toJavaMethodDescriptor(TypeDescriptor.functionOf(getterName, erasedPropertyType)));
-                    context.lastEmittedType = erasedPropertyType;
-                    emitConversion(context, composer, erasedPropertyType, arm.resolvedPatternType());
-                    if (arm.binding() == null) {
-                        composer.pop();
-                    } else {
-                        final var bindingSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.binding(),
-                                arm.resolvedPatternType(), BindingMutability.IMMUTABLE);
-                        context.symbols.define(arm.binding());
-                        composer.storeLocal(TypeKind.fromDescriptor(
-                                TypeDescriptor.toJavaClassDesc(arm.resolvedPatternType()).descriptorString()),
-                                bindingSlot + context.localSlotOffset);
-                    }
+                declareMatchBindings(context, arm.pattern());
+                if (!arm.pattern().wildcard()) {
+                    emitMatchPattern(context, composer, arm.pattern(), scrutinee, next);
                 }
                 if (arm.guard() != null) {
                     emitExpr(context, composer, arm.guard());
                     composer.ifeq(next);
                 }
-                composer.pop();
                 emitExpr(context, composer, arm.expression());
                 emitConversion(context, composer, context.lastEmittedType, match.getType());
                 composer.goto_(done);
@@ -479,8 +443,7 @@ final class ExpressionFlowEmitter {
             composer.labelBinding(next);
         }
 
-        composer.labelBinding(failure);
-        composer.pop();
+        composer.labelBinding(noMatch);
         final var exception = ClassDesc.of("java.lang.IllegalStateException");
         composer.new_(exception);
         composer.dup();
@@ -489,7 +452,129 @@ final class ExpressionFlowEmitter {
                 MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
         composer.athrow();
         composer.labelBinding(done);
+        endScope(context);
         context.lastEmittedType = match.getType();
+    }
+
+    private static Bind emitMatchTemporary(final CompilationContext context,
+                                           final String name,
+                                           final TypeDescriptor type) {
+        return declareLoopLocal(context, nextLoopTemporary(context, "match$" + name), type);
+    }
+
+    private static void declareMatchBindings(final CompilationContext context, final Expr.MatchPattern pattern) {
+        if (!pattern.alternatives().isEmpty()) {
+            declareMatchBindings(context, pattern.alternatives().getFirst());
+            return;
+        }
+        if (pattern.alias() != null) declareMatchBinding(context, pattern.alias(), pattern.resolvedType());
+        if (pattern.binding() != null) declareMatchBinding(context, pattern.binding(), pattern.resolvedType());
+        for (final var argument : pattern.arguments()) declareMatchBindings(context, argument);
+    }
+
+    private static void declareMatchBinding(final CompilationContext context,
+                                            final Token name,
+                                            final TypeDescriptor type) {
+        context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, name, type, BindingMutability.IMMUTABLE);
+        context.symbols.define(name);
+    }
+
+    private static void emitMatchPattern(final CompilationContext context,
+                                         final CodeBuilder composer,
+                                         final Expr.MatchPattern pattern,
+                                         final Bind value,
+                                         final Label failure) {
+        if (!pattern.alternatives().isEmpty()) {
+            final var matched = composer.newLabel();
+            for (int i = 0; i < pattern.alternatives().size(); i++) {
+                final var alternativeFailure = i == pattern.alternatives().size() - 1
+                        ? failure : composer.newLabel();
+                emitMatchPattern(context, composer, pattern.alternatives().get(i), value, alternativeFailure);
+                composer.goto_(matched);
+                if (i != pattern.alternatives().size() - 1) {
+                    composer.labelBinding(alternativeFailure);
+                }
+            }
+            composer.labelBinding(matched);
+            return;
+        }
+        if (pattern.wildcard()) return;
+        if (pattern.binding() != null) {
+            storeMatchBinding(context, composer, pattern.binding(), pattern.resolvedType(), value);
+            return;
+        }
+
+        final var matchType = pattern.resolvedType();
+        final var targetClass = TypeDescriptor.toJavaClassDesc(matchType);
+        loadPipelineValue(context, composer, value, value.type());
+        composer.instanceOf(targetClass);
+        composer.ifeq(failure);
+
+        final var matchedValue = emitMatchTemporary(context, "value", matchType);
+        loadPipelineValue(context, composer, value, value.type());
+        composer.checkcast(targetClass);
+        storePipelineValue(context, composer, matchedValue, matchType);
+        if (pattern.alias() != null) {
+            storeMatchBinding(context, composer, pattern.alias(), matchType, matchedValue);
+        }
+        if (pattern.extractor() == null) return;
+
+        final var outputValues = new ArrayList<Bind>();
+        if (pattern.legacyProperty()) {
+            final var propertyType = TypeSubstitution.erase(pattern.declaredPatternType());
+            final var getterName = Stmt.propertyGetterName(pattern.extractor().lexeme());
+            loadPipelineValue(context, composer, matchedValue, matchType);
+            composer.invokevirtual(targetClass, getterName,
+                    toJavaMethodDescriptor(TypeDescriptor.functionOf(getterName, propertyType)));
+            emitConversion(context, composer, propertyType, pattern.resolvedPatternType());
+            final var output = emitMatchTemporary(context, "output", pattern.resolvedPatternType());
+            storePipelineValue(context, composer, output, pattern.resolvedPatternType());
+            outputValues.add(output);
+        } else {
+            loadPipelineValue(context, composer, matchedValue, matchType);
+            composer.invokevirtual(targetClass,
+                    Stmt.Pattern.helperName(pattern.extractor().lexeme()),
+                    MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+            final var outputArray = emitMatchTemporary(context, "outputs", TypeDescriptor.arrayOf(TypeDescriptor.ofAny()));
+            storePipelineValue(context, composer, outputArray, TypeDescriptor.arrayOf(TypeDescriptor.ofAny()));
+            loadPipelineValue(context, composer, outputArray, TypeDescriptor.arrayOf(TypeDescriptor.ofAny()));
+            composer.ifnull(failure);
+            for (int i = 0; i < pattern.arguments().size(); i++) {
+                final var output = emitMatchTemporary(context, "output", TypeDescriptor.ofAny());
+                loadPipelineValue(context, composer, outputArray, TypeDescriptor.arrayOf(TypeDescriptor.ofAny()));
+                composer.ldc(i);
+                composer.aaload();
+                storePipelineValue(context, composer, output, TypeDescriptor.ofAny());
+                outputValues.add(output);
+            }
+        }
+
+        for (int i = 0; i < pattern.arguments().size(); i++) {
+            final var argument = pattern.arguments().get(i);
+            final var outputValue = outputValues.get(i);
+            if (pattern.legacyProperty()) {
+                emitMatchPattern(context, composer, argument, outputValue, failure);
+            } else {
+                final var expectedType = argument.resolvedType();
+                final var typedOutput = emitMatchTemporary(context, "typedOutput", expectedType);
+                loadPipelineValue(context, composer, outputValue, TypeDescriptor.ofAny());
+                emitConversion(context, composer, TypeDescriptor.ofAny(), expectedType);
+                storePipelineValue(context, composer, typedOutput, expectedType);
+                emitMatchPattern(context, composer, argument, typedOutput, failure);
+            }
+        }
+    }
+
+    private static void storeMatchBinding(final CompilationContext context,
+                                          final CodeBuilder composer,
+                                          final Token name,
+                                          final TypeDescriptor type,
+                                          final Bind value) {
+        loadPipelineValue(context, composer, value, value.type());
+        emitConversion(context, composer, value.type(), type);
+        final var binding = context.symbols.getSymbol(name);
+        composer.storeLocal(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(type).descriptorString()),
+                binding.lvt() + context.localSlotOffset);
     }
 
     static void emitRaise(final CompilationContext context, final CodeBuilder composer, final Expr.Raise raise) {

@@ -37,6 +37,11 @@ final class StatementResolver {
                 context.symbols.endScope();
             }
             case Stmt.Break(Token keyword) -> {
+                if (context.frame.resolvingPattern) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, keyword,
+                            "Pattern bodies cannot break out of control flow."));
+                }
                 if (context.frame.loopDepth == 0) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW,
                             keyword,
@@ -48,6 +53,11 @@ final class StatementResolver {
                 context.frame.flowState.markUnreachable();
             }
             case Stmt.Continue(Token keyword) -> {
+                if (context.frame.resolvingPattern) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, keyword,
+                            "Pattern bodies cannot continue control flow."));
+                }
                 if (context.frame.loopDepth == 0) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW,
                             keyword,
@@ -157,6 +167,11 @@ final class StatementResolver {
                 context.frame.flowState = FlowState.join(thenFlow, elseFlow);
             }
             case Stmt.Return(Expr value, Token location) -> {
+                if (context.frame.resolvingPattern) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, location,
+                            "Pattern bodies cannot return before assigning their outputs."));
+                }
                 final var expectedReturnType = context.frame.expectedReturnTypes.peek();
                 final var returnType = value == null
                         ? TypeDescriptor.ofUnit()

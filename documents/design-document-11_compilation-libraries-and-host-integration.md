@@ -26,7 +26,7 @@ a source package a JVM module.
   resource generation; runtime loading uses the index, so adding a standard-library source does not
   require a separate registration-list edit. Standard-library declarations remain explicit imports,
   and the canonical source tree mirrors package names.
-- The compiler writes `META-INF/zeron/api-v18.bin`. The index has schema version 18 and carries the
+- The compiler writes `META-INF/zeron/api-v19.bin`. The index has schema version 19 and carries the
   required standard-library API version, currently 11.
 - Zeron libraries can be built into a class directory and consumed in compiled mode. Library loading
   validates the API-index schema and standard-library API versions and creates metadata-only
@@ -75,7 +75,7 @@ validated library JARs or class directories to the runtime classpath.
 
 ## Zeron Library Artifacts
 
-The API index is a binary sidecar at `META-INF/zeron/api-v18.bin`. Its schema version is separate from
+The API index is a binary sidecar at `META-INF/zeron/api-v19.bin`. Its schema version is separate from
 the standard-library API version. It records qualified public signatures, generated JVM owners,
 declaration and method generic parameters, nullability, reference views, mutability markers, callback
 shapes, and each callable's minimum accepted arity. Public property requirements and getter/setter
@@ -113,7 +113,7 @@ provider's initializer bodies.
 `--jar-output <file.jar>` packages a successful source/project compilation from a temporary staging
 directory, leaving the default `dist/` output unchanged when the option is omitted. When combined
 with `--build-stdlib`, the requested class directory is preserved and also packaged as a JAR.
-Archives contain the compiled classes and `META-INF/zeron/api-v18.bin`, with entries in deterministic
+Archives contain the compiled classes and `META-INF/zeron/api-v19.bin`, with entries in deterministic
 order. The JAR is published only after packaging succeeds.
 
 Consumers may select a Zeron library class directory or JAR with `--library`; compiled standard

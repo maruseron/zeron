@@ -61,6 +61,7 @@ public final class Scanner {
             entry("or",          OR),
             entry("package",     PACKAGE),
             entry("permits",     PERMITS),
+            entry("pattern",     PATTERN),
             entry("property",    PROPERTY),
             entry("public",      PUBLIC),
             entry("private",     PRIVATE),
@@ -77,7 +78,8 @@ public final class Scanner {
             entry("typeof",      TYPEOF),
             entry("until",       UNTIL),
             entry("witness",     WITNESS),
-            entry("while",       WHILE));
+            entry("while",       WHILE),
+            entry("when",        WHEN));
 
     Scanner(final String source, final String sourcePath) {
         this.source = source;

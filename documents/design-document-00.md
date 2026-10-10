@@ -62,9 +62,11 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     `fold`, `map`, `mapError`, and `andThen` for explicit error-value composition. No propagation
     operator or source-level exception handling is introduced.
 - Exhaustive `match` expressions over non-null sealed-contract values. Cases name permitted classes,
-    may bind the whole value with `as`, or use one named public-property pattern
-    (`Some<T>.value(value)`) with an optional Boolean guard. Guard-failing cases continue to later
-    arms and do not count toward exhaustiveness; a final unguarded `_` may cover remaining variants.
+    may bind the whole value with `as`, use declared class-defined extractor patterns with nested or
+    ignored outputs, and combine patterns with OR alternatives. Pattern guards and refutation
+    continue to later arms and do not count toward exhaustiveness; a final unguarded `_` may cover
+    remaining variants. The legacy one-public-property form remains compatible; see
+    [design-document-16](design-document-16_patterns-and-pattern-matching.md).
 - Compiled Zeron libraries can be packaged as JARs and loaded from either JARs or class directories;
     consumers validate both API-index schema and standard-library API compatibility.
 - Initial Java class-directory interop for public constructors and methods, including expanded
@@ -175,10 +177,8 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     rejects duplicate nominal contract/target witnesses and excludes non-nominal instances and
     witness-dispatched instance methods; see
     [design-document-15](design-document-15_type-class-witnesses-and-generic-bounds.md).
-- Richer pattern matching, including multiple named-property patterns per case, nested patterns, and
-    OR-patterns.
-- Named object patterns that define explicit, potentially partial views for matching; overlap,
-    match-failure signaling, purity, and exhaustiveness rules remain to be designed.
+- Class-defined extractor patterns for match expressions, including refutable patterns, nesting,
+    and OR-patterns; see [design-document-16](design-document-16_patterns-and-pattern-matching.md).
 - Low priority: anonymous objects that explicitly implement a named contract, for one-off adapters
     and test doubles. Anonymous record values are excluded because they would introduce structural
     typing; capture, identity, and lowering rules remain to be designed.

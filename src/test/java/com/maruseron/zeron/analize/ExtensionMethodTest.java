@@ -18,6 +18,114 @@ import static org.junit.Assert.assertTrue;
 
 public final class ExtensionMethodTest {
     @Test
+    public void resolvesSameNamedExtensionsByReceiverType() throws Exception {
+        final var output = Files.createTempDirectory("zeron-receiver-specific-extensions");
+        try {
+            final var app = unit("""
+                    package app;
+                    import zeron.collections.*;
+                    extension List<Int> {
+                        fn sum(): Int = this.stream().fold(0, (acc, item) -> acc + item);
+                    }
+                    extension List<String> {
+                        fn sum(): String = this.stream().fold("", (acc, item) -> acc + item);
+                    }
+                    fn integerSum(): Int = List<Int>.of(1, 2, 3).sum();
+                    fn stringSum(): String = List<String>.of("a", "b", "c").sum();
+                    """, "Main.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app), "app.Main", "app", List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass("app.Main");
+                assertEquals(6, generated.getMethod("integerSum").invoke(null));
+                assertEquals("abc", generated.getMethod("stringSum").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void rejectsDuplicateExtensionForSameReceiverAndName() {
+        final var extensions = unit("""
+                package app;
+                extension List<Int> {
+                    fn sum(): Int = 1;
+                }
+                extension List<Int> {
+                    fn sum(): Int = 2;
+                }
+                """, "Extensions.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(extensions));
+
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .anyMatch(error -> error.message().contains("An extension for this receiver and name")));
+    }
+
+    @Test
+    public void rejectsExtensionsThatCollideAfterJvmErasure() {
+        final var extensions = unit("""
+                package app;
+                import zeron.collections.List;
+                extension List<Int> {
+                    fn label(): String = "integer";
+                }
+                extension List<String> {
+                    fn label(): String = "string";
+                }
+                """, "Extensions.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(extensions));
+
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .anyMatch(error -> error.message().contains("same erased JVM signature")));
+
+        final var defaultArgumentExtensions = unit("""
+                package app;
+                import zeron.collections.List;
+                extension List<Int> {
+                    fn format(value: Int = 0): String = "integer";
+                }
+                extension List<String> {
+                    fn format(value: String = ""): String = "string";
+                }
+                """, "DefaultExtensions.zn");
+        final var defaultResult = new ResolutionService().resolveUnitsWithDiagnostics(
+                List.of(defaultArgumentExtensions));
+        assertTrue(defaultResult.errors().toString(), defaultResult.errors().stream()
+                .anyMatch(error -> error.message().contains("same erased JVM signature")));
+    }
+
+    @Test
+    public void emitsLambdasDeclaredInsideExtensionMethodBodies() throws Exception {
+        final var output = Files.createTempDirectory("zeron-extension-body-lambda");
+        try {
+            final var app = unit("""
+                    package app;
+                    import zeron.collections.*;
+                    extension List<Int> {
+                        fn sum(): Int = this.stream().fold(0, (acc, item) -> acc + item);
+                    }
+                    fn result(): Int = List<Int>.of(1, 2, 3).sum();
+                    """, "Main.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app), "app.Main", "app", List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(6, loader.loadClass("app.Main").getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
     public void passesBroadlyAcceptingFunctionToGenericCollectionCallback() throws Exception {
         final var output = Files.createTempDirectory("zeron-broad-function-callback");
         try {
@@ -163,7 +271,7 @@ public final class ExtensionMethodTest {
                 List.of(declarations, model));
 
         assertTrue(result.errors().toString(), result.errors().stream()
-                .anyMatch(error -> error.message().contains("An extension method and a namespace function")));
+                .anyMatch(error -> error.message().contains("Function and extension names")));
     }
 
     @Test
@@ -291,7 +399,7 @@ public final class ExtensionMethodTest {
                 List.of(app, first, second, model));
 
         assertTrue(result.errors().toString(), result.errors().stream()
-                .anyMatch(error -> error.message().contains("Ambiguous imported extension call")));
+                .anyMatch(error -> error.message().contains("Ambiguous extension method")));
     }
 
     @Test
@@ -328,11 +436,13 @@ public final class ExtensionMethodTest {
                     package app;
                     import model.Cell;
                     import model.Readable;
-                    import extras.*;
-                    import concrete.*;
-                    fn concrete(): String = Cell<Int>.new(7).describe();
+                    import extras.Readable.readExtended;
+                    import extras.Readable.describe as contractDescribe;
+                    import concrete.Cell.describe as concreteDescribe;
+                    fn concrete(): String = Cell<Int>.new(7).concreteDescribe();
                     fn throughContract(value: Readable<Int>): Int = value.readExtended();
                     fn projected(value: Cell<Int>): Int = value.readExtended();
+                    fn contractResult(value: Cell<Int>): String = value.contractDescribe();
                     """, "App.zn");
             final var compiler = CompilationService.forCompilationUnits(
                     List.of(app, concreteExtensions, contractExtensions, model),
@@ -343,8 +453,11 @@ public final class ExtensionMethodTest {
                     getClass().getClassLoader())) {
                 final var generated = loader.loadClass("app.ContractExtensionProjection");
                 assertEquals("concrete", generated.getMethod("concrete").invoke(null));
+                final var instance = loader.loadClass("model.Cell").getDeclaredConstructor(Object.class)
+                        .newInstance(7);
+                assertEquals("contract", generated.getMethod("contractResult", loader.loadClass("model.Cell"))
+                        .invoke(null, instance));
                 final var cell = loader.loadClass("model.Cell");
-                final var instance = cell.getDeclaredConstructor(Object.class).newInstance(7);
                 assertEquals(7, generated.getMethod("throughContract", loader.loadClass("model.Readable"))
                         .invoke(null, instance));
                 assertEquals(7, generated.getMethod("projected", cell).invoke(null, instance));
@@ -392,7 +505,46 @@ public final class ExtensionMethodTest {
                 List.of(app, firstExtensions, secondExtensions, model));
 
         assertTrue(result.errors().toString(), result.errors().stream()
-                .anyMatch(error -> error.message().contains("Ambiguous imported extension call")));
+                .anyMatch(error -> error.message().contains("Ambiguous extension method")));
+    }
+
+    @Test
+    public void reportsAmbiguityBetweenConcreteAndProjectedContractExtensions() {
+        final var model = unit("""
+                package model;
+                public contract Readable {
+                }
+                public class Cell is Readable {
+                    public constructor new;
+                }
+                """, "Model.zn");
+        final var concreteExtensions = unit("""
+                package concrete;
+                import model.Cell;
+                public extension Cell {
+                    public fn label(): String = "concrete";
+                }
+                """, "CellExtensions.zn");
+        final var contractExtensions = unit("""
+                package projected;
+                import model.Readable;
+                public extension Readable {
+                    public fn label(): String = "contract";
+                }
+                """, "ReadableExtensions.zn");
+        final var app = unit("""
+                package app;
+                import model.Cell;
+                import concrete.*;
+                import projected.*;
+                fn result(): String = Cell.new().label();
+                """, "App.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
+                List.of(app, concreteExtensions, contractExtensions, model));
+
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .anyMatch(error -> error.message().contains("Ambiguous extension method")));
     }
 
     @Test
@@ -455,13 +607,13 @@ public final class ExtensionMethodTest {
                     import extras.Box.bump;
                     import extras.Box.doubleValue;
                     import extras.Box.priority;
-                    import extras.Box.selected;
+                    import extras.Box.selected as extensionSelected;
                     fn value(): Int {
                         let box = Box.new(3);
                         box.bump();
                         return box.doubleValue();
                     }
-                    fn fallback(): String = Box.new(1).selected();
+                    fn fallback(): String = Box.new(1).extensionSelected();
                     fn instanceWins(): String = Box.new(1).priority();
                     """, "App.zn");
             final var compiler = CompilationService.forCompilationUnits(List.of(app, extensions, model),
@@ -769,6 +921,12 @@ public final class ExtensionMethodTest {
                             get = if (this < 0) then -this else this;
                         }
                     }
+                    public extension Container<Int> {
+                        public fn sum(): Int = 1;
+                    }
+                    public extension Container<String> {
+                        public fn sum(): String = "strings";
+                    }
                     """, "BoxExtensions.zn");
             final var libraryCompiler = CompilationService.forCompilationUnits(
                     List.of(extensions, model), "library.Provider", "extras",
@@ -782,6 +940,11 @@ public final class ExtensionMethodTest {
                     .map(ZeronLibraryIndex.ExtensionExport.class::cast)
                     .anyMatch(extension -> extension.property()
                             && extension.qualifiedName().equals("extras.Int.absoluteValue")));
+            assertEquals(2, index.declarations().stream()
+                    .filter(ZeronLibraryIndex.ExtensionExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ExtensionExport.class::cast)
+                    .filter(extension -> extension.qualifiedName().equals("extras.Container.sum"))
+                    .count());
 
             final var app = unit("""
                     package app;
@@ -790,6 +953,7 @@ public final class ExtensionMethodTest {
                     import extras.Box.increment;
                     import extras.Container.readValue;
                     import extras.Int.absoluteValue;
+                    import extras.Container.sum;
                     fn result(): Int {
                         let box = Box.new(4);
                         box.increment();
@@ -797,6 +961,8 @@ public final class ExtensionMethodTest {
                     }
                     fn genericResult(): Int = Container<Int>.new(9).readValue();
                     fn absoluteResult(): Int = (-8).absoluteValue;
+                    fn integerSum(): Int = Container<Int>.new(3).sum();
+                    fn stringSum(): String = Container<String>.new("abc").sum();
                     """, "Consumer.zn");
             final var consumerCompiler = CompilationService.forCompilationUnits(
                     List.of(app), "app.ExtensionConsumer", "app",
@@ -811,6 +977,10 @@ public final class ExtensionMethodTest {
                         .getMethod("genericResult").invoke(null));
                 assertEquals(8, loader.loadClass("app.ExtensionConsumer")
                         .getMethod("absoluteResult").invoke(null));
+                assertEquals(1, loader.loadClass("app.ExtensionConsumer")
+                        .getMethod("integerSum").invoke(null));
+                assertEquals("strings", loader.loadClass("app.ExtensionConsumer")
+                        .getMethod("stringSum").invoke(null));
             }
         } finally {
             deleteTree(root);

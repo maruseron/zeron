@@ -126,10 +126,8 @@ to their raw JVM class or interface; see [design-document-05_classes-and-contrac
 Generic call inference is structural and intentionally bounded. It handles direct type variables,
 function signatures, arrays (including a mutable array literal projected to a read-only parameter),
 nullable/reference wrappers, and existing generic descriptors. It is not a general subtype solver: there are no variance rules or inference from a desired result
-type alone. Overloaded calls infer each generic candidate independently, discard inapplicable
-candidates, and select the unique most-specific applicable parameter signature. Non-generic
-candidates win only as a final tie-break; ambiguous candidates require a more specific argument or
-explicit type arguments.
+type alone. Because each Zeron callable name has a single declaration, calls infer that declaration's
+generic parameters directly; there is no candidate ranking or return-type-based selection.
 Contract bounds may authorize readonly contract methods on generic function and method type
 parameters; all bounds are checked independently.
 If a type parameter appears only in an unconstrained lambda parameter, the caller must
@@ -186,7 +184,8 @@ shape matrix and broader adapter reuse still need coverage.
   generic function value; an expected function type can infer the specialization when it determines
   every type parameter. Specialized values lower through deduplicated static bridges and
   `LambdaMetafactory`. Polymorphic function values and partial type-argument lists remain deferred.
-  Overloaded function references require an expected function type that selects one signature.
+  Function references name a unique declaration; an expected function type may still determine
+  generic type arguments when it fully constrains them.
 4. **Invariant generic classes and contracts implemented.** Constructor and member substitution,
    declaration-site conformance, invariant identity, raw JVM erasure, nominal callback adapters, and
    erased contract bridges are covered. Broader shape combinations and adapter reuse remain follow-up

@@ -109,7 +109,7 @@ final class DeclarationEmitter {
                                     //Zeron.debug(currentFunction.toString());
                                 });
                             });
-                    emitDefaultOverloads(context, classBuilder, function, functionType);
+                    emitDefaultArgumentWrappers(context, classBuilder, function, functionType);
                 }
                 default -> {}
             }
@@ -193,10 +193,10 @@ final class DeclarationEmitter {
                     }
     }
 
-    private static void emitDefaultOverloads(final CompilationContext context,
-                                             final ClassBuilder classBuilder,
-                                             final Stmt.FunctionDeclaration function,
-                                             final FunctionDescriptor functionType) {
+    private static void emitDefaultArgumentWrappers(final CompilationContext context,
+                                                    final ClassBuilder classBuilder,
+                                                    final Stmt.FunctionDeclaration function,
+                                                    final FunctionDescriptor functionType) {
         if (function.defaultValues().isEmpty()) return;
         final var qualifiedName = context.resolution.functionName(function.name());
         final var owner = context.metadata.functionOwner(qualifiedName);
@@ -206,11 +206,11 @@ final class DeclarationEmitter {
         final var lastWrapperArity = function.variadic() ? fixedArity : functionType.arity() - 1;
         for (int arity = function.minimumArity(); arity <= lastWrapperArity; arity++) {
             final var suppliedArity = arity;
-            final var overloadType = TypeDescriptor.functionOf(functionType.name(),
+            final var wrapperType = TypeDescriptor.functionOf(functionType.name(),
                     functionType.returnType(), functionType.parameters().subList(0, suppliedArity)
                             .toArray(TypeDescriptor[]::new));
-            final var runtimeOverload = (FunctionDescriptor) TypeSubstitution.erase(overloadType);
-            classBuilder.withMethod(function.name().lexeme(), toJavaMethodDescriptor(runtimeOverload),
+            final var runtimeWrapper = (FunctionDescriptor) TypeSubstitution.erase(wrapperType);
+            classBuilder.withMethod(function.name().lexeme(), toJavaMethodDescriptor(runtimeWrapper),
                     flags, methodBuilder -> methodBuilder.withCode(code -> {
                         final var previousOffset = context.localSlotOffset;
                         final var previousReturnType = context.currentReturnType;

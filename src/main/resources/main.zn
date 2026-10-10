@@ -1,10 +1,5 @@
 import zeron.collections.*;
 
-class Person {
-    public property name: String;
-    public property age: Int;
-}
-
 class PrintingSink<T> is Sink<T> {
     public constructor empty() = PrintingSink.new();
     public mut add(value: T): Unit = println(value);
@@ -12,20 +7,16 @@ class PrintingSink<T> is Sink<T> {
 
 fn empty<C, T: Sink<C>>(): T = T.empty();
 
+extension List<Int> {
+    fn sum(): Int = this.stream().fold(0, (acc, i) -> acc + i);
+}
+
+extension List<String> {
+    fn sum(): String = this.stream().fold("", (acc, i) -> acc + i);
+}
+
 fn main() {
-    let users = [Person.new("marcelo", 24), Person.new("dario", 56)];
+    let strs = List.of("hello, ", "world!");
 
-    let result = for users
-        filter user -> user.age > 30
-        map user -> user.name;
-
-    let nums = [1, 2, 3, 4, 5, 6];
-
-    let evenSquared = for nums
-        flatMap i -> List<Int>.of(i, i + 10)
-        filter i -> i % 2 == 0
-        map i -> i * i
-        collect empty<Int, List<Int>>();
-
-    println(evenSquared);
+    println(strs.sum());
 }

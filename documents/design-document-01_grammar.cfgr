@@ -170,6 +170,10 @@ range                      : INT ".." INT ;
 
 # Semantic/parser constraints:
 # - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
+# - Each package/namespace callable name and each class/contract method name identifies one
+#   declaration. Ordinary Zeron functions and methods do not overload. Extension methods may share
+#   a name only for non-equivalent receiver types; calls select by receiver applicability alone,
+#   and multiple applicable extensions are ambiguous.
 # - A for-expression evaluates its source once. Without collect, it returns a lazy Stream and creates
 #   stage callbacks in source order; callback bodies run during traversal. Every traversal requests a
 #   new iterator, but the source need not be replayable. Stages execute in order; filters skip later

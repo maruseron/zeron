@@ -40,9 +40,12 @@ final class CallResolver {
             final var functionToken = context.functionSymbolTokens.get(forcedFunctionName);
             if (functionToken == null) throw new IllegalStateException("Resolved namespace function disappeared.");
             call.setResolvedFunctionName(forcedFunctionName);
-            final var selected = selectFunctionOverload(call, forcedFunctionName);
-            call.setResolvedFunctionDeclaration(selected);
-            descriptor = selected.typeDescriptor();
+            final var declaration = context.functions.get(forcedFunctionName);
+            if (declaration == null || declaration instanceof Stmt.ExtensionMethod) {
+                throw new IllegalStateException("Resolved namespace function disappeared.");
+            }
+            call.setResolvedFunctionDeclaration(declaration);
+            descriptor = declaration.typeDescriptor();
         } else if (callableSymbol != null && context.symbols.containsSymbol(callableSymbol)) {
             call.setResolvedSymbolToken(callableSymbol);
             final var symbol = context.symbols.getSymbol(callableSymbol).type();
@@ -75,9 +78,12 @@ final class CallResolver {
                 return resultType;
             }
             call.setResolvedFunctionName(functionName);
-            final var selected = selectFunctionOverload(call, functionName);
-            call.setResolvedFunctionDeclaration(selected);
-            descriptor = selected.typeDescriptor();
+            final var declaration = context.functions.get(functionName);
+            if (declaration == null || declaration instanceof Stmt.ExtensionMethod) {
+                throw new IllegalStateException("Resolved function disappeared.");
+            }
+            call.setResolvedFunctionDeclaration(declaration);
+            descriptor = declaration.typeDescriptor();
         }
         if (descriptor.isGeneric()) {
             final var resultType = resolveGenericCall(call, descriptor);
@@ -149,112 +155,6 @@ final class CallResolver {
                     call.arguments.stream().map(Expr::getType).toList(), call.callee));
         }
     }
-
-    private Stmt.FunctionDeclaration selectFunctionOverload(final Expr.Call call, final String functionName) {
-            final var packageName = context.declarationPackages.getOrDefault(functionName, "");
-            final var candidates = context.functionOverloads.getOrDefault(functionName, List.of()).stream()
-                    .filter(candidate -> !(candidate instanceof Stmt.ExtensionMethod))
-                    .filter(candidate -> packageName.equals(context.packageName) || candidate.isPublic())
-                    .toList();
-            if (candidates.isEmpty()) throw new IllegalStateException("Resolved function disappeared.");
-            if (candidates.size() == 1) return candidates.getFirst();
-            final var actualTypes = new ArrayList<TypeDescriptor>(call.arguments.size());
-            for (final var argument : call.arguments) {
-                actualTypes.add(argument instanceof Expr.Lambda || isFunctionReferenceCandidate(argument)
-                        ? null : ExpressionFlowResolver.resolveExpression(context, argument));
-            }
-            final var applicable = new ArrayList<OverloadCandidate>();
-            for (final var declaration : candidates) {
-                final var signature = declaration.typeDescriptor();
-                final var variadic = declaration.variadic();
-                final var fixedArity = Stmt.fixedArity(declaration.parameters(), variadic);
-                if ((!call.explicitTypeArguments.isEmpty()
-                        && call.explicitTypeArguments.size() != signature.typeParameters().size())
-                        || call.arguments.size() < declaration.minimumArity()
-                        || !variadic && call.arguments.size() > signature.arity()) continue;
-                final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-                try {
-                    for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
-                        TypeResolver.validateType(context, call.explicitTypeArguments.get(i), call.callee);
-                        substitutions.put(signature.typeParameters().get(i), call.explicitTypeArguments.get(i));
-                    }
-                    for (int i = 0; i < actualTypes.size(); i++) {
-                        final var actual = actualTypes.get(i);
-                        if (actual == null) continue;
-                        final var pattern = parameterType(signature.parameters(), i, fixedArity, variadic);
-                        if (TypeSubstitution.containsTypeParameter(pattern)) {
-                            TypeUnifier.unify(pattern, actual, substitutions, call.callee);
-                        }
-                    }
-                } catch (final ResolutionError _) {
-                    continue;
-                }
-                if (signature.typeParameters().stream().anyMatch(parameter -> !substitutions.containsKey(parameter))) {
-                    continue;
-                }
-                final var parameters = signature.parameters().stream()
-                        .map(parameter -> TypeSubstitution.substitute(parameter, substitutions)).toList();
-                var matches = true;
-                for (int i = 0; i < actualTypes.size(); i++) {
-                    final var actual = actualTypes.get(i);
-                    final var expected = parameterType(parameters, i, fixedArity, variadic);
-                    if (actual != null && !context.typeCompatibility.canAssign(expected, actual)) {
-                        matches = false;
-                        break;
-                    }
-                    if (actual == null && functionType(expected) == null) {
-                        matches = false;
-                        break;
-                    }
-                }
-                if (matches) applicable.add(new OverloadCandidate(declaration, parameters,
-                        declaration.minimumArity(), variadic, signature.isGeneric()));
-            }
-            if (applicable.isEmpty()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                        call.callee, "No overload of '" + functionName + "' matches these arguments."));
-            }
-            var best = applicable.stream().filter(candidate -> applicable.stream().noneMatch(other ->
-                    other != candidate && moreSpecific(other, candidate))).toList();
-            if (best.size() > 1) {
-                final var minOmitted = best.stream().mapToInt(candidate ->
-                        Math.max(0, Stmt.fixedArity(candidate.declaration().parameters(), candidate.variadic())
-                                - call.arguments.size())).min().orElse(0);
-                best = best.stream().filter(candidate ->
-                        Math.max(0, Stmt.fixedArity(candidate.declaration().parameters(), candidate.variadic())
-                                - call.arguments.size()) == minOmitted).toList();
-                if (best.stream().anyMatch(OverloadCandidate::variadic)
-                        && best.stream().anyMatch(candidate -> !candidate.variadic())) {
-                    best = best.stream().filter(candidate -> !candidate.variadic()).toList();
-                }
-                if (best.stream().anyMatch(candidate -> !candidate.generic())
-                        && best.stream().anyMatch(OverloadCandidate::generic)) {
-                    best = best.stream().filter(candidate -> !candidate.generic()).toList();
-                }
-            }
-            if (best.size() != 1) {
-                final var signatures = best.stream().map(candidate ->
-                        TypeFormatter.format(candidate.declaration().typeDescriptor())).sorted().toList();
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                        call.callee, "Ambiguous call to '" + functionName + "': " + String.join(", ", signatures) + "."));
-            }
-            return best.getFirst().declaration();
-        }
-
-    private boolean moreSpecific(final OverloadCandidate left, final OverloadCandidate right) {
-            if (left.parameters().size() != right.parameters().size()) return false;
-            var strict = false;
-            for (int i = 0; i < left.parameters().size(); i++) {
-                final var leftType = left.parameters().get(i);
-                final var rightType = right.parameters().get(i);
-                if (!context.typeCompatibility.canAssign(rightType, leftType)) return false;
-                strict |= !context.typeCompatibility.canAssign(leftType, rightType);
-            }
-            return strict;
-        }
-
-    private record OverloadCandidate(Stmt.FunctionDeclaration declaration, List<TypeDescriptor> parameters,
-                                     int minimumArity, boolean variadic, boolean generic) {}
 
     private TypeDescriptor resolveGenericCall(final Expr.Call call,
                                               final FunctionDescriptor genericType) {

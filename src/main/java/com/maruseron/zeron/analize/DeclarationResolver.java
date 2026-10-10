@@ -27,17 +27,9 @@ final class DeclarationResolver {
         }
         final var methodNames = new HashSet<String>();
         for (final var method : contract.methods()) {
-            if (contract.methods().stream().anyMatch(existing -> existing != method
-                    && existing.name().lexeme().equals(method.name().lexeme())
-                    && canonicalParameterSignature(existing.typeDescriptor())
-                            .equals(canonicalParameterSignature(method.typeDescriptor()))
-                    || existing != method && existing.name().lexeme().equals(method.name().lexeme())
-                            && !Collections.disjoint(jvmOverloadSignatures(existing.typeDescriptor(),
-                                    existing.minimumArity(), existing.variadic(), existing.defaultValues()),
-                                    jvmOverloadSignatures(method.typeDescriptor(), method.minimumArity(),
-                                            method.variadic(), method.defaultValues())))) {
+            if (!methodNames.add(method.name().lexeme())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        method.name(), "Duplicate contract method signature."));
+                        method.name(), "Contract method name '" + method.name().lexeme() + "' is already declared."));
             }
             TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
             TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
@@ -202,7 +194,6 @@ final class DeclarationResolver {
             TypeResolver.validateTypeParameterBounds(context, constructor.typeDescriptor(), constructor.name());
         }
 
-        final var methodNames = new HashSet<String>();
         for (final var property : declaration.properties()) {
             if (!fieldNames.add(property.name().lexeme())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
@@ -215,25 +206,13 @@ final class DeclarationResolver {
                         "A writable custom property requires a setter."));
             }
         }
+        final var methodNames = new HashSet<String>();
         for (final var method : declaration.methods()) {
-            if (fieldNames.contains(method.name().lexeme())) {
+            if (fieldNames.contains(method.name().lexeme()) || !methodNames.add(method.name().lexeme())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                         method.name(), "Duplicate class member."));
             }
-            final var prior = declaration.methods().stream().takeWhile(existing -> existing != method)
-                    .filter(existing -> existing.name().lexeme().equals(method.name().lexeme()))
-                    .anyMatch(existing -> canonicalParameterSignature(existing.typeDescriptor())
-                            .equals(canonicalParameterSignature(method.typeDescriptor()))
-                            || !Collections.disjoint(jvmOverloadSignatures(existing.typeDescriptor(),
-                                    existing.minimumArity(), existing.variadic(), existing.defaultValues()),
-                                    jvmOverloadSignatures(method.typeDescriptor(), method.minimumArity(),
-                                            method.variadic(), method.defaultValues())));
-            if (prior) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        method.name(), "Duplicate method parameter signature."));
-            }
 
-            methodNames.add(method.name().lexeme());
             TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
             TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
         }
@@ -513,38 +492,6 @@ final class DeclarationResolver {
             context.frame.flowState = enclosingFlow;
             RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
-    }
-
-    private static List<TypeDescriptor> canonicalParameterSignature(final FunctionDescriptor descriptor) {
-        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        for (int i = 0; i < descriptor.typeParameters().size(); i++) {
-            substitutions.put(descriptor.typeParameters().get(i),
-                    new TypeParameterDescriptor(Integer.MIN_VALUE, "T" + i));
-        }
-        return descriptor.parameters().stream()
-                .map(parameter -> TypeSubstitution.substitute(parameter, substitutions)).toList();
-    }
-
-    private static List<String> erasedParameterSignature(final FunctionDescriptor descriptor) {
-        return descriptor.parameters().stream()
-                .map(TypeSubstitution::erase)
-                .map(TypeDescriptor::descriptor).toList();
-    }
-
-    private static Set<List<String>> jvmOverloadSignatures(final FunctionDescriptor descriptor,
-                                                           final int minimumArity,
-                                                           final boolean variadic,
-                                                           final List<Expr> defaultValues) {
-        final var signatures = new HashSet<List<String>>();
-        signatures.add(erasedParameterSignature(descriptor));
-        if (defaultValues.isEmpty()) return signatures;
-        final var fixedArity = descriptor.arity() - (variadic ? 1 : 0);
-        final var lastWrapperArity = variadic ? fixedArity : descriptor.arity() - 1;
-        for (int arity = minimumArity; arity <= lastWrapperArity; arity++) {
-            signatures.add(descriptor.parameters().subList(0, arity).stream()
-                    .map(TypeSubstitution::erase).map(TypeDescriptor::descriptor).toList());
-        }
-        return signatures;
     }
 
     private static void checkConformance(final ResolutionContext context, final Stmt.ClassDecl declaration,

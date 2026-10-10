@@ -4,7 +4,10 @@
 
 Package headers, package-qualified nominal identities, explicit and star imports, aliases, and
 public versus package-visible declarations are implemented. Explicit imports also select extension
-method families for receiver syntax. Named source namespaces group functions
+methods for receiver syntax. Ordinary Zeron callable names are unique within their package or
+namespace; receiver-distinct extension declarations are the exception and are selected by receiver
+applicability as described below.
+named source namespaces group functions
 and immutable values within a package, independent of project directory layout. Namespace sealing,
 re-exports, and module-level visibility remain deferred. Project source discovery, library artifacts,
 Java interop, and compiler intrinsic bindings are covered separately in
@@ -33,10 +36,9 @@ package without imposing a source-directory convention.
 - `SymbolTable` keys functions and values by source spelling; class and contract types live in separate resolver maps.
 - Package and declaration identities are source-level names; the chosen JVM owners and output paths
     do not participate in name resolution. Build and output behavior is specified in doc 11.
-- Imports resolve public classes, contracts, function overload families, immutable values, and
-    explicitly named extension method families.
-    An explicit function import names the family; call-site argument types select one public
-    signature from it. Package-private
+- Imports resolve public classes, contracts, functions, immutable values, and
+    explicitly named extension methods.
+    An explicit function import names its unique declaration. Package-private
     declarations remain available within their package.
 
     Default parameters are properties of function and method declarations, not of their function types.
@@ -215,15 +217,20 @@ Importing the receiver type does not activate extensions. An extension import do
 function callable as a top-level function. Public use across packages requires both a public
 extension declaration and a public extension method; omitted visibility is package-visible.
 
-Member lookup first resolves visible class or contract instance-method overloads, including contract
-default methods. If that tier has an applicable best candidate, it wins; ambiguity in that tier is
-reported rather than hidden by an extension. Only when no visible instance candidate applies does
-resolution consider imported extensions with the matching local method name. Applicable explicitly
-imported extension families take precedence over star-imported families; if none applies,
-star-imported families are considered together. Receiver and ordinary argument types drive generic
-inference and specificity; defaults and variadic parameters affect applicability. Return types do
-not select an overload. Equally specific star-imported candidates are ambiguous at the call site. An
-alias changes only the extension method name recognized at the receiver dot.
+Member lookup first resolves a visible class or contract instance method, including a contract
+default method. Zeron classes and contracts cannot declare two methods with the same name. A
+declared instance method takes precedence over a same-named imported extension; otherwise resolution
+considers the matching local extension, then an explicitly imported extension, then star-imported
+extensions. A tier may contain same-named extensions for different receiver types; only receiver
+applicability selects a declaration. If multiple declarations in the first applicable tier match the
+receiver, the call is ambiguous, with no receiver-specificity ranking. An explicit import alias can
+select a different extension family, but does not make argument types, generic inference, bounds,
+optional arguments, or return type participate in selection. Those are checked only after one
+receiver-applicable declaration has been selected. An alias changes only the extension method name
+recognized at the receiver dot. Two extensions with the same qualified method name and equivalent
+receiver types are duplicate declarations. Distinct receiver declarations are also rejected when
+their emitted static methods or generated default-argument wrappers would have identical erased JVM
+signatures; such calls cannot be represented as distinct methods in the shared namespace owner.
 
 An extension body receives an implicit `this` with read-only receiver capability unless its method
 is marked `mut`, in which case the receiver is `&T`. Mutating extensions can be called only through
@@ -236,19 +243,18 @@ classes and contracts, and the intrinsic receivers `Unit`, `Int`, `Float`, `Bool
 `Array<T>`. Other pseudo-types, Java receivers, and nullable receivers are not extension targets.
 When a class implements a contract, an extension declared for that contract is also applicable to
 the concrete class, with generic contract arguments substituted from the class declaration. This is
-a compile-time projection and still emits a static call to the imported extension. An applicable
-class-specific extension is more specific than one reached through a contract projection; unrelated
-equally specific contract extensions are ambiguous. Instance and default methods retain precedence.
+a compile-time projection and still emits a static call to the imported extension. If more than one
+same-named extension is visible in the selected tier, the name is ambiguous rather than selected by
+receiver specificity. Instance and default methods retain precedence.
 An extension for `T` applies only when the receiver is known to be non-null; nullable receivers must
 be flow-narrowed or accessed with safe navigation.
 
 #### Extension receiver projections to explore
 
-Consider whether extensions should support projected candidates for nullable and mutable receivers,
+Consider whether extensions should support projected receivers for nullable and mutable receivers,
 such as adapting a `T` extension to `T?` or a read-only `T` extension to `&T`. This requires deciding
 how null handling composes with safe navigation and flow narrowing, whether mutable projections can
-ever be implicit, and how projected and directly declared extensions interact in overload
-specificity and ambiguity. Until settled, nullable receivers do not match non-null extension targets,
+ever be implicit, and how projected and directly declared extensions interact in name ambiguity. Until settled, nullable receivers do not match non-null extension targets,
 and mutability follows only the receiver and extension declarations themselves.
 
 ### Project value initialization

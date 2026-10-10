@@ -6,4 +6,6 @@ public contract Iterable<T> {
     default forEach(consumer: (T) -> Unit): Unit {
         for (let element in this) consumer(element);
     }
+
+    default stream(): Stream<T> = Stream.from(this);
 }

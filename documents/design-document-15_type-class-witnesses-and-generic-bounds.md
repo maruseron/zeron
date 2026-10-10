@@ -26,7 +26,7 @@ constructors. General non-nominal instances and witness-dispatched instance meth
 
 A generic bound denotes a complete applied contract type, not merely a raw contract name. For
 example, `Sink<Int>` and `Sink<String>` are distinct constraints even though both erase to the same
-JVM interface. Substitution and overload selection retain all nested contract arguments at source
+JVM interface. Substitution and generic inference retain all nested contract arguments at source
 level. The initial generic model remains invariant; adding variance is independent work.
 
 Generic functions and methods may bind a type parameter to an applied contract:

@@ -161,6 +161,13 @@ final class LambdaCompilationPlan {
                 collectFunctionShapes(type.returnType());
                 collectLambdaShapes(body);
             }
+            case Stmt.ExtensionMethod extension -> {
+                for (final var parameter : extension.typeDescriptor().parameters()) {
+                    collectFunctionShapes(parameter);
+                }
+                collectFunctionShapes(extension.typeDescriptor().returnType());
+                collectLambdaShapes(extension.body());
+            }
             case Stmt.ExternalFunction external -> {
                 for (final var parameter : external.typeDescriptor().parameters()) {
                     collectFunctionShapes(parameter);

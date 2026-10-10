@@ -86,9 +86,10 @@ Method type parameters and references to enclosing class or contract parameters 
 type encoding as generic function signatures. Function and value exports carry an explicit namespace
 name when declared inside a namespace; ordinary top-level value exports have no namespace. Callable
 exports retain their full-arity signatures and record both minimum arity and whether the final
-parameter is variadic. Multiple function exports may share a qualified name and together form its
-overload family; each signature retains its own generic, minimum-arity, and variadic metadata.
-Class and contract method lists likewise preserve same-named overloads. Named-constructor exports also record their variadic marker so consumers can
+parameter is variadic. Each qualified function name has at most one source declaration. Class and
+contract method lists likewise have unique names; calls resolve directly to that declaration and use
+its generic, minimum-arity, default-argument, and variadic metadata. Named-constructor exports also
+record their variadic marker so consumers can
 pack direct factory-call arguments correctly. Consumers omit only trailing defaulted fixed parameters
 and call generated provider-side JVM wrappers; direct variadic arguments are packed by the consumer,
 while function values keep the full array-shaped signature. Default expressions are not serialized or re-evaluated by
@@ -151,9 +152,11 @@ The supported source mappings are intentionally narrow:
 - `String` and boxed scalar parameters/results are nullable scalar types.
 - Other Java reference parameters/results map to nullable mutable views (`&T?`). Constructors
   return non-null mutable views (`&T`), and instance calls require a mutable receiver.
-- Overloads are selected by supported argument types. Applicable fixed-arity overloads take
-  precedence over varargs overloads; remaining equal-cost candidates are errors. Return types do not
-  select overloads.
+- Java method overloads are selected by supported argument types. Applicable fixed-arity Java
+  methods take precedence over varargs methods; remaining equal-cost candidates are errors. This is
+  host-interop resolution only; ordinary Zeron declarations cannot overload. Receiver-distinct
+  extension families may share a name and are selected only by receiver applicability; overlapping
+  applicable extensions are ambiguous.
 - Expanded Java varargs calls pack trailing arguments into the JVM's typed array, including an empty
   tail. Primitive and reference components are supported when their component type is mapped. Passing
   an already-packed Java array is not supported.
@@ -196,7 +199,7 @@ including `java.io.IO`, remain unavailable unless provided through a supported m
    libraries, deterministic JAR packaging/loading, and compiled standard-library mode work. Both
    index-schema and standard-library API compatibility are checked.
 3. **Java interop: initial slices implemented.** Class-directory interop supports public
-   constructors/methods, mapped types, overload selection, mutable receivers, expanded varargs, and
+   constructors/methods, mapped types, Java overload selection, mutable receivers, expanded varargs, and
    host exception propagation. The curated JDK facade adds only `System.out` and `PrintStream`
    `print`/`println`. Arbitrary fields, inheritance, callbacks, JDK module discovery, and Java JARs
    remain out of scope.

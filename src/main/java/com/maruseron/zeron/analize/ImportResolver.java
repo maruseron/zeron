@@ -24,22 +24,22 @@ final class ImportResolver {
     private final Map<String, Stmt.ClassDecl> classes;
     private final Map<String, Stmt.ContractDecl> contracts;
     private final Map<String, Stmt.FunctionDeclaration> functions;
-    private final Map<String, List<Stmt.FunctionDeclaration>> functionOverloads;
+    private final Map<String, List<Stmt.ExtensionMethod>> extensionMethods;
     private final Map<String, Stmt.Var> topLevelValues;
     private final Map<String, String> declarationPackages;
     private final JavaClassPath javaClassPath;
 
-    ImportResolver(final Map<String, Stmt.ClassDecl> classes,
-                   final Map<String, Stmt.ContractDecl> contracts,
-                   final Map<String, Stmt.FunctionDeclaration> functions,
-                   final Map<String, List<Stmt.FunctionDeclaration>> functionOverloads,
-                   final Map<String, Stmt.Var> topLevelValues,
+    ImportResolver(    final Map<String, Stmt.ClassDecl> classes,
+    final Map<String, Stmt.ContractDecl> contracts,
+    final Map<String, Stmt.FunctionDeclaration> functions,
+    final Map<String, List<Stmt.ExtensionMethod>> extensionMethods,
+    final Map<String, Stmt.Var> topLevelValues,
                    final Map<String, String> declarationPackages,
                    final JavaClassPath javaClassPath) {
         this.classes = classes;
         this.contracts = contracts;
         this.functions = functions;
-        this.functionOverloads = functionOverloads;
+        this.extensionMethods = extensionMethods;
         this.topLevelValues = topLevelValues;
         this.declarationPackages = declarationPackages;
         this.javaClassPath = javaClassPath;
@@ -86,17 +86,12 @@ final class ImportResolver {
             final var classDeclaration = classes.get(target);
             final var contractDeclaration = contracts.get(target);
             final var functionDeclaration = functions.get(target);
-            final var functionFamily = functionOverloads.getOrDefault(target,
-                    functionDeclaration == null ? List.of() : List.of(functionDeclaration));
-            final var extensionFamily = functionFamily.stream()
-                    .filter(Stmt.ExtensionMethod.class::isInstance)
-                    .map(Stmt.ExtensionMethod.class::cast).toList();
-            final var ordinaryFunctionFamily = functionFamily.stream()
-                    .filter(candidate -> !(candidate instanceof Stmt.ExtensionMethod)).toList();
+            final var extensionFamily = extensionMethods.getOrDefault(target, List.of());
             final var valueDeclaration = topLevelValues.get(target);
             final var javaClass = javaClassPath.find(target);
             if (classDeclaration == null && contractDeclaration == null
-                    && functionDeclaration == null && valueDeclaration == null && javaClass == null) {
+                    && functionDeclaration == null && extensionFamily.isEmpty()
+                    && valueDeclaration == null && javaClass == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
                         importDeclaration.location(),
                         "Unknown import target '" + target + "'."));
@@ -109,10 +104,8 @@ final class ImportResolver {
             }
             final var isPublic = classDeclaration != null ? classDeclaration.isPublic()
                     : contractDeclaration != null ? contractDeclaration.isPublic()
-                    : !extensionFamily.isEmpty()
-                        ? extensionFamily.stream().anyMatch(Stmt.ExtensionMethod::isPublic)
-                    : !ordinaryFunctionFamily.isEmpty()
-                        ? ordinaryFunctionFamily.stream().anyMatch(Stmt.FunctionDeclaration::isPublic)
+                    : functionDeclaration != null ? functionDeclaration.isPublic()
+                    : !extensionFamily.isEmpty() ? extensionFamily.stream().anyMatch(Stmt.ExtensionMethod::isPublic)
                     : valueDeclaration != null ? valueDeclaration.isPublic()
                     : true;
             if (!targetPackage.equals(unit.packageName()) && !isPublic) {

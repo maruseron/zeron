@@ -166,8 +166,10 @@ must return a value of that type. It has no implicit `this` because it runs as a
 work with a constructed object, bind the result of the canonical constructor to a local and use that
 receiver explicitly. Returning an expression of type `&Class` is allowed; it need not be a direct
 `Class.new(...)` expression. Named constructors do not overload, and their names share the class
-member namespace with fields and methods. Methods may overload by parameter signature, but not by
-return type or receiver mutability.
+member namespace with fields and methods. Zeron methods also do not overload: each class or contract
+member name identifies at most one method, regardless of parameter types, defaults, generic bounds,
+return type, or receiver mutability. Optional parameters and generic inference provide call
+flexibility without introducing alternate declarations.
 They lower to static factory methods; only canonical `new` lowers to JVM `<init>`.
 Named-constructor parameters may end in one variadic `T...` parameter. The factory body receives
 that parameter as `Array<T>`, and direct factory calls pack all positional arguments after the
@@ -422,7 +424,19 @@ Visibility           ::= "public" | "private"
 MethodBody           ::= "=" Expression ";" | Block
 ```
 
-Fields, properties, methods, and named constructors share one member namespace; methods may share a name when their parameter signatures differ, while fields, properties, and named constructors cannot overload. Return types and mutability do not distinguish method overloads. Calls filter candidates by arity, defaults, variadic packing, generic inference, and assignability, then choose the unique most-specific candidate; incomparable best candidates are ambiguous. Every class has one canonical constructor, synthesized as public when omitted; only `private constructor new;` is needed to restrict direct construction. Named constructors lower to static factories, have no `this`, and return `&Class`; every reachable normal path in a block must return a class reference. Factory bodies may use locals and branches, and may return any expression assignable to `&Class`. Object allocation and initialization still happen only through the canonical constructor. Method calls use `receiver.method(...)`; property reads and writes use `receiver.property` and `receiver.property = value`. Field reads and writes use explicitly named private storage. `this` names the current receiver. Initializers are fixed values, not optional constructor parameters; only uninitialized fields and auto-properties appear in the canonical constructor signature.
+Fields, properties, methods, and named constructors share one member namespace; every member name
+is unique within a class or contract. Calls resolve to that single declaration and validate arity,
+defaults, variadic packing, generic inference, bounds, and assignability without ranking competing
+signatures. Every class has one canonical constructor, synthesized as public when omitted; only
+`private constructor new;` is needed to restrict direct construction. Named constructors lower to
+static factories, have no `this`, and return `&Class`; every reachable normal path in a block must
+return a class reference. Factory bodies may use locals and branches, and may return any expression
+assignable to `&Class`. Object allocation and initialization still happen only through the canonical
+constructor. Method calls use `receiver.method(...)`; property reads and writes use
+`receiver.property` and `receiver.property = value`. Field reads and writes use explicitly named
+private storage. `this` names the current receiver. Initializers are fixed values, not optional
+constructor parameters; only uninitialized fields and auto-properties appear in the canonical
+constructor signature.
 
 ## Implementation Roadmap
 

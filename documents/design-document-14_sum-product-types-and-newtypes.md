@@ -130,7 +130,7 @@ safely represent the value as its underlying type, while retaining distinct nomi
 This is a representation goal, not yet a settled guarantee that wrappers are erased in every
 context. Generics, nullable values, contracts/interfaces, function values, identity-sensitive
 operations, and ABI boundaries may require boxing or adaptation. The language must specify equality,
-nullability, overload resolution, and API compatibility independently of the chosen JVM layout.
+nullability, and API compatibility independently of the chosen JVM layout.
 
 ## Compilation strategies to evaluate
 
@@ -161,7 +161,7 @@ construction, generic behavior, and stable public library metadata.
    use? Import aliases do not resolve this distinction because they only rename references.
 2. Are sum cases accessed only as `Sum.Case`, or should imports permit unqualified case names?
 3. Are case payloads positional, labeled, or both? Can fields have defaults or visibility modifiers?
-4. How are generic arguments inferred for zero-payload cases and overloaded case names?
+4. How are generic arguments inferred for zero-payload cases?
 5. What payload destructuring patterns are in scope initially, and how do guards and nullable values
    interact with case coverage?
 6. Should zero-payload cases have singleton identity, value equality, or unspecified object identity?
@@ -169,7 +169,7 @@ construction, generic behavior, and stable public library metadata.
    If so, are they nominal or structural?
 8. What exact syntax declares a newtype, and where can validation run without allowing invariant
    bypass? Can methods and multiple constructors be declared inline?
-9. In which JVM contexts may a newtype be unboxed, and what boxing, equality, overload, reflection,
+9. In which JVM contexts may a newtype be unboxed, and what boxing, equality, reflection,
    and library-ABI rules are required?
 10. How are sums and newtypes represented in compiled-library metadata, and which declaration
     changes constitute source or binary API changes?

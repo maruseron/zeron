@@ -68,7 +68,7 @@ final class NominalTypeEmitter {
                                             }
                                         });
                             }
-                            emitContractDefaultOverloads(context, builder, contract, method);
+                            emitContractDefaultArgumentWrappers(context, builder, contract, method);
                         }
                         for (final var property : contract.properties()) {
                             final var getterType = TypeDescriptor.functionOf(
@@ -156,7 +156,7 @@ final class NominalTypeEmitter {
                                     }
                                     methodBuilder.withCode(code -> emitClassMethod(context, code, declaration, method));
                                 });
-                        emitClassDefaultOverloads(context, builder, declaration, classDesc, method, flags);
+                        emitClassDefaultArgumentWrappers(context, builder, declaration, classDesc, method, flags);
                     }
                     for (final var pattern : declaration.patterns()) {
                         emitClassPattern(context, builder, declaration, pattern);
@@ -589,52 +589,53 @@ final class NominalTypeEmitter {
         return "$zeron$lambda$call$" + methodName;
     }
 
-    private static void emitClassDefaultOverloads(final CompilationContext context,
-                                                  final ClassBuilder builder,
-                                                  final Stmt.ClassDecl owner,
-                                                  final ClassDesc classDesc,
-                                                  final Stmt.Method method,
-                                                  final int flags) {
-        emitDefaultMethodOverloads(context, builder, owner.name().lexeme(), classDesc,
+    private static void emitClassDefaultArgumentWrappers(final CompilationContext context,
+                                                         final ClassBuilder builder,
+                                                         final Stmt.ClassDecl owner,
+                                                         final ClassDesc classDesc,
+                                                         final Stmt.Method method,
+                                                         final int flags) {
+        emitDefaultMethodArgumentWrappers(context, builder, owner.name().lexeme(), classDesc,
                 method.name(), method.parameters(), method.typeDescriptor(),
                 method.defaultValues(), method.minimumArity(), method.variadic(),
                 flags | ClassFile.ACC_SYNTHETIC, false, method.isMutating());
     }
 
-    private static void emitContractDefaultOverloads(final CompilationContext context,
-                                                     final ClassBuilder builder,
-                                                     final Stmt.ContractDecl owner,
-                                                     final Stmt.ContractMethod method) {
+    private static void emitContractDefaultArgumentWrappers(final CompilationContext context,
+                                                            final ClassBuilder builder,
+                                                            final Stmt.ContractDecl owner,
+                                                            final Stmt.ContractMethod method) {
         if (method.defaultValues().isEmpty()) return;
-        emitDefaultMethodOverloads(context, builder, owner.name().lexeme(), ClassDesc.of(owner.name().lexeme()),
+        emitDefaultMethodArgumentWrappers(context, builder, owner.name().lexeme(),
+                ClassDesc.of(owner.name().lexeme()),
                 method.name(), method.parameters(), method.typeDescriptor(),
                 method.defaultValues(), method.minimumArity(), method.variadic(),
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_SYNTHETIC, true, method.isMutating());
     }
 
-    private static void emitDefaultMethodOverloads(final CompilationContext context,
-                                                   final ClassBuilder builder,
-                                                   final String ownerName,
-                                                   final ClassDesc ownerDesc,
-                                                   final Token methodName,
-                                                   final List<Token> parameters,
-                                                   final FunctionDescriptor functionType,
-                                                   final List<Expr> defaultValues,
-                                                   final int minimumArity,
-                                                   final boolean variadic,
-                                                   final int flags,
-                                                   final boolean isContract,
-                                                   final boolean isMutating) {
+    private static void emitDefaultMethodArgumentWrappers(final CompilationContext context,
+                                                          final ClassBuilder builder,
+                                                          final String ownerName,
+                                                          final ClassDesc ownerDesc,
+                                                          final Token methodName,
+                                                          final List<Token> parameters,
+                                                          final FunctionDescriptor functionType,
+                                                          final List<Expr> defaultValues,
+                                                          final int minimumArity,
+                                                          final boolean variadic,
+                                                          final int flags,
+                                                          final boolean isContract,
+                                                          final boolean isMutating) {
         if (defaultValues.isEmpty()) return;
         final var fixedArity = parameters.size() - (variadic ? 1 : 0);
         final var lastWrapperArity = variadic ? fixedArity : functionType.arity() - 1;
         for (int arity = minimumArity; arity <= lastWrapperArity; arity++) {
             final var suppliedArity = arity;
-            final var overloadType = TypeDescriptor.functionOf(functionType.name(),
+            final var wrapperType = TypeDescriptor.functionOf(functionType.name(),
                     functionType.returnType(), functionType.parameters().subList(0, suppliedArity)
                             .toArray(TypeDescriptor[]::new));
-            final var runtimeOverload = (FunctionDescriptor) TypeSubstitution.erase(overloadType);
-            builder.withMethod(methodName.lexeme(), toJavaMethodDescriptor(runtimeOverload), flags,
+            final var runtimeWrapper = (FunctionDescriptor) TypeSubstitution.erase(wrapperType);
+            builder.withMethod(methodName.lexeme(), toJavaMethodDescriptor(runtimeWrapper), flags,
                     methodBuilder -> methodBuilder.withCode(code -> {
                         final var previousOffset = context.localSlotOffset;
                         final var previousReturnType = context.currentReturnType;

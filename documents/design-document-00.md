@@ -41,8 +41,10 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     an ordinary value type. See [typed raised effects](design-document-13_typed-raised-effects.md).
 - Explicitly imported extension methods for Zeron classes and contracts. Extensions resolve
     statically, lower to receiver-first static functions, and cannot access private members.
-    Instance-method overloads (including contract defaults) take precedence when applicable;
-    otherwise imported extension overloads are considered. Mutating extensions require `&T`.
+    Ordinary callable names are unique rather than overloaded; extensions may share a name for
+    different receiver types and resolve only by receiver applicability, with overlap reported as
+    ambiguous. Instance and contract-default methods take precedence over same-named extensions.
+    Mutating extensions require `&T`.
 - Invariant generic classes and contracts with inferred or explicit constructor arguments, member
     substitution, declaration-site conformance, raw JVM erasure, erased-signature bridges, and callback
     adaptation across erased nominal fields and members.
@@ -194,13 +196,6 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     The final expression must explicitly construct its `Option`/`Result` value; plain results are
     not implicitly lifted. This sequences value-level failures and does not handle declared
     `raises` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
-- Low priority: operator overloading resolved only through explicitly imported algebraic conformance
-    witnesses, not arbitrary type members. A witness supplies operations appropriate to a structure,
-    including its `identity` (for example, `0` for an additive group and `1` for a multiplicative
-    group); one type may have different witnesses in different contexts. Existing intrinsic numeric
-    operators remain unchanged. Duplicate applicable witnesses require disambiguation or are errors.
-    The design is open and difficult: the compiler can check signatures, but algebraic laws such as
-    associativity and identity remain unenforced.
 - Low priority: compiler-recognized type-admissibility constraints on generic type parameters, such
     as `NonNull` to exclude nullable type arguments or `Numeric` to admit only `Int` and `Float`.
     These constraints restrict which types may be supplied but do not expose operations; generic

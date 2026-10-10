@@ -689,7 +689,7 @@ public final class ZeronLibraryIndexTest {
     }
 
         @Test
-    public void resolvesAndInvokesOverloadsFromSeparatelyCompiledLibraries() throws Exception {
+    public void resolvesUniqueFunctionsFromSeparatelyCompiledLibraries() throws Exception {
             final var suffix = UUID.randomUUID().toString().replace("-", "");
             final var libraryPackage = "overloadlibrary" + suffix;
             final var appPackage = "overloadclient" + suffix;
@@ -702,17 +702,17 @@ public final class ZeronLibraryIndexTest {
                     for (int libraryNumber = 1; libraryNumber <= 2; libraryNumber++) {
                             deleteTree(Path.of("dist"));
                             final var libraryEntry = libraryPackage + ".LibraryEntry" + libraryNumber + suffix;
-                            final var overloadUnit = parse("Overload" + libraryNumber + ".zn", libraryNumber == 1
+                            final var functionUnit = parse("Library" + libraryNumber + ".zn", libraryNumber == 1
                                     ? """
                                             package %s;
-                                            public fn select(value: Int): String = "integer";
+                                            public fn selectInt(value: Int): String = "integer";
                                             """.formatted(libraryPackage)
                                     : """
                                             package %s;
-                                            public fn select(value: String): String = "string";
+                                            public fn selectString(value: String): String = "string";
                                             """.formatted(libraryPackage));
                             final var libraryCompiler = CompilationService.forCompilationUnits(
-                                    List.of(overloadUnit), libraryEntry, libraryPackage);
+                                    List.of(functionUnit), libraryEntry, libraryPackage);
                             libraryCompiler.resolve();
                             libraryCompiler.compile();
                             final var libraryRoot = libraryNumber == 1 ? libraryOneRoot : libraryTwoRoot;
@@ -728,10 +728,11 @@ public final class ZeronLibraryIndexTest {
                     deleteTree(Path.of("dist"));
                     final var client = parse("OverloadClient.zn", """
                             package %s;
-                            import %s.select as select;
-                            fn intResult(): String = select(1);
-                            fn stringResult(): String = select("text");
-                            """.formatted(appPackage, libraryPackage));
+                            import %s.selectInt as selectInt;
+                            import %s.selectString as selectString;
+                            fn intResult(): String = selectInt(1);
+                            fn stringResult(): String = selectString("text");
+                            """.formatted(appPackage, libraryPackage, libraryPackage));
                     final var consumer = CompilationService.forCompilationUnits(
                             List.of(client), clientMainName, appPackage, List.of(firstIndex, secondIndex));
                     consumer.resolve();

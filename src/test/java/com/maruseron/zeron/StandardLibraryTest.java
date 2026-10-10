@@ -301,7 +301,7 @@ public final class StandardLibraryTest {
     }
 
     @Test
-    public void genericClassFactoryAndNamespaceFunctionCollisionIsAmbiguousWhenApplicable() {
+    public void genericClassFactoryAndNamespaceFunctionNameIsAlwaysAmbiguous() {
         final var source = parse("Main.zn", """
                 class Box<T> {
                     value: T;
@@ -318,7 +318,7 @@ public final class StandardLibraryTest {
 
         final var error = assertThrows(ResolutionError.class, compiler::resolve);
 
-        assertTrue(error.getMessage().contains("Ambiguous call"));
+        assertTrue(error.getMessage().contains("Ambiguous name"));
 
         final var nonMatchingFactory = parse("NonMatchingFactory.zn", """
                 class Factory<T> {
@@ -332,7 +332,8 @@ public final class StandardLibraryTest {
                 """);
         final var nonMatchingCompiler = CompilationService.forCompilationUnits(List.of(nonMatchingFactory),
                 "ClassNamespaceSelection", "");
-        nonMatchingCompiler.resolve();
+        final var nonMatchingError = assertThrows(ResolutionError.class, nonMatchingCompiler::resolve);
+        assertTrue(nonMatchingError.getMessage().contains("Ambiguous name"));
     }
 
     @Test

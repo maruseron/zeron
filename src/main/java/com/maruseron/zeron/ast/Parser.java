@@ -209,16 +209,60 @@ public final class Parser {
 
     private Stmt.Witness witnessDeclaration() {
         final var name = previous();
-        final var typeParameters = typeParameterDeclaration(name, false);
+        final var typeParameters = typeParameterDeclaration(name, true);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = new LinkedHashMap<>(typeParameters);
         try {
             final var contractType = collectType();
             consume(FOR, "Expect 'for' between witness contract and target type.");
             final var targetType = collectType();
-            consume(LEFT_BRACE, "Expect '{' before witness factory mappings.");
+            consume(LEFT_BRACE, "Expect '{' before witness members.");
             final var mappings = new ArrayList<Stmt.WitnessFactoryMapping>();
+            final var methods = new ArrayList<Stmt.WitnessMethod>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                if (match(FN) || match(MUT)) {
+                    final var declarationToken = previous();
+                    if (declarationToken.type() == MUT) {
+                        error(declarationToken, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "Witness methods cannot be marked mut.");
+                    }
+                    final var methodName = consume(IDENTIFIER, "Expect witness method name.");
+                    final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
+                    final var enclosingMethodTypeParameters = activeTypeParameters;
+                    activeTypeParameters = new LinkedHashMap<>(enclosingMethodTypeParameters);
+                    activeTypeParameters.putAll(methodTypeParameters);
+                    final ParsedMethod parsed;
+                    try {
+                        parsed = methodSignature(methodName, false,
+                                List.copyOf(methodTypeParameters.values()));
+                    } finally {
+                        activeTypeParameters = enclosingMethodTypeParameters;
+                    }
+                    final var sourceMethod = new Stmt.Function(methodName, parsed.parameters(),
+                            parsed.typeDescriptor(), parsed.body(), false, parsed.defaultValues(),
+                            parsed.parameters().size() - (parsed.variadic() ? 1 : 0)
+                                    - parsed.defaultValues().size(), parsed.variadic());
+                    final var helperName = new Token(IDENTIFIER,
+                            "$zeron$witness$" + name.span().start().offset() + "$" + methodName.lexeme(),
+                            null, methodName.span());
+                    final var helperParameters = new ArrayList<Token>();
+                    helperParameters.add(new Token(THIS, "this", null, methodName.span()));
+                    helperParameters.addAll(parsed.parameters());
+                    final var helperTypes = new ArrayList<TypeDescriptor>();
+                    helperTypes.add(targetType);
+                    helperTypes.addAll(parsed.typeDescriptor().parameters());
+                    final var helperTypeParameters = new ArrayList<TypeParameterDescriptor>(typeParameters.values());
+                    helperTypeParameters.addAll(methodTypeParameters.values());
+                    final var helperType = TypeDescriptor.functionWithEffectsOf(helperName.lexeme(),
+                            parsed.typeDescriptor().returnType(), helperTypes, helperTypeParameters,
+                            parsed.typeDescriptor().raisedEffects());
+                    final var implementation = new Stmt.Function(helperName, helperParameters, helperType,
+                            parsed.body(), false, parsed.defaultValues(),
+                            1 + parsed.parameters().size() - (parsed.variadic() ? 1 : 0)
+                                    - parsed.defaultValues().size(), parsed.variadic());
+                    methods.add(new Stmt.WitnessMethod(methodName, sourceMethod, implementation));
+                    continue;
+                }
                 final var requirement = consume(IDENTIFIER, "Expect contract factory requirement name.");
                 consume(EQUAL, "Expect '=' before witness constructor target.");
                 var mappedType = witnessMappedType();
@@ -232,9 +276,9 @@ public final class Parser {
                 consume(SEMICOLON, "Expect ';' after witness mapping.");
                 mappings.add(new Stmt.WitnessFactoryMapping(requirement, mappedType, constructor));
             }
-            consume(RIGHT_BRACE, "Expect '}' after witness mappings.");
+            consume(RIGHT_BRACE, "Expect '}' after witness members.");
             return new Stmt.Witness(name, List.copyOf(typeParameters.values()), contractType,
-                    targetType, mappings);
+                    targetType, mappings, methods);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -620,7 +664,7 @@ public final class Parser {
             if (match(COLON)) {
                 if (!allowBounds) {
                     throw error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                            "Type-parameter bounds are supported only on generic functions and methods.");
+                            "Type-parameter bounds are supported only on generic functions, methods, and witnesses.");
                 }
                 final var enclosingTypeParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(parameters);

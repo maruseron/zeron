@@ -15,6 +15,7 @@ public final class Compiler {
         context.resolution = new ResolutionService("", context.javaClassPathRoots, context.functionBindings)
                 .resolveUnitsWithDiagnostics(context.compilationUnits);
         context.symbols = context.resolution.globalSymbolTable();
+        context.refreshResolvedDeclarations();
         return context.resolution;
     }
 

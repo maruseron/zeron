@@ -101,7 +101,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v19.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v20.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -424,7 +424,7 @@ final class BytecodeEmitter {
                     }
                     case "Ljava/lang/String;" -> {
                         emitExpr(context, composer, binary.left);
-                        emitExpr(context, composer, binary.right);
+                        emitStringConcatenationRight(context, composer, binary);
                         final var handle = MethodHandleDesc.of(
                                 DirectMethodHandleDesc.Kind.STATIC,
                                 ClassDesc.of("java.lang.invoke.StringConcatFactory"),
@@ -699,6 +699,9 @@ final class BytecodeEmitter {
                      constructorIndex++) {
                     slots.add(Expr.evidenceToken(parameter, boundIndex, constructorIndex));
                 }
+                for (int methodIndex = 0; methodIndex < contract.methods().size(); methodIndex++) {
+                    slots.add(Expr.methodEvidenceToken(parameter, boundIndex, methodIndex));
+                }
             }
         }
         return List.copyOf(slots);
@@ -711,12 +714,60 @@ final class BytecodeEmitter {
         return methodType.insertParameterTypes(methodType.parameterCount(), parameters);
     }
 
-    private static void emitEvidenceArguments(final CompilationContext context,
-                                              final CodeBuilder composer,
-                                              final List<Expr.EvidenceArgument> evidence) {
+    static void emitEvidenceUnavailable(final CodeBuilder composer) {
+        final var exception = ClassDesc.of("java.lang.UnsupportedOperationException");
+        composer.new_(exception);
+        composer.dup();
+        composer.ldc("This generic entry point requires compiler-provided type-class evidence.");
+        composer.invokespecial(exception, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+        composer.athrow();
+    }
+
+    static void emitEvidenceArguments(final CompilationContext context,
+                                     final CodeBuilder composer,
+                                     final List<Expr.EvidenceArgument> evidence) {
         for (final var argument : evidence) {
             if (argument.forwardToken() != null) {
                 emitVariable(context, composer, argument.forwardToken());
+            } else if (argument.instanceMethod()) {
+                final var ownerName = context.metadata.functionOwner(argument.ownerName()) == null
+                        ? argument.ownerName()
+                        : context.metadata.functionOwner(argument.ownerName());
+                final var kind = switch (argument.handleKind()) {
+                    case STATIC -> DirectMethodHandleDesc.Kind.STATIC;
+                    case VIRTUAL -> DirectMethodHandleDesc.Kind.VIRTUAL;
+                    case INTERFACE -> DirectMethodHandleDesc.Kind.INTERFACE_VIRTUAL;
+                };
+                final var erasedSignature = (FunctionDescriptor) TypeSubstitution.erase(argument.signature());
+                final var evidenceCount = witnessSlots(context, argument.signature()).size();
+                final var methodType = argument.handleKind() == Expr.EvidenceHandleKind.STATIC
+                        ? toJavaMethodDescriptor(erasedSignature)
+                        : toJavaMethodDescriptor(TypeDescriptor.functionWithEffectsOf(
+                                erasedSignature.name(), erasedSignature.returnType(),
+                                erasedSignature.parameters().subList(1, erasedSignature.parameters().size()),
+                                List.of(), erasedSignature.raisedEffects()));
+                final var handleType = withEvidenceParameters(methodType, evidenceCount);
+                composer.ldc(MethodHandleDesc.of(kind, ClassDesc.of(ownerName),
+                        argument.constructorName(), handleType.descriptorString()));
+                if (!argument.prerequisiteEvidence().isEmpty()) {
+                    final var boundArgumentPosition = erasedSignature.parameters().size()
+                            - (argument.handleKind() == Expr.EvidenceHandleKind.STATIC ? 0 : 1);
+                    composer.loadConstant(Integer.valueOf(boundArgumentPosition));
+                    composer.loadConstant(Integer.valueOf(argument.prerequisiteEvidence().size()));
+                    composer.anewarray(ClassDesc.of("java.lang.Object"));
+                    for (int index = 0; index < argument.prerequisiteEvidence().size(); index++) {
+                        composer.dup();
+                        composer.loadConstant(Integer.valueOf(index));
+                        emitEvidenceArguments(context, composer,
+                                List.of(argument.prerequisiteEvidence().get(index)));
+                        composer.aastore();
+                    }
+                    composer.invokestatic(ClassDesc.of("java.lang.invoke.MethodHandles"), "insertArguments",
+                            MethodTypeDesc.of(ClassDesc.of("java.lang.invoke.MethodHandle"),
+                                    ClassDesc.of("java.lang.invoke.MethodHandle"), ConstantDescs.CD_int,
+                                    ConstantDescs.CD_Object.arrayType()));
+                }
             } else {
                 final var targetType = (FunctionDescriptor) TypeSubstitution.erase(argument.signature());
                 composer.ldc(MethodHandleDesc.of(DirectMethodHandleDesc.Kind.STATIC,
@@ -724,6 +775,70 @@ final class BytecodeEmitter {
                         toJavaMethodDescriptor(targetType).descriptorString()));
             }
         }
+    }
+
+    private static void emitStringConcatenationRight(final CompilationContext context,
+                                                     final CodeBuilder composer,
+                                                     final Expr.Binary binary) {
+        if (binary.right.getType() instanceof NullDescriptor) {
+            emitExpr(context, composer, binary.right);
+            composer.pop();
+            composer.ldc("null");
+            context.lastEmittedType = TypeDescriptor.ofString();
+            return;
+        }
+        if (binary.nullableStringification()) {
+            final var nullPath = composer.newLabel();
+            final var done = composer.newLabel();
+            emitExpr(context, composer, binary.right);
+            composer.dup();
+            composer.ifnull(nullPath);
+            if (binary.displayCall() != null) {
+                emitMemberCall(context, composer, binary.displayCall(), true);
+            } else {
+                final var baseType = ((NullableDescriptor) binary.right.getType()).baseType();
+                emitConversion(context, composer, context.lastEmittedType, TypeSubstitution.erase(baseType));
+                emitBuiltInStringValue(context, composer, baseType);
+            }
+            composer.goto_(done);
+            composer.labelBinding(nullPath);
+            composer.pop();
+            composer.ldc("null");
+            composer.labelBinding(done);
+            context.lastEmittedType = TypeDescriptor.ofString();
+            return;
+        }
+        if (binary.displayCall() != null) {
+            emitMemberCall(context, composer, binary.displayCall(), false);
+            return;
+        }
+        if (binary.builtInStringification()) {
+            emitExpr(context, composer, binary.right);
+            emitBuiltInStringValue(context, composer, binary.right.getType());
+            return;
+        }
+        throw new IllegalStateException("String concatenation is missing resolved Display evidence.");
+    }
+
+    private static void emitBuiltInStringValue(final CompilationContext context,
+                                               final CodeBuilder composer,
+                                               final TypeDescriptor valueType) {
+        final var type = valueType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : valueType;
+        if (type instanceof StringDescriptor || type instanceof InferDescriptor) {
+            context.lastEmittedType = TypeDescriptor.ofString();
+            return;
+        }
+        if (type instanceof UnitDescriptor) {
+            composer.pop();
+            composer.ldc("Unit");
+            context.lastEmittedType = TypeDescriptor.ofString();
+            return;
+        }
+        final var descriptor = TypeSubstitution.erase(type);
+        composer.invokestatic(ClassDesc.of("java.lang.String"), "valueOf",
+                MethodTypeDesc.of(ConstantDescs.CD_String, TypeDescriptor.toJavaClassDesc(descriptor)));
+        context.lastEmittedType = TypeDescriptor.ofString();
     }
 
     private static void emitArrayFill(CompilationContext context, final CodeBuilder composer,
@@ -800,17 +915,51 @@ final class BytecodeEmitter {
         if (call.witnessEvidenceToken() != null) {
             emitVariable(context, composer, call.witnessEvidenceToken());
             final var factoryType = call.witnessFactoryType();
+            final var receiverOffset = call.witnessEvidenceIsMethod() ? 1 : 0;
+            if (call.witnessEvidenceIsMethod() && !receiverOnStack) {
+                emitExpr(context, composer, call.receiver);
+                emitConversion(context, composer, context.lastEmittedType,
+                        TypeSubstitution.erase(factoryType.parameters().getFirst()));
+            }
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(context, composer, call.arguments.get(i));
                 emitConversion(context, composer, context.lastEmittedType,
-                        TypeSubstitution.erase(factoryType.parameters().get(i)));
+                        TypeSubstitution.erase(factoryType.parameters().get(i + receiverOffset)));
             }
+            emitEvidenceArguments(context, composer, call.evidenceArguments());
             final var erasedParameters = factoryType.parameters().stream()
                     .map(TypeSubstitution::erase)
                     .map(TypeDescriptor::toJavaClassDesc).toList();
             composer.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
-                    MethodTypeDesc.of(ConstantDescs.CD_Object, erasedParameters));
+                    withEvidenceParameters(
+                            MethodTypeDesc.of(ConstantDescs.CD_Object, erasedParameters),
+                            call.evidenceArguments().size()));
+            emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"),
+                    TypeSubstitution.erase(factoryType.returnType()));
             context.lastEmittedType = factoryType.returnType();
+            return;
+        }
+        if (call.witnessMethodName() != null) {
+            final var helperType = call.witnessMethodType();
+            final var owner = context.metadata.functionOwner(call.witnessMethodOwner());
+            if (owner == null) {
+                throw new IllegalStateException("Resolved witness helper owner not found.");
+            }
+            if (!receiverOnStack) {
+                emitExpr(context, composer, call.receiver);
+            }
+            for (int index = 0; index < call.arguments.size(); index++) {
+                emitExpr(context, composer, call.arguments.get(index));
+                emitConversion(context, composer, context.lastEmittedType,
+                        TypeSubstitution.erase(helperType.parameters().get(index + 1)));
+            }
+            emitEvidenceArguments(context, composer, call.evidenceArguments());
+            composer.invokestatic(ClassDesc.of(owner), call.witnessMethodName(),
+                    withEvidenceParameters(toJavaMethodDescriptor(helperType),
+                            call.evidenceArguments().size()));
+            emitConversion(context, composer,
+                    TypeSubstitution.erase(helperType.returnType()), call.getType());
+            context.lastEmittedType = call.getType();
             return;
         }
         if (call.javaCallTarget() != null) {
@@ -1412,6 +1561,14 @@ final class BytecodeEmitter {
         }
         if (sourceJavaType.equals(ConstantDescs.CD_Object)) {
             emitUnboxOrCast(context, composer, targetType);
+            context.lastEmittedType = targetType;
+            return;
+        }
+        final var sourceDescriptor = sourceJavaType.descriptorString();
+        final var targetDescriptor = TypeDescriptor.toJavaClassDesc(targetType).descriptorString();
+        if ((sourceDescriptor.startsWith("L") || sourceDescriptor.startsWith("["))
+                && (targetDescriptor.startsWith("L") || targetDescriptor.startsWith("["))) {
+            composer.checkcast(targetJavaClass(context, targetType));
             context.lastEmittedType = targetType;
             return;
         }

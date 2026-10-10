@@ -225,7 +225,10 @@ final class CallResolver {
             }
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
-                Resolver.ensureAssignable(context, requiredBound, substitutions.get(parameter), call.callee);
+                final var actual = substitutions.get(parameter);
+                if (!TypeClassEvidence.hasEvidence(context, requiredBound, actual, call.callee)) {
+                    Resolver.ensureAssignable(context, requiredBound, actual, call.callee);
+                }
             }
         }
 

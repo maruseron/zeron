@@ -34,7 +34,7 @@ final class TypeResolver {
         for (final var bound : parameter.bounds()) {
             if (!(bound instanceof NominalDescriptor || bound instanceof GenericDescriptor)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                        where, "A generic function or method bound must be a contract type."));
+                        where, "A type-parameter bound must be a contract type."));
             }
             final var boundName = className(context, bound);
             final var contract = context.contracts.get(boundName);

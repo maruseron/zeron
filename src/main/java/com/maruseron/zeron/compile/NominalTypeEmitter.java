@@ -68,6 +68,25 @@ final class NominalTypeEmitter {
                                             }
                                         });
                             }
+                            if (!witnessSlots.isEmpty()) {
+                                final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(
+                                        method.typeDescriptor());
+                                final var bridgeFlags = ClassFile.ACC_PUBLIC
+                                        | (method.isDefault() ? 0 : ClassFile.ACC_ABSTRACT)
+                                        | ClassFile.ACC_SYNTHETIC;
+                                builder.withMethod(method.name().lexeme(),
+                                        toJavaMethodDescriptor(bridgeType), bridgeFlags, methodBuilder -> {
+                                            final var methodSignature =
+                                                    ClassSignatureEmitter.methodSignature(method.typeDescriptor());
+                                            if (methodSignature != null) {
+                                                methodBuilder.with(SignatureAttribute.of(
+                                                        methodBuilder.constantPool().utf8Entry(methodSignature)));
+                                            }
+                                            if (method.isDefault()) {
+                                                methodBuilder.withCode(BytecodeEmitter::emitEvidenceUnavailable);
+                                            }
+                                        });
+                            }
                             emitContractDefaultArgumentWrappers(context, builder, contract, method);
                         }
                         for (final var property : contract.properties()) {
@@ -156,6 +175,21 @@ final class NominalTypeEmitter {
                                     }
                                     methodBuilder.withCode(code -> emitClassMethod(context, code, declaration, method));
                                 });
+                        if (!witnessSlots.isEmpty()) {
+                            final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(
+                                    method.typeDescriptor());
+                            builder.withMethod(method.name().lexeme(),
+                                    toJavaMethodDescriptor(bridgeType), flags | ClassFile.ACC_SYNTHETIC,
+                                    methodBuilder -> {
+                                        final var methodSignature =
+                                                ClassSignatureEmitter.methodSignature(method.typeDescriptor());
+                                        if (methodSignature != null) {
+                                            methodBuilder.with(SignatureAttribute.of(
+                                                    methodBuilder.constantPool().utf8Entry(methodSignature)));
+                                        }
+                                        methodBuilder.withCode(BytecodeEmitter::emitEvidenceUnavailable);
+                                    });
+                        }
                         emitClassDefaultArgumentWrappers(context, builder, declaration, classDesc, method, flags);
                     }
                     for (final var pattern : declaration.patterns()) {

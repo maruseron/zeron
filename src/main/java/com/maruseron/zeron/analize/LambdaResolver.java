@@ -92,9 +92,14 @@ final class LambdaResolver {
             }
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
-                ensureAssignable(context, requiredBound, substitutions.get(parameter), reference.name);
+                final var actual = substitutions.get(parameter);
+                if (!TypeClassEvidence.hasEvidence(context, requiredBound, actual, reference.name)) {
+                    ensureAssignable(context, requiredBound, actual, reference.name);
+                }
             }
         }
+        reference.setEvidenceArguments(TypeClassEvidence.selectArguments(
+                context, sourceType.typeParameters(), substitutions, reference.name));
 
         final var specializedType = sourceType.isGeneric()
                 ? TypeDescriptor.functionWithEffectsOf(sourceType.name(),

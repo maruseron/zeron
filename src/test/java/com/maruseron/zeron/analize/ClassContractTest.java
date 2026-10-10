@@ -26,6 +26,132 @@ import static org.junit.Assert.assertThrows;
 
 public final class ClassContractTest {
     @Test
+    public void nonNominalWitnessMethodIsDispatchedThroughItsStaticHelper() throws Exception {
+        final var programName = "MethodWitness" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                contract Display<T> {
+                    toString(): String;
+                }
+                class Box {
+                    public constructor new;
+                }
+                witness Display<Box> for Box {
+                    fn toString(): String = "box";
+                }
+                fn run(): String = Box.new().toString();
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals("box", loader.loadClass(programName).getMethod("run").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Box.class"));
+            Files.deleteIfExists(Path.of("dist", "Display.class"));
+        }
+    }
+
+    @Test
+    public void displayWitnessAndBuiltInStringificationSupportConcatenation() throws Exception {
+        final var programName = "DisplayConcat" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                class Box {
+                    public constructor new;
+                }
+                class GenericBox<T> {
+                    value: T;
+                    public constructor new;
+                }
+                contract Named {
+                    name(): String;
+                }
+                class Label is Named {
+                    value: String;
+                    public constructor new;
+                    public name(): String = this.value;
+                }
+                class BoundedBox<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                witness zeron.lang.Display<Box> for Box {
+                    fn toString(): String = "box";
+                }
+                witness<T> zeron.lang.Display<GenericBox<T>> for GenericBox<T> {
+                    fn toString(): String = "generic";
+                }
+                witness<T: Named> zeron.lang.Display<BoundedBox<T>> for BoundedBox<T> {
+                    fn toString(): String = this.value.name();
+                }
+                fn run(): String = "value=" + Box.new();
+                fn genericWitness(): String = "value=" + GenericBox<Int>.new(42);
+                fn boundedGenericWitness(): String =
+                    "value=" + BoundedBox<Label>.new(Label.new("label"));
+                fn builtin(): String = "value=" + 42;
+                fn nullable(value: Int?): String = "value=" + value;
+                fn generic<T: zeron.lang.Display<T>>(value: T): String = "value=" + value;
+                fn genericRun(): String = generic(42);
+                fn genericBoundedRun(): String =
+                    generic(BoundedBox<Label>.new(Label.new("generic label")));
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals("value=box", program.getMethod("run").invoke(null));
+                assertEquals("value=generic", program.getMethod("genericWitness").invoke(null));
+                assertEquals("value=label", program.getMethod("boundedGenericWitness").invoke(null));
+                assertEquals("value=42", program.getMethod("builtin").invoke(null));
+                assertEquals("value=null", program.getMethod("nullable", Integer.class).invoke(null, new Object[]{null}));
+                assertEquals("value=7", program.getMethod("nullable", Integer.class).invoke(null, 7));
+                assertEquals("value=42", program.getMethod("genericRun").invoke(null));
+                assertEquals("value=generic label", program.getMethod("genericBoundedRun").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Box.class"));
+        }
+    }
+
+    @Test
+    public void nonNominalWitnessUsesDefaultContractMethod() throws Exception {
+        final var programName = "DefaultMethodWitness" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                contract Render<T> {
+                    toString(): String;
+                    default label(): String = this.toString();
+                }
+                class Box {
+                    public constructor new;
+                }
+                witness Render<Box> for Box {
+                    fn toString(): String = "box";
+                }
+                fn run(): String = Box.new().label();
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals("box", loader.loadClass(programName).getMethod("run").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Box.class"));
+            Files.deleteIfExists(Path.of("dist", "Render.class"));
+        }
+    }
+
+    @Test
     public void explicitWitnessRemapsFactoryAndGenericMethodsForwardEvidence() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var programName = "MappedWitness" + suffix;

@@ -1,0 +1,5 @@
+package zeron.lang;
+
+public contract Display<T> {
+    toString(): String;
+}

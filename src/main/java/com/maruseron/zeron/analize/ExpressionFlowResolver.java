@@ -281,6 +281,12 @@ final class ExpressionFlowResolver {
                         context, binary.right, rightType, leftType);
                 Zeron.debug("resolving binary   " + refinedLeftType + " "
                     + binary.operator.lexeme() + " " + refinedRightType);
+                if (binary.operator.type() == TokenType.PLUS
+                        && refinedLeftType instanceof StringDescriptor) {
+                    final var stringType = resolveStringConcatenation(context, binary, refinedRightType);
+                    binary.setType(stringType);
+                    yield stringType;
+                }
                 final var equalityOperator = binary.operator.type() == TokenType.EQUAL_EQUAL
                         || binary.operator.type() == TokenType.BANG_EQUAL;
                 if (!equalityOperator
@@ -574,6 +580,72 @@ final class ExpressionFlowResolver {
                 yield resolvedType;
             }
         };
+    }
+
+    private static TypeDescriptor resolveStringConcatenation(final ResolutionContext context,
+                                                             final Expr.Binary binary,
+                                                             final TypeDescriptor rightType) {
+        final var nullable = rightType instanceof NullableDescriptor;
+        var valueType = nullable ? ((NullableDescriptor) rightType).baseType() : rightType;
+        if (valueType instanceof ReferenceDescriptor reference) valueType = reference.baseType();
+        binary.setNullableStringification(nullable || valueType instanceof NullDescriptor);
+        if (valueType instanceof NullDescriptor || valueType instanceof StringDescriptor
+                || valueType instanceof IntDescriptor || valueType instanceof FloatDescriptor
+                || valueType instanceof BooleanDescriptor || valueType instanceof UnitDescriptor) {
+            binary.setBuiltInStringification(true);
+            return TypeDescriptor.ofString();
+        }
+
+        final var display = context.contracts.values().stream()
+                .filter(contract -> contract.name().lexeme().equals("zeron.lang.Display"))
+                .findFirst().orElse(null);
+        if (display == null || display.typeParameters().size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    binary.operator, "String concatenation requires the zeron.lang.Display contract."));
+        }
+        final var displayType = TypeDescriptor.genericOf(TypeDescriptor.ofName(display.name().lexeme()), valueType);
+        final var method = display.methods().stream()
+                .filter(candidate -> candidate.name().lexeme().equals("toString"))
+                .findFirst().orElse(null);
+        if (method == null || method.typeDescriptor().arity() != 0
+                || !(method.typeDescriptor().returnType() instanceof StringDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    display.name(), "Display must declare toString(): String."));
+        }
+
+        final var token = new Token(TokenType.IDENTIFIER, "toString", null, binary.operator.span());
+        final var call = new Expr.MemberCall(binary.right, token, binary.operator,
+                List.of(), List.of(), TypeDescriptor.ofString());
+        if (valueType instanceof TypeParameterDescriptor parameter) {
+            if (parameter.bounds().stream().noneMatch(displayType::equals)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        binary.operator, "String concatenation requires an explicit Display<T> bound."));
+            }
+            MemberInteropResolver.resolveMemberCall(context, call);
+            binary.setDisplayCall(call);
+            return TypeDescriptor.ofString();
+        }
+
+        if (context.typeCompatibility.isContractProjection(displayType, valueType)) {
+            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            substitutions.put(display.typeParameters().getFirst(), valueType);
+            call.setResolvedOwnerName(display.name().lexeme());
+            call.setResolvedContractMethod(method);
+            call.setResolvedDescriptor((FunctionDescriptor) TypeSubstitution.substitute(
+                    method.typeDescriptor(), substitutions));
+            call.setType(TypeDescriptor.ofString());
+            binary.setDisplayCall(call);
+            return TypeDescriptor.ofString();
+        }
+
+        final var resolved = MemberInteropResolver.resolveWitnessMethodForContract(
+                context, call, valueType, displayType);
+        if (resolved == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    binary.operator, "No Display witness is in scope for '" + valueType + "'."));
+        }
+        binary.setDisplayCall(call);
+        return TypeDescriptor.ofString();
     }
 
     private static TypeDescriptor resolveHandle(final ResolutionContext context, final Expr.Handle handle) {

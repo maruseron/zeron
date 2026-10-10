@@ -12,7 +12,8 @@ final class LambdaCompilationPlan {
     record FunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
     record NullableFunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
     record FunctionReference(String functionName, Stmt.FunctionDeclaration declaration, FunctionDescriptor sourceType,
-                             FunctionDescriptor targetType, String helperName) {}
+                             FunctionDescriptor targetType, String helperName,
+                             List<Expr.EvidenceArgument> evidenceArguments) {}
 
     private record FunctionAdapterKey(FunctionDescriptor source, FunctionDescriptor target) {}
     private record FunctionReferenceKey(String functionName, Stmt.FunctionDeclaration declaration,
@@ -359,7 +360,7 @@ final class LambdaCompilationPlan {
         final var reference = functionReferences.computeIfAbsent(key,
                 _ -> new FunctionReference(expression.resolvedFunctionName(),
                         expression.resolvedFunctionDeclaration(), sourceType, targetType,
-                        "$functionRef$" + functionReferences.size()));
+                        "$functionRef$" + functionReferences.size(), expression.evidenceArguments()));
         referencesByExpression.put(expression, reference);
         for (int i = 0; i < targetType.arity(); i++) {
             collectFunctionAdapters(targetType.parameters().get(i), sourceType.parameters().get(i));

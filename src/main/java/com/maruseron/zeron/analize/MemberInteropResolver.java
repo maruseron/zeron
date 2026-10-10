@@ -182,6 +182,13 @@ final class MemberInteropResolver {
         return resolveMemberCall(context, call, null);
     }
 
+    static TypeDescriptor resolveWitnessMethodForContract(final ResolutionContext context,
+                                                          final Expr.MemberCall call,
+                                                          final TypeDescriptor receiverType,
+                                                          final TypeDescriptor contractType) {
+        return resolveWitnessMethodCall(context, call, receiverType, contractType);
+    }
+
     private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                                      final TypeDescriptor expectedType) {
         if (call.safeNavigation()) {
@@ -369,6 +376,19 @@ final class MemberInteropResolver {
             }
             final var extensionResult = resolveImportedExtension(context, call, receiverType, false);
             if (extensionResult != null) return extensionResult;
+            final var witnessResult = resolveWitnessMethodCall(context, call, receiverType);
+            if (witnessResult != null) return witnessResult;
+            final var javaClass = context.javaClassPath.find(ownerName);
+            if (javaClass != null) return resolveJavaInstanceCall(context, call, receiverType, javaClass);
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.name, "Unknown method: '" + call.name.lexeme() + "'"));
+        }
+
+        if (classMethod == null && contractMethod == null) {
+            final var extensionResult = resolveImportedExtension(context, call, receiverType, false);
+            if (extensionResult != null) return extensionResult;
+            final var witnessResult = resolveWitnessMethodCall(context, call, receiverType);
+            if (witnessResult != null) return witnessResult;
             final var javaClass = context.javaClassPath.find(ownerName);
             if (javaClass != null) return resolveJavaInstanceCall(context, call, receiverType, javaClass);
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
@@ -432,6 +452,61 @@ final class MemberInteropResolver {
         }
         call.setType(instantiatedDescriptor.returnType());
         return instantiatedDescriptor.returnType();
+    }
+
+    private static TypeDescriptor resolveWitnessMethodCall(final ResolutionContext context,
+                                                           final Expr.MemberCall call,
+                                                           final TypeDescriptor receiverType) {
+        return resolveWitnessMethodCall(context, call, receiverType, null);
+    }
+
+    private static TypeDescriptor resolveWitnessMethodCall(final ResolutionContext context,
+                                                           final Expr.MemberCall call,
+                                                           final TypeDescriptor receiverType,
+                                                           final TypeDescriptor requiredContractType) {
+        final var selection = TypeClassEvidence.selectMethod(context, receiverType,
+                requiredContractType, call.name.lexeme(), call.name);
+        if (selection == null) return null;
+        final var method = selection.method();
+        final var signature = method.methodSignature();
+        final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                signature.typeDescriptor(), selection.substitutions());
+        call.setWitnessMethod(selection.helperQualifiedName(),
+                method.implementation().name().lexeme(),
+                selection.helperType());
+        call.setResolvedDescriptor(descriptor);
+        final var witnessEvidence = TypeClassEvidence.selectArguments(
+                context, method.implementation().typeDescriptor().typeParameters(),
+                selection.substitutions(), call.name);
+        final var fixedArity = Stmt.fixedArity(signature.parameters(), signature.variadic());
+        if (descriptor.isGeneric()) {
+            final var result = resolveGenericMemberCall(context, call, descriptor, signature.minimumArity(),
+                    signature.variadic(), fixedArity);
+            if (!witnessEvidence.isEmpty()) {
+                final var evidence = new ArrayList<>(witnessEvidence);
+                evidence.addAll(call.evidenceArguments());
+                call.setEvidenceArguments(evidence);
+            }
+            return result;
+        }
+        if (!call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    call.name, "This method does not declare type parameters."));
+        }
+        ensureMemberCallArity(call, descriptor, signature.minimumArity(),
+                signature.variadic());
+        if (signature.variadic()) {
+            call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(), fixedArity);
+        }
+        for (int index = 0; index < call.arguments.size(); index++) {
+            final var expected = memberParameterType(descriptor.parameters(), index,
+                    fixedArity, signature.variadic());
+            ensureAssignable(context, expected,
+                    resolveArgument(context, call.arguments.get(index), expected), call.name);
+        }
+        call.setType(descriptor.returnType());
+        call.setEvidenceArguments(witnessEvidence);
+        return descriptor.returnType();
     }
 
     private record ExtensionReceiverMatch(Stmt.ExtensionMethod method, TypeDescriptor projection) {}
@@ -1185,6 +1260,7 @@ final class MemberInteropResolver {
                 bound = candidateBound;
                 contract = candidateContract;
                 method = candidateMethod;
+                selectedBoundIndex = boundIndex;
                 break;
             }
         }
@@ -1248,6 +1324,15 @@ final class MemberInteropResolver {
         }
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
                 method.typeDescriptor(), substitutions);
+        final var methodIndex = contract.methods().indexOf(method);
+        final var evidenceMethodParameters = new ArrayList<TypeDescriptor>();
+        evidenceMethodParameters.add(parameter);
+        evidenceMethodParameters.addAll(descriptor.parameters());
+        final var evidenceMethodType = TypeDescriptor.functionWithEffectsOf(
+                method.name().lexeme(), descriptor.returnType(), evidenceMethodParameters,
+                descriptor.typeParameters(), descriptor.raisedEffects());
+        call.setWitnessMethodEvidence(Expr.methodEvidenceToken(parameter, selectedBoundIndex, methodIndex),
+                evidenceMethodType);
         final var variadic = method.variadic();
         final var fixedArity = Stmt.fixedArity(method.parameters(), variadic);
         if (descriptor.isGeneric()) {

@@ -8,6 +8,7 @@ import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.scan.Token;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public sealed interface Stmt {
@@ -111,17 +112,47 @@ public sealed interface Stmt {
         }
     }
 
-    record Witness(Token name, List<TypeParameterDescriptor> typeParameters,
-                   TypeDescriptor contractType, TypeDescriptor targetType,
-                   List<WitnessFactoryMapping> mappings) implements Stmt, Decl {
-        public Witness {
-            typeParameters = List.copyOf(typeParameters);
-            mappings = List.copyOf(mappings);
+    final class Witness implements Stmt, Decl {
+        private final Token name;
+        private final List<TypeParameterDescriptor> typeParameters;
+        private final TypeDescriptor contractType;
+        private final TypeDescriptor targetType;
+        private final List<WitnessFactoryMapping> mappings;
+        private final List<WitnessMethod> methods;
+
+        public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
+                       final TypeDescriptor contractType, final TypeDescriptor targetType,
+                       final List<WitnessFactoryMapping> mappings,
+                       final List<WitnessMethod> methods) {
+            this.name = name;
+            this.typeParameters = List.copyOf(typeParameters);
+            this.contractType = contractType;
+            this.targetType = targetType;
+            this.mappings = List.copyOf(mappings);
+            this.methods = new ArrayList<>(methods);
         }
+
+        public Witness(Token name, List<TypeParameterDescriptor> typeParameters,
+                       TypeDescriptor contractType, TypeDescriptor targetType,
+                       List<WitnessFactoryMapping> mappings) {
+            this(name, typeParameters, contractType, targetType, mappings, List.of());
+        }
+
+        public Token name() { return name; }
+        public List<TypeParameterDescriptor> typeParameters() { return typeParameters; }
+        public TypeDescriptor contractType() { return contractType; }
+        public TypeDescriptor targetType() { return targetType; }
+        public List<WitnessFactoryMapping> mappings() { return mappings; }
+        public List<WitnessMethod> methods() { return List.copyOf(methods); }
+        public void addMethod(final WitnessMethod method) { methods.add(method); }
     }
 
     record WitnessFactoryMapping(Token requirementName, TypeDescriptor targetType,
                                  Token constructorName) {
+    }
+
+    record WitnessMethod(Token requirementName, Function methodSignature,
+                         Function implementation) {
     }
 
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,

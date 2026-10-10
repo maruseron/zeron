@@ -25,7 +25,7 @@ import java.util.Objects;
 
 final class CompilationContext {
     final ClassFile classFile;
-    final List<Stmt> topLevelDeclarations;
+    List<Stmt> topLevelDeclarations;
     final List<CompilationUnit> compilationUnits;
     final Path outputDirectory;
     final String mainClassName;
@@ -91,6 +91,7 @@ final class CompilationContext {
                     sourceTypes.put(ClassDesc.of(contractDeclaration.name().lexeme()),
                             ClassHierarchyResolver.ClassHierarchyInfo.ofInterface());
                 }
+
             }
         }
         sourceTypes.put(ClassDesc.of("zeron.runtime.RaisedEffect"),
@@ -100,6 +101,20 @@ final class CompilationContext {
             final var sourceType = sourceTypes.get(resolver);
             return sourceType != null ? sourceType : fallback.getClassInfo(resolver);
         };
+    }
+
+    void refreshResolvedDeclarations() {
+        final var declarations = new java.util.ArrayList<Stmt>();
+        for (var unitIndex = 0; unitIndex < compilationUnits.size(); unitIndex++) {
+            final var unit = compilationUnits.get(unitIndex);
+            if (unit.metadataOnly()) continue;
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                declarations.add(member.declaration());
+                sourcePathsByDeclaration.put(member.declaration(), unit.sourcePath());
+            }
+        }
+        topLevelDeclarations = List.copyOf(declarations);
+        metadata.indexResolvedFunctions(compilationUnits, mainClassName);
     }
 
     String sourcePath(final Stmt declaration) {

@@ -109,6 +109,19 @@ final class DeclarationEmitter {
                                     //Zeron.debug(currentFunction.toString());
                                 });
                             });
+                    if (!witnessSlots.isEmpty()) {
+                        final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(functionType);
+                        classBuilder.withMethod(name.lexeme(), toJavaMethodDescriptor(bridgeType),
+                                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                                methodBuilder -> {
+                                    final var signature = ClassSignatureEmitter.methodSignature(functionType);
+                                    if (signature != null) {
+                                        methodBuilder.with(SignatureAttribute.of(
+                                                methodBuilder.constantPool().utf8Entry(signature)));
+                                    }
+                                    methodBuilder.withCode(BytecodeEmitter::emitEvidenceUnavailable);
+                                });
+                    }
                     emitDefaultArgumentWrappers(context, classBuilder, function, functionType);
                 }
                 default -> {}

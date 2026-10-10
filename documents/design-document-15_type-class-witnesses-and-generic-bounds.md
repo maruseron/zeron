@@ -2,25 +2,20 @@
 
 ## Status
 
-This document records the agreed direction and implementation status for applied contract bounds
-and class-side constructor evidence. Generic functions and methods retain applied contract bounds
-and instance calls through those bounds. Class-side factory calls use hidden `MethodHandle` evidence
-parameters; concrete callers select a compatible public named constructor from a class's declared
-conformance, while generic callers forward compatible evidence. Explicit `witness` declarations
-can remap factory requirements, including generic class patterns. These hidden parameters use erased
-JVM descriptors, while selection uses source-level applied types.
+This document records the design for applied contract bounds, class-side constructor evidence, and
+non-nominal method witnesses. Generic functions and methods retain applied contract bounds and pass
+hidden `MethodHandle` evidence where needed. Witness selection uses source-level applied types;
+runtime evidence uses erased JVM descriptors.
 
-The API index preserves witness mappings for separately compiled libraries. The current coherence
-check rejects witnesses sharing the same nominal contract and target; a general applied-pattern
-overlap solver remains future work. See [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md)
-and [design-document-07_generic-functions.md](design-document-07_generic-functions.md) for the
-conformance and generic-bound foundations.
+The API index preserves witness patterns and their implementation metadata across separately
+compiled libraries. The current coherence validation rejects overlapping witness patterns it can
+identify; a complete overlap solver for all generic patterns remains future hardening.
 
-The feature should make evidence relationships visible as a language concept, in the direction of
-type classes, while using compiler-passed witnesses as the runtime representation. The initial
-extension is intentionally restricted: a class's declared contract conformance provides evidence
-for its instance methods, and an explicit witness may map class-side factory requirements to named
-constructors. General non-nominal instances and witness-dispatched instance methods are future work.
+The witness model makes evidence relationships explicit as a language concept, in the direction of
+type classes, while using compiler-passed method handles as the runtime representation. A class's
+declared contract conformance remains authoritative for its instance methods. An explicit witness
+may provide instance-method evidence for a target that does not declare that contract, and may map
+class-side factory requirements to named constructors.
 
 ## Applied contract bounds
 
@@ -41,9 +36,8 @@ fn collectInto<E, C: Sink<E>>(source: Iterable<E>): C {
 
 Applied bounds such as `C: Sink<E>` retain their type arguments during resolution and conformance
 checking, even though those arguments erase in JVM descriptors. Bounds expose non-mutating instance
-operations under the current mutability rules; class-side operations are selected through hidden
-factory evidence, not through a value receiver. Generic functions support the illustrated factory
-call. Generic methods, like generic functions, can call class-side factories through bounds.
+operations under the current mutability rules; class-side operations use hidden factory evidence.
+Generic methods, like generic functions, can invoke class-side factories through bounds.
 
 ## Conformance and witness declarations
 
@@ -57,9 +51,10 @@ class IntList is Sink<Int> {
 }
 ```
 
-That conformance automatically supplies evidence for `Sink<Int>` instance-method use. A standalone
-witness does not create a second instance or replace the conformance. It completes the class-side
-factory mapping:
+That conformance automatically supplies evidence for `Sink<Int>` instance-method use. A witness
+does not create a second instance or replace a declared nominal conformance. For nominal targets a
+witness may complete or remap class-side factories, but it cannot override the class's instance
+methods:
 
 ```zeron
 witness Sink<Int> for IntList {
@@ -67,122 +62,145 @@ witness Sink<Int> for IntList {
 }
 ```
 
-The spelling is a proposed design. A generic declaration should be expressible without reducing
-applied types to raw names:
+For a non-nominal target, witness methods provide contract instance-method evidence:
 
 ```zeron
-witness<T> Sink<T> for Buffer<T> {
-    empty = Buffer<T>.empty;
+public contract Display<T> {
+    toString(): String;
+}
+
+witness Display<Int> for Int {
+    fn toString(): String = intToString(this);
 }
 ```
 
-This schematic form quantifies over `T`; it is valid only when the corresponding
-`Buffer<T> is Sink<T>` conformance and every mapped factory requirement are valid for the full type
-pattern.
+A non-nominal witness must implement every abstract instance-method requirement. If a method is
+omitted and the contract provides a default implementation, the default is lowered as a static
+witness implementation. It receives the target and any prerequisite evidence needed by contract
+calls made within the default.
 
-The witness target is a constructor reference, not a call expression. It records which static
-factory should be invoked later and does not evaluate or allocate anything when the witness is
-selected. In the initial slice, entries map only class-side factory requirements. Each entry names
-the contract requirement on the left and a public named constructor on the implementing class on
-the right. A contract factory requirement implicitly returns `&Self`; under a bound on type `C`,
-`C.empty()` therefore has type `&C`.
+Witness method implementations are read-only in this initial design: `mut` requirements are
+unsupported, `this` is immutable, and implementations may access only public target members.
+Witness bodies are not guaranteed to be effect-free; purity is not a Zeron semantic guarantee.
 
-If no explicit witness mapping is written, a requirement uses the same-name constructor when it is
-compatible. An explicit mapping replaces that conventional mapping for that requirement and allows
-the class factory to have a different name. It does not add another witness candidate. The target
-must match the requirement's parameter types after substitution, generic arity, variadic shape,
-visibility, and implicit `&Self` result. Constructor selection remains static; no virtual constructor
-slot or runtime class-name lookup is introduced.
+Generic witness declarations express complete applied patterns and prerequisite bounds:
 
-## Coherence and selection
-
-Witness selection is global and independent of imports, local scope, and call site. For any concrete
-type and fully applied contract, there is at most one applicable witness. Missing evidence is a
-compile-time error; multiple applicable witnesses are a compile-time ambiguity, never resolved by
-choosing the nearest scope or most recent import.
-
-The compiler checks the applied contract against the class's declared conformance after substituting
-the witness's type parameters. A witness cannot claim an unrelated conformance. Generic witness
-patterns must not overlap in a way that creates multiple applicable witnesses. The initial placement
-rule is settled: a witness must be declared in the same package as either its contract or its target
-class. Compiled libraries must preserve enough metadata to enforce coherence across compilation
-boundaries.
-
-## Generic body and call-site resolution
-
-When compiling a generic function, each bound that declares class-side factories contributes hidden
-evidence parameters to its implementation signature. A class-side call such as `C.empty()` is
-resolved against that bound and emitted as an invocation on its evidence parameter. It does not
-inspect an erased `C`, infer a class from an instance value, or perform dynamic lookup. The current
-implementation reserves evidence for every factory on those bounds, even if the function does not
-use each factory. Instance methods continue to dispatch through the nominal contract interface.
-
-At a direct generic call, ordinary inference first determines the type arguments. The resolver then
-substitutes them into each bound, selects the unique witness for every resulting applied contract,
-and supplies those witnesses as hidden arguments. When generic code calls another generic function requiring the same class-side operation, it forwards
-the evidence it already received for a compatible bound rather than resolving it again. This
-supports separate compilation while keeping source-level type checking precise.
-
-For example, after inference establishes `C = List<Int>` and `E = Int`, a call conceptually lowers to:
-
-```java
-newSink(methodHandle(List::empty));
+```zeron
+witness<T: Display<T>> Display<Array<T>> for Buffer<T> {
+    fn toString(): String = render(this);
+}
 ```
 
-where the source-level helper is conceptually `fn newSink<C: Sink<Int>>(): C = C.empty();`.
+Prerequisite bounds must be resolved recursively when selecting the witness. Generic contract
+methods are supported. The target does not need to declare nominal conformance when witness methods
+supply the required behavior.
 
-The implementation uses direct method-handle constants for selected constructors rather than
-generated witness classes. Explicit mappings and generic witness patterns participate in the same
-selection process.
+The witness target for a factory mapping is a constructor reference, not a call expression. It
+records which static factory should be invoked later and does not evaluate or allocate anything when
+the witness is selected. Each mapping names the contract requirement on the left and a public named
+constructor on the implementing class on the right. A contract factory requirement implicitly
+returns `&Self`; under a bound on type `C`, `C.empty()` therefore has type `&C`.
+
+If no explicit factory mapping is written, a requirement uses the same-name constructor when it is
+compatible. An explicit mapping replaces that conventional mapping for that requirement. The target
+must match parameter types after substitution, generic arity, variadic shape, visibility, and the
+implicit `&Self` result. Constructor selection remains static; no virtual constructor slot or
+runtime class-name lookup is introduced.
+
+## Coherence, imports, and selection
+
+Witness candidates are import-scoped. Witnesses declared in the current package are implicitly
+active; a `package.*` import activates witnesses from that package. Explicit symbol imports do not
+activate witnesses. Separate packages may each define a witness, but importing both can make a
+lookup ambiguous.
+
+For a concrete type and fully applied contract, there must be at most one applicable witness among
+the active candidates. Missing evidence is a compile-time error, and multiple applicable witnesses
+are a compile-time ambiguity; resolution does not prefer the nearest scope or most recent import.
+Overlapping patterns within an active witness scope are rejected. Witnesses must obey the orphan
+rule: a witness is declared in the package of its contract or target type. Library metadata must
+preserve enough information to validate coherence across compilation boundaries.
+
+The compiler validates method signatures against the fully applied contract and checks declared
+nominal conformance where present. A witness cannot claim an unrelated contract/type pattern.
+Generic prerequisite bounds are part of witness applicability.
+
+## Member lookup and generic body resolution
+
+Direct calls on concrete receivers preserve this precedence:
+
+1. Ordinary instance methods (including nominal contract dispatch).
+2. Existing local, explicit-import, and star-import extension lookup tiers.
+3. Witness methods in the active witness scope.
+
+An applicable extension owns lookup even when its arguments are invalid; resolution reports the
+extension error instead of silently falling back to a witness. If multiple applicable witnesses
+expose the same unqualified method, the call is ambiguous. A helper with an explicit generic
+contract bound is the intended disambiguation mechanism.
+
+When compiling a generic function, each bound that declares class-side factories or instance
+methods contributes hidden evidence parameters to its implementation signature. A call through the
+bound dispatches using the corresponding method/factory evidence; it does not inspect an erased type
+parameter or perform runtime witness lookup. Generic callers forward compatible evidence to other
+bounded functions. Direct callers infer source type arguments, recursively select the unique witness
+for each substituted bound, and pass its hidden method handles.
+
+Default contract methods selected for non-nominal targets are statically lowered as witness
+implementations. Calls from those defaults to other contract requirements use the target's witness
+evidence and any prerequisite evidence. Nominal class conformance continues to own instance-method
+behavior; a standalone witness cannot change it.
+
+## Display and string concatenation
+
+Stringification uses the `Display` contract and its `toString` method. `String + T` requires
+`Display<T>` evidence. There is no fallback to host/JVM `Object.toString()`. Generic function bodies
+must declare an explicit `Display<T>` bound; the compiler does not infer hidden bounds from an
+operator use.
+
+For nullable `T?`, stringification is built-in nullable lifting: null renders as `"null"` and a
+non-null value uses `Display<T>`. No `Display<T?>` witness is needed. Compiler-provided built-in
+`Display` evidence covers `Int`, `Float`, `Boolean`, `String`, and `Unit`. `Array<T>` and `Any` are
+deferred. The existing `==` and `!=` behavior is unchanged; any future `Eq<T>` integration with
+operators is a separate design.
 
 ## JVM representation and library metadata
 
-The witness is the runtime evidence; the type argument itself is not reified. The implementation
-passes a `java.lang.invoke.MethodHandle` as hidden evidence and invokes it using an erased
-signature-polymorphic call. Generic function descriptors in the API index retain their source-level
-bounds; explicit witness and mapping metadata are also serialized.
-Generic signatures and factory results use erased JVM descriptors, with bridges or casts where needed.
-For example, a `Sink<E>` factory's source result is `&Self`; in a generic body it erases according
-to `C`, and a concrete call may cast the returned reference to the inferred concrete class type.
-`E` remains available to compile-time resolution and is not required as a runtime class token.
+The witness is runtime evidence; generic type arguments are not reified. The implementation passes
+`java.lang.invoke.MethodHandle` values as hidden evidence and invokes them with erased signatures.
+The API index preserves source-level applied bounds, function signatures, witness patterns, factory
+mappings, method signatures, helper owners/names, and prerequisite bounds. Its schema version must
+be advanced when the witness metadata format changes.
 
-The Zeron API index preserves source-level applied bounds, function signatures, witness patterns,
-and factory mappings. Schema version 18 accounts for the hidden-evidence ABI and witness metadata,
-allowing mapped witnesses to be consumed across compiled-library boundaries.
+Witness methods are emitted as static helpers rather than generated dictionary classes. Generic
+signatures and method results use erased JVM descriptors, with casts where required. Applied types
+remain available for compile-time resolution and separate compilation.
 
-## Type classes: intended scope and limits
+For reflection compatibility, bounded generic declarations also expose their ordinary erased
+descriptor. That overload has no witness context and therefore throws
+`UnsupportedOperationException` when invoked directly from Java. Zeron-generated calls and
+specialized function references use the evidence-bearing descriptor.
 
-The witness model provides a foundation for a type-class feature, but it does not immediately turn
-every contract into dictionary dispatch. In the first extension:
-
-- Nominal `class C is Contract<Args>` conformance continues to provide instance-method dispatch
-  through the existing JVM interface implementation.
-- Witnesses provide evidence for class-side factory requirements, including explicit constructor
-  remapping.
-- Generic bounds may retain applied contract arguments and pass their evidence implicitly.
-- General witnesses for types that do not implement the nominal contract are not allowed.
-- Instance methods are not redirected through witness dictionaries.
-
-A broader type-class design could later permit non-nominal instances and dispatch instance methods
-through witnesses. That would require defining method dictionaries, default method ownership,
-overlap and orphan rules, visibility, and how witness evidence composes when an implementation
-itself has generic bounds. It should be designed as an explicit expansion, not smuggled into the
-initial factory-witness feature.
-
-## Decisions and remaining design questions
+## Decisions and remaining work
 
 Agreed direction:
 
-1. Applied contract arguments are preserved in bound and witness identity.
-2. Declared nominal conformance automatically supplies instance-method evidence.
-3. Explicit `witness Contract<Args> for Type` declarations provide class-side factory mappings and
-   may remap a requirement to a differently named public constructor.
+1. Applied contract arguments are preserved in bounds and witness identity.
+2. Declared nominal conformance automatically supplies instance-method evidence and cannot be
+   overridden by a witness.
+3. Witnesses can supply non-nominal instance-method implementations and may map class-side factory
+   requirements to public named constructors.
 4. A contract factory returns `&Self`; through a bound on `C`, its result is `&C`.
-5. Witness selection is globally coherent and compile-time; class-side evidence is passed implicitly
-   to generic implementations when required.
-6. Witnesses do not reify generic type arguments, and no virtual constructor dispatch is introduced.
-7. Initial scope excludes non-nominal instances and witness-dispatched instance methods.
+5. Evidence is selected statically, passed implicitly, and recursively composed from prerequisite
+   bounds.
+6. Witness bodies are read-only, access only public target members, and have no purity guarantee.
+7. The orphan rule is based on the package of the contract or target type.
+8. The current package is implicitly in witness scope; package-star imports activate other witness
+   packages, but explicit symbol imports do not.
+9. `Display.toString` supplies `String + T`; nullable lifting and compiler-provided built-ins apply
+   as described above. Generic bounds are explicit.
+10. `==` and `!=` are unchanged; future `Eq<T>` operator behavior is separate work.
 
-Remaining work includes a complete overlap solver for distinct generic patterns and expanding
-separate-compilation and negative diagnostics coverage. The default same-name behavior, constructor
-mapping intent, placement rule, and hidden-evidence direction are settled above.
+Implementation must include generic and default witness methods, recursive evidence, import-scoped
+ambiguity, built-in display, API-index round trips, separately compiled consumers, erased JVM
+signature checks, and negative diagnostics. A complete overlap solver for every possible distinct
+generic-pattern pair remains future hardening.

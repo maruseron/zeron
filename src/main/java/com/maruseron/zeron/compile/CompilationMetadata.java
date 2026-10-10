@@ -42,6 +42,10 @@ final class CompilationMetadata {
                 } else if (declaration instanceof ZeronLibraryIndex.ValueExport value) {
                     valueOwners.putIfAbsent(value.qualifiedName(), value.jvmOwner());
                     valueInitializationOwners.putIfAbsent(value.qualifiedName(), value.initializationOwner());
+                } else if (declaration instanceof ZeronLibraryIndex.WitnessExport witness) {
+                    for (final var method : witness.methods()) {
+                        functionOwners.putIfAbsent(method.helperQualifiedName(), method.helperJvmOwner());
+                    }
                 }
                 for (final var unit : units) {
                     if (!unit.metadataOnly()) continue;
@@ -121,6 +125,24 @@ final class CompilationMetadata {
 
     String functionOwner(final Stmt.FunctionDeclaration function) {
         return declarationOwners.get(function);
+    }
+
+    void indexResolvedFunctions(final List<CompilationUnit> units, final String mainClassName) {
+        for (var unitIndex = 0; unitIndex < units.size(); unitIndex++) {
+            final var unit = units.get(unitIndex);
+            if (unit.metadataOnly()) continue;
+            final var owner = unitIndex == 0 ? mainClassName : holderName(unit, unitIndex);
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (!(member.declaration() instanceof Stmt.FunctionDeclaration function)) continue;
+                if (!function.name().lexeme().startsWith("$zeron$witness$")) continue;
+                final var qualifiedName = member.namespaceName() == null
+                        ? qualifiedName(unit.packageName(), function.name().lexeme())
+                        : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
+                                function.name().lexeme());
+                functionOwners.put(qualifiedName, owner);
+                declarationOwners.put(function, owner);
+            }
+        }
     }
 
     String holderName(final CompilationUnit unit, final int unitIndex) {

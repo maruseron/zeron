@@ -16,9 +16,41 @@ import java.util.Objects;
 
 public sealed interface Expr {
 
+    enum EvidenceHandleKind { STATIC, VIRTUAL, INTERFACE }
+
     record EvidenceArgument(TypeParameterDescriptor parameter, int boundIndex, int constructorIndex,
                             String ownerName, String constructorName, FunctionDescriptor signature,
-                            Token forwardToken) {}
+                            Token forwardToken, boolean instanceMethod, EvidenceHandleKind handleKind,
+                            List<EvidenceArgument> prerequisiteEvidence) {
+        public EvidenceArgument {
+            prerequisiteEvidence = List.copyOf(prerequisiteEvidence);
+        }
+
+        public EvidenceArgument(final TypeParameterDescriptor parameter, final int boundIndex,
+                                final int constructorIndex, final String ownerName,
+                                final String constructorName, final FunctionDescriptor signature,
+                                final Token forwardToken, final boolean instanceMethod,
+                                final EvidenceHandleKind handleKind) {
+            this(parameter, boundIndex, constructorIndex, ownerName, constructorName,
+                    signature, forwardToken, instanceMethod, handleKind, List.of());
+        }
+
+        public EvidenceArgument(final TypeParameterDescriptor parameter, final int boundIndex,
+                                final int constructorIndex, final String ownerName,
+                                final String constructorName, final FunctionDescriptor signature,
+                                final Token forwardToken) {
+            this(parameter, boundIndex, constructorIndex, ownerName, constructorName,
+                    signature, forwardToken, false, EvidenceHandleKind.STATIC);
+        }
+
+        public EvidenceArgument(final TypeParameterDescriptor parameter, final int boundIndex,
+                                final int constructorIndex, final String ownerName,
+                                final String constructorName, final FunctionDescriptor signature,
+                                final Token forwardToken, final boolean instanceMethod) {
+            this(parameter, boundIndex, constructorIndex, ownerName, constructorName,
+                    signature, forwardToken, instanceMethod, EvidenceHandleKind.STATIC);
+        }
+    }
 
     static Token evidenceToken(final TypeParameterDescriptor parameter,
                                final int boundIndex,
@@ -26,6 +58,15 @@ public sealed interface Expr {
         return new Token(TokenType.IDENTIFIER,
                 "$zeron$evidence$" + parameter.scopeId() + "$" + parameter.name()
                         + "$" + boundIndex + "$" + constructorIndex,
+                null, -1);
+    }
+
+    static Token methodEvidenceToken(final TypeParameterDescriptor parameter,
+                                    final int boundIndex,
+                                    final int methodIndex) {
+        return new Token(TokenType.IDENTIFIER,
+                "$zeron$evidence$" + parameter.scopeId() + "$" + parameter.name()
+                        + "$" + boundIndex + "$method$" + methodIndex,
                 null, -1);
     }
 
@@ -53,6 +94,10 @@ public sealed interface Expr {
         private int variadicFixedArity = -1;
         private Token witnessEvidenceToken;
         private FunctionDescriptor witnessFactoryType;
+        private boolean witnessEvidenceIsMethod;
+        private String witnessMethodOwner;
+        private String witnessMethodName;
+        private FunctionDescriptor witnessMethodType;
         private List<EvidenceArgument> evidenceArguments = List.of();
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
@@ -103,9 +148,25 @@ public sealed interface Expr {
         }
         public Token witnessEvidenceToken() { return witnessEvidenceToken; }
         public FunctionDescriptor witnessFactoryType() { return witnessFactoryType; }
+        public boolean witnessEvidenceIsMethod() { return witnessEvidenceIsMethod; }
         public void setWitnessEvidence(final Token token, final FunctionDescriptor factoryType) {
             witnessEvidenceToken = token;
             witnessFactoryType = factoryType;
+            witnessEvidenceIsMethod = false;
+        }
+        public void setWitnessMethodEvidence(final Token token, final FunctionDescriptor methodType) {
+            witnessEvidenceToken = token;
+            witnessFactoryType = methodType;
+            witnessEvidenceIsMethod = true;
+        }
+        public String witnessMethodOwner() { return witnessMethodOwner; }
+        public String witnessMethodName() { return witnessMethodName; }
+        public FunctionDescriptor witnessMethodType() { return witnessMethodType; }
+        public void setWitnessMethod(final String owner, final String methodName,
+                                     final FunctionDescriptor methodType) {
+            witnessMethodOwner = owner;
+            witnessMethodName = methodName;
+            witnessMethodType = methodType;
         }
         public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
         public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
@@ -309,6 +370,9 @@ public sealed interface Expr {
         public final Token operator;
         public final Expr right;
         private TypeDescriptor type;
+        private MemberCall displayCall;
+        private boolean builtInStringification;
+        private boolean nullableStringification;
 
         public Binary(Expr left, Token operator, Expr right, TypeDescriptor type) {
             this.left = left;
@@ -320,6 +384,13 @@ public sealed interface Expr {
         public TypeDescriptor getType() {
             return type;
         }
+
+        public MemberCall displayCall() { return displayCall; }
+        public void setDisplayCall(final MemberCall call) { displayCall = call; }
+        public boolean builtInStringification() { return builtInStringification; }
+        public void setBuiltInStringification(final boolean value) { builtInStringification = value; }
+        public boolean nullableStringification() { return nullableStringification; }
+        public void setNullableStringification(final boolean value) { nullableStringification = value; }
 
         public void setType(TypeDescriptor type) {
             this.type = type;
@@ -1082,6 +1153,7 @@ public sealed interface Expr {
         private Stmt.FunctionDeclaration resolvedFunctionDeclaration;
         private FunctionDescriptor sourceFunctionType;
         private FunctionDescriptor specializedFunctionType;
+        private List<EvidenceArgument> evidenceArguments = List.of();
         private FunctionDescriptor storedFunctionType;
         private Token resolvedSymbolToken;
         private Stmt.Var resolvedValueDeclaration;
@@ -1117,6 +1189,10 @@ public sealed interface Expr {
         public void setSourceFunctionType(final FunctionDescriptor type) { sourceFunctionType = type; }
         public FunctionDescriptor specializedFunctionType() { return specializedFunctionType; }
         public void setSpecializedFunctionType(final FunctionDescriptor type) { specializedFunctionType = type; }
+        public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
+        public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
+            evidenceArguments = List.copyOf(arguments);
+        }
         public FunctionDescriptor storedFunctionType() { return storedFunctionType; }
         public void setStoredFunctionType(final FunctionDescriptor type) { storedFunctionType = type; }
         public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? name : resolvedSymbolToken; }

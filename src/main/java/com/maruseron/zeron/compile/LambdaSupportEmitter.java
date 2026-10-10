@@ -69,9 +69,11 @@ final class LambdaSupportEmitter {
         if (owner == null) {
             throw new IllegalStateException("Missing JVM owner for " + reference.functionName());
         }
+        emitEvidenceArguments(context, composer, reference.evidenceArguments());
         composer.invokestatic(ClassDesc.of(owner),
             reference.functionName().substring(reference.functionName().lastIndexOf('.') + 1),
-            toJavaMethodDescriptor(sourceType));
+            withEvidenceParameters(toJavaMethodDescriptor(sourceType),
+                    reference.evidenceArguments().size()));
         emitConversion(context, composer, sourceType.returnType(), targetType.returnType());
         composer.return_(TypeKind.fromDescriptor(
             TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));

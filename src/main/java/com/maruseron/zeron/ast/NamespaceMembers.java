@@ -17,6 +17,11 @@ public final class NamespaceMembers {
                 }
             } else {
                 members.add(new Member(null, declaration));
+                if (declaration instanceof Stmt.Witness witness) {
+                    for (final var method : witness.methods()) {
+                        members.add(new Member(null, method.implementation()));
+                    }
+                }
             }
         }
         return List.copyOf(members);

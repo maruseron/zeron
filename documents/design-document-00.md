@@ -39,7 +39,7 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Nominal non-generic effect payload classes, declared `raises` sets, `raise` expressions, and
     typed expression handlers. Calls propagate effects until handled or declared; `Result` remains
     an ordinary value type. See [typed raised effects](design-document-13_typed-raised-effects.md).
-- Explicitly imported extension methods for Zeron classes and contracts. Extensions resolve
+- Explicitly imported extension methods for Zeron classes, contracts, and nominal sums. Extensions resolve
     statically, lower to receiver-first static functions, and cannot access private members.
     Ordinary callable names are unique rather than overloaded; extensions may share a name for
     different receiver types and resolve only by receiver applicability, with overlap reported as
@@ -56,10 +56,10 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Callable `zeron.io.print` and `zeron.io.println` standard-library functions, implemented as
     ordinary Zeron functions through the curated Java external-class facade. The former print
     statement syntax has been removed.
-- `zeron.lang.Option<T>` as a sealed contract implemented by `Some<T>` and `None<T>`, with
-    `Option.some(value)` and `Option.none::<T>()` factories and `fold` for consuming either case
-    without exceptions. `Iterator<T>.next()` returns this type, using `None` for exhaustion and
-    `Some` for yielded values.
+- `zeron.lang.Option<T>` as the nominal sum `Some(value: T) | None`. Cases are constructed and
+    matched through `Option.Some(value)` and `Option<T>.None()`. Public extension operations provide
+    `isSome`, `getOrElse`, `fold`, `map`, and `filter`. `Iterator<T>.next()` returns this type,
+    using `Option<T>.None()` for exhaustion and `Option.Some(value)` for yielded values.
 - `zeron.lang.Result<T, E>` as a sealed contract implemented by `Ok<T, E>` and `Err<T, E>`, with
     `fold`, `map`, `mapError`, and `andThen` for explicit error-value composition. No propagation
     operator or source-level exception handling is introduced.
@@ -71,9 +71,14 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     [design-document-16](design-document-16_patterns-and-pattern-matching.md).
 - Compiled Zeron libraries can be packaged as JARs and loaded from either JARs or class directories;
     consumers validate both API-index schema and standard-library API compatibility.
-- Initial Java class-directory interop for public constructors and methods, including expanded
-    varargs calls with supported component types. Java JARs, JDK module discovery, fields, and
-    ordinary Java array signatures remain unsupported.
+- Initial Java classpath interop for public constructors and methods, including expanded varargs
+    calls with supported component types. Explicit directory/JAR roots are searched in order, with
+    runtime-version-aware multi-release JAR lookup. Public JDK class metadata is discovered directly
+    from exported system-module packages, without class initialization or default imports. Arbitrary
+    Java field reads and mutable-instance writes support public declared fields with mapped
+    descriptors; static writes and final-field writes are rejected. Java methods support `Object[]`
+    parameters/results; Zeron array arguments are shallow-copied at the boundary, while typed
+    reference and primitive array signatures remain unsupported.
 - Binding reassignment as a declaration property: `let` bindings are immutable and `let mut`
     bindings may be reassigned.
 - Reference mutation capability (`&T`) is distinct from binding reassignment and is enforced for
@@ -201,10 +206,10 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     These constraints restrict which types may be supplied but do not expose operations; generic
     operator support remains a separate operator-witness design. Define constraint inference,
     forwarding, and compiled-library representation before implementation.
-- Low priority: type-predicate return types such as `isSome(): this is Some<T>`, which connect a
+- Low priority: type-predicate return types such as `isSome(): this is Option.Some`, which connect a
     successful Boolean check to flow refinement of a stable receiver. Define how predicate bodies
     are verified so the refinement is sound, which receivers may be narrowed, and how generic
-    arguments are preserved despite runtime erasure before using this for `Option` or `Result`.
+    arguments are preserved despite runtime erasure before using this for `Result`.
 - Low priority: an explicit pipe operator where `value |> f` means `f(value)` and
     `value |> f(option)` means `f(value, option)`. The piped value becomes the first argument;
     stages evaluate left to right. No partial application, method lookup, or implicit nullable/result

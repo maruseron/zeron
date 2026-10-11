@@ -48,13 +48,18 @@ final class StatementEmitter {
                         emitStmt(context, composer, elseBranch);
                     }
                 } else {
-                    emitExpr(context, composer, condition);
-                    if (elseBranch != null) {
-                        composer.ifThenElse(
-                            c -> emitStmt(context, c, thenBranch), 
-                            c -> emitStmt(context, c, elseBranch));
-                    } else {
-                        composer.ifThen(c -> emitStmt(context, c, thenBranch));
+                    final var bindings = ExpressionFlowEmitter.beginSumCaseTestBindings(context, composer, condition);
+                    try {
+                        emitExpr(context, composer, condition);
+                        if (elseBranch != null) {
+                            composer.ifThenElse(
+                                c -> emitStmt(context, c, thenBranch),
+                                c -> emitStmt(context, c, elseBranch));
+                        } else {
+                            composer.ifThen(c -> emitStmt(context, c, thenBranch));
+                        }
+                    } finally {
+                        ExpressionFlowEmitter.endSumCaseTestBindings(context, bindings);
                     }
                 }
             }
@@ -62,15 +67,20 @@ final class StatementEmitter {
                 final var loopStart = composer.newLabel();
                 final var loopExit = composer.newLabel();
                 composer.labelBinding(loopStart);
-                emitExpr(context, composer, condition);
-                composer.ifeq(loopExit);
-                context.loopExitLabels.push(loopExit);
-                context.loopContinueLabels.push(loopStart);
+                final var bindings = ExpressionFlowEmitter.beginSumCaseTestBindings(context, composer, condition);
                 try {
-                    emitStmt(context, composer, body);
+                    emitExpr(context, composer, condition);
+                    composer.ifeq(loopExit);
+                    context.loopExitLabels.push(loopExit);
+                    context.loopContinueLabels.push(loopStart);
+                    try {
+                        emitStmt(context, composer, body);
+                    } finally {
+                        context.loopExitLabels.pop();
+                        context.loopContinueLabels.pop();
+                    }
                 } finally {
-                    context.loopContinueLabels.pop();
-                    context.loopExitLabels.pop();
+                    ExpressionFlowEmitter.endSumCaseTestBindings(context, bindings);
                 }
                 composer.goto_(loopStart);
                 composer.labelBinding(loopExit);
@@ -178,14 +188,14 @@ final class StatementEmitter {
         composer.astore(optionLocal.lvt() + context.localSlotOffset);
 
         composer.aload(optionLocal.lvt() + context.localSlotOffset);
-        composer.invokeinterface(ClassDesc.of("zeron.lang.Option"), "isSome",
-                MethodTypeDesc.of(ConstantDescs.CD_boolean));
+        final var someClass = ClassDesc.of("zeron.lang.Option$$sum$Some");
+        composer.instanceOf(someClass);
         composer.ifeq(loopExit);
 
         composer.aload(optionLocal.lvt() + context.localSlotOffset);
-        composer.aconst_null();
-        composer.invokeinterface(ClassDesc.of("zeron.lang.Option"), "getOrElse",
-                MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+        composer.checkcast(someClass);
+        composer.invokevirtual(someClass, "$zeron$payload$0",
+                MethodTypeDesc.of(ConstantDescs.CD_Object));
         emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), elementType);
         composer.storeLocal(TypeKind.fromDescriptor(
                 TypeDescriptor.toJavaClassDesc(elementType).descriptorString()),

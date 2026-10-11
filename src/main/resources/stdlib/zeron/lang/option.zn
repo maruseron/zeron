@@ -1,45 +1,28 @@
 package zeron.lang;
 
-namespace Option {
-    public fn some<T>(value: T): Option<T> = Some<T>.from(value);
+public type Option<T> = Some(value: T) | None;
 
-    public fn none<T>(): Option<T> = None<T>.none();
-}
+public extension<T> Option<T> {
+    public fn isSome(): Boolean = match (this) {
+        case Option.Some(_) -> true;
+        case Option.None() -> false;
+    };
 
-public sealed contract Option<T> permits Some<T>, None<T> {
-    isSome(): Boolean;
-    getOrElse(defaultValue: T): T;
-    fold<R>(ifSome: (T) -> R, ifNone: () -> R): R;
-}
+    public fn getOrElse(other: T): T =
+        if (this matches Option.Some(value)) then value else other;
 
-public class Some<T> is Option<T> {
-    item: T;
+    public fn fold<R>(ifSome: (T) -> R, ifNone: () -> R): R = match (this) {
+        case Option.Some(value) -> ifSome(value);
+        case Option.None() -> ifNone();
+    };
 
-    private constructor new;
+    public fn map<B>(f: (T) -> B): Option<B> = match (this) {
+        case Option.Some(value) -> Option.Some(f(value));
+        case Option.None()  -> Option<B>.None();
+    };
 
-    public constructor from(value: T) = Some<T>.new(value);
-
-    public isSome(): Boolean = true;
-
-    public property value: T {
-        get = this.item;
-    }
-
-    public getOrElse(defaultValue: T): T = this.item;
-
-    public fold<R>(ifSome: (T) -> R, ifNone: () -> R): R =
-        ifSome(this.item);
-}
-
-public class None<T> is Option<T> {
-    private constructor new;
-
-    public constructor none() = None<T>.new();
-
-    public isSome(): Boolean = false;
-
-    public getOrElse(defaultValue: T): T = defaultValue;
-
-    public fold<R>(ifSome: (T) -> R, ifNone: () -> R): R =
-        ifNone();
+    public fn filter(p: (T) -> Boolean): Option<T> = match (this) {
+        case Option.Some(value) -> if (p(value)) then this else Option<T>.None();
+        case Option.None()  -> this;
+    };
 }

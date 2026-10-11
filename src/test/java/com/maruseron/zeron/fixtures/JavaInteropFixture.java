@@ -2,6 +2,11 @@ package com.maruseron.zeron.fixtures;
 
 public class JavaInteropFixture {
     private int value;
+    public int publicValue;
+    public int[] publicArray = new int[0];
+    public final int finalValue = 17;
+    public static int publicStaticValue = 23;
+    public static final int finalStaticValue = 29;
 
     public JavaInteropFixture(final int value) {
         this.value = value;
@@ -65,6 +70,26 @@ public class JavaInteropFixture {
 
     public static String echo(final String value) {
         return value;
+    }
+
+    public static Object[] echoObjects(final Object[] values) {
+        return values;
+    }
+
+    public static int objectArrayLength(final Object[] values) {
+        return values.length;
+    }
+
+    public static void overwriteFirstObject(final Object[] values) {
+        values[0] = "changed";
+    }
+
+    public static String[] echoStrings(final String[] values) {
+        return values;
+    }
+
+    public static int[] echoInts(final int[] values) {
+        return values;
     }
 
     public static int readValue(final JavaInteropFixture fixture) {

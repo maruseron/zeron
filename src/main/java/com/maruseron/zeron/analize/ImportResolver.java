@@ -176,6 +176,10 @@ final class ImportResolver {
             } catch (final ResolutionError error) {
                 errors.add(error);
                 invalidAliases.add(importDeclaration.localName());
+            } catch (final JavaClassPath.MetadataException error) {
+                errors.add(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                        importDeclaration.location(), error.getMessage(), unit.sourcePath()));
+                invalidAliases.add(importDeclaration.localName());
             }
         }
         for (final var packageName : List.of("zeron.io", "zeron.lang")) {

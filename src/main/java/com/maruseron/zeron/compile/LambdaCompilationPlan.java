@@ -306,6 +306,7 @@ final class LambdaCompilationPlan {
                     collectLambdaShapes(arm.expression());
                 }
             }
+            case Expr.SumCaseTest test -> collectLambdaShapes(test.value);
             case Expr.Pipeline pipeline -> {
                 collectLambdaShapes(pipeline.source);
                 for (final var stage : pipeline.stages) {
@@ -416,7 +417,8 @@ final class LambdaCompilationPlan {
             }
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 collectCapturedVariables(condition, localNames, captured, seen);
-                if (thenBranch != null) collectCapturedVariables(thenBranch, new HashSet<>(localNames), captured, seen);
+                if (thenBranch != null) collectCapturedVariables(thenBranch,
+                        namesWithConditionBindings(condition, localNames), captured, seen);
                 if (elseBranch != null) collectCapturedVariables(elseBranch, new HashSet<>(localNames), captured, seen);
             }
             case Stmt.For(Token iterationBind, Token _, Expr iterable, Stmt body) -> {
@@ -436,7 +438,7 @@ final class LambdaCompilationPlan {
             }
             case Stmt.While(Token _, Expr condition, Stmt body) -> {
                 collectCapturedVariables(condition, localNames, captured, seen);
-                collectCapturedVariables(body, new HashSet<>(localNames), captured, seen);
+                collectCapturedVariables(body, namesWithConditionBindings(condition, localNames), captured, seen);
             }
             case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body,
                                boolean _, List<Expr> _, int _, boolean _) -> {
@@ -446,6 +448,18 @@ final class LambdaCompilationPlan {
             }
             default -> {}
         }
+    }
+
+    private static Set<String> namesWithConditionBindings(final Expr condition,
+                                                           final Set<String> localNames) {
+        final var names = new HashSet<>(localNames);
+        final var candidate = condition instanceof Expr.Grouping grouping ? grouping.expression : condition;
+        if (candidate instanceof Expr.SumCaseTest test) {
+            for (final var argument : test.pattern.arguments()) {
+                if (argument.binding() != null) names.add(argument.binding().lexeme());
+            }
+        }
+        return names;
     }
 
     private void collectCapturedVariables(final Expr expr,
@@ -515,7 +529,8 @@ final class LambdaCompilationPlan {
             case Expr.Grouping grouping -> collectCapturedVariables(grouping.expression, localNames, captured, seen);
             case Expr.If iff -> {
                 collectCapturedVariables(iff.condition, localNames, captured, seen);
-                collectCapturedVariables(iff.thenExpr, localNames, captured, seen);
+                collectCapturedVariables(iff.thenExpr,
+                        namesWithConditionBindings(iff.condition, localNames), captured, seen);
                 collectCapturedVariables(iff.elseExpr, localNames, captured, seen);
             }
             case Expr.Match match -> {
@@ -528,12 +543,16 @@ final class LambdaCompilationPlan {
                     collectCapturedVariables(arm.expression(), armNames, captured, seen);
                 }
             }
+            case Expr.SumCaseTest test -> collectCapturedVariables(test.value, localNames, captured, seen);
             case Expr.Raise raise -> collectCapturedVariables(raise.effect, localNames, captured, seen);
             case Expr.Handle handle -> {
                 collectCapturedVariables(handle.expression, localNames, captured, seen);
                 for (final var arm : handle.arms) {
                     final var armNames = new HashSet<>(localNames);
-                    if (arm.alias() != null) armNames.add(arm.alias().lexeme());
+                    arm.pattern().bindingNames().forEach(name -> armNames.add(name.lexeme()));
+                    if (arm.guard() != null) {
+                        collectCapturedVariables(arm.guard(), armNames, captured, seen);
+                    }
                     collectCapturedVariables(arm.expression(), armNames, captured, seen);
                 }
             }

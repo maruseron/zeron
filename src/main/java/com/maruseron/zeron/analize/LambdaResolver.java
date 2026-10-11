@@ -348,9 +348,19 @@ final class LambdaResolver {
                 || referencesAnyVariable(context, assignment.index, names)
                 || referencesAnyVariable(context, assignment.value, names);
             case Expr.Grouping grouping -> referencesAnyVariable(context, grouping.expression, names);
-            case Expr.If iff -> referencesAnyVariable(context, iff.condition, names)
-                || referencesAnyVariable(context, iff.thenExpr, names)
-                || referencesAnyVariable(context, iff.elseExpr, names);
+            case Expr.If iff -> {
+                final var thenNames = new HashSet<>(names);
+                final var candidate = iff.condition instanceof Expr.Grouping grouping
+                        ? grouping.expression : iff.condition;
+                if (candidate instanceof Expr.SumCaseTest test) {
+                    for (final var argument : test.pattern.arguments()) {
+                        if (argument.binding() != null) thenNames.remove(argument.binding().lexeme());
+                    }
+                }
+                yield referencesAnyVariable(context, iff.condition, names)
+                        || referencesAnyVariable(context, iff.thenExpr, thenNames)
+                        || referencesAnyVariable(context, iff.elseExpr, names);
+            }
             case Expr.Pipeline pipeline -> referencesAnyVariable(context, pipeline.source, names)
                 || pipeline.stages.stream().anyMatch(stage -> {
                     final var stageNames = new HashSet<>(names);
@@ -371,9 +381,9 @@ final class LambdaResolver {
             case Expr.Handle handle -> referencesAnyVariable(context, handle.expression, names)
                 || handle.arms.stream().anyMatch(arm -> {
                     final var armNames = new HashSet<>(names);
-                    if (arm.alias() != null) armNames.remove(arm.alias().lexeme());
-                    if (arm.binding() != null) armNames.remove(arm.binding().lexeme());
-                    return referencesAnyVariable(context, arm.expression(), armNames);
+                    arm.pattern().bindingNames().forEach(name -> armNames.remove(name.lexeme()));
+                    return arm.guard() != null && referencesAnyVariable(context, arm.guard(), armNames)
+                            || referencesAnyVariable(context, arm.expression(), armNames);
                 });
             case Expr.Logical logical -> referencesAnyVariable(context, logical.left, names)
                 || referencesAnyVariable(context, logical.right, names);
@@ -381,6 +391,7 @@ final class LambdaResolver {
                 || referencesAnyVariable(context, coalesce.right, names);
             case Expr.Unary unary -> referencesAnyVariable(context, unary.right, names);
             case Expr.TypeTest test -> referencesAnyVariable(context, test.value, names);
+            case Expr.SumCaseTest test -> referencesAnyVariable(context, test.value, names);
             case Expr.Cast cast -> referencesAnyVariable(context, cast.value, names);
             case Expr.Lambda nested -> nested.body.stream().anyMatch(statement ->
                 statement instanceof Stmt.Return returned && returned.value() != null
@@ -465,15 +476,6 @@ final class LambdaResolver {
     }
 
     static void resolveFunction(final ResolutionContext context, final Stmt.Function function) {
-        if (Objects.equals(context.currentSourcePath, context.entrySourcePath)
-                && function.name().lexeme().equals("main")
-                && function.parameters().isEmpty()
-                && (function.typeDescriptor().returnType() instanceof UnitDescriptor
-                    || function.typeDescriptor().returnType() instanceof InferDescriptor)
-                && !function.typeDescriptor().raisedEffects().isEmpty()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    function.name(), "The entry-point main function cannot declare raised effects."));
-        }
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);

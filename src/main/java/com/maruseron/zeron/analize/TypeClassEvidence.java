@@ -28,6 +28,7 @@ final class TypeClassEvidence {
                 TypeResolver.validateTypeParameterBound(context, parameter, witness.name()));
         final var contract = context.contracts.get(nominalName(witness.contractType()));
         final var target = context.classes.get(nominalName(witness.targetType()));
+        final var sumTarget = context.sums.get(nominalName(witness.targetType()));
         if (contract == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     witness.name(), "A witness must name a contract and a supported target type."));
@@ -35,32 +36,36 @@ final class TypeClassEvidence {
         if (!packageName.equals(packageOf(contract.name().lexeme()))
                 && !packageName.equals(packageOfTarget(witness.targetType()))) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    witness.name(), "A witness must be declared in the contract or target class package."));
+                    witness.name(), "A witness must be declared in the contract or target type package."));
         }
 
-        if (target != null && target.typeParameters().size() != witness.typeParameters().size()) {
+        final var targetParameters = target != null ? target.typeParameters()
+                : sumTarget != null ? sumTarget.typeParameters() : List.<TypeParameterDescriptor>of();
+        final var nominalTargetName = target != null ? target.name().lexeme()
+                : sumTarget != null ? sumTarget.name().lexeme() : null;
+        if (nominalTargetName != null && targetParameters.size() != witness.typeParameters().size()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                    witness.name(), "Witness target must match the target class's complete type pattern."));
+                    witness.name(), "Witness target must match the target type's complete type pattern."));
         }
         final var targetSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        final var classPattern = target == null ? witness.targetType() : target.typeParameters().isEmpty()
-                ? (TypeDescriptor) TypeDescriptor.ofName(target.name().lexeme())
-                : TypeDescriptor.genericOf(TypeDescriptor.ofName(target.name().lexeme()),
-                        target.typeParameters().stream().map(parameter -> (TypeDescriptor) parameter).toList());
-        if (target != null) {
-            for (final var parameter : target.typeParameters()) {
+        final var targetPattern = nominalTargetName == null ? witness.targetType() : targetParameters.isEmpty()
+                ? (TypeDescriptor) TypeDescriptor.ofName(nominalTargetName)
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(nominalTargetName),
+                        targetParameters.stream().map(parameter -> (TypeDescriptor) parameter).toList());
+        if (nominalTargetName != null) {
+            for (final var parameter : targetParameters) {
                 targetSubstitutions.put(parameter, parameter);
             }
         }
-        if (target != null && (!matchPattern(witness.targetType(), classPattern,
+        if (nominalTargetName != null && (!matchPattern(witness.targetType(), targetPattern,
                     witness.typeParameters(), targetSubstitutions)
                 || !targetSubstitutions.keySet().containsAll(witness.typeParameters()))) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                    witness.name(), "Witness target must match the target class's complete type pattern."));
+                    witness.name(), "Witness target must match the target type's complete type pattern."));
         }
-        if (target == null && !witness.typeParameters().isEmpty()) {
+        if (nominalTargetName == null && !witness.typeParameters().isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                    witness.name(), "Generic witness targets must be generic classes."));
+                    witness.name(), "Generic witness targets must be generic nominal types."));
         }
         final var contractArguments = typeArguments(witness.contractType());
         if (contractArguments.size() != contract.typeParameters().size()) {
@@ -69,8 +74,8 @@ final class TypeClassEvidence {
         }
         final var classSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         if (target != null) {
-            for (int index = 0; index < target.typeParameters().size(); index++) {
-                classSubstitutions.put(target.typeParameters().get(index), witness.typeParameters().get(index));
+            for (int index = 0; index < targetParameters.size(); index++) {
+                classSubstitutions.put(targetParameters.get(index), witness.typeParameters().get(index));
             }
         }
         final var classContract = target == null ? null : target.contractUses().stream()

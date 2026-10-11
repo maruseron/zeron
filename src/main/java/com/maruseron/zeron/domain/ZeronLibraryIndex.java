@@ -27,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 20;
+    public static final int VERSION = 21;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -144,6 +144,17 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(),
                             constructors, methods, properties, true, contract.sealed(), permittedClasses));
                 }
+                case SumExport sum -> {
+                    final var sumName = token(sum.qualifiedName());
+                    final var cases = sum.cases().stream()
+                            .map(sumCase -> new Stmt.SumCase(token(sumCase.name()),
+                                    sumCase.payloads().stream()
+                                            .map(payload -> new Stmt.SumPayload(
+                                                    token(payload.name()), payload.type()))
+                                            .toList()))
+                            .toList();
+                    statements.add(new Stmt.SumDecl(sumName, sum.typeParameters(), cases, true));
+                }
                 case WitnessExport witness -> {
                     final var mappings = witness.mappings().stream()
                             .map(mapping -> new Stmt.WitnessFactoryMapping(token(mapping.requirementName()),
@@ -174,7 +185,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
 
     public sealed interface ExportedDeclaration permits NamespacedDeclaration, ClassExport, ContractExport,
-            WitnessExport {
+            SumExport, WitnessExport {
         String qualifiedName();
     }
 
@@ -309,6 +320,29 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                               List<MethodExport> methods,
                               List<PropertyExport> properties) {
             this(qualifiedName, typeParameters, constructors, methods, properties, false, List.of());
+        }
+    }
+
+    public record SumExport(String qualifiedName, List<TypeParameterDescriptor> typeParameters,
+                            List<SumCaseExport> cases) implements ExportedDeclaration {
+        public SumExport {
+            Objects.requireNonNull(qualifiedName);
+            typeParameters = List.copyOf(typeParameters);
+            cases = List.copyOf(cases);
+        }
+    }
+
+    public record SumCaseExport(String name, List<SumPayloadExport> payloads) {
+        public SumCaseExport {
+            Objects.requireNonNull(name);
+            payloads = List.copyOf(payloads);
+        }
+    }
+
+    public record SumPayloadExport(String name, TypeDescriptor type) {
+        public SumPayloadExport {
+            Objects.requireNonNull(name);
+            Objects.requireNonNull(type);
         }
     }
 
@@ -522,6 +556,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                                 output.name().lexeme(), output.type()))
                                                         .toList(),
                                                 pattern.refutable()))
+                                        .toList()));
+                    }
+                    case Stmt.SumDecl sum when sum.isPublic() -> {
+                        exports.add(new SumExport(sum.name().lexeme(), sum.typeParameters(),
+                                sum.cases().stream()
+                                        .map(sumCase -> new SumCaseExport(sumCase.name().lexeme(),
+                                                sumCase.payloads().stream()
+                                                        .map(payload -> new SumPayloadExport(
+                                                                payload.name().lexeme(), payload.type()))
+                                                        .toList()))
                                         .toList()));
                     }
                     case Stmt.ContractDecl contract when contract.isPublic() ->
@@ -742,6 +786,21 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     for (final var type : permitted.typeArguments()) writeType(output, type, context);
                 }
             }
+            case SumExport sum -> {
+                output.writeByte(7);
+                output.writeUTF(sum.qualifiedName());
+                final var context = new WriteContext();
+                writeTypeParameters(output, sum.typeParameters(), context);
+                output.writeInt(sum.cases().size());
+                for (final var sumCase : sum.cases()) {
+                    output.writeUTF(sumCase.name());
+                    output.writeInt(sumCase.payloads().size());
+                    for (final var payload : sumCase.payloads()) {
+                        output.writeUTF(payload.name());
+                        writeType(output, payload.type(), context);
+                    }
+                }
+            }
             case WitnessExport witness -> {
                 output.writeByte(6);
                 output.writeUTF(witness.qualifiedName());
@@ -852,6 +911,21 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     permitted.add(new ContractUseExport(permittedName, arguments));
                 }
                 yield new ContractExport(name, typeParameters, constructors, methods, properties, sealed, permitted);
+            }
+            case 7 -> {
+                final var name = input.readUTF();
+                final var context = new ReadContext();
+                final var typeParameters = readTypeParameters(input, context);
+                final var cases = new ArrayList<SumCaseExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var caseName = input.readUTF();
+                    final var payloads = new ArrayList<SumPayloadExport>();
+                    for (int j = 0, payloadCount = readCount(input); j < payloadCount; j++) {
+                        payloads.add(new SumPayloadExport(input.readUTF(), readType(input, context)));
+                    }
+                    cases.add(new SumCaseExport(caseName, payloads));
+                }
+                yield new SumExport(name, typeParameters, cases);
             }
             case 6 -> {
                 final var name = input.readUTF();

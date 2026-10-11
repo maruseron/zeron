@@ -90,6 +90,14 @@ final class CompilationContext {
                 } else if (declaration instanceof Stmt.ContractDecl contractDeclaration) {
                     sourceTypes.put(ClassDesc.of(contractDeclaration.name().lexeme()),
                             ClassHierarchyResolver.ClassHierarchyInfo.ofInterface());
+                } else if (declaration instanceof Stmt.SumDecl sumDeclaration) {
+                    sourceTypes.put(ClassDesc.of(sumDeclaration.name().lexeme()),
+                            ClassHierarchyResolver.ClassHierarchyInfo.ofInterface());
+                    for (final var sumCase : sumDeclaration.cases()) {
+                        sourceTypes.put(ClassDesc.of(sumDeclaration.generatedCaseName(sumCase)),
+                                ClassHierarchyResolver.ClassHierarchyInfo.ofClass(
+                                        ClassDesc.of("java.lang.Object")));
+                    }
                 }
 
             }

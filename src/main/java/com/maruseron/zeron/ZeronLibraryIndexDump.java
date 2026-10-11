@@ -132,6 +132,19 @@ public final class ZeronLibraryIndexDump {
                                 + property.name() + ": " + formatType(property.type()));
                     }
                 }
+                case ZeronLibraryIndex.SumExport sum -> {
+                    System.out.println("type " + sum.qualifiedName()
+                            + formatTypeParameters(sum.typeParameters()) + " =");
+                    for (int caseIndex = 0; caseIndex < sum.cases().size(); caseIndex++) {
+                        final var sumCase = sum.cases().get(caseIndex);
+                        final var payloads = sumCase.payloads().stream()
+                                .map(payload -> payload.name() + ": " + formatType(payload.type()))
+                                .collect(Collectors.joining(", "));
+                        System.out.println("  " + (caseIndex == 0 ? "" : "| ")
+                                + sumCase.name()
+                                + (sumCase.payloads().isEmpty() ? "" : "(" + payloads + ")"));
+                    }
+                }
                 case ZeronLibraryIndex.WitnessExport witness -> {
                     System.out.println("witness " + witness.qualifiedName()
                             + formatTypeParameters(witness.typeParameters()) + " "

@@ -14,6 +14,15 @@ import java.util.stream.Collectors;
 import static com.maruseron.zeron.analize.Resolver.*;
 
 final class DeclarationResolver {
+    static void resolveSum(final ResolutionContext context, final Stmt.SumDecl sum) {
+        final var contract = context.contracts.get(sum.name().lexeme());
+        resolveContract(context, contract);
+        for (final var sumCase : sum.cases()) {
+            final var caseClass = context.classes.get(sum.generatedCaseName(sumCase));
+            resolveClass(context, caseClass);
+        }
+    }
+
     static void resolveContract(final ResolutionContext context, final Stmt.ContractDecl contract) {
         validateSealedContract(context, contract);
         for (final var constructor : contract.namedConstructors()) {

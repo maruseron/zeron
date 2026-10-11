@@ -44,7 +44,7 @@ final class LambdaCaptureValidator {
             case Stmt.Block(List<Stmt> block) -> walkCaptureUsage(block, localNames);
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 walkCaptureUsage(condition, localNames);
-                if (thenBranch != null) walkCaptureUsage(thenBranch, localNames);
+                if (thenBranch != null) walkCaptureUsage(thenBranch, namesWithConditionBindings(condition, localNames));
                 if (elseBranch != null) walkCaptureUsage(elseBranch, localNames);
             }
             case Stmt.Return(Expr value, Token _) -> {
@@ -56,7 +56,7 @@ final class LambdaCaptureValidator {
             }
             case Stmt.While(Token _, Expr condition, Stmt body) -> {
                 walkCaptureUsage(condition, localNames);
-                walkCaptureUsage(body, localNames);
+                walkCaptureUsage(body, namesWithConditionBindings(condition, localNames));
             }
             case Stmt.For(Token _, Token _, Expr iterable, Stmt body) -> {
                 walkCaptureUsage(iterable, localNames);
@@ -119,7 +119,7 @@ final class LambdaCaptureValidator {
             case Expr.Grouping grouping -> walkCaptureUsage(grouping.expression, localNames);
             case Expr.If iff -> {
                 walkCaptureUsage(iff.condition, localNames);
-                walkCaptureUsage(iff.thenExpr, localNames);
+                walkCaptureUsage(iff.thenExpr, namesWithConditionBindings(iff.condition, localNames));
                 walkCaptureUsage(iff.elseExpr, localNames);
             }
             case Expr.Match match -> {
@@ -132,13 +132,15 @@ final class LambdaCaptureValidator {
                     walkCaptureUsage(arm.expression(), armNames);
                 }
             }
+
+            case Expr.SumCaseTest test -> walkCaptureUsage(test.value, localNames);
             case Expr.Raise raise -> walkCaptureUsage(raise.effect, localNames);
             case Expr.Handle handle -> {
                 walkCaptureUsage(handle.expression, localNames);
                 for (final var arm : handle.arms) {
                     final var armNames = new HashSet<>(localNames);
-                    if (arm.alias() != null) armNames.add(arm.alias().lexeme());
-                    if (arm.binding() != null) armNames.add(arm.binding().lexeme());
+                    arm.pattern().bindingNames().forEach(name -> armNames.add(name.lexeme()));
+                    if (arm.guard() != null) walkCaptureUsage(arm.guard(), armNames);
                     walkCaptureUsage(arm.expression(), armNames);
                 }
             }
@@ -168,5 +170,17 @@ final class LambdaCaptureValidator {
             }
             default -> {}
         }
+    }
+
+    private static Set<String> namesWithConditionBindings(final Expr condition,
+                                                           final Set<String> localNames) {
+        final var names = new HashSet<>(localNames);
+        final var candidate = condition instanceof Expr.Grouping grouping ? grouping.expression : condition;
+        if (candidate instanceof Expr.SumCaseTest test) {
+            for (final var argument : test.pattern.arguments()) {
+                if (argument.binding() != null) names.add(argument.binding().lexeme());
+            }
+        }
+        return names;
     }
 }

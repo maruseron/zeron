@@ -103,6 +103,24 @@ public final class StandardLibraryTest {
     }
 
     @Test
+    public void defaultPackageSumDoesNotShadowBundledPackageClass() {
+        final var source = """
+                import zeron.collections.*;
+
+                type List<T> = Nil | Cons(head: T, tail: List<T>);
+
+                fn main() {}
+                """;
+        final var userUnit = parse("main.zn", source);
+        final var units = StandardLibrary.withBundledUnits(List.of(userUnit));
+        final var compiler = CompilationService.forCompilationUnits(units, "Main", "");
+
+        final var resolution = compiler.resolveWithDiagnostics();
+
+        assertTrue(resolution.errors().toString(), resolution.errors().isEmpty());
+    }
+
+    @Test
     public void matchExhaustivelySelectsOptionCasesAndEvaluatesScrutineeOnce() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var packageName = "matchFixture" + suffix;
@@ -112,33 +130,31 @@ public final class StandardLibraryTest {
         Files.writeString(entry, """
                 package %s;
                 import zeron.lang.Option;
-                import zeron.lang.Some;
-                import zeron.lang.None;
                 let mut calls = 0;
                 fn next(): Option<Int> {
                     calls += 1;
-                    return Some<Int>.from(42);
+                    return Option.Some(42);
                 }
                 fn someResult(): Int = match (next()) {
-                    case Some<Int> as some -> some.value;
-                    case None<Int> -> -1;
+                    case Option.Some(value) -> value;
+                    case Option.None() -> -1;
                 };
                 fn noneResult(): Int {
-                    let value: Option<Int> = None<Int>.none();
+                    let value: Option<Int> = Option<Int>.None();
                     return match (value) {
-                        case Some<Int> as some -> some.value;
-                        case None<Int> -> -1;
+                        case Option.Some(item) -> item;
+                        case Option.None() -> -1;
                     };
                 }
                 fn wildcardResult(): Int {
-                    let value: Option<Int> = None<Int>.none();
+                    let value: Option<Int> = Option<Int>.None();
                     return match (value) {
-                        case Some<Int> as some -> some.value;
+                        case Option.Some(item) -> item;
                         case _ -> 7;
                     };
                 }
                 fn acceptsExternalNull(value: Option<Int>): Int = match (value) {
-                    case Some<Int> as some -> some.value;
+                    case Option.Some(item) -> item;
                     case _ -> 7;
                 };
                 fn callCount(): Int = calls;
@@ -173,8 +189,6 @@ public final class StandardLibraryTest {
         final var source = parse("Main.zn", """
                 import zeron.collections.List;
                 import zeron.lang.Option;
-                import zeron.lang.Some;
-                import zeron.lang.None;
                 import List.map;
                 namespace List {
                     public fn sort<T>(list: &List<T>): Unit = ();
@@ -190,10 +204,10 @@ public final class StandardLibraryTest {
                     let values = List<Int>.of(1, 2);
                     let mapped = values.map(value -> value + 1);
                     List.sort(mapped);
-                    let option: Option<Int> = Option.some(5);
+                    let option: Option<Int> = Option.Some(5);
                     return match (option) {
-                        case Some<Int> as some -> some.value;
-                        case None<Int> -> -1;
+                        case Option.Some(value) -> value;
+                        case Option.None() -> -1;
                     };
                 }
                 """);
@@ -346,24 +360,22 @@ public final class StandardLibraryTest {
         Files.writeString(entry, """
                 package %s;
                 import zeron.lang.Option;
-                import zeron.lang.Some;
-                import zeron.lang.None;
                 import zeron.lang.Result;
                 import zeron.lang.Ok;
                 import zeron.lang.Err;
                 fn optionValue(value: Option<Int>): Int = match (value) {
-                    case Some<Int>.value(item) as some if item > 0 -> some.value;
-                    case Some<Int>.value(_) -> 0;
-                    case None<Int> -> -1;
+                    case Option.Some(item) if item > 0 -> item;
+                    case Option.Some(_) -> 0;
+                    case Option.None() -> -1;
                 };
                 fn resultValue(value: Result<Int, String>): Int = match (value) {
                     case Ok<Int, String>.value(item) if item > 0 -> item;
                     case Ok<Int, String>.value(_) -> 0;
                     case Err<Int, String>.error(message) -> if (message == "bad") then 7 else -1;
                 };
-                fn some(): Option<Int> = Some<Int>.from(42);
-                fn negative(): Option<Int> = Some<Int>.from(-2);
-                fn none(): Option<Int> = None<Int>.none();
+                fn some(): Option<Int> = Option.Some(42);
+                fn negative(): Option<Int> = Option.Some(-2);
+                fn none(): Option<Int> = Option<Int>.None();
                 fn ok(): Result<Int, String> = Ok<Int, String>.from(9);
                 fn bad(): Result<Int, String> = Err<Int, String>.from("bad");
                 """.formatted(packageName));
@@ -409,38 +421,34 @@ public final class StandardLibraryTest {
         final var header = """
                 package %s;
                 import zeron.lang.Option;
-                import zeron.lang.Some;
-                import zeron.lang.None;
                 fn result(value: Option<Int>): Int =
                 """.formatted(packageName);
 
         try {
             for (final var match : List.of(
-                    "match (value) { case Some<Int> -> 1; }",
-                    "match (value) { case Some<Int> -> 1; case Some<Int> -> 2; case None<Int> -> 3; }",
-                    "match (value) { case Some<Int> if true -> 1; case None<Int> -> 2; }",
-                    "match (value) { case Some<Int> -> 1; case None<Int> if true -> 2; }",
+                    "match (value) { case Option.Some(_) -> 1; }",
+                    "match (value) { case Option.Some(_) -> 1; case Option.Some(_) -> 2; case Option.None() -> 3; }",
+                    "match (value) { case Option.Some(_) if true -> 1; case Option.None() -> 2; }",
+                    "match (value) { case Option.Some(_) -> 1; case Option.None() if true -> 2; }",
                     "match (value) { case _ if true -> 1; }",
-                    "match (value) { case Some<Int> if 1 -> 1; case None<Int> -> 2; }",
-                    "match (value) { case Some<Int>.missing(item) -> 1; case None<Int> -> 2; }",
-                    "match (value) { case Some<Int>.item(item) -> 1; case None<Int> -> 2; }",
-                    "match (value) { case _ -> 1; case Some<Int> -> 2; }",
-                    "match (value) { case Some<Int> -> 1; case None<Int> -> 2; case _ -> 3; }",
+                    "match (value) { case Option.Some(_) if 1 -> 1; case Option.None() -> 2; }",
+                    "match (value) { case Option.Some(_) -> 1; case Option.None() -> 2; case Option.Some(_) -> 3; }",
+                    "match (value) { case _ -> 1; case Option.Some(_) -> 2; }",
+                    "match (value) { case Option.Some(_) -> 1; case Option.None() -> 2; case _ -> 3; }",
                     "match (value) { case Option<Int> -> 1; }",
-                    "match (value) { case Some<String> -> 1; case None<Int> -> 2; }")) {
+                    "match (value) { case Option<String>.Some(_) -> 1; case Option.None() -> 2; }")) {
                 Files.writeString(entry, header + match + ";");
                 deleteTree(Path.of("dist"));
-                assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
-                        "--entry", Path.of(packageName, "Main.zn").toString()) != 0);
+                assertTrue("Expected invalid match to fail: " + match,
+                        Zeron.runCli("--root", sourceRoot.toString(),
+                                "--entry", Path.of(packageName, "Main.zn").toString()) != 0);
             }
             Files.writeString(entry, """
                     package %s;
                     import zeron.lang.Option;
-                    import zeron.lang.Some;
-                    import zeron.lang.None;
                     fn result(value: Option<Int>?): Int = match (value) {
-                        case Some<Int> -> 1;
-                        case None<Int> -> 2;
+                        case Option.Some(_) -> 1;
+                        case Option.None() -> 2;
                     };
                     """.formatted(packageName));
             deleteTree(Path.of("dist"));
@@ -885,16 +893,20 @@ public final class StandardLibraryTest {
         final var source = parse("OptionTest.zn", """
                 package %s;
                 import zeron.lang.Option;
-                import zeron.lang.Some;
 
-                fn someValue(): Int = Option.some(41).fold(value -> value + 1, () -> 0);
-                fn noneValue(): Int = Option.none<Int>().fold(value -> value, () -> 42);
+                fn someValue(): Int = Option.Some(41).fold(value -> value + 1, () -> 0);
+                fn noneValue(): Int = Option<Int>.None().fold(value -> value, () -> 42);
+                fn mappedValue(): Int = Option.Some(41).map(value -> value + 1).getOrElse(0);
+                fn filteredValue(): Int = Option.Some(42)
+                    .filter(value -> value > 0).getOrElse(0);
+                fn rejectedValue(): Int = Option.Some(42)
+                    .filter(value -> false).getOrElse(-1);
                 fn someNullIsPresent(): Boolean {
-                    let option: Option<String?> = Some<String?>.from(null);
+                    let option: Option<String?> = Option.Some(null);
                     return option.isSome()
                         and option.fold(value -> value == null, () -> false);
                 }
-                fn noneIsAbsent(): Boolean = Option.none<String?>().isSome() == false;
+                fn noneIsAbsent(): Boolean = Option<String?>.None().isSome() == false;
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
@@ -908,6 +920,9 @@ public final class StandardLibraryTest {
                 final var test = loader.loadClass(className);
                 assertEquals(42, test.getMethod("someValue").invoke(null));
                 assertEquals(42, test.getMethod("noneValue").invoke(null));
+                assertEquals(42, test.getMethod("mappedValue").invoke(null));
+                assertEquals(42, test.getMethod("filteredValue").invoke(null));
+                assertEquals(-1, test.getMethod("rejectedValue").invoke(null));
                 assertEquals(true, test.getMethod("someNullIsPresent").invoke(null));
                 assertEquals(true, test.getMethod("noneIsAbsent").invoke(null));
             }
@@ -999,17 +1014,15 @@ public final class StandardLibraryTest {
             import zeron.collections.Iterator;
             import zeron.collections.Iterable;
             import zeron.lang.Option;
-            import zeron.lang.Some;
-            import zeron.lang.None;
 
             class %s is Iterator<Int> {
                 value: Int;
                 ready: Boolean;
                 public constructor new;
                 public mut next(): Option<Int> {
-                    if (not this.ready) return None<Int>.none();
+                    if (not this.ready) return Option<Int>.None();
                     this.ready = false;
-                    return Some<Int>.from(this.value);
+                    return Option.Some(this.value);
                 }
                 }
                 class %s is Iterable<Int> {
@@ -1039,7 +1052,7 @@ public final class StandardLibraryTest {
                         && method.methodType().equalsString("()Lzeron/lang/Option;"))
                     .findFirst()
                     .orElseThrow();
-                assertFalse(nextMethod.code().orElseThrow().elementStream()
+                assertTrue(nextMethod.code().orElseThrow().elementStream()
                     .filter(Instruction.class::isInstance)
                     .map(Instruction.class::cast)
                     .map(Instruction::opcode)
@@ -2104,8 +2117,8 @@ public final class StandardLibraryTest {
         final var values = new ArrayList<Integer>();
         for (;;) {
             final var option = next.invoke(iterator);
-            if (!(boolean) option.getClass().getMethod("isSome").invoke(option)) break;
-            values.add((Integer) option.getClass().getMethod("$zeron$get$value").invoke(option));
+            if (!option.getClass().getName().endsWith("Option$$sum$Some")) break;
+            values.add((Integer) option.getClass().getMethod("$zeron$payload$0").invoke(option));
         }
         return values;
     }

@@ -1,22 +1,7 @@
 import zeron.collections.*;
 
-class PrintingSink<T> is Sink<T> {
-    public constructor empty() = PrintingSink.new();
-    public mut add(value: T): Unit = println(value);
-}
-
-fn empty<C, T: Sink<C>>(): T = T.empty();
-
-extension List<Int> {
-    fn sum(): Int = this.stream().fold(0, (acc, i) -> acc + i);
-}
-
-extension List<String> {
-    fn sum(): String = this.stream().fold("", (acc, i) -> acc + i);
-}
+type List<T> = Nil | Cons(head: T, tail: List<T>);
 
 fn main() {
-    let strs = List.of("hello, ", "world!");
-
-    println(strs.sum());
+    
 }

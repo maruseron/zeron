@@ -20,6 +20,13 @@ public final class JavaTypeMapping {
         };
     }
 
+    public static TypeDescriptor toZeronMethodType(final ClassDesc javaType) {
+        if (javaType.descriptorString().equals("[Ljava/lang/Object;")) {
+            return TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable()).toNullable();
+        }
+        return toZeronType(javaType);
+    }
+
     private static TypeDescriptor referenceType(final String descriptor) {
         if (!descriptor.startsWith("L") || !descriptor.endsWith(";")) return null;
         final var binaryName = descriptor.substring(1, descriptor.length() - 1).replace('/', '.');

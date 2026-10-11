@@ -7,6 +7,7 @@ import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
@@ -17,6 +18,7 @@ final class DeclarationRegistry {
     private final Map<String, Stmt.ClassDecl> classes;
     private final Map<String, Stmt.ExternalClass> externalClasses;
     private final Map<String, Stmt.ContractDecl> contracts;
+    private final Map<String, Stmt.SumDecl> sums;
     private final Map<String, Stmt.FunctionDeclaration> functions;
     private final Map<String, List<Stmt.ExtensionMethod>> extensionMethods;
     private final Map<String, Stmt.Var> topLevelValues;
@@ -34,6 +36,7 @@ final class DeclarationRegistry {
             final Map<String, Stmt.ClassDecl> classes,
             final Map<String, Stmt.ExternalClass> externalClasses,
             final Map<String, Stmt.ContractDecl> contracts,
+            final Map<String, Stmt.SumDecl> sums,
             final Map<String, Stmt.FunctionDeclaration> functions,
             final Map<String, List<Stmt.ExtensionMethod>> extensionMethods,
             final Map<String, Stmt.Var> topLevelValues,
@@ -49,6 +52,7 @@ final class DeclarationRegistry {
         this.classes = classes;
         this.externalClasses = externalClasses;
         this.contracts = contracts;
+        this.sums = sums;
         this.functions = functions;
         this.extensionMethods = extensionMethods;
         this.topLevelValues = topLevelValues;
@@ -83,9 +87,48 @@ final class DeclarationRegistry {
             } else if (statement instanceof Stmt.ContractDecl declaration) {
                 registerType(declaration.name());
                 contracts.put(declaration.name().lexeme(), declaration);
+            } else if (statement instanceof Stmt.SumDecl declaration) {
+                registerSum(declaration);
             }
 
         }
+    }
+
+    private void registerSum(final Stmt.SumDecl sum) {
+        registerType(sum.name());
+        if (sums.putIfAbsent(sum.name().lexeme(), sum) != null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                    sum.name(), "Sum type '" + sum.name().lexeme() + "' is already declared."));
+        }
+        if (sum.cases().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                    sum.name(), "A sum type must declare at least one case."));
+        }
+        final var caseNames = new HashSet<String>();
+        final var permitted = new ArrayList<Stmt.ContractUse>();
+        for (final var sumCase : sum.cases()) {
+            if (!caseNames.add(sumCase.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        sumCase.name(), "Duplicate sum case name."));
+            }
+            final var caseClassName = sum.generatedCaseName(sumCase);
+            final var caseClassToken = new Token(sum.name().type(), caseClassName, null, sumCase.name().span());
+            final var typeArguments = sum.typeParameters().stream()
+                    .map(parameter -> (TypeDescriptor) parameter).toList();
+            permitted.add(new Stmt.ContractUse(caseClassToken, typeArguments));
+            final var fields = sumCase.payloads().stream()
+                    .map(payload -> new Stmt.Field(payload.name(), payload.type()))
+                    .toList();
+            final var contractUse = new Stmt.ContractUse(sum.name(), typeArguments);
+            final var caseClass = new Stmt.ClassDecl(caseClassToken, sum.typeParameters(), List.of(contractUse),
+                    fields, List.of(), new Stmt.Constructor(new Token(TokenType.IDENTIFIER, "new", null,
+                            sumCase.name().span()), true), List.of(), List.of(), List.of(), sum.isPublic(), false);
+            registerType(caseClassToken);
+            classes.put(caseClassName, caseClass);
+        }
+        final var sumContract = new Stmt.ContractDecl(sum.name(), sum.typeParameters(), List.of(),
+                List.of(), List.of(), sum.isPublic(), true, permitted);
+        contracts.put(sum.name().lexeme(), sumContract);
     }
 
     private void validateExternalClass(final Stmt.ExternalClass declaration, final String qualifiedName) {

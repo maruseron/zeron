@@ -85,6 +85,9 @@ public final class Resolver {
                 } else if (declaration instanceof Stmt.ContractDecl contractDeclaration) {
                     attempt(context, () -> context.declarationRegistrar.registerTypes(
                             unit.packageName(), List.of(contractDeclaration)));
+                } else if (declaration instanceof Stmt.SumDecl sumDeclaration) {
+                    attempt(context, () -> context.declarationRegistrar.registerTypes(
+                            unit.packageName(), List.of(sumDeclaration)));
                 } else if (declaration instanceof Stmt.ExternalClass externalClass) {
                     attempt(context, () -> context.declarationRegistrar.registerTypes(
                             unit.packageName(), List.of(externalClass)));
@@ -233,6 +236,14 @@ public final class Resolver {
             context.diagnostics.record(error, context.currentSourcePath);
             context.recoverAfterDeclarationFailure();
             return false;
+        } catch (final JavaClassPath.MetadataException error) {
+            final var token = new Token(TokenType.IDENTIFIER, error.binaryName(), null, 1);
+            final var diagnostic = new ResolutionError(
+                    DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    token, error.getMessage(), context.currentSourcePath);
+            context.diagnostics.record(diagnostic, context.currentSourcePath);
+            context.recoverAfterDeclarationFailure();
+            return false;
         }
     }
 
@@ -240,6 +251,7 @@ public final class Resolver {
         return switch (declaration) {
             case Stmt.ClassDecl classDeclaration -> classDeclaration.name();
             case Stmt.ContractDecl contractDeclaration -> contractDeclaration.name();
+            case Stmt.SumDecl sumDeclaration -> sumDeclaration.name();
             case Stmt.ExternalClass externalClass -> externalClass.name();
             case Stmt.Witness witness -> witness.name();
             case Stmt.FunctionDeclaration function -> function.name();

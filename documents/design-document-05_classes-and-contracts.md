@@ -16,15 +16,15 @@ The goal is to establish useful object semantics before adding inheritance or ad
 - Sealed contracts declare a closed set of permitted classes with `sealed contract C permits A, B`.
   Permitted classes must be in the contract package, conform directly, and use matching generic
   parameters in declaration order. The compiler records permits in library metadata and the JVM
-  `PermittedSubclasses` attribute. `Option<T>` is the bundled example. Exhaustive `match`
+  `PermittedSubclasses` attribute. Exhaustive `match`
   expressions check the permitted set explicitly; sealing alone does not make arbitrary branches
   exhaustive.
 - Parameterized nominal types retain source-level identity but erase to one raw JVM class or interface per declaration. Generic contract bridges adapt differing erased signatures.
 - Named constructors are static factories with expression or block bodies and an implicit mutable class-reference result. Omitted canonical declarations synthesize public construction; `private constructor new;` restricts it.
 - Contracts may require named constructors. A conforming class must provide a public named factory with a compatible signature; the requirement is checked statically and does not add a virtual constructor slot to the contract interface.
 - `Iterator<T>` and `Iterable<T>` are ordinary bundled contracts. `Iterator<T>.next()` returns
-  `zeron.lang.Option<T>`; `None` signals exhaustion and `Some` carries a value. The `for` loop
-  lowers this protocol and extracts elements only from `Some`.
+  `zeron.lang.Option<T>`; `Option<T>.None()` signals exhaustion and `Option.Some(value)` carries a
+  value. The `for` loop lowers this protocol and extracts yielded values from the `Some` case.
   `zeron.ranges.IntRange` implements
     `Iterable<Int>` and range loops invoke its methods through interface dispatch; arrays retain
     specialized lowering.
@@ -37,8 +37,8 @@ An ordinary contract remains an open protocol. A sealed contract closes its dire
 set with a non-empty `permits` clause:
 
 ```zeron
-public sealed contract Option<T> permits Some<T>, None<T> {
-    isSome(): Boolean;
+public sealed contract Lookup<T> permits Found<T>, Missing<T> {
+    isFound(): Boolean;
 }
 ```
 
@@ -59,10 +59,10 @@ sealed permits list, including when contract metadata comes from a compiled libr
 The implemented `match` expression operates on a non-null sealed-contract value:
 
 ```zeron
-match (option) {
-    case Some<T>.value(value) if value > 0 -> value;
-    case Some<T>.value(_) as some -> 0;
-    case None<T> -> defaultValue;
+match (lookup) {
+    case Found<T>.value(value) if value > 0 -> value;
+    case Found<T>.value(_) as found -> 0;
+    case Missing<T> -> defaultValue;
 }
 ```
 

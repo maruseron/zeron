@@ -15,6 +15,7 @@ final class FunctionResolutionFrame {
     FlowState flowState = new FlowState();
     int loopDepth;
     boolean resolvingPattern;
+    boolean resolvingSumCaseCondition;
     String currentClassName;
     Stmt.ClassDecl currentMethodOwner;
     List<Stmt.Field> initializerVisibleFields;

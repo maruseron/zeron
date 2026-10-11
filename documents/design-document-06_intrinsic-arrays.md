@@ -149,9 +149,11 @@ future optimization, but must preserve the current source-level invariance and n
 
 Keep source type equality independent of this layout. Centralize the element-to-array descriptor
 mapping in the type-lowering layer; do not let JVM descriptors define variance or source-level
-assignability. Decide how Java array covariance and Java-originated array values are handled before
-ordinary Java array signatures are supported. A source-level invariant type check is required even
-if the JVM array representation has its own runtime store checks.
+assignability. Ordinary Java method interop supports only `Object[]`: a Zeron array argument is
+shallow-copied before the call so Java writes cannot violate the source array's invariant element
+type, and an `Object[]` result is exposed as nullable `Array<Any?>`. Typed reference arrays and
+primitive arrays remain unsupported; no component conversion, unboxing, or runtime array adaptation
+is implied by class-file discovery.
 
 ## Implementation Roadmap
 
@@ -172,8 +174,9 @@ if the JVM array representation has its own runtime store checks.
   mutable-write enforcement, stable IDs, generic signature substitution, and resolved operation
   annotations are implemented. User-declared intrinsic signatures remain deferred.
 6. **Compiler execution: implemented.** The compiler backend uses `Object[]`, boxed primitive
-  elements, and `Objects.checkIndex`. Java class-directory interop is implemented separately;
-  ordinary Java array signatures and specialized Zeron array layouts remain future work.
+  elements, and `Objects.checkIndex`. Java `Object[]` method parameters use a shallow defensive copy;
+  Java `Object[]` results map to nullable `Array<Any?>`. Typed reference arrays, primitive arrays,
+  and specialized Zeron array layouts remain deferred.
 7. **Test the contract end to end.** Tests cover projection, invariance, nullable slots, primitive
   boxing/unboxing, aliasing, bounds failures, and generated-code execution. Broader interoperability,
   all reference/function element combinations, and descriptor inspection remain follow-up coverage.
@@ -195,8 +198,8 @@ if the JVM array representation has its own runtime store checks.
 
 ## Deferred Questions
 
-- Should `Array<T>` interoperate directly with Java arrays, or should an intrinsic runtime wrapper
-  mediate Java's covariant array behavior?
+- Should Java typed reference arrays and primitive arrays receive explicit component mappings and
+  conversions, or remain behind an intrinsic runtime wrapper?
 - Should arrays directly conform to the standard `Iterable<T>` contract, or continue to use dedicated
   index-based `for` lowering plus an explicit `Stream`/`ArrayIterator` adapter?
 - If first-class element-slot references are eventually added, what lifetime and escape rules govern

@@ -39,9 +39,31 @@ final class ExpressionFlowResolver {
                             "Safe navigation cannot be used for property assignment."));
                 }
                 MemberInteropResolver.resolveProperty(context, assignment.property);
-                if (assignment.property.javaFieldTarget() != null) {
+                if (assignment.property.sumPayloadIndex() >= 0) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
-                            assignment.property.name, "External static properties are read-only."));
+                            assignment.property.name, "Sum payloads are immutable."));
+                }
+                final var javaFieldTarget = assignment.property.javaFieldTarget();
+                if (javaFieldTarget != null) {
+                    if (javaFieldTarget.isStatic()) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                                assignment.property.name, "Static Java field writes are not supported."));
+                    }
+                    if (javaFieldTarget.isFinal()) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                                assignment.property.name, "Final Java fields are read-only."));
+                    }
+                    final var receiverType = assignment.property.receiver.getType();
+                    if (!(receiverType instanceof ReferenceDescriptor)) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                                assignment.property.name,
+                                "Java field assignment requires a mutable reference."));
+                    }
+                    ensureAssignable(context, assignment.property.getType(),
+                            MemberInteropResolver.resolveArgument(context, assignment.value,
+                                    assignment.property.getType()), assignment.property.name);
+                    assignment.setType(TypeDescriptor.ofUnit());
+                    yield TypeDescriptor.ofUnit();
                 }
                 if (assignment.property.extensionCall() != null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -81,9 +103,32 @@ final class ExpressionFlowResolver {
             }
             case Expr.PropertyCompoundAssignment assignment -> {
                 MemberInteropResolver.resolveProperty(context, assignment.property);
-                if (assignment.property.javaFieldTarget() != null) {
+                if (assignment.property.sumPayloadIndex() >= 0) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
-                            assignment.property.name, "External static properties are read-only."));
+                            assignment.property.name, "Sum payloads are immutable."));
+                }
+                final var javaFieldTarget = assignment.property.javaFieldTarget();
+                if (javaFieldTarget != null) {
+                    if (javaFieldTarget.isStatic() || javaFieldTarget.isFinal()) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                                assignment.property.name,
+                                javaFieldTarget.isStatic() ? "Static Java field writes are not supported."
+                                        : "Final Java fields are read-only."));
+                    }
+                    final var receiverType = assignment.property.receiver.getType();
+                    if (!(receiverType instanceof ReferenceDescriptor)) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                                assignment.property.name,
+                                "Java field assignment requires a mutable reference."));
+                    }
+                    final var operation = new Expr.Binary(assignment.property,
+                            assignment.operator, assignment.value, TypeDescriptor.ofInfer());
+                    final var valueType = resolve(context, operation);
+                    assignment.setResolvedOperation(operation);
+                    ensureAssignable(context, assignment.property.getType(), valueType,
+                            assignment.property.name);
+                    assignment.setType(TypeDescriptor.ofUnit());
+                    yield TypeDescriptor.ofUnit();
                 }
                 if (assignment.property.extensionCall() != null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -367,8 +412,15 @@ final class ExpressionFlowResolver {
                 final var incoming = context.frame.flowState.copy();
                 final var conditionFlows = resolveCondition(context, iff.condition, incoming, iff.paren);
                 context.frame.flowState = conditionFlows.whenTrue().copy();
-                final var thenType = resolve(context, iff.thenExpr);
-                final var thenFlow = context.frame.flowState.copy();
+                final var matchBindings = beginSuccessfulSumCaseTestScope(context, iff.condition);
+                final TypeDescriptor thenType;
+                final FlowState thenFlow;
+                try {
+                    thenType = resolve(context, iff.thenExpr);
+                } finally {
+                    endSuccessfulSumCaseTestScope(context, matchBindings);
+                }
+                thenFlow = context.frame.flowState.copy();
                 context.frame.flowState = conditionFlows.whenFalse().copy();
                 final var elseType = resolve(context, iff.elseExpr);
                 final var elseFlow = context.frame.flowState.copy();
@@ -379,6 +431,7 @@ final class ExpressionFlowResolver {
             }
             case Expr.Pipeline pipeline -> resolvePipeline(context, pipeline);
             case Expr.Match match -> resolveMatch(context, match);
+            case Expr.SumCaseTest test -> resolveSumCaseTest(context, test);
             case Expr.Raise raise -> {
                 final var effectType = resolve(context, raise.effect);
                 final var nominalType = effectType instanceof ReferenceDescriptor reference
@@ -651,57 +704,40 @@ final class ExpressionFlowResolver {
     private static TypeDescriptor resolveHandle(final ResolutionContext context, final Expr.Handle handle) {
         final var enclosingEffects = RaisedEffectFlow.beginHandledExpression(context);
         TypeDescriptor protectedType;
-        final var handledEffects = new LinkedHashSet<TypeDescriptor>();
+        final var fullyHandledEffects = new LinkedHashSet<TypeDescriptor>();
+        final var armPatterns = new ArrayList<MatchPatternResolution>();
         try {
             protectedType = resolve(context, handle.expression);
             for (final var arm : handle.arms) {
                 final var effect = TypeResolver.requireEffectType(context, arm.effectType(), arm.keyword());
-                if (!handledEffects.add(effect)) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
-                            arm.keyword(), "An effect may appear only once in a handler."));
-                }
                 arm.setResolvedEffectType(effect);
-                if (arm.namedPattern() != null) {
-                    final var property = MemberInteropResolver.findProperty(
-                            context, effect.name(), arm.namedPattern());
-                    if (property == null) {
-                        Zeron.resolutionError(new ResolutionError(
-                                DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                                arm.namedPattern(), "Effect '" + simpleName(effect.name())
-                                + "' has no readable property named '"
-                                + arm.namedPattern().lexeme() + "'."));
-                    } else {
-                        if (!property.isPublic()) {
-                            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
-                                    arm.namedPattern(),
-                                    "Named handler patterns can only read public properties."));
-                        }
-                        arm.setResolvedPatternTypes(property.type(),
-                                MemberInteropResolver.resolvedPropertyType(
-                                        context, effect.name(), property, effect));
-                    }
-                }
+                final var pattern = resolveMatchPattern(context, arm.pattern(), effect, false,
+                        Set.of(), List.of());
+                armPatterns.add(pattern);
+                if (arm.guard() == null && pattern.irrefutable()) fullyHandledEffects.add(effect);
             }
         } finally {
-            RaisedEffectFlow.endHandledExpression(context, enclosingEffects, handledEffects, handle.keyword);
+            RaisedEffectFlow.endHandledExpression(
+                    context, enclosingEffects, fullyHandledEffects, handle.keyword);
         }
 
         TypeDescriptor resultType = protectedType instanceof NeverDescriptor ? null : protectedType;
         final var armsFlow = new ArrayList<FlowState>();
-        final var incomingFlow = context.frame.flowState.copy();
-        for (final var arm : handle.arms) {
-            context.frame.flowState = incomingFlow.copy();
+        final var protectedFlow = context.frame.flowState.copy();
+        for (int i = 0; i < handle.arms.size(); i++) {
+            final var arm = handle.arms.get(i);
+            final var pattern = armPatterns.get(i);
+            context.frame.flowState = protectedFlow.copy();
             context.symbols.beginScope();
             try {
-                if (arm.alias() != null) {
-                    context.symbols.declareSymbol(SYNTHETIC_VAR, arm.alias(),
-                            arm.resolvedEffectType(), BindingMutability.IMMUTABLE);
-                    context.symbols.define(arm.alias());
+                for (final var binding : pattern.bindings().values()) {
+                    context.symbols.declareSymbol(SYNTHETIC_VAR, binding.name(),
+                            binding.type(), BindingMutability.IMMUTABLE);
+                    context.symbols.define(binding.name());
                 }
-                if (arm.binding() != null) {
-                    context.symbols.declareSymbol(SYNTHETIC_VAR, arm.binding(),
-                            arm.resolvedPatternType(), BindingMutability.IMMUTABLE);
-                    context.symbols.define(arm.binding());
+                if (arm.guard() != null) {
+                    final var guardType = resolve(context, arm.guard());
+                    ensureAssignable(context, TypeDescriptor.ofBoolean(), guardType, arm.keyword());
                 }
                 final var armType = resolve(context, arm.expression());
                 resultType = resultType == null ? armType
@@ -711,7 +747,8 @@ final class ExpressionFlowResolver {
                 context.symbols.endScope();
             }
         }
-        var joined = FlowState.unreachable();
+        var joined = protectedType instanceof NeverDescriptor
+                ? FlowState.unreachable() : protectedFlow;
         for (final var flow : armsFlow) joined = FlowState.join(joined, flow);
         context.frame.flowState = joined;
         if (resultType == null) resultType = protectedType;
@@ -998,11 +1035,57 @@ final class ExpressionFlowResolver {
                     pattern.keyword(), "Expected a type, binding, or wildcard pattern."));
         }
 
-        final var patternType = pattern.type();
-        TypeResolver.validateType(context, patternType, pattern.keyword());
+        final var patternType = resolveStarImportedPatternType(context, pattern);
+        final var sum = root ? context.sums.get(patternType.name()) : null;
+        if (sum == null) TypeResolver.validateType(context, patternType, pattern.keyword());
         if (patternType instanceof NullableDescriptor || patternType instanceof ReferenceDescriptor) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     pattern.keyword(), "Match case types must be non-null class types."));
+        }
+        if (sum != null && pattern.extractor() != null) {
+            final var sumCase = sum.cases().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(pattern.extractor().lexeme()))
+                    .findFirst().orElse(null);
+            if (sumCase == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.extractor(), "Unknown case '" + pattern.extractor().lexeme()
+                                + "' for sum '" + sum.name().lexeme() + "'."));
+            }
+            final var sumArguments = patternType instanceof GenericDescriptor generic
+                    ? generic.typeParameters() : List.<TypeDescriptor>of();
+            if (!sumArguments.isEmpty() && !sumArguments.equals(contractArguments)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.keyword(), "Case type arguments must match the scrutinee sum arguments."));
+            }
+            if (pattern.alias() != null || pattern.arguments().size() != sumCase.payloads().size()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                        pattern.extractor(), "Sum case expects " + sumCase.payloads().size()
+                                + " payload patterns and does not support an alias."));
+            }
+            final TypeDescriptor appliedSumType = contractArguments.isEmpty()
+                    ? TypeDescriptor.ofName(sum.name().lexeme())
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(sum.name().lexeme()), contractArguments);
+            final var substitutions = TypeResolver.substitutionsFor(context, sum.typeParameters(), appliedSumType);
+            final var bindings = new LinkedHashMap<String, MatchBinding>();
+            for (int index = 0; index < sumCase.payloads().size(); index++) {
+                final var argument = pattern.arguments().get(index);
+                if (!argument.alternatives().isEmpty() || argument.extractor() != null
+                        || argument.alias() != null || argument.binding() == null && !argument.wildcard()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                            argument.keyword(), "Sum payload patterns may only bind a name or use '_'."));
+                }
+                final var payloadType = TypeSubstitution.substitute(
+                        sumCase.payloads().get(index).type(), substitutions);
+                argument.resolve(null, payloadType, false);
+                if (argument.binding() != null) {
+                    addPatternBinding(context, bindings, argument.binding(), payloadType);
+                }
+            }
+            final var caseName = sum.generatedCaseName(sumCase);
+            pattern.resolve(null, TypeDescriptor.ofName(caseName), false);
+            pattern.markSumCase();
+            return new MatchPatternResolution(bindings, Set.of(caseName), true,
+                    TypeDescriptor.ofName(caseName));
         }
         final var classDeclaration = context.classes.get(patternType.name());
         if (classDeclaration == null) {
@@ -1090,6 +1173,32 @@ final class ExpressionFlowResolver {
                 !refutable, patternType);
     }
 
+    private static TypeDescriptor resolveStarImportedPatternType(final ResolutionContext context,
+                                                                 final Expr.MatchPattern pattern) {
+        final var patternType = pattern.type();
+        final var sourceTypeName = pattern.keyword().lexeme();
+        final var parsedTypeName = patternType.name();
+        final var starQualifiedName = context.currentImports.onDemandPackages().stream()
+                .map(importedPackage -> importedPackage + "." + sourceTypeName)
+                .filter(parsedTypeName::equals)
+                .findFirst()
+                .orElse(null);
+        if (starQualifiedName == null) return patternType;
+
+        final var resolvedName = MemberInteropResolver.resolveClassName(
+                context, sourceTypeName, pattern.keyword());
+        if (resolvedName == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, pattern.keyword(),
+                    "Unknown type '" + sourceTypeName + "'."));
+        }
+        if (resolvedName.equals(starQualifiedName)) return patternType;
+
+        final var resolvedBase = TypeDescriptor.ofName(resolvedName);
+        return patternType instanceof GenericDescriptor generic
+                ? TypeDescriptor.genericOf(resolvedBase, generic.typeParameters())
+                : resolvedBase;
+    }
+
     private static void addPatternBinding(final ResolutionContext context,
                                           final Map<String, MatchBinding> bindings,
                                           final Token name,
@@ -1098,6 +1207,36 @@ final class ExpressionFlowResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                     name, "A pattern cannot bind the same name more than once."));
         }
+    }
+
+    static List<Token> beginSuccessfulSumCaseTestScope(final ResolutionContext context,
+                                                       final Expr condition) {
+        final var candidate = condition instanceof Expr.Grouping grouping
+                ? grouping.expression : condition;
+        if (!(candidate instanceof Expr.SumCaseTest test)) return List.of();
+        final var payloadBindings = test.pattern.arguments().stream()
+                .map(Expr.MatchPattern::binding).filter(Objects::nonNull).toList();
+        if (payloadBindings.isEmpty()) return List.of();
+        context.symbols.beginScope();
+        final var bindings = new ArrayList<Token>();
+        for (final var argument : test.pattern.arguments()) {
+            if (argument.binding() == null) continue;
+            final var name = argument.binding();
+            final var type = argument.resolvedType();
+            Resolver.declare(context, new Stmt.Var(name, type, null,
+                            BindingMutability.IMMUTABLE, false),
+                    name, type, BindingMutability.IMMUTABLE);
+            Resolver.define(context, name);
+            bindings.add(name);
+        }
+        return bindings;
+    }
+
+    static void endSuccessfulSumCaseTestScope(final ResolutionContext context,
+                                               final List<Token> bindings) {
+        if (bindings.isEmpty()) return;
+        bindings.forEach(context.frame.flowState::remove);
+        context.symbols.endScope();
     }
 
     private static void mergePatternBindings(final ResolutionContext context,
@@ -1114,13 +1253,91 @@ final class ExpressionFlowResolver {
 
     private static TypeDescriptor resolveTypeTest(final ResolutionContext context, final Expr.TypeTest test) {
         final var sourceType = resolve(context, test.value);
-        validateRuntimeTestTarget(context, test.targetType, test.operator);
-        if (!context.typeCompatibility.canTypeTest(sourceType, test.targetType)) {
+        final var targetType = resolveSumCaseTestType(context, test.targetType, sourceType, test.operator);
+        validateRuntimeTestTarget(context, targetType, test.operator);
+        if (!context.typeCompatibility.canTypeTest(sourceType, targetType)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                     test.operator,
-                    "Type test is impossible between " + sourceType + " and " + test.targetType + "."));
+                    "Type test is impossible between " + sourceType + " and " + targetType + "."));
         }
+        test.setResolvedTargetType(targetType);
+        test.setType(TypeDescriptor.ofBoolean());
+        return TypeDescriptor.ofBoolean();
+    }
 
+    private static TypeDescriptor resolveSumCaseTestType(final ResolutionContext context,
+                                                          final TypeDescriptor targetType,
+                                                          final TypeDescriptor sourceType,
+                                                          final Token where) {
+        final var separator = targetType.name().lastIndexOf('.');
+        if (separator < 0) return targetType;
+        final var sumName = targetType.name().substring(0, separator);
+        final var caseName = targetType.name().substring(separator + 1);
+        final var sum = context.sums.get(sumName);
+        if (sum == null) return targetType;
+        final var sumCase = sum.cases().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(caseName))
+                .findFirst().orElse(null);
+        if (sumCase == null) return targetType;
+        final var source = sourceType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : sourceType;
+        final var sumType = source instanceof NullableDescriptor nullable ? nullable.baseType() : source;
+        if (!sumType.name().equals(sum.name().lexeme())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                    where, "Sum case '" + targetType.name() + "' is not a case of " + sourceType + "."));
+        }
+        final var sumArguments = sumType instanceof GenericDescriptor generic
+                ? generic.typeParameters() : List.<TypeDescriptor>of();
+        final var generatedName = sum.generatedCaseName(sumCase);
+        return sumArguments.isEmpty() ? TypeDescriptor.ofName(generatedName)
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(generatedName), sumArguments);
+    }
+
+    private static TypeDescriptor resolveSumCaseTest(final ResolutionContext context,
+                                                       final Expr.SumCaseTest test) {
+        if (!context.frame.resolvingSumCaseCondition) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    test.operator, "'matches' is currently supported only as a direct if or while condition."));
+        }
+        final var sourceType = resolve(context, test.value);
+        final var source = sourceType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : sourceType;
+        final var sumType = source instanceof NullableDescriptor nullable ? nullable.baseType() : source;
+        final var sumDeclaration = context.sums.get(sumType.name());
+        if (sumDeclaration == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    test.operator, "'matches' requires a nominal sum value."));
+        }
+        final var pattern = test.pattern;
+        if (pattern.extractor() == null || pattern.binding() != null || pattern.wildcard()
+                || !pattern.alternatives().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    test.operator, "'matches' requires one sum case pattern."));
+        }
+        final var permittedCases = new LinkedHashSet<String>();
+        for (final var sumCase : sumDeclaration.cases()) {
+            permittedCases.add(sumDeclaration.generatedCaseName(sumCase));
+        }
+        final var caseArguments = sumType instanceof GenericDescriptor generic
+                ? generic.typeParameters() : List.<TypeDescriptor>of();
+        final var resolvedPattern = resolveMatchPattern(context, pattern, sumType, true,
+                permittedCases, caseArguments);
+        final var matchedType = resolvedPattern.matchedType();
+        final var resolvedCaseType = matchedType == null || caseArguments.isEmpty()
+                ? matchedType
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(matchedType.name()), caseArguments);
+        if (resolvedCaseType != null) {
+            pattern.resolve(null, resolvedCaseType, false);
+            pattern.markSumCase();
+        }
+        if (resolvedCaseType == null || !context.typeCompatibility.canTypeTest(sourceType, resolvedCaseType)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                    test.operator, "Sum case test is impossible between " + sourceType + " and "
+                            + resolvedCaseType + "."));
+        }
+        final var payloadTypes = pattern.arguments().stream().map(Expr.MatchPattern::resolvedType).toList();
+        test.setResolvedCaseType(resolvedCaseType);
+        test.setPayloadTypes(payloadTypes);
         test.setType(TypeDescriptor.ofBoolean());
         return TypeDescriptor.ofBoolean();
     }
@@ -1188,9 +1405,17 @@ final class ExpressionFlowResolver {
                 || targetType instanceof FunctionDescriptor || targetType instanceof TypeParameterDescriptor
                 || targetType instanceof NullDescriptor || targetType instanceof NeverDescriptor
                 || targetType instanceof InferDescriptor) {
+            if (targetType instanceof GenericDescriptor generic
+                    && context.classes.containsKey(generic.name())
+                    && isGeneratedSumCase(context, generic.name())) return;
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST, where,
                     "This type cannot be used as a runtime type-test target."));
         }
+    }
+
+    private static boolean isGeneratedSumCase(final ResolutionContext context, final String className) {
+        return context.sums.values().stream().anyMatch(sum ->
+                sum.cases().stream().anyMatch(sumCase -> sum.generatedCaseName(sumCase).equals(className)));
     }
 
     static StatementResolver.ConditionFlows resolveCondition(final ResolutionContext context, final Expr expression,
@@ -1198,6 +1423,11 @@ final class ExpressionFlowResolver {
                                                               final Token where) {
         final var enclosingFlow = context.frame.flowState;
         try {
+            final var condition = ungroupCondition(expression);
+            if (containsSumCaseTest(expression) && !(condition instanceof Expr.SumCaseTest)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        where, "'matches' cannot be composed with other condition operators yet."));
+            }
             if (expression instanceof Expr.Literal literal && literal.value instanceof Boolean value) {
                 final var whenTrue = incoming.copy();
                 final var whenFalse = incoming.copy();
@@ -1233,7 +1463,13 @@ final class ExpressionFlowResolver {
             }
 
             context.frame.flowState = incoming.copy();
-            ensureBoolean(context, resolve(context, expression), where);
+            final var previousSumCaseCondition = context.frame.resolvingSumCaseCondition;
+            context.frame.resolvingSumCaseCondition = condition instanceof Expr.SumCaseTest;
+            try {
+                ensureBoolean(context, resolve(context, expression), where);
+            } finally {
+                context.frame.resolvingSumCaseCondition = previousSumCaseCondition;
+            }
             final var evaluated = context.frame.flowState.copy();
             final var whenTrue = evaluated.copy();
             final var whenFalse = evaluated.copy();
@@ -1244,7 +1480,14 @@ final class ExpressionFlowResolver {
                     whenTrue.put(context.symbols.getSymbol(variable.name).name(),
                             refineTypeFact(context, context.symbols.getSymbol(variable.name).type(),
                                     evaluated.get(context.symbols.getSymbol(variable.name).name()),
-                                    test.targetType));
+                                    test.resolvedTargetType()));
+                }
+            } else if (expression instanceof Expr.SumCaseTest test) {
+                final var variable = directVariable(context, test.value);
+                if (variable != null && isRefinable(context, variable.name)) {
+                    final var binding = context.symbols.getSymbol(variable.name);
+                    whenTrue.put(binding.name(), refineTypeFact(context, binding.type(),
+                            evaluated.get(binding.name()), test.resolvedCaseType()));
                 }
             } else if (expression instanceof Expr.Binary binary
                     && isNullComparison(context, binary)) {
@@ -1263,6 +1506,22 @@ final class ExpressionFlowResolver {
         } finally {
             context.frame.flowState = enclosingFlow;
         }
+    }
+
+    private static Expr ungroupCondition(final Expr expression) {
+        return expression instanceof Expr.Grouping grouping
+                ? ungroupCondition(grouping.expression) : expression;
+    }
+
+    private static boolean containsSumCaseTest(final Expr expression) {
+        return switch (expression) {
+            case Expr.SumCaseTest _ -> true;
+            case Expr.Grouping grouping -> containsSumCaseTest(grouping.expression);
+            case Expr.Logical logical -> containsSumCaseTest(logical.left)
+                    || containsSumCaseTest(logical.right);
+            case Expr.Unary unary -> containsSumCaseTest(unary.right);
+            default -> false;
+        };
     }
 
     private static FlowFact refineTypeFact(final ResolutionContext context, final TypeDescriptor declaredType,

@@ -1,27 +1,24 @@
-# Sum, Product, and Newtype Types: Design Exploration
+# Sum, Product, and Newtype Types
 
 ## Status and scope
 
-This document records an exploratory direction for algebraic data types in Zeron. It is not a
-language specification and does not authorize implementation choices where questions remain open.
-It distinguishes three related but different ideas:
+This document specifies the nominal-sum MVP and keeps product and newtype design separate. It
+distinguishes three related but different ideas:
 
 - **Sum types** represent one alternative from a closed set of cases.
 - **Product types** represent a value containing all of a set of components.
 - **Newtypes** give an underlying value a distinct nominal identity and domain-specific API.
 
-The proposed sum declaration syntax is the current discussion's concrete starting point. Product
-type syntax and newtype syntax have not been selected. Transparent type aliases are not proposed
-here; a distinct wrapper type is preferred when a domain concept must not be interchangeable with
-its representation.
+Product type syntax and newtype syntax have not been selected. Transparent type aliases are not
+introduced by the sum declaration.
 
 ## Motivation and existing facilities
 
-Zeron already has nominal classes and contracts, sealed contracts, generic `Option<T>` and
-`Result<T, E>` library types, and exhaustive matching over sealed contracts. These facilities can
-model many alternatives using a sealed contract and one implementing class per case. A native sum
-declaration could make the closed alternatives explicit and let the compiler own construction,
-case coverage, and generated representations.
+Zeron already has nominal classes and contracts, sealed contracts, a generic `Result<T, E>` library
+type, and exhaustive matching over sealed contracts. These facilities can model alternatives using
+a sealed contract and one implementing class per case. Native sums make the closed alternatives
+explicit and let the compiler own construction, case coverage, and generated representations.
+`Option<T>` is now the bundled example of a native generic sum.
 
 Classes already represent named objects with fields and methods, and so can be used for product-like
 data. Standalone tuples, anonymous records, and native sum declarations are not currently
@@ -30,7 +27,15 @@ previously been excluded to avoid introducing structural typing.
 
 ## Sum types
 
-### Proposed declaration form
+### Bundled `Option<T>`
+
+The bundled `zeron.lang.Option<T>` is implemented as `Some(value: T) | None`. Its case constructors
+are `Option.Some(value)` and `Option<T>.None()`. Operations including `isSome`, `getOrElse`, `fold`,
+`map`, and `filter` are public extensions over the sum, so they use ordinary static extension
+dispatch rather than generated case-class methods. Iterators and other standard-library APIs
+continue to use `Option<T>` as their result type.
+
+### Declaration and identity
 
 Use a `type` declaration whose right-hand side is a `|`-separated list of cases:
 
@@ -43,53 +48,107 @@ Cases with payloads use named fields; cases without payloads are written by name
 covers both payload-bearing alternatives and enum-like sets of named constants. It avoids a separate
 `sum` keyword while clearly distinguishing a sum from a single-type alias by its case-list form.
 
-The declaration is intended to introduce a **nominal, closed type**, not a transparent alias or a
-structural union. A type's identity is its declared name and package, regardless of whether another
-sum has identical cases.
+The MVP declaration introduces a **nominal, closed type**, not a transparent alias or a structural
+union. A type's identity is its declared name and package, regardless of whether another sum has
+identical cases. A declaration must contain at least one uniquely named case. Cases cannot be
+extended, implemented, or subclassed by consumers. A sum has no user-declared methods, contract
+conformance, or additional members in the MVP.
 
-### Case names and construction
+### Cases, payloads, construction, and visibility
 
 The preferred direction is to qualify cases with the sum name at use sites, for example:
 
 ```zeron
-let missing: Option<Int> = Option.None;
-let present = Option.Some(value: 42);
-let direction = Coordinate.North;
+let missing: Option<Int> = Option<Int>.None();
+let present = Option.Some(42);
+let direction = Coordinate.North();
 ```
 
 Qualification avoids package-level collisions between common names such as `None`, `Some`, and
-`North`, and provides a natural spelling for both construction and patterns. Whether constructor
-arguments use labels, positional arguments, or support both remains undecided. Generic arguments
-should be inferable from an expected type where possible; inference for standalone cases such as
-`Option.None` requires particular attention because that case has no payload from which to infer
-`T`.
+`North`, and provides one spelling for construction and patterns. Every case is constructed by a
+qualified call, including payload-less cases: `Option.None()` or `Option<Int>.None()`. Payloads are
+declared as ordered named fields, are immutable, and are positional at construction and match sites.
+Names are metadata/documentation only; named arguments and payload defaults are not in the MVP.
 
-Cases are fixed by the declaration. A consumer cannot add cases or implement the sum to extend its
-alternatives. Visibility should be coherent across the sum and its cases: exposing a public sum
-should expose enough case information for clients to construct and exhaustively match it.
+All cases have the visibility of their sum. Public sums expose every case and payload type in their
+API; payload types must themselves be publicly nameable. Per-case visibility and case-specific type
+parameters are excluded. Adding, removing, or changing a public case or payload is a public API
+change.
+
+Every zero-payload case is semantically a singleton: constructing it repeatedly yields the same
+value, and reference identity comparisons observe that stable identity. Payload-bearing cases
+construct fresh values. This is a source semantic guarantee, not merely a code-generation shortcut.
+
+Generic sum parameters are invariant, following existing generic nominal types. Constructor
+inference uses payload argument types and a contextual expected sum type. For a payload-less case,
+context must determine the sum's type arguments or the caller must supply them explicitly. If
+arguments plus context do not uniquely determine all parameters, resolution fails rather than
+guessing.
 
 ### Matching and exhaustiveness
 
-Native sums should compose with `match`. A case-only pattern can be the initial supported pattern
-form:
+Sums compose with `match` using qualified case patterns:
 
 ```zeron
 match (option) {
-    case Option.Some -> ...;
-    case Option.None -> ...;
+    case Option.Some(value) if value > 0 -> value;
+    case Option.Some(_) -> 0;
+    case Option.None() -> -1;
 }
 ```
 
-Payload binding and nested destructuring can be added as pattern capabilities are designed. Cases
-with named payloads should leave room for patterns that bind selected fields. Matching should reject
-unknown or duplicate cases and require coverage of every alternative unless an unguarded wildcard
-covers the remainder. Guarded cases should not count toward exhaustiveness because their guards may
-fail. Matching nullable values remains distinct from matching the sum's cases: the scrutinee must
-first be proven non-null or handled by separately specified nullable-pattern behavior.
+The initial payload pattern requires exactly the declared arity; each position binds an immutable
+local or uses `_`. Nested patterns and OR-patterns are deferred for sums. A sum match is over a
+non-null sum value, consistent with existing match behavior; nullable matching is separate. Unknown
+and duplicate case patterns are errors. A guarded case is non-covering. An unguarded wildcard may
+cover only remaining cases and must be final. Otherwise every declared case must be covered by an
+unguarded case. Existing Boolean guard evaluation, result type joining, and single scrutinee
+evaluation apply.
 
-The intended benefit over encoding every sum as an ordinary sealed contract is that the compiler has
-the exact finite case set directly from the declaration, enabling reliable exhaustive checking and
-case-specific construction without user-authored implementing classes.
+Case type arguments must match the scrutinee's resolved sum arguments. Generic runtime dispatch uses
+erased case identity; generic payload types are validated statically. This sum facility is a distinct
+source declaration, even if the first implementation reuses sealed-contract match machinery.
+
+### Case refinement and payload access
+
+A known case can be tested without destructuring through `match`:
+
+```zeron
+if (option is Option.Some) then option.value else 0;
+```
+
+The test narrows the value to that generated case on the true control-flow path. For a generic sum,
+the case inherits type arguments from the tested sum value; case runtime checks use the erased
+generated class identity. A named payload may be read as a property only while flow analysis proves
+that the receiver has been refined to its declaring case. Payload reads preserve the declared
+generic payload type. Payloads are immutable and are never assignable.
+
+`matches` combines the test with positional extraction:
+
+```zeron
+if (option matches Option.Some(value)) then value else 0;
+```
+
+It is initially supported only as a direct `if` or `while` condition. Payload names are immutable
+locals available only on the successful branch/body path; `_` ignores a payload. The pattern must
+name a case of the tested sum and provide exactly its payload arity. Logical composition, negation,
+and other expression contexts are rejected for now, avoiding bindings on paths where the case test
+may not have succeeded. Use `match` when composing tests or handling several cases.
+
+### Extensions and witnesses
+
+Extensions may target the nominal sum type, including an applied generic pattern such as
+`extension<T> Option<T>`. They are ordinary statically dispatched extensions: they add no members
+to generated case classes, introduce no virtual dispatch, and may inspect payloads only through
+the sum's `match` and refinement rules. A sum-target extension is not a witness and does not imply
+contract conformance.
+
+A contract witness may target the sum type once, including a complete generic pattern such as
+`witness<T> Describable for Option<T>`. Its implementation receives the sum value, so it can use
+exhaustive `match` to provide behavior across cases. This witness does not establish conformance
+for individual generated case classes, and no case-specific witnesses are synthesized. Factory
+mappings remain unsupported for sum witnesses; they are class-side constructor mappings and sums
+have case factories instead.
 
 ## Product types
 
@@ -134,18 +193,25 @@ nullability, and API compatibility independently of the chosen JVM layout.
 
 ## Compilation strategies to evaluate
 
-### First implementation candidate for sums
+### Sum lowering
 
-A straightforward JVM lowering would generate a common parent interface or abstract type for each
-sum and a final implementation class for each case. Payload fields live on their case class.
-Matching can dispatch on generated case identity using `instanceof`, then read payloads after static
-case checking. Zero-payload cases could be singleton instances, although allocation and identity
-semantics need to be specified.
+A straightforward JVM lowering generates a sealed common parent interface and one final
+implementation class per case. Payload fields live on their case class. Matching dispatches on case
+identity, then reads payloads after static case checking. Each zero-payload case has one cached,
+publicly accessible singleton instance and its case factory returns that instance. If every case is
+payload-less, a generated JVM enum is also a representation candidate; it must preserve the same
+singleton identity, exhaustiveness, and source-level nominal semantics. Enum lowering is an
+optimization choice, not exposure of Java enum operations or ABI.
 
 This strategy resembles the existing sealed-contract representation and is a conservative starting
 point. A tagged representation with a discriminator and shared payload storage could reduce object
 overhead, but adds layout complexity and is not required to establish source semantics. Source type
 identity and exhaustive coverage must not depend on generated JVM names or layout.
+
+Compiled-library metadata must export the sum declaration, type parameters, visibility, ordered
+cases, and each payload's name and type. Consumer compilation uses that metadata for construction,
+type inference, and exhaustive matching; it must not reconstruct source semantics from class files.
+Changing the metadata schema is distinct from changing the standard-library API compatibility number.
 
 ### Product and newtype representation
 
@@ -155,32 +221,20 @@ underlying JVM representation in eligible contexts and use generated wrappers or
 boxing is needed. Any representation optimization must preserve nominal checks, validated
 construction, generic behavior, and stable public library metadata.
 
-## Open questions
+## Deferred design questions
 
-1. Is `type Name = Case | Case` the final syntax, and what syntax, if any, should transparent aliases
-   use? Import aliases do not resolve this distinction because they only rename references.
-2. Are sum cases accessed only as `Sum.Case`, or should imports permit unqualified case names?
-3. Are case payloads positional, labeled, or both? Can fields have defaults or visibility modifiers?
-4. How are generic arguments inferred for zero-payload cases?
-5. What payload destructuring patterns are in scope initially, and how do guards and nullable values
-   interact with case coverage?
-6. Should zero-payload cases have singleton identity, value equality, or unspecified object identity?
-7. Do product types need a standalone tuple/record form in addition to classes and named case payloads?
-   If so, are they nominal or structural?
-8. What exact syntax declares a newtype, and where can validation run without allowing invariant
-   bypass? Can methods and multiple constructors be declared inline?
-9. In which JVM contexts may a newtype be unboxed, and what boxing, equality, reflection,
-   and library-ABI rules are required?
-10. How are sums and newtypes represented in compiled-library metadata, and which declaration
-    changes constitute source or binary API changes?
+Product types remain separate from sum payload products. Classes already provide nominal
+product-like objects; a standalone tuple/record needs a demonstrated use case and decisions about
+identity, mutability, labels, equality, destructuring, and generic type identity.
+
+Newtypes need their own declaration syntax, validated-construction boundary, visibility and
+deserialization rules, equality/nullability semantics, and boxing/ABI contract before implementation.
+They must not be represented by an implicit alias or smuggled into this sum feature.
 
 ## Suggested sequencing
 
-1. Specify native sum identity, case visibility and construction, generic inference, and exhaustive
-   case-only matching. Reconcile this with existing sealed-contract matching rather than silently
-   changing its behavior.
-2. Implement sums with generated nominal case classes first; defer representation optimization and
-   advanced nested patterns.
-3. Evaluate product types separately against the capabilities of classes and named case payloads.
-4. Specify newtype construction invariants and source semantics before selecting erased/boxed lowering.
+1. Implement the specified sum MVP with generated nominal case classes and singleton nullary cases.
+   Keep enum lowering, advanced patterns, product syntax, and newtypes deferred.
+2. Evaluate product types separately against the capabilities of classes and named case payloads.
+3. Specify newtype construction invariants and source semantics before selecting erased/boxed lowering.
    Treat representation and ABI as part of the design, not as an invisible optimization.

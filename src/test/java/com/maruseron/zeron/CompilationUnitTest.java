@@ -192,8 +192,9 @@ public final class CompilationUnitTest {
                 """);
         final var consumer = parse("Main.zn", """
                 package app;
+                import zeron.collections.*;
                 fn identity(option: Option<Int>): Option<Int> = option;
-                fn created(): Option<Int> = Option.some(42);
+                fn created(): Option<Int> = Option.Some(42);
                 fn result(): Int = defaultImportMarker();
                 fn main() {
                     println("hello");

@@ -29,6 +29,7 @@ final class StatementResolver {
                     throw new IllegalStateException("Namespace members must be flattened before resolution.");
             case Stmt.ClassDecl declaration -> DeclarationResolver.resolveClass(context, declaration);
             case Stmt.ContractDecl declaration -> DeclarationResolver.resolveContract(context, declaration);
+            case Stmt.SumDecl declaration -> DeclarationResolver.resolveSum(context, declaration);
             case Stmt.ExternalClass _ -> {}
             case Stmt.Witness _ -> {}
             case Stmt.Block(List<Stmt> statements) -> {
@@ -82,18 +83,19 @@ final class StatementResolver {
                 TypeResolver.validateTypeParameterBounds(context, extension.typeDescriptor(), extension.name());
                 final var receiverName = Resolver.className(context, extension.receiverType());
                 final var isNominalReceiver = context.classes.containsKey(receiverName)
-                        || context.contracts.containsKey(receiverName);
+                        || context.contracts.containsKey(receiverName)
+                        || context.sums.containsKey(receiverName);
                 if (!isNominalReceiver && !isSupportedBuiltinExtensionReceiver(extension.receiverType())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                            extension.name(), "Extensions can target only Zeron classes, contracts, and supported built-in types."));
+                            extension.name(), "Extensions can target only nominal Zeron types and supported built-in types."));
                 }
                 if (isNominalReceiver) {
-                    final var receiverDeclaration = context.classes.containsKey(receiverName)
-                            ? context.classes.get(receiverName) : context.contracts.get(receiverName);
-                    Resolver.ensureTypeAccessible(context, receiverName, extension.name(),
-                            receiverDeclaration instanceof Stmt.ClassDecl classDeclaration
-                                    ? classDeclaration.isPublic()
-                                    : ((Stmt.ContractDecl) receiverDeclaration).isPublic());
+                    final var isPublic = context.classes.containsKey(receiverName)
+                            ? context.classes.get(receiverName).isPublic()
+                            : context.contracts.containsKey(receiverName)
+                                    ? context.contracts.get(receiverName).isPublic()
+                                    : context.sums.get(receiverName).isPublic();
+                    Resolver.ensureTypeAccessible(context, receiverName, extension.name(), isPublic);
                 }
                 LambdaResolver.resolveExtensionMethod(context, extension);
             }
@@ -153,8 +155,14 @@ final class StatementResolver {
                 final var incoming = context.frame.flowState.copy();
                 final var conditionFlows = ExpressionFlowResolver.resolveCondition(context, condition, incoming, keyword);
                 context.frame.flowState = conditionFlows.whenTrue().copy();
-                resolve(thenBranch);
-                final var thenFlow = context.frame.flowState.copy();
+                final var matchBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(context, condition);
+                final FlowState thenFlow;
+                try {
+                    resolve(thenBranch);
+                } finally {
+                    ExpressionFlowResolver.endSuccessfulSumCaseTestScope(context, matchBindings);
+                }
+                thenFlow = context.frame.flowState.copy();
 
                 final FlowState elseFlow;
                 if (elseBranch == null) {
@@ -270,7 +278,18 @@ final class StatementResolver {
             try {
                 conditionFlows = ExpressionFlowResolver.resolveCondition(context, condition, headerState, keyword);
                 context.frame.flowState = conditionFlows.whenTrue().copy();
-                resolve(body);
+                final var matchBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(context, condition);
+                try {
+                    resolve(body);
+                } finally {
+                    ExpressionFlowResolver.endSuccessfulSumCaseTestScope(context, matchBindings);
+                    for (final var state : loopFlow.continueStates) {
+                        matchBindings.forEach(state::remove);
+                    }
+                    for (final var state : loopFlow.breakStates) {
+                        matchBindings.forEach(state::remove);
+                    }
+                }
             } finally {
                 context.frame.loopDepth--;
                 context.frame.loopFlows.pop();

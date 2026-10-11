@@ -1,8 +1,6 @@
 package zeron.collections;
 
 import zeron.lang.Option;
-import zeron.lang.Some;
-import zeron.lang.None;
 import zeron.internal.unwrapSome;
 
 class ArrayStream<T> is Iterable<T> {
@@ -26,8 +24,8 @@ class MappedIterator<T, R> is Iterator<R> {
     public mut next(): Option<R> {
         let f = transform;
         let item = source.next();
-        if (not item.isSome()) return None<R>.none();
-        return Some<R>.from(f(unwrapSome(item)));
+        if (not item.isSome()) return Option<R>.None();
+        return Option.Some(f(unwrapSome(item)));
     }
 }
 
@@ -55,10 +53,10 @@ class FlatMappedIterator<T, R> is Iterator<R> {
             let item = this.inner.next();
             if (item.isSome()) return item;
             let outerItem = this.source.next();
-            if (not outerItem.isSome()) return None<R>.none();
+            if (not outerItem.isSome()) return Option<R>.None();
             this.inner = f(unwrapSome(outerItem)).iterator();
         }
-        return None<R>.none();
+        return Option<R>.None();
     }
 }
 
@@ -81,7 +79,7 @@ class FilteredIterator<T> is Iterator<T> {
             if (f(unwrapSome(item))) return item;
             item = source.next();
         }
-        return None<T>.none();
+        return Option<T>.None();
     }
 }
 
@@ -98,7 +96,7 @@ class TakenIterator<T> is Iterator<T> {
     remaining: Int;
 
     public mut next(): Option<T> {
-        if (remaining <= 0) return None<T>.none();
+        if (remaining <= 0) return Option<T>.None();
         this.remaining = remaining - 1;
         return source.next();
     }
@@ -176,20 +174,20 @@ class TakenWhileIterator<T> is Iterator<T> {
     done: Boolean = false;
 
     public mut next(): Option<T> {
-        if (done) return Option<T>.none();
+        if (done) return Option<T>.None();
 
         let f = predicate;
         let item = source.next();
         if (not item.isSome()) {
             this.done = true;
-            return Option<T>.none();
+            return Option<T>.None();
         }
 
         if (f(unwrapSome(item))) {
             return item;
         } else {
             this.done = true;
-            return Option<T>.none();
+            return Option<T>.None();
         }
     }
 }

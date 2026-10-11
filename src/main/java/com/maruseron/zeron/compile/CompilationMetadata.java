@@ -30,6 +30,11 @@ final class CompilationMetadata {
                     metadataTypeNames.add(classDeclaration.name().lexeme());
                 } else if (declaration instanceof Stmt.ContractDecl contractDeclaration) {
                     metadataTypeNames.add(contractDeclaration.name().lexeme());
+                } else if (declaration instanceof Stmt.SumDecl sumDeclaration) {
+                    metadataTypeNames.add(sumDeclaration.name().lexeme());
+                    for (final var sumCase : sumDeclaration.cases()) {
+                        metadataTypeNames.add(sumDeclaration.generatedCaseName(sumCase));
+                    }
                 }
             }
         }

@@ -112,6 +112,20 @@ final class BytecodeEmitter {
                                        final Expr.PropertyAssignment assignment,
                                        final boolean retainResult ){
         final var property = assignment.property;
+        if (property.javaFieldTarget() != null) {
+            final var target = property.javaFieldTarget();
+            if (target.isStatic()) {
+                throw new IllegalStateException("Static Java field writes must be rejected during resolution.");
+            }
+            emitExpr(context, composer, property.receiver);
+            emitExpr(context, composer, assignment.value);
+            emitConversion(context, composer, context.lastEmittedType, property.getType());
+            composer.putfield(ClassDesc.of(target.owner()), target.name(),
+                    ClassDesc.ofDescriptor(target.descriptor()));
+            if (retainResult) emitUnitValue(context, composer);
+            context.lastEmittedType = TypeDescriptor.ofUnit();
+            return;
+        }
         if (property.resolvedAsProperty()) {
             final var ownerName = property.resolvedOwnerName();
             final var declaredType = declarationPropertyType(context, ownerName, property.name.lexeme());
@@ -146,6 +160,78 @@ final class BytecodeEmitter {
     private static void emitPropertyCompoundAssignment(CompilationContext context, final CodeBuilder composer,
                                                final Expr.PropertyCompoundAssignment assignment ){
         final var property = assignment.property;
+        final var javaFieldTarget = property.javaFieldTarget();
+        if (javaFieldTarget != null) {
+            if (javaFieldTarget.isStatic()) {
+                throw new IllegalStateException("Static Java field writes must be rejected during resolution.");
+            }
+            final var erasedType = TypeSubstitution.erase(property.getType());
+            beginScope(context);
+            try {
+                final var receiverToken = new Token(TokenType.IDENTIFIER,
+                        "$javaFieldReceiver$" + context.propertyTemporaryCount, null, property.name.span());
+                context.propertyTemporaryCount++;
+                final var receiverType = property.receiver.getType();
+                final var receiverSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR,
+                        receiverToken, receiverType, BindingMutability.IMMUTABLE);
+                context.symbols.define(receiverToken);
+                final var currentToken = new Token(TokenType.IDENTIFIER,
+                        "$javaFieldCurrent$" + context.propertyTemporaryCount, null, property.name.span());
+                context.propertyTemporaryCount++;
+                final var currentType = property.getType();
+                final var currentSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, currentToken,
+                        currentType, BindingMutability.IMMUTABLE);
+                context.symbols.define(currentToken);
+                final var valueToken = new Token(TokenType.IDENTIFIER,
+                        "$javaFieldValue$" + context.propertyTemporaryCount, null, property.name.span());
+                context.propertyTemporaryCount++;
+                final var valueType = assignment.resolvedOperation().right.getType();
+                final var valueSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, valueToken,
+                        valueType, BindingMutability.IMMUTABLE);
+                context.symbols.define(valueToken);
+                final var resultToken = new Token(TokenType.IDENTIFIER,
+                        "$javaFieldResult$" + context.propertyTemporaryCount, null, property.name.span());
+                context.propertyTemporaryCount++;
+                final var resultSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR,
+                        resultToken, erasedType, BindingMutability.IMMUTABLE);
+                context.symbols.define(resultToken);
+
+                emitExpr(context, composer, property.receiver);
+                final var receiverKind = TypeKind.fromDescriptor(
+                        TypeDescriptor.toJavaClassDesc(receiverType).descriptorString());
+                composer.storeLocal(receiverKind, receiverSlot + context.localSlotOffset);
+                composer.loadLocal(receiverKind, receiverSlot + context.localSlotOffset);
+                composer.getfield(ClassDesc.of(javaFieldTarget.owner()), javaFieldTarget.name(),
+                        ClassDesc.ofDescriptor(javaFieldTarget.descriptor()));
+                emitConversion(context, composer, erasedType, currentType);
+                composer.storeLocal(TypeKind.fromDescriptor(
+                        TypeDescriptor.toJavaClassDesc(currentType).descriptorString()),
+                        currentSlot + context.localSlotOffset);
+                emitExpr(context, composer, assignment.value);
+                emitConversion(context, composer, context.lastEmittedType, valueType);
+                composer.storeLocal(TypeKind.fromDescriptor(
+                        TypeDescriptor.toJavaClassDesc(valueType).descriptorString()),
+                        valueSlot + context.localSlotOffset);
+
+                final var current = new Expr.Variable(currentToken, currentType);
+                final var value = new Expr.Variable(valueToken, valueType);
+                emitExpr(context, composer, new Expr.Binary(current, assignment.operator, value,
+                        assignment.resolvedOperation().getType()));
+                emitConversion(context, composer, context.lastEmittedType, erasedType);
+                final var fieldKind = TypeKind.fromDescriptor(
+                        TypeDescriptor.toJavaClassDesc(erasedType).descriptorString());
+                composer.storeLocal(fieldKind, resultSlot + context.localSlotOffset);
+                composer.loadLocal(receiverKind, receiverSlot + context.localSlotOffset);
+                composer.loadLocal(fieldKind, resultSlot + context.localSlotOffset);
+                composer.putfield(ClassDesc.of(javaFieldTarget.owner()), javaFieldTarget.name(),
+                        ClassDesc.ofDescriptor(javaFieldTarget.descriptor()));
+                emitUnitValue(context, composer);
+                context.lastEmittedType = TypeDescriptor.ofUnit();
+            } finally {
+                endScope(context);
+            }
+            return;
+        }
         final var ownerName = property.resolvedOwnerName();
         final var declaredType = declarationPropertyType(context, ownerName, property.name.lexeme());
         final var erasedType = TypeSubstitution.erase(declaredType);
@@ -185,6 +271,7 @@ final class BytecodeEmitter {
                     assignment.resolvedOperation().getType()));
             emitConversion(context, composer, context.lastEmittedType, erasedType);
             emitPropertySetterCall(context, composer, ownerName, property.name.lexeme(), declaredType);
+            emitUnitValue(context, composer);
             context.lastEmittedType = TypeDescriptor.ofUnit();
         } finally {
             endScope(context);
@@ -325,8 +412,14 @@ final class BytecodeEmitter {
                     break;
                 } else if (property.javaFieldTarget() != null) {
                     final var target = property.javaFieldTarget();
-                    composer.getstatic(ClassDesc.of(target.owner()), target.name(),
-                            ClassDesc.ofDescriptor(target.descriptor()));
+                    if (target.isStatic()) {
+                        composer.getstatic(ClassDesc.of(target.owner()), target.name(),
+                                ClassDesc.ofDescriptor(target.descriptor()));
+                    } else {
+                        emitExpr(context, composer, property.receiver);
+                        composer.getfield(ClassDesc.of(target.owner()), target.name(),
+                                ClassDesc.ofDescriptor(target.descriptor()));
+                    }
                     context.lastEmittedType = property.getType();
                     break;
                 } else if (property.safeNavigation()) {
@@ -345,6 +438,17 @@ final class BytecodeEmitter {
                     final var erasedType = TypeSubstitution.erase(declaredType);
                     emitExpr(context, composer, property.receiver);
                     emitPropertyGetterCall(context, composer, ownerName, property.name.lexeme(), declaredType);
+                    emitConversion(context, composer, erasedType, property.getType());
+                    context.lastEmittedType = property.getType();
+                } else if (property.sumPayloadIndex() >= 0) {
+                    final var ownerName = property.resolvedOwnerName();
+                    final var owner = context.resolution.classes().get(ownerName);
+                    final var erasedType = TypeSubstitution.erase(owner.fields()
+                            .get(property.sumPayloadIndex()).type());
+                    emitExpr(context, composer, property.receiver);
+                    composer.invokevirtual(ClassDesc.of(ownerName),
+                            "$zeron$payload$" + property.sumPayloadIndex(),
+                            MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedType)));
                     emitConversion(context, composer, erasedType, property.getType());
                     context.lastEmittedType = property.getType();
                 } else {
@@ -455,6 +559,7 @@ final class BytecodeEmitter {
             case Expr.Logical logical -> ExpressionFlowEmitter.emitLogical(context, composer, logical);
             case Expr.Coalesce coalesce -> ExpressionFlowEmitter.emitCoalesce(context, composer, coalesce);
             case Expr.TypeTest test -> ExpressionFlowEmitter.emitTypeTest(context, composer, test);
+            case Expr.SumCaseTest test -> ExpressionFlowEmitter.emitSumCaseTest(context, composer, test);
             case Expr.Cast cast -> ExpressionFlowEmitter.emitCast(context, composer, cast);
             case Expr.Call call -> emitCall(context, composer, call);
             case Expr.MemberCall call -> emitMemberCall(context, composer, call);
@@ -875,9 +980,10 @@ final class BytecodeEmitter {
 
     private static void emitOptionUnwrapSome(CompilationContext context, final CodeBuilder composer, final Expr.Call call ){
         emitExpr(context, composer, call.arguments.getFirst());
-        composer.aconst_null();
-        composer.invokeinterface(ClassDesc.of("zeron.lang.Option"), "getOrElse",
-                MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+        final var someClass = ClassDesc.of("zeron.lang.Option$$sum$Some");
+        composer.checkcast(someClass);
+        composer.invokevirtual(someClass, "$zeron$payload$0",
+                MethodTypeDesc.of(ConstantDescs.CD_Object));
         context.lastEmittedType = call.getType();
     }
 
@@ -964,6 +1070,30 @@ final class BytecodeEmitter {
         }
         if (call.javaCallTarget() != null) {
             emitJavaMemberCall(context, composer, call, receiverOnStack);
+            return;
+        }
+        if (call.sumCaseFactory()) {
+            final var declaration = context.resolution.classes().get(call.resolvedClassName());
+            if (declaration == null) throw new IllegalStateException("Resolved sum case class not found.");
+            final var classDesc = ClassDesc.of(call.resolvedClassName());
+            final var constructorTypes = declaration.canonicalConstructorTypes();
+            final var parameters = constructorTypes.stream()
+                    .map(type -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(type)))
+                    .toList();
+            if (constructorTypes.isEmpty()) {
+                composer.getstatic(classDesc, "$zeron$singleton", classDesc);
+            } else {
+                composer.new_(classDesc);
+                composer.dup();
+                for (int i = 0; i < call.arguments.size(); i++) {
+                    emitExpr(context, composer, call.arguments.get(i));
+                    emitConversion(context, composer, context.lastEmittedType,
+                            TypeSubstitution.erase(constructorTypes.get(i)));
+                }
+                composer.invokespecial(classDesc, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, parameters));
+            }
+            context.lastEmittedType = call.getType();
             return;
         }
         if (call.name.lexeme().equals("new") && call.resolvedClassName() != null) {
@@ -1186,6 +1316,9 @@ final class BytecodeEmitter {
         for (int i = 0; i < fixedParameterCount; i++) {
             emitExpr(context, composer, call.arguments.get(i));
             emitConversion(context, composer, context.lastEmittedType, call.resolvedDescriptor().parameters().get(i));
+            if (descriptor.parameterType(i).descriptorString().equals("[Ljava/lang/Object;")) {
+                emitJavaObjectArrayCopy(context, composer);
+            }
         }
         if (target.varArgs()) {
             emitJavaVarargsArray(context, composer, call, fixedParameterCount,
@@ -1206,6 +1339,20 @@ final class BytecodeEmitter {
                 : call.getType();
     }
 
+    private static void emitJavaObjectArrayCopy(final CompilationContext context,
+                                                final CodeBuilder composer) {
+        final var unchanged = composer.newLabel();
+        composer.dup();
+        composer.ifnull(unchanged);
+        composer.dup();
+        composer.arraylength();
+        composer.invokestatic(ClassDesc.of("java.util.Arrays"), "copyOf",
+                MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType(),
+                        ConstantDescs.CD_Object.arrayType(), ConstantDescs.CD_int));
+        composer.labelBinding(unchanged);
+        context.lastEmittedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable()).toNullable();
+    }
+
     private static void emitSafeProperty(CompilationContext context, final CodeBuilder composer, final Expr.Property property ){
         final var nullPath = composer.newLabel();
         final var done = composer.newLabel();
@@ -1223,6 +1370,15 @@ final class BytecodeEmitter {
             final var declaredType = declarationPropertyType(context, owner, property.name.lexeme());
             final var erasedType = TypeSubstitution.erase(declaredType);
             emitPropertyGetterCall(context, composer, owner, property.name.lexeme(), declaredType);
+            emitConversion(context, composer, erasedType, property.getType());
+        } else if (property.sumPayloadIndex() >= 0) {
+            final var ownerName = property.resolvedOwnerName();
+            final var owner = context.resolution.classes().get(ownerName);
+            final var erasedType = TypeSubstitution.erase(owner.fields()
+                    .get(property.sumPayloadIndex()).type());
+            composer.invokevirtual(ClassDesc.of(ownerName),
+                    "$zeron$payload$" + property.sumPayloadIndex(),
+                    MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedType)));
             emitConversion(context, composer, erasedType, property.getType());
         } else {
             final var owner = nominalName(context, nonNullType(property.receiver.getType()));
@@ -1319,8 +1475,8 @@ final class BytecodeEmitter {
                                              final CodeBuilder composer) {
         final var noValue = composer.newLabel();
         final var done = composer.newLabel();
-        final var someClass = ClassDesc.of("zeron.lang.Some");
-        final var noneClass = ClassDesc.of("zeron.lang.None");
+        final var someClass = ClassDesc.of("zeron.lang.Option$$sum$Some");
+        final var noneClass = ClassDesc.of("zeron.lang.Option$$sum$None");
 
         composer.dup2();
         composer.dup2();
@@ -1335,15 +1491,18 @@ final class BytecodeEmitter {
         composer.dcmpl();
         composer.ifge(noValue);
         composer.d2i();
+        composer.new_(someClass);
+        composer.dup_x1();
+        composer.swap();
         composer.invokestatic(ClassDesc.of("java.lang.Integer"), "valueOf",
                 MethodTypeDesc.of(ClassDesc.of("java.lang.Integer"), ConstantDescs.CD_int));
-        composer.invokestatic(someClass, "from",
-                MethodTypeDesc.of(someClass, ConstantDescs.CD_Object));
+        composer.invokespecial(someClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
         composer.goto_(done);
 
         composer.labelBinding(noValue);
         composer.pop2();
-        composer.invokestatic(noneClass, "none", MethodTypeDesc.of(noneClass));
+        composer.getstatic(noneClass, "$zeron$singleton", noneClass);
         composer.labelBinding(done);
         composer.checkcast(ClassDesc.of("zeron.lang.Option"));
         context.lastEmittedType = TypeDescriptor.genericOf(

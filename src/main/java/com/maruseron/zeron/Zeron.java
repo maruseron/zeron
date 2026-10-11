@@ -85,7 +85,9 @@ public class Zeron {
                 if (++index >= args.length) throw new IllegalArgumentException("--library requires a class directory or JAR.");
                 libraryRoots.add(Paths.get(args[index]));
             } else if (argument.equals("--java-classpath")) {
-                if (++index >= args.length) throw new IllegalArgumentException("--java-classpath requires a class directory.");
+                if (++index >= args.length) {
+                    throw new IllegalArgumentException("--java-classpath requires a class directory or JAR.");
+                }
                 javaClassPathRoots.add(Paths.get(args[index]));
             } else if (argument.equals("--build-stdlib")) {
                 if (++index >= args.length) throw new IllegalArgumentException("--build-stdlib requires an output directory.");
@@ -111,11 +113,10 @@ public class Zeron {
         }
         if (runClassFile != null) {
             if (entry != null || !sourceRoots.isEmpty() || !scriptPaths.isEmpty()
-                    || standardLibraryOutput != null || jarOutput != null || !javaClassPathRoots.isEmpty()
-                    || !bundleStandardLibrarySources) {
+                    || standardLibraryOutput != null || jarOutput != null || !bundleStandardLibrarySources) {
                 throw new IllegalArgumentException("--run-class cannot be combined with compilation options.");
             }
-            return runGeneratedClass(runClassFile, standardLibraryJar, libraryRoots);
+            return runGeneratedClass(runClassFile, standardLibraryJar, libraryRoots, javaClassPathRoots);
         }
         if (customStandardLibraryJar) {
             throw new IllegalArgumentException("--stdlib-jar can only be used with --run-class.");
@@ -178,7 +179,8 @@ public class Zeron {
 
     private static int runGeneratedClass(final Path classFile,
                                          final Path standardLibraryJar,
-                                         final List<Path> libraries) throws IOException {
+                                         final List<Path> libraries,
+                                         final List<Path> javaClassPathRoots) throws IOException {
         final var outputRoot = Paths.get("dist").toAbsolutePath().normalize();
         final var absoluteClassFile = classFile.toAbsolutePath().normalize();
         if (!absoluteClassFile.startsWith(outputRoot)
@@ -186,6 +188,7 @@ public class Zeron {
                 || !Files.isRegularFile(absoluteClassFile)) {
             throw new IllegalArgumentException("--run-class requires an existing .class file under dist/.");
         }
+        validateJavaClassPathRoots(javaClassPathRoots);
         if (!Files.exists(standardLibraryJar)) {
             buildStandardLibraryJar(standardLibraryJar);
         } else {
@@ -208,6 +211,9 @@ public class Zeron {
         classPathEntries.add(runtimeLocation.toString());
         for (final var library : libraries) {
             classPathEntries.add(library.toAbsolutePath().normalize().toString());
+        }
+        for (final var root : javaClassPathRoots) {
+            classPathEntries.add(root.toAbsolutePath().normalize().toString());
         }
         final var javaExecutable = Paths.get(System.getProperty("java.home"), "bin",
                 System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java");
@@ -505,10 +511,13 @@ public class Zeron {
 
     private static void validateJavaClassPathRoots(final List<Path> roots) {
         for (final var root : roots) {
-            if (!Files.isDirectory(root)) {
-                throw new IllegalArgumentException("Java classpath root must be a class directory; JAR loading is not implemented: "
-                        + root);
+            if (Files.isDirectory(root)) continue;
+            if (Files.isRegularFile(root)
+                    && root.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".jar")) {
+                continue;
             }
+            throw new IllegalArgumentException(
+                    "Java classpath root must be an existing class directory or .jar file: " + root);
         }
     }
 

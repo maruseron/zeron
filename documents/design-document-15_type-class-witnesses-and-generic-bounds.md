@@ -3,7 +3,7 @@
 ## Status
 
 This document records the design for applied contract bounds, class-side constructor evidence, and
-non-nominal method witnesses. Generic functions and methods retain applied contract bounds and pass
+non-nominal method witnesses, including witnesses targeting nominal sum types. Generic functions and methods retain applied contract bounds and pass
 hidden `MethodHandle` evidence where needed. Witness selection uses source-level applied types;
 runtime evidence uses erased JVM descriptors.
 
@@ -73,6 +73,27 @@ witness Display<Int> for Int {
     fn toString(): String = intToString(this);
 }
 ```
+
+A sum target is witnessed once as the sum type, not once per case:
+
+```zeron
+type Maybe<T> = Just(value: T) | Nothing;
+contract Describable {
+    describe(): String;
+}
+witness<T> Describable for Maybe<T> {
+    fn describe(): String = match (this) {
+        case Maybe.Just(_) -> "just";
+        case Maybe.Nothing() -> "nothing";
+    };
+}
+```
+
+The helper receives the sum value, and its body may inspect cases using exhaustive `match` or case
+refinement. This supplies evidence only for the sum target; it does not establish contract
+conformance for generated case classes or automatically synthesize a witness for each case.
+Generic witness target patterns must cover the sum's complete type-parameter pattern. Factory
+mappings remain class-only because a sum witness has no class named constructors to map.
 
 A non-nominal witness must implement every abstract instance-method requirement. If a method is
 omitted and the contract provides a default implementation, the default is lowered as a static

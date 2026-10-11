@@ -22,9 +22,9 @@ existing shorthand:
 
 ```zeron
 match (option) {
-    case Some<T>.value(value) if value > 0 -> value;
-    case Some<T>.value(_) as some -> 0;
-    case None<T> -> defaultValue;
+    case Option.Some(value) if value > 0 -> value;
+    case Option.Some(_) -> 0;
+    case Option.None() -> defaultValue;
 }
 ```
 

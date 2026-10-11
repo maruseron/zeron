@@ -112,6 +112,26 @@ public sealed interface Stmt {
         }
     }
 
+    record SumDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                   List<SumCase> cases, boolean isPublic) implements Stmt, Decl {
+        public SumDecl {
+            typeParameters = List.copyOf(typeParameters);
+            cases = List.copyOf(cases);
+        }
+
+        public String generatedCaseName(final SumCase sumCase) {
+            return name.lexeme() + "$$sum$" + sumCase.name().lexeme();
+        }
+    }
+
+    record SumCase(Token name, List<SumPayload> payloads) {
+        public SumCase {
+            payloads = List.copyOf(payloads);
+        }
+    }
+
+    record SumPayload(Token name, TypeDescriptor type) {}
+
     final class Witness implements Stmt, Decl {
         private final Token name;
         private final List<TypeParameterDescriptor> typeParameters;

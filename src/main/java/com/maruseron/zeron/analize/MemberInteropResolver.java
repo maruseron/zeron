@@ -8,6 +8,7 @@ import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
+import java.lang.constant.ClassDesc;
 import java.util.*;
 
 import static com.maruseron.zeron.analize.Resolver.*;
@@ -54,10 +55,17 @@ final class MemberInteropResolver {
     }
 
     static TypeDescriptor resolveProperty(final ResolutionContext context, final Expr.Property property) {
-        if (property.receiver instanceof Expr.Variable typeName) {
-            final var ownerName = resolveClassName(context, typeName.name.lexeme(), typeName.name);
+        final var receiverPath = expressionPath(property.receiver);
+        if (receiverPath != null) {
+            final var where = property.receiver instanceof Expr.Variable typeName
+                    ? typeName.name : property.name;
+            final var ownerName = resolveClassName(context, receiverPath, where);
             final var externalClass = ownerName == null ? null : context.externalClasses.get(ownerName);
-            if (externalClass != null || "java.lang.System".equals(ownerName)) {
+            final var isZeronType = ownerName != null
+                    && (context.classes.containsKey(ownerName) || context.contracts.containsKey(ownerName));
+            final var javaClass = ownerName == null || isZeronType
+                    ? null : context.javaClassPath.find(ownerName);
+            if (javaClass != null) {
                 if (property.safeNavigation()) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             property.name, "Safe navigation cannot be used for a static property."));
@@ -65,20 +73,25 @@ final class MemberInteropResolver {
                 final var declaredProperty = externalClass == null ? null : externalClass.staticProperties().stream()
                         .filter(candidate -> candidate.name().lexeme().equals(property.name.lexeme()))
                         .findFirst().orElse(null);
-                final var javaClass = context.javaClassPath.find(ownerName);
                 final var javaField = javaClass == null ? null : javaClass.fields().stream()
-                        .filter(candidate -> candidate.name().equals(property.name.lexeme()) && candidate.isStatic())
+                        .filter(candidate -> candidate.name().equals(property.name.lexeme()))
                         .findFirst().orElse(null);
                 final var fieldType = javaField == null ? null : JavaTypeMapping.toZeronType(javaField.descriptor());
-                if (javaField == null || fieldType == null
-                        || externalClass != null && (declaredProperty == null || !declaredProperty.isPublic()
-                            || !fieldType.equals(declaredProperty.type()))
-                        || externalClass == null && !property.name.lexeme().equals("out")) {
+                final var facadeFieldAllowed = externalClass != null
+                        ? declaredProperty != null && declaredProperty.isPublic()
+                            && fieldType != null && fieldType.equals(declaredProperty.type())
+                        : !ownerName.equals("java.lang.System") || property.name.lexeme().equals("out");
+                if (javaField == null || !javaField.isStatic() || fieldType == null
+                        || !facadeFieldAllowed) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             property.name, "Unknown or unsupported external static property."));
                 }
+                if (javaField.hasGenericSignature()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                            property.name, "Generic Java fields are not supported."));
+                }
                 property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
-                        javaField.descriptor().descriptorString()));
+                        javaField.descriptor().descriptorString(), true, javaField.isFinal()));
                 property.setType(fieldType);
                 return fieldType;
             }
@@ -126,6 +139,28 @@ final class MemberInteropResolver {
         }
         final var ownerName = className(context, baseType);
         final var owner = context.classes.get(ownerName);
+        for (final var sum : context.sums.values()) {
+            for (final var sumCase : sum.cases()) {
+                if (!sum.generatedCaseName(sumCase).equals(ownerName)) continue;
+                for (int index = 0; index < sumCase.payloads().size(); index++) {
+                    final var payload = sumCase.payloads().get(index);
+                    if (!payload.name().lexeme().equals(property.name.lexeme())) continue;
+                    final var appliedSumType = baseType instanceof GenericDescriptor generic
+                            ? TypeDescriptor.genericOf(TypeDescriptor.ofName(sum.name().lexeme()),
+                                    generic.typeParameters())
+                            : TypeDescriptor.ofName(sum.name().lexeme());
+                    final var payloadType = TypeSubstitution.substitute(payload.type(),
+                            TypeResolver.substitutionsFor(context, sum.typeParameters(), appliedSumType));
+                    property.setResolvedOwnerName(ownerName);
+                    property.setSumPayloadIndex(index);
+                    final var resultType = property.safeNavigation()
+                            ? payloadType.toNullable() : payloadType;
+                    property.setType(resultType);
+                    finishSafeNavigation(context, safeFlows);
+                    return resultType;
+                }
+            }
+        }
         final var propertyDeclaration = findProperty(context, ownerName, property.name);
         if (propertyDeclaration != null) {
             if (!propertyDeclaration.isPublic()
@@ -142,6 +177,34 @@ final class MemberInteropResolver {
             property.setType(resultType);
             finishSafeNavigation(context, safeFlows);
             return resultType;
+        }
+        if (owner == null) {
+            final var javaClass = context.contracts.containsKey(ownerName)
+                    ? null : context.javaClassPath.find(ownerName);
+            final var javaField = javaClass == null ? null : javaClass.fields().stream()
+                    .filter(candidate -> candidate.name().equals(property.name.lexeme()))
+                    .findFirst().orElse(null);
+            if (javaField != null) {
+                if (javaField.isStatic()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                            property.name, "Static Java fields must be accessed through their class."));
+                }
+                if (javaField.hasGenericSignature()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                            property.name, "Generic Java fields are not supported."));
+                }
+                final var fieldType = JavaTypeMapping.toZeronType(javaField.descriptor());
+                if (fieldType == null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                            property.name, "Java field descriptor is not supported."));
+                }
+                property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
+                        javaField.descriptor().descriptorString(), false, javaField.isFinal()));
+                final var resultType = property.safeNavigation() ? fieldType.toNullable() : fieldType;
+                property.setType(resultType);
+                finishSafeNavigation(context, safeFlows);
+                return resultType;
+            }
         }
         if (owner != null) {
             final var field = owner.fields().stream()
@@ -211,10 +274,37 @@ final class MemberInteropResolver {
                                              final TypeDescriptor alreadyResolvedReceiverType,
                                              final TypeDescriptor expectedType) {
         Zeron.debug("resolving member call       " + call.name.lexeme() + " for " + call.receiver);
-        final var classOwnerName = call.receiver instanceof Expr.Variable typeName
-                ? resolveClassName(context, typeName.name.lexeme(), typeName.name)
-                : null;
+        final var receiverPath = expressionPath(call.receiver);
+        final var classOwnerName = receiverPath == null ? null : resolveClassName(context, receiverPath,
+                call.receiver instanceof Expr.Variable typeName ? typeName.name : call.name);
         final var classDeclaration = classOwnerName == null ? null : context.classes.get(classOwnerName);
+        final var sumDeclaration = classOwnerName == null ? null : context.sums.get(classOwnerName);
+        if (sumDeclaration != null) {
+            final var sumCase = sumDeclaration.cases().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
+                    .findFirst().orElse(null);
+            if (sumCase == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        call.name, "Unknown case '" + call.name.lexeme() + "' for sum '"
+                                + sumDeclaration.name().lexeme() + "'."));
+            }
+            final var caseName = sumDeclaration.generatedCaseName(sumCase);
+            final var caseClass = context.classes.get(caseName);
+            final var caseExpectedType = expectedCaseType(sumDeclaration, expectedType, caseName);
+            final var result = resolveClassFactoryCall(context, call, caseClass, caseName,
+                    new ClassFactory(null, true), caseExpectedType, null);
+            call.setSumCaseFactory(true);
+            final var caseType = result instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : result;
+            final var arguments = caseType instanceof GenericDescriptor generic
+                    ? generic.typeParameters() : List.<TypeDescriptor>of();
+            final TypeDescriptor sumType = arguments.isEmpty()
+                    ? TypeDescriptor.ofName(sumDeclaration.name().lexeme())
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(sumDeclaration.name().lexeme()), arguments);
+            final var sumResult = new ReferenceDescriptor(sumType);
+            call.setType(sumResult);
+            return sumResult;
+        }
         final var classFactory = classDeclaration == null ? null
                 : findClassFactory(classDeclaration, call.name.lexeme());
         final var namespaceFunctionName = !call.safeNavigation()
@@ -926,6 +1016,20 @@ final class MemberInteropResolver {
                 constructorTypes.toArray(TypeDescriptor[]::new));
     }
 
+    private static TypeDescriptor expectedCaseType(final Stmt.SumDecl sum,
+                                                   final TypeDescriptor expectedType,
+                                                   final String caseName) {
+        final var expected = expectedType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : expectedType;
+        if (expected == null || !expected.name().equals(sum.name().lexeme())) return expectedType;
+        final var arguments = expected instanceof GenericDescriptor generic
+                ? generic.typeParameters() : List.<TypeDescriptor>of();
+        final TypeDescriptor caseType = arguments.isEmpty()
+                ? TypeDescriptor.ofName(caseName)
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(caseName), arguments);
+        return new ReferenceDescriptor(caseType);
+    }
+
     private static TypeDescriptor classType(final Stmt.ClassDecl declaration) {
         final var base = TypeDescriptor.ofName(declaration.name().lexeme());
         return declaration.typeParameters().isEmpty()
@@ -1156,19 +1260,29 @@ final class MemberInteropResolver {
                 final var javaParameterType = method.isVarArgs() && i >= fixedCount
                         ? method.descriptor().parameterType(formalCount - 1).componentType()
                         : method.descriptor().parameterType(i);
-                final var parameterType = JavaTypeMapping.toZeronType(javaParameterType);
-                if (parameterType == null || !context.typeCompatibility.canAssign(parameterType, actualTypes.get(i))) {
+                final var parameterType = JavaTypeMapping.toZeronMethodType(javaParameterType);
+                if (parameterType == null) {
+                    hasUnsupportedShape = true;
+                    applicable = false;
+                    break;
+                }
+                final var acceptsObjectArray = isJavaObjectArray(javaParameterType)
+                        && isZeronArrayType(actualTypes.get(i));
+                if (!acceptsObjectArray
+                        && !context.typeCompatibility.canAssign(parameterType, actualTypes.get(i))) {
                     applicable = false;
                     break;
                 }
                 parameterTypes.add(parameterType);
-                cost += javaConversionCost(context, parameterType, actualTypes.get(i));
+                cost += acceptsObjectArray
+                        ? javaObjectArrayConversionCost(parameterType, actualTypes.get(i))
+                        : javaConversionCost(context, parameterType, actualTypes.get(i));
             }
             if (!applicable) continue;
 
             final var returnType = constructor
                     ? new ReferenceDescriptor(TypeDescriptor.ofName(javaClass.binaryName()))
-                    : JavaTypeMapping.toZeronType(method.descriptor().returnType());
+                    : JavaTypeMapping.toZeronMethodType(method.descriptor().returnType());
             if (returnType == null) {
                 hasUnsupportedShape = true;
                 continue;
@@ -1199,7 +1313,14 @@ final class MemberInteropResolver {
         }
         final var selected = bestCandidates.getFirst();
         for (int i = 0; i < selected.parameterTypes().size(); i++) {
-            ensureAssignable(context, selected.parameterTypes().get(i), actualTypes.get(i), call.name);
+            final var javaParameterType = selected.method().isVarArgs()
+                    && i >= selected.method().descriptor().parameterCount() - 1
+                    ? selected.method().descriptor().parameterType(
+                            selected.method().descriptor().parameterCount() - 1).componentType()
+                    : selected.method().descriptor().parameterType(i);
+            if (!isJavaObjectArray(javaParameterType) || !isZeronArrayType(actualTypes.get(i))) {
+                ensureAssignable(context, selected.parameterTypes().get(i), actualTypes.get(i), call.name);
+            }
         }
         final var invocationKind = constructor
                 ? JavaCallTarget.InvocationKind.CONSTRUCTOR
@@ -1218,6 +1339,23 @@ final class MemberInteropResolver {
         if (expected.equals(actual)) return 0;
         if (expected instanceof NullableDescriptor nullable && nullable.baseType().equals(actual)) return 1;
         return 2;
+    }
+
+    private static boolean isJavaObjectArray(final ClassDesc javaType) {
+        return javaType.descriptorString().equals("[Ljava/lang/Object;");
+    }
+
+    private static boolean isZeronArrayType(final TypeDescriptor type) {
+        return switch (type) {
+            case ArrayDescriptor _ -> true;
+            case NullableDescriptor nullable -> isZeronArrayType(nullable.baseType());
+            case ReferenceDescriptor reference -> isZeronArrayType(reference.baseType());
+            default -> false;
+        };
+    }
+
+    private static int javaObjectArrayConversionCost(final TypeDescriptor expected, final TypeDescriptor actual) {
+        return expected.equals(actual) ? 0 : 1;
     }
 
     private static TypeDescriptor resolveBoundedMemberCall(final ResolutionContext context, final Expr.MemberCall call,
@@ -1357,21 +1495,32 @@ final class MemberInteropResolver {
         return descriptor.returnType();
     }
 
-    private static String resolveClassName(final ResolutionContext context, final String name, final Token where) {
-        if (context.classes.containsKey(name)) return name;
-        final var importedName = context.currentImports.types().get(name);
-        if (importedName != null && (context.classes.containsKey(importedName) || context.javaClassPath.find(importedName) != null)) {
-            return importedName;
+    static String resolveClassName(final ResolutionContext context, final String name, final Token where) {
+        if (name.contains(".")) {
+            if (context.classes.containsKey(name) || context.contracts.containsKey(name)) return name;
+            return context.javaClassPath.find(name) != null ? name : null;
         }
         final var qualifiedName = context.packageName.isEmpty() ? name : context.packageName + "." + name;
-        if (context.classes.containsKey(qualifiedName) || context.javaClassPath.find(qualifiedName) != null) return qualifiedName;
+        if (context.classes.containsKey(qualifiedName) || context.contracts.containsKey(qualifiedName)) {
+            return qualifiedName;
+        }
+        final var importedName = context.currentImports.types().get(name);
+        if (importedName != null
+                && (context.classes.containsKey(importedName) || context.contracts.containsKey(importedName)
+                    || context.javaClassPath.find(importedName) != null)) {
+            return importedName;
+        }
+        if (context.packageName.isEmpty()
+                && (context.classes.containsKey(name) || context.contracts.containsKey(name))) {
+            return name;
+        }
         final var starCandidates = starTypeCandidates(context, name);
         if (starCandidates.size() > 1) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT, where,
                     "Ambiguous type '" + name + "' from star imports; add an explicit import or alias."));
         }
         if (starCandidates.size() == 1) return starCandidates.getFirst();
-        return context.javaClassPath.find(name) != null ? name : null;
+        return null;
     }
 
     private static List<String> starTypeCandidates(final ResolutionContext context, final String simpleTypeName) {

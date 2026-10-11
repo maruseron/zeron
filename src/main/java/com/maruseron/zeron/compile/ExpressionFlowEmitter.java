@@ -77,16 +77,56 @@ final class ExpressionFlowEmitter {
     static void emitIfExpression(CompilationContext context, final CodeBuilder composer, final Expr.If iff) {
         final var elseLabel = composer.newLabel();
         final var doneLabel = composer.newLabel();
-        emitExpr(context, composer, iff.condition);
-        composer.ifeq(elseLabel);
-        emitExpr(context, composer, iff.thenExpr);
-        emitConversion(context, composer, context.lastEmittedType, iff.getType());
-        composer.goto_(doneLabel);
-        composer.labelBinding(elseLabel);
-        emitExpr(context, composer, iff.elseExpr);
-        emitConversion(context, composer, context.lastEmittedType, iff.getType());
-        composer.labelBinding(doneLabel);
-        context.lastEmittedType = iff.getType();
+        final var bindings = beginSumCaseTestBindings(context, composer, iff.condition);
+        try {
+            emitExpr(context, composer, iff.condition);
+            composer.ifeq(elseLabel);
+            emitExpr(context, composer, iff.thenExpr);
+            emitConversion(context, composer, context.lastEmittedType, iff.getType());
+            composer.goto_(doneLabel);
+            composer.labelBinding(elseLabel);
+            emitExpr(context, composer, iff.elseExpr);
+            emitConversion(context, composer, context.lastEmittedType, iff.getType());
+            composer.labelBinding(doneLabel);
+            context.lastEmittedType = iff.getType();
+        } finally {
+            endSumCaseTestBindings(context, bindings);
+        }
+    }
+
+    static List<Token> beginSumCaseTestBindings(final CompilationContext context,
+                                               final CodeBuilder composer,
+                                               final Expr condition) {
+        final var candidate = condition instanceof Expr.Grouping grouping ? grouping.expression : condition;
+        if (!(candidate instanceof Expr.SumCaseTest test)) return List.of();
+        final var bindings = test.pattern.arguments().stream()
+                .filter(argument -> argument.binding() != null).toList();
+        if (bindings.isEmpty()) return List.of();
+        context.symbols.beginScope();
+        final var names = new ArrayList<Token>();
+        for (final var argument : bindings) {
+            final var name = argument.binding();
+            context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, name,
+                    argument.resolvedType(), BindingMutability.IMMUTABLE);
+            context.symbols.define(name);
+            final var type = argument.resolvedType();
+            if (type instanceof IntDescriptor || type instanceof BooleanDescriptor) {
+                composer.iconst_0();
+            } else if (type instanceof FloatDescriptor) {
+                composer.ldc(0.0d);
+            } else {
+                composer.aconst_null();
+            }
+            composer.storeLocal(TypeKind.fromDescriptor(
+                    TypeDescriptor.toJavaClassDesc(type).descriptorString()),
+                    context.symbols.getSymbol(name).lvt() + context.localSlotOffset);
+            names.add(name);
+        }
+        return names;
+    }
+
+    static void endSumCaseTestBindings(final CompilationContext context, final List<Token> bindings) {
+        if (!bindings.isEmpty()) context.symbols.endScope();
     }
 
     static void emitForExpression(CompilationContext context, final CodeBuilder composer, final Expr.Pipeline pipeline) {
@@ -259,12 +299,13 @@ final class ExpressionFlowEmitter {
             composer.invokeinterface(ITERATOR_CLASS, "next", MethodTypeDesc.of(OPTION_CLASS));
             composer.astore(optionLocal.lvt() + context.localSlotOffset);
             composer.aload(optionLocal.lvt() + context.localSlotOffset);
-            composer.invokeinterface(OPTION_CLASS, "isSome", MethodTypeDesc.of(ConstantDescs.CD_boolean));
+            final var someClass = ClassDesc.of("zeron.lang.Option$$sum$Some");
+            composer.instanceOf(someClass);
             composer.ifeq(loopExit);
             composer.aload(optionLocal.lvt() + context.localSlotOffset);
-            composer.aconst_null();
-            composer.invokeinterface(OPTION_CLASS, "getOrElse",
-                    MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+            composer.checkcast(someClass);
+            composer.invokevirtual(someClass, "$zeron$payload$0",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object));
             emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), sourceElementType);
             storePipelineValue(context, composer, initialValue, sourceElementType);
         }
@@ -368,13 +409,13 @@ final class ExpressionFlowEmitter {
                 composer.invokeinterface(ITERATOR_CLASS, "next", MethodTypeDesc.of(OPTION_CLASS));
                 composer.astore(optionLocal.lvt() + context.localSlotOffset);
                 composer.aload(optionLocal.lvt() + context.localSlotOffset);
-                composer.invokeinterface(OPTION_CLASS, "isSome",
-                        MethodTypeDesc.of(ConstantDescs.CD_boolean));
+                final var someClass = ClassDesc.of("zeron.lang.Option$$sum$Some");
+                composer.instanceOf(someClass);
                 composer.ifeq(innerExit);
                 composer.aload(optionLocal.lvt() + context.localSlotOffset);
-                composer.aconst_null();
-                composer.invokeinterface(OPTION_CLASS, "getOrElse",
-                        MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+                composer.checkcast(someClass);
+                composer.invokevirtual(someClass, "$zeron$payload$0",
+                        MethodTypeDesc.of(ConstantDescs.CD_Object));
                 emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), flattenedType);
                 final var flattenedValue =
                         declareLoopLocal(context, nextLoopTemporary(context, "flatValue"), flattenedType);
@@ -517,6 +558,25 @@ final class ExpressionFlowEmitter {
         if (pattern.alias() != null) {
             storeMatchBinding(context, composer, pattern.alias(), matchType, matchedValue);
         }
+        if (pattern.sumCase()) {
+            final var caseDeclaration = context.resolution.classes().get(matchType.name());
+            if (caseDeclaration == null) throw new IllegalStateException("Resolved sum case class not found.");
+            for (int index = 0; index < pattern.arguments().size(); index++) {
+                final var argument = pattern.arguments().get(index);
+                if (argument.wildcard()) continue;
+                final var payloadType = argument.resolvedType();
+                final var erasedPayloadType = TypeSubstitution.erase(
+                        caseDeclaration.fields().get(index).type());
+                final var output = emitMatchTemporary(context, "sumPayload", payloadType);
+                loadPipelineValue(context, composer, matchedValue, matchType);
+                composer.invokevirtual(targetClass, "$zeron$payload$" + index,
+                        MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedPayloadType)));
+                emitConversion(context, composer, erasedPayloadType, payloadType);
+                storePipelineValue(context, composer, output, payloadType);
+                storeMatchBinding(context, composer, argument.binding(), payloadType, output);
+            }
+            return;
+        }
         if (pattern.extractor() == null) return;
 
         final var outputValues = new ArrayList<Bind>();
@@ -591,6 +651,7 @@ final class ExpressionFlowEmitter {
 
     static void emitHandle(final CompilationContext context, final CodeBuilder composer, final Expr.Handle handle) {
         final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+        beginScope(context);
         final var start = composer.newLabel();
         final var end = composer.newLabel();
         final var handler = composer.newLabel();
@@ -602,69 +663,65 @@ final class ExpressionFlowEmitter {
         composer.goto_(done);
         composer.labelBinding(end);
         composer.labelBinding(handler);
-        final var exceptionSlot = composer.allocateLocal(TypeKind.REFERENCE);
-        final var payloadSlot = composer.allocateLocal(TypeKind.REFERENCE);
-        composer.storeLocal(TypeKind.REFERENCE, exceptionSlot);
-        composer.loadLocal(TypeKind.REFERENCE, exceptionSlot);
+        final var exception = declareLoopLocal(context, nextLoopTemporary(context, "handlerException"),
+                TypeDescriptor.ofAny());
+        final var payload = declareLoopLocal(context, nextLoopTemporary(context, "handlerPayload"),
+                TypeDescriptor.ofAny());
+        storePipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(carrier);
         composer.invokevirtual(carrier, "payload", MethodTypeDesc.of(ConstantDescs.CD_Object));
-        composer.storeLocal(TypeKind.REFERENCE, payloadSlot);
+        storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
 
         for (final var arm : handle.arms) {
             final var next = composer.newLabel();
-            final var effectClass = TypeDescriptor.toJavaClassDesc(arm.resolvedEffectType());
-            composer.loadLocal(TypeKind.REFERENCE, payloadSlot);
-            composer.instanceOf(effectClass);
-            composer.ifeq(next);
-            if (arm.alias() != null || arm.binding() != null) {
-                beginScope(context);
-                try {
-                    if (arm.alias() != null) {
-                        final var aliasSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.alias(),
-                                arm.resolvedEffectType(), BindingMutability.IMMUTABLE);
-                        context.symbols.define(arm.alias());
-                        composer.loadLocal(TypeKind.REFERENCE, payloadSlot);
-                        composer.checkcast(effectClass);
-                        composer.storeLocal(TypeKind.REFERENCE, aliasSlot + context.localSlotOffset);
-                    }
-                    if (arm.namedPattern() != null) {
-                        final var bindingSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, arm.binding(),
-                                arm.resolvedPatternType(), BindingMutability.IMMUTABLE);
-                        context.symbols.define(arm.binding());
-                        composer.loadLocal(TypeKind.REFERENCE, payloadSlot);
-                        composer.checkcast(effectClass);
-                        final var erasedType = TypeSubstitution.erase(arm.declaredPatternType());
-                        composer.invokevirtual(effectClass, Stmt.propertyGetterName(arm.namedPattern().lexeme()),
-                                toJavaMethodDescriptor(TypeDescriptor.functionOf(
-                                        Stmt.propertyGetterName(arm.namedPattern().lexeme()), erasedType)));
-                        emitConversion(context, composer, erasedType, arm.resolvedPatternType());
-                        composer.storeLocal(TypeKind.fromDescriptor(
-                                TypeDescriptor.toJavaClassDesc(arm.resolvedPatternType()).descriptorString()),
-                                bindingSlot + context.localSlotOffset);
-                    }
-                    emitExpr(context, composer, arm.expression());
-                    emitConversion(context, composer, context.lastEmittedType, handle.getType());
-                } finally {
-                    endScope(context);
+            beginScope(context);
+            try {
+                declareMatchBindings(context, arm.pattern());
+                emitMatchPattern(context, composer, arm.pattern(), payload, next);
+                if (arm.guard() != null) {
+                    emitExpr(context, composer, arm.guard());
+                    composer.ifeq(next);
                 }
-            } else {
                 emitExpr(context, composer, arm.expression());
                 emitConversion(context, composer, context.lastEmittedType, handle.getType());
+            } finally {
+                endScope(context);
             }
             composer.goto_(done);
             composer.labelBinding(next);
         }
 
-        composer.loadLocal(TypeKind.REFERENCE, exceptionSlot);
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(carrier);
         composer.athrow();
         composer.labelBinding(done);
         composer.exceptionCatch(start, end, handler, carrier);
+        endScope(context);
         context.lastEmittedType = handle.getType();
     }
 
     static void emitTypeTest(CompilationContext context, final CodeBuilder composer, final Expr.TypeTest test) {
         emitExpr(context, composer, test.value);
         emitBox(context, composer, context.lastEmittedType);
-        composer.instanceOf(runtimeTypeTestClass(context, test.targetType));
+        composer.instanceOf(runtimeTypeTestClass(context, test.resolvedTargetType()));
+        context.lastEmittedType = TypeDescriptor.ofBoolean();
+    }
+
+    static void emitSumCaseTest(final CompilationContext context, final CodeBuilder composer,
+                                final Expr.SumCaseTest test) {
+        emitExpr(context, composer, test.value);
+        final var valueType = context.lastEmittedType;
+        final var value = emitMatchTemporary(context, "sumCaseTest", valueType);
+        storePipelineValue(context, composer, value, valueType);
+        final var failed = composer.newLabel();
+        final var done = composer.newLabel();
+        emitMatchPattern(context, composer, test.pattern, value, failed);
+        composer.iconst_1();
+        composer.goto_(done);
+        composer.labelBinding(failed);
+        composer.iconst_0();
+        composer.labelBinding(done);
         context.lastEmittedType = TypeDescriptor.ofBoolean();
     }
 
@@ -706,6 +763,7 @@ final class ExpressionFlowEmitter {
             case AnyDescriptor _ -> ConstantDescs.CD_Object;
             case UnitDescriptor _ -> TypeDescriptor.toJavaClassDesc(type);
             case StringDescriptor _ -> TypeDescriptor.toJavaClassDesc(type);
+            case GenericDescriptor generic -> TypeDescriptor.toJavaClassDesc(generic.baseType());
             case NominalDescriptor _ -> TypeDescriptor.toJavaClassDesc(type);
             default -> throw new IllegalStateException("Unsupported runtime type-test target: " + type);
         };

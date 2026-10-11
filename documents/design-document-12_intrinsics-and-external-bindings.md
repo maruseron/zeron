@@ -9,9 +9,10 @@ external or expected declarations.
 
 Array type and operation semantics remain in
 [design-document-06_intrinsic-arrays.md](design-document-06_intrinsic-arrays.md). Project
-compilation, library artifacts, and Java class-directory interop remain in
+compilation, library artifacts, and Java classpath metadata discovery remain in
 [design-document-11_compilation-libraries-and-host-integration.md](design-document-11_compilation-libraries-and-host-integration.md).
-An intrinsic is not a Java class lookup mechanism and does not imply JDK module discovery.
+Intrinsics are not a Java class lookup mechanism; Java classpath and JDK module discovery are
+separate interop facilities.
 
 ## Current Status
 
@@ -29,7 +30,7 @@ An intrinsic is not a Java class lookup mechanism and does not imply JDK module 
 - `Int.toFloat()` is a public extension that calls the private external helper `zeron.lang.intToFloat`;
   the helper is bound to the `INT_TO_FLOAT` intrinsic and lowers to JVM `i2d`.
 - `Float.toInt()` is a public checked conversion returning `Option<Int>`. It truncates toward zero,
-  returning `None` for NaN, infinities, or values whose truncated result is outside the 32-bit
+  returning `Option<Int>.None()` for NaN, infinities, or values whose truncated result is outside the 32-bit
   `Int` range; fractional values in the fringe around either endpoint are accepted when truncation
   yields a representable `Int`.
 - Intrinsic IDs and function bindings are internal. There is no source-level `intrinsic` keyword or
@@ -124,11 +125,11 @@ An intrinsic operation and an external Java function binding are different mecha
 
 - An intrinsic ID selects implementation owned by Zeron's compiler or runtime and is attached to a
   resolved syntax operation.
-- A Java class-directory entry reads public class-file metadata and records a JVM owner and method
+- A Java classpath entry reads public class-file metadata from an ordered directory/JAR root and records a JVM owner and method
   descriptor for ordinary invocation; details are in
   [design-document-11_compilation-libraries-and-host-integration.md](design-document-11_compilation-libraries-and-host-integration.md).
 - A signature-only top-level external function binds through `FunctionBindingRegistry`. A direct
-  static-method target is verified against class-directory metadata.
+  static-method target is verified against classpath metadata.
 - The curated external-class syntax exposes only exact Java member declarations validated against
   the two supported JDK facades. It does not provide general JDK class discovery or let source
   declarations broaden the approved member set.
@@ -149,8 +150,11 @@ all compiler-provided behavior depend on a class-file owner. A deliberately cura
    Java method discovery stay in doc 11. This document owns only the shared binding model.
 4. **Curated external class facade: initial slice implemented.** `java.lang.System.out` and
    `java.io.PrintStream.print(Object)` / `println(Object)` validate against the JDK runtime metadata
-   and lower as direct field/method instructions. General external class discovery, arbitrary fields,
-   inheritance, JDK module lookup, and Java generics remain deferred.
+   and lower as direct field/method instructions. Public classes in exported JDK packages are
+   independently discoverable from module class-file metadata. Public declared Java fields with
+   supported descriptors are validated and lowered as field instructions; mutable instance writes
+   are allowed only for non-final fields. Static writes, inheritance, and Java generics remain
+   deferred.
 5. **Broaden external declarations only for a concrete need.** Specify each additional type identity,
    visibility/import behavior, descriptor ownership, initialization, and interaction with contracts
    before expanding the supported facade set.

@@ -119,6 +119,7 @@ final class NominalTypeEmitter {
 
     private static void generateNominalClass(CompilationContext context, final Stmt.ClassDecl declaration) throws IOException {
         final var className = declaration.name().lexeme();
+        final var generatedSumCase = className.contains("$$sum$");
         final var classDesc = ClassDesc.of(className);
         final var interfaces = declaration.contractUses().stream()
             .map(contractUse -> ClassDesc.of(contractUse.name().lexeme()))
@@ -143,6 +144,10 @@ final class NominalTypeEmitter {
                         builder.withField(field.name().lexeme(), TypeDescriptor.toJavaClassDesc(field.type()),
                                 ClassFile.ACC_PRIVATE);
                     }
+                    if (generatedSumCase && declaration.fields().isEmpty()) {
+                        builder.withField("$zeron$singleton", classDesc,
+                                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL);
+                    }
                     for (final var property : declaration.properties()) {
                         if (!property.isCustom()) {
                             builder.withField(Stmt.propertyBackingFieldName(property.name().lexeme()),
@@ -160,6 +165,32 @@ final class NominalTypeEmitter {
                     builder.withMethodBody("<init>", constructorType,
                             declaration.constructor().isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE,
                             code -> emitCanonicalConstructor(context, code, declaration, classDesc));
+                    if (generatedSumCase && declaration.fields().isEmpty()) {
+                        builder.withMethodBody("<clinit>", MethodTypeDesc.of(ConstantDescs.CD_void),
+                                ClassFile.ACC_STATIC, code -> {
+                                    code.new_(classDesc);
+                                    code.dup();
+                                    code.invokespecial(classDesc, "<init>", constructorType);
+                                    code.putstatic(classDesc, "$zeron$singleton", classDesc);
+                                    code.return_();
+                                });
+                    }
+                    if (generatedSumCase) {
+                        for (int index = 0; index < declaration.fields().size(); index++) {
+                            final var field = declaration.fields().get(index);
+                            final var fieldType = TypeSubstitution.erase(field.type());
+                            final var getterName = "$zeron$payload$" + index;
+                            builder.withMethodBody(getterName,
+                                    MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(fieldType)),
+                                    ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL, code -> {
+                                        code.aload(0);
+                                        code.getfield(classDesc, field.name().lexeme(),
+                                                TypeDescriptor.toJavaClassDesc(fieldType));
+                                        code.return_(TypeKind.fromDescriptor(
+                                                TypeDescriptor.toJavaClassDesc(fieldType).descriptorString()));
+                                    });
+                        }
+                    }
                     for (final var method : declaration.methods()) {
                         final var flags = method.isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE;
                         final var witnessSlots = BytecodeEmitter.witnessSlots(context, method.typeDescriptor());

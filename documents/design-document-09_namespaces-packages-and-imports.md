@@ -239,8 +239,8 @@ members, do not gain private access even in the receiver's package, and add no v
 The compiler lowers each extension to a receiver-first static function. Read-only extension
 properties use the same lowering as zero-argument getter functions; they require an explicit type
 and getter, and cannot have an initializer, setter, or `mut` modifier. Extensions may target Zeron
-classes and contracts, and the intrinsic receivers `Unit`, `Int`, `Float`, `Boolean`, `String`, and
-`Array<T>`. Other pseudo-types, Java receivers, and nullable receivers are not extension targets.
+classes, contracts, and nominal sums, and the intrinsic receivers `Unit`, `Int`, `Float`, `Boolean`,
+`String`, and `Array<T>`. Other pseudo-types, Java receivers, and nullable receivers are not extension targets.
 When a class implements a contract, an extension declared for that contract is also applicable to
 the concrete class, with generic contract arguments substituted from the class declaration. This is
 a compile-time projection and still emits a static call to the imported extension. If more than one
@@ -305,8 +305,10 @@ not re-export declarations.
 Built-in types remain implicitly available. When the selected standard library provides it,
 `zeron.io` is implicitly star-imported so standard output functions such as `println` are available
 without an explicit import. `zeron.lang` is also implicitly star-imported to make foundational
-library declarations available. These defaults follow ordinary star-import precedence and ambiguity
-rules. Other standard-library packages and `java.lang` are not implicitly imported.
+library declarations available. Explicit imports and current-package declarations take precedence;
+the foundational unqualified type names `Option`, `Result`, `Ok`, and `Err` resolve to `zeron.lang`
+before other star-imported packages. Other standard-library packages and `java.lang` are not
+implicitly imported.
 The CLI compiles the bundled
 `zeron.collections` and `zeron.ranges` source units as ordinary units.
 

@@ -34,7 +34,7 @@ import static com.maruseron.zeron.scan.TokenType.*;
 
 public final class Parser {
     private static final Set<String> DEFAULT_ZERON_LANG_TYPES =
-            Set.of("Option", "Some", "None", "Result", "Ok", "Err");
+            Set.of("Option", "Result", "Ok", "Err");
 
     private static class ParseError extends RuntimeException {}
 
@@ -147,7 +147,8 @@ public final class Parser {
         var braceDepth = 0;
         for (var index = current; index + 1 < tokens.size(); index++) {
             final var token = tokens.get(index);
-            if (braceDepth == 0 && (token.type() == CLASS || token.type() == EFFECT || token.type() == CONTRACT)
+            if (braceDepth == 0 && (token.type() == CLASS || token.type() == EFFECT || token.type() == CONTRACT
+                    || token.type() == TYPE)
                     && tokens.get(index + 1).type() == IDENTIFIER) {
                 localTypeNames.add(tokens.get(index + 1).lexeme());
             }
@@ -174,6 +175,7 @@ public final class Parser {
                 if (match(CLASS)) return classDeclaration(true);
                 if (match(EFFECT)) return effectDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
+                if (match(TYPE)) return sumDeclaration(true);
                 if (match(SEALED)) {
                     consume(CONTRACT, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION,
                             "Only contracts can be sealed.");
@@ -186,12 +188,13 @@ public final class Parser {
                 if (match(FN)) return fnDeclaration(true);
                 if (match(EXTENSION)) return extensionDeclaration(true);
                 throw error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
-                        "Only values, functions, classes, contracts, and extensions may be public.");
+                        "Only values, functions, classes, contracts, sums, and extensions may be public.");
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
             if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
             if (levelMarker == null && match(EFFECT)) return effectDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
+            if (levelMarker == null && match(TYPE)) return sumDeclaration(false);
             if (levelMarker == null && match(SEALED)) {
                 consume(CONTRACT, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION,
                         "Only contracts can be sealed.");
@@ -204,6 +207,36 @@ public final class Parser {
         } catch (ParseError error) {
             synchronize();
             return null;
+        }
+    }
+
+    private Stmt.SumDecl sumDeclaration(final boolean isPublic) {
+        final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect sum type name."));
+        final var typeParameters = typeParameterDeclaration(name, false);
+        final var enclosingTypeParameters = activeTypeParameters;
+        activeTypeParameters = typeParameters;
+        try {
+            consume(EQUAL, "Expect '=' before sum cases.");
+            final var cases = new ArrayList<Stmt.SumCase>();
+            do {
+                final var caseName = consume(IDENTIFIER, "Expect sum case name.");
+                final var payloads = new ArrayList<Stmt.SumPayload>();
+                if (match(LEFT_PAREN)) {
+                    if (!check(RIGHT_PAREN)) {
+                        do {
+                            final var payloadName = consume(IDENTIFIER, "Expect sum payload name.");
+                            consume(COLON, "Expect ':' after sum payload name.");
+                            payloads.add(new Stmt.SumPayload(payloadName, collectType()));
+                        } while (match(COMMA));
+                    }
+                    consume(RIGHT_PAREN, "Expect ')' after sum payloads.");
+                }
+                cases.add(new Stmt.SumCase(caseName, payloads));
+            } while (match(PIPE));
+            consume(SEMICOLON, "Expect ';' after sum declaration.");
+            return new Stmt.SumDecl(name, List.copyOf(typeParameters.values()), cases, isPublic);
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
         }
     }
 
@@ -332,7 +365,7 @@ public final class Parser {
             if (!(receiverBase instanceof NominalDescriptor)
                     && !isSupportedBuiltinExtensionReceiver(receiverBase)) {
                 error(declarationName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                        "Extensions can target only Zeron classes, contracts, and supported built-in types.");
+                        "Extensions can target only nominal Zeron types and supported built-in types.");
             }
             final var receiverName = receiverBase instanceof NominalDescriptor nominal
                     ? nominal.name() : receiverBase.name();
@@ -1248,11 +1281,11 @@ public final class Parser {
             || activeTypeParameters.containsKey(name)) return name;
         if (importedTypes.containsKey(name)) return importedTypes.get(name);
         if (localTypeNames.contains(name)) return packageName.isEmpty() ? name : packageName + "." + name;
+        if (DEFAULT_ZERON_LANG_TYPES.contains(name)) return "zeron.lang." + name;
         if (!onDemandImports.isEmpty()) {
             final var explicitPackageType = onDemandImports.getFirst() + "." + name;
             return explicitPackageType;
         }
-        if (DEFAULT_ZERON_LANG_TYPES.contains(name)) return "zeron.lang." + name;
         return packageName.isEmpty() ? name : packageName + "." + name;
     }
 
@@ -1592,13 +1625,19 @@ public final class Parser {
 
     private Expr typeTest() {
         final var value = comparison();
-        if (!match(IS)) return value;
-        final var operator = previous();
-        final var negation = match(NOT) ? previous() : null;
-        final var test = new Expr.TypeTest(value, operator, collectType());
-        return negation == null
-                ? test
-                : new Expr.Unary(negation, test, TypeDescriptor.ofBoolean());
+        if (match(IS)) {
+            final var operator = previous();
+            final var negation = match(NOT) ? previous() : null;
+            final var test = new Expr.TypeTest(value, operator, collectType());
+            return negation == null
+                    ? test
+                    : new Expr.Unary(negation, test, TypeDescriptor.ofBoolean());
+        }
+        if (check(IDENTIFIER) && peek().lexeme().equals("matches")) {
+            final var operator = advance();
+            return new Expr.SumCaseTest(value, operator, matchPattern(true));
+        }
+        return value;
     }
 
     private Expr comparison() {
@@ -1957,43 +1996,57 @@ public final class Parser {
         final var arms = new ArrayList<Expr.HandleArm>();
         while (match(CASE)) {
             final var caseKeyword = previous();
-            final var previousStop = stopQualifiedTypeAtNamedPattern;
-            stopQualifiedTypeAtNamedPattern = true;
-            final TypeDescriptor effectType;
-            try {
-                effectType = collectType();
-            } finally {
-                stopQualifiedTypeAtNamedPattern = previousStop;
-            }
-            if (effectType instanceof GenericDescriptor || effectType instanceof ReferenceDescriptor
-                    || effectType instanceof NullableDescriptor) {
-                error(caseKeyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                        "Handler cases must name a non-generic effect type.");
-            }
-            Token namedPattern = null;
-            Token binding = null;
-            if (match(DOT)) {
-                namedPattern = consume(IDENTIFIER, "Expect named pattern after '.'.");
-                consume(LEFT_PAREN, "Expect '(' after named pattern.");
-                if (check(IDENTIFIER) && peek().lexeme().equals("_")) {
-                    advance();
-                } else {
-                    binding = consume(IDENTIFIER, "Expect binding name or '_' in named pattern.");
-                }
-                consume(RIGHT_PAREN, "Expect ')' after named pattern argument.");
-            }
+            var pattern = matchPattern(true);
             final var alias = match(AS)
                     ? consume(IDENTIFIER, "Expect binding name after 'as'.")
                     : null;
+            if (alias != null) pattern = addRootPatternAlias(pattern, alias);
+            final var effectType = handlerEffectType(pattern, caseKeyword);
+            final var guard = match(IF) ? expression() : null;
             consume(ARROW, "Expect '->' after handler case.");
             final var body = expression();
             consume(SEMICOLON, "Expect ';' after handler case.");
-            arms.add(new Expr.HandleArm(caseKeyword, effectType, alias, namedPattern, binding, body));
+            arms.add(new Expr.HandleArm(caseKeyword, effectType, pattern, guard, body));
         }
         consume(RIGHT_BRACE, "Expect '}' after handler cases.");
         if (arms.isEmpty()) error(keyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                 "A handler must contain at least one case.");
         return new Expr.Handle(keyword, protectedExpression, arms);
+    }
+
+    private Expr.MatchPattern addRootPatternAlias(final Expr.MatchPattern pattern, final Token alias) {
+        if (!pattern.alternatives().isEmpty()) {
+            final var alternatives = pattern.alternatives().stream()
+                    .map(alternative -> addRootPatternAlias(alternative, alias))
+                    .toList();
+            return new Expr.MatchPattern(pattern.keyword(), null, null, List.of(), null, null,
+                    false, alternatives);
+        }
+        return new Expr.MatchPattern(pattern.keyword(), pattern.type(), pattern.extractor(),
+                pattern.arguments(), pattern.binding(), alias, pattern.wildcard(), List.of());
+    }
+
+    private TypeDescriptor handlerEffectType(final Expr.MatchPattern pattern, final Token where) {
+        if (!pattern.alternatives().isEmpty()) {
+            final var effectType = handlerEffectType(pattern.alternatives().getFirst(), where);
+            for (final var alternative : pattern.alternatives()) {
+                if (!effectType.equals(handlerEffectType(alternative, where))) {
+                    error(where, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "OR-pattern alternatives in an effect handler must name the same effect type.");
+                }
+            }
+            return effectType;
+        }
+        if (pattern.type() == null || pattern.wildcard() || pattern.binding() != null) {
+            error(where, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    "An effect handler pattern must begin with an effect type.");
+        }
+        if (pattern.type() instanceof GenericDescriptor || pattern.type() instanceof ReferenceDescriptor
+                || pattern.type() instanceof NullableDescriptor) {
+            error(where, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    "Handler cases must name a non-generic effect type.");
+        }
+        return pattern.type();
     }
 
     private Expr matchExpression(final Token keyword) {

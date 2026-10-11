@@ -30,6 +30,50 @@ import static org.junit.Assert.assertTrue;
 
 public final class ZeronLibraryIndexTest {
     @Test
+    public void separatelyCompiledClientUsesPublicSumFromLibraryIndex() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "sumlibrary" + suffix;
+        final var clientPackage = "sumclient" + suffix;
+        final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-sum-library-");
+        final var library = parse("Library.zn", """
+                package %s;
+                public type Choice<T> = Some(value: T) | Empty;
+                """.formatted(libraryPackage));
+        final var client = parse("Main.zn", """
+                package %s;
+                import %s.*;
+                fn run(): Int = match (Choice.Some(42)) {
+                    case Choice.Some(value) -> value;
+                    case Choice.Empty() -> 0;
+                };
+                """.formatted(clientPackage, libraryPackage));
+        try {
+            deleteTree(Path.of("dist"));
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            copyTree(Path.of("dist"), libraryRoot);
+            final var libraryIndex = ZeronLibraryIndex.readFromDirectory(libraryRoot);
+            assertTrue(libraryIndex.declarations().stream().anyMatch(ZeronLibraryIndex.SumExport.class::isInstance));
+
+            deleteTree(Path.of("dist"));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), clientPackage + ".Main", clientPackage, List.of(libraryIndex));
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(clientPackage + ".Main").getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(libraryRoot);
+        }
+    }
+
+    @Test
     public void separatelyCompiledClientUsesWitnessMethodFromLibraryIndex() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var libraryPackage = "displaylibrary" + suffix;

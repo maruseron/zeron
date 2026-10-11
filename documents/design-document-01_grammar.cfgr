@@ -8,11 +8,11 @@ packageDeclaration         : "package" qualifiedName ";" ;
 qualifiedName              : IDENTIFIER {"." IDENTIFIER} ;
 importDeclaration          : "import" qualifiedName ["as" IDENTIFIER] ";" ;
 
-topLevelDeclaration        : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl
+topLevelDeclaration        : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl | sumDecl
                            | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
                            | externalClassDecl | publicExternalClassDecl
                            | effectDecl | publicEffectDecl | extensionDecl | publicExtensionDecl
-                           | publicClassDecl | publicContractDecl | publicSealedContractDecl ;
+                           | publicClassDecl | publicContractDecl | publicSealedContractDecl | publicSumDecl ;
 publicFunDecl              : "public" funDecl ;
 publicExternalFunctionDecl : "public" externalFunctionDecl ;
 publicEffectDecl           : "public" effectDecl ;
@@ -21,7 +21,11 @@ publicExternalClassDecl    : "public" externalClassDecl ;
 publicClassDecl            : "public" classDecl ;
 publicContractDecl         : "public" contractDecl ;
 publicSealedContractDecl   : "public" sealedContractDecl ;
+publicSumDecl              : "public" sumDecl ;
 sealedContractDecl         : "sealed" contractDecl ;
+sumDecl                    : "type" IDENTIFIER [typeParameters] "=" sumCase {"|" sumCase} ";" ;
+sumCase                    : IDENTIFIER ["(" [sumPayload {"," sumPayload}] ")"] ;
+sumPayload                 : IDENTIFIER ":" type ;
 declaration                : varDecl | funDecl | statement ;
 
 varDecl                    : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
@@ -109,7 +113,7 @@ bitwiseOr                  : bitwiseXor {"|" bitwiseXor} ;
 bitwiseXor                 : bitwiseAnd {"^" bitwiseAnd} ;
 bitwiseAnd                 : equality {"&" equality} ;
 equality                   : typeTest {("!=" | "==" | "===") typeTest} ;
-typeTest                   : comparison ["is" ["not"] type] ;
+typeTest                   : comparison ["is" ["not"] type | "matches" matchPattern] ;
 comparison                 : shift {(">" | ">=" | "<" | "<=") shift} ;
 shift                      : term {("<<" | ">>" | ">>>") term} ;
 term                       : factor {("-" | "+") factor} ;
@@ -148,7 +152,7 @@ primary                    : INT
                            | "(" expression ")"
                            | range ;
 handleExpr                 : "handle" "(" expression ")" "with" "{" handleArm+ "}" ;
-handleArm                  : "case" type ["as" IDENTIFIER] "->" expression ";" ;
+handleArm                  : "case" matchPattern ["if" expression] "->" expression ";" ;
 arrayLiteral               : "[" expression {"," expression} "]" ;
 ifExpr                     : "if" "(" expression ")" "then" expression "else" expression ;
 matchExpr                  : "match" "(" expression ")" "{" matchArm+ "}" ;
@@ -191,6 +195,22 @@ range                      : INT ".." INT ;
 # - Sealed contracts require a non-empty permits list. Permitted classes must be in the contract's
 #   package; public sealed contracts permit only public classes. Generic arity and type parameters
 #   correspond by position. Permitted implementation classes are final.
+# - Nominal sums use `type Name<T> = Case(value: T) | Empty;`. Cases are closed, share the sum's
+#   visibility, have immutable positional payloads, and are constructed as `Name.Case(args)` (including
+#   `Name.Empty()`). Generic arguments infer from payloads and expected type; underconstrained cases
+#   require explicit arguments. Each zero-payload case is a singleton by identity. Sum matches use
+#   `case Name.Case(binding, _)`, require exact payload arity, and are exhaustive over unguarded cases
+#   or a final unguarded wildcard. Nullable sums, nested/OR sum patterns, named args, defaults,
+#   methods, and contract conformance are not part of the MVP.
+# - `value is Name.Case` refines the value to that case on the true path; generic case arguments
+#   come from the sum value. Named payloads can be read only while that case refinement is active.
+#   `value matches Name.Case(binding, _)` is supported as a direct `if` or `while` condition and
+#   binds immutable payload locals only in the successful branch. Composing `matches` with logical
+#   operators, negation, or other expressions is not supported yet. Payloads are read-only.
+# - Extensions may target the nominal sum type and remain statically dispatched. A witness may target
+#   a sum once for its complete generic pattern; its methods receive the sum value and may inspect it
+#   with `match`. This does not make generated case classes conform to the witnessed contract.
+#   Sum-target witnesses cannot map class named constructors.
 # - Match expressions require a non-null sealed-contract value. Every permitted class must be covered
 #   by an unguarded case, unless a final unguarded `_` covers remaining values. Case generic arguments
 #   must match the scrutinee's contract arguments. Cases may invoke declared class patterns with
@@ -258,13 +278,18 @@ range                      : INT ".." INT ;
 #   `|`, `^`, `~` and shifts require `Int`; `>>>` is zero-filling. Shift distances follow JVM Int
 #   behavior (only the low five bits are used).
 # - Array literals are non-empty. A valueless `return` has type Unit and is rejected in non-Unit functions.
-# - Effects are nominal non-generic payload classes. Effects are supported in callable signatures
-#   and function types, but not in external Java signatures, entry-point `main`, or top-level
+# - Effects are nominal non-generic payload classes. Effects are supported in callable signatures,
+#   function types, and entry-point `main`, but not in external Java signatures or top-level
 #   initializers. A raised effect must be declared by the enclosing callable or handled by a typed
-#   `handle` case. Handler cases accept a single effect type, an optional whole-payload alias, or
-#   one named public-property pattern; there are no catch-all cases or effect subtyping in this
-#   slice. Unmatched effects
-#   propagate at runtime. `Result` remains an ordinary value type.
+#   `handle` case. Handler cases reuse nested and OR `matchPattern` syntax, allow Boolean guards,
+#   and require their OR alternatives to name the same effect type. Only an unguarded, irrefutable
+#   pattern establishes effect coverage; unmatched effects propagate at runtime. Java exceptions
+#   are not caught or translated. There are no catch-all cases or effect subtyping in this slice.
+#   `Result` remains an ordinary value type.
+# - Sum declarations introduce closed nominal types. Cases are constructed and matched through
+#   qualified calls/patterns; payload positions are positional, and generic case patterns inherit
+#   type arguments from the scrutinee unless arguments are explicitly supplied. Nullary cases are
+#   singletons. Public compiled-library metadata preserves the sum declaration and ordered payloads.
 #   Type argument arity is checked by resolution.
 # Parser productions describe syntax; declaration, type-argument, and return-flow constraints are
 # enforced by resolution.

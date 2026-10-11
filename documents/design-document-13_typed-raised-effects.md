@@ -10,13 +10,13 @@ caller.
 The initial slice supports nominal, non-generic `effect` declarations; `raises` clauses on
 functions, class methods, extension methods, named constructors, and function type annotations;
 `raise` expressions; and expression handlers. Effects are checked by the resolver and represented in
-compiled-library API metadata. A handler may list one or more exact effect types, optionally bind
-the whole payload with `as`, and evaluate an expression for each case.
+compiled-library API metadata. Handler cases use the existing named-pattern syntax, can bind the
+whole payload with `as`, and can include Boolean guards.
 
 The implementation does not add effect inheritance, effect generics, effect rows, catch-all or
-wildcard cases, property patterns, asynchronous effects, or Java exception translation. Effects may
-not escape from the entry-point `main` function or top-level initializers. The implementation is
-limited to expression handlers; no statement-level `try`/`catch` form is introduced.
+wildcard cases, asynchronous effects, or Java exception translation. Declared effects may escape
+from the entry-point `main`; top-level initializers remain effect-free. The implementation is limited
+to expression handlers; no statement-level `try`/`catch` form is introduced.
 
 ## Surface syntax
 
@@ -54,11 +54,19 @@ annotation's return type:
 fn loadFunction(): (String) -> String raises NotFound = read;
 ```
 
-A handler protects exactly one parenthesized expression. Each `case` names a concrete effect type,
-may bind the entire payload to an immutable alias with `as`, or bind one named public property with
-`Effect.property(binding)` (using `_` when the property value is not needed), and ends with an
-expression and semicolon. Cases are tried in source order. The parser requires at least one case
-and rejects duplicate effect types during resolution.
+A handler protects exactly one parenthesized expression. Each `case` begins with a concrete effect
+type and may use the same nested named patterns as `match`, bind the whole payload with `as`, and
+add an `if` guard:
+
+```zeron
+handle (read(path)) with {
+    case NotFound.path(missingPath) if missingPath == path -> "";
+    case NotFound as failure -> report(failure);
+};
+```
+
+OR-pattern alternatives in a handler case must name the same effect type. Multiple cases for the
+same effect are allowed and tried in source order. The parser requires at least one case.
 
 ## Static semantics
 
@@ -88,27 +96,30 @@ Duplicate entries are rejected. An implementation may raise fewer effects than t
 is assigned to, but not more; effects are checked separately from the generated JVM function-shape
 identity.
 
-The entry-point `main` function cannot declare raised effects. Effects in its body therefore need
-local handlers. Top-level value initializers also cannot raise effects because there is no enclosing
-callable to receive them. Java exceptions are not translated into Zeron effects, and external Java
-functions have no raised effects in their signatures.
+The entry-point `main` function may declare raised effects like any other callable. Effects not
+handled within `main` must appear in its `raises` clause. Top-level value initializers cannot raise
+effects because there is no enclosing callable or entry-point boundary to receive them. Java
+exceptions are not translated into Zeron effects, and external Java functions have no raised effects
+in their signatures.
 
 ### Handler scope and result type
 
 The protected expression is resolved with an isolated raised-effect set. On normal completion its
-value is preserved. The handler removes the effect types listed by its cases from the protected
-expression's escaping set; any other effects remain and must be declared or handled by an outer
-scope. Handler arms are resolved in the enclosing effect scope, so effects raised by an arm are not
-removed by that same handler.
+value is preserved. A handler removes an effect from that set only if it has an unguarded,
+irrefutable pattern for that effect. In particular, guarded or refutable patterns do not prove
+coverage; a set of refutable cases is not combined to infer exhaustiveness. An unmatched payload,
+including one for a listed but incompletely handled effect, remains in the escaping set and must be
+declared or handled by an outer scope. Handler arms and guards are resolved in the enclosing effect
+scope, so effects they raise are not removed by that same handler.
 
 The handler expression has a common result type for the protected expression's normal result and all
 handler arms. When the protected expression has type `Never`, only the arms determine the result
 type. This ensures that both normal and handled paths produce values compatible with the expression's
 static type.
 
-Cases do not establish exhaustiveness. A missing case is a propagation path, not a compile-time
-error; the caller must declare the unmatched effect or handle it elsewhere. Wildcards and catch-all
-cases are intentionally absent, so a handler cannot silently erase an unlisted effect.
+OR-patterns, nested patterns, multiple outputs, and guards reuse `match` pattern semantics. OR
+alternatives must bind the same names with compatible types. The handler has no wildcard or
+catch-all case, so it cannot silently erase an unlisted effect.
 
 ### Functions and library compatibility
 
@@ -131,46 +142,38 @@ The compiler emits a final `zeron.runtime.RaisedEffect` runtime exception with a
 support class is emitted alongside compiled classes.
 
 A handler compiles its protected expression into a JVM exception-table region catching only
-`RaisedEffect`. It checks the carrier payload against each declared effect class, binds the matching
-payload alias or reads the requested public property, and evaluates the matching arm. If no case
-matches, it rethrows the same carrier. Ordinary Java exceptions are not caught or rewritten. Effect
-payload classes and carriers are emitted as normal class files and public effect metadata is
-available to imported compiled libraries.
+`RaisedEffect`. It tries the patterns in source order, evaluates a guard only after its pattern
+matches, and evaluates the arm only when both pattern and guard succeed. If no case matches, it
+rethrows the same carrier. Ordinary Java exceptions are not caught or rewritten. An unhandled
+carrier escaping the generated `main` method likewise propagates unchanged across the host boundary;
+the current compiler does not add a launcher that catches and formats it. A future launcher may
+report an uncaught Zeron effect by catching only `RaisedEffect`, without translating Java exceptions
+or implicitly stringifying the payload. Effect payload classes and carriers are emitted as normal
+class files and public effect metadata is available to imported compiled libraries.
 
 ## Limitations and roadmap
-
-Handler property patterns are limited to one public property and no guard. OR-patterns and catch-all
-cases are deferred until coverage and propagation rules are specified; any future wildcard must not
-make an undeclared effect disappear silently.
 
 Other follow-up areas:
 
 1. Design effect subtyping and generic payloads, if needed, without conflating effect identity with
    nominal value-type inheritance.
-2. Design multi-property, nested, and OR handler patterns with coverage diagnostics.
-3. Settle the host-boundary policy for raised effects. The current rule requires effects in `main`
-   to be handled locally; explore whether unhandled effects may instead escape from `main` to the
-   host, either for all effect types or only for designated host-facing effects. This could keep
-   beginner programs from needing handlers for routine operations, but must define how the host
-   reports or handles an uncaught effect rather than silently dropping it. Decide separately how
-   top-level initializers should behave.
-4. Add an explicit Java exception bridge only as an opt-in boundary construct; ordinary external
+2. Add an explicit Java exception bridge only as an opt-in boundary construct; ordinary external
    functions should remain effect-free and Java exceptions should continue to propagate unchanged.
-5. Explore effect-set polymorphism only after concrete callable and function-type compatibility has
+3. Explore effect-set polymorphism only after concrete callable and function-type compatibility has
    stabilized.
-6. Decide whether observable I/O belongs in the raised-effect system. `raises` currently describes
+4. Decide whether observable I/O belongs in the raised-effect system. `raises` currently describes
    typed control-flow effects, not purity or the absence of observable side effects, so `println`
    can have no declared raised effects without being pure. If operations such as `println` were to
    raise a hypothetical `IO` effect, weigh the semantic benefit against the learning burden of
-   introducing effect handling early; consider that choice together with the proposed `main`
-   boundary policy.
-7. Explore first-class, typed effect-handler values that can be named and reused after `with`,
+   introducing effect handling early; `main` may declare such effects and let them escape to the
+   host boundary.
+5. Explore first-class, typed effect-handler values that can be named and reused after `with`,
    while keeping `match` for ordinary value inspection and `handle` for raised control flow.
    Specify how handler result types relate to the protected expression's normal result, how
    unhandled effects propagate, and how handler-raised effects are checked; consider composition
    separately. Keep this distinct from resumable algebraic effect handlers unless continuation
    resumption is explicitly designed.
-8. Decide whether raised effects should remain abortive or eventually grow into fully resumable
+6. Decide whether raised effects should remain abortive or eventually grow into fully resumable
    algebraic effects. Resumption is not part of the current runtime model: `raise` throws a carrier
    and unwinds the JVM stack to a handler. Supporting resumable operations would require capturing
    and invoking continuations and would change the compiler/runtime model substantially. Do not

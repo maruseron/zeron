@@ -80,6 +80,39 @@ public final class TypedRaisedEffectsTest {
                     fn work(): Int raises Failure = Worker.new().work();
                     fn start(): Worker raises Startup = Worker.start();
                     fn callbackType(): (Int) -> Int raises Failure = callback;
+                    class Details {
+                        public property first: String;
+                        public property second: String;
+                        public pattern pair(left: String, right: String) {
+                            left = this.first;
+                            right = this.second;
+                        }
+                    }
+                    effect StructuredFailure {
+                        public property details: Details;
+                    }
+                    fn structured(): String = handle (
+                        raise StructuredFailure.new(Details.new("nested", "pattern"))
+                    ) with {
+                        case StructuredFailure.details(Details.pair(left, right))
+                            if left == "skip" -> "guarded";
+                        case StructuredFailure as failure -> failure.details.first + failure.details.second;
+                    };
+                    fn alternatives(): String = handle (
+                        raise StructuredFailure.new(Details.new("a", "b"))
+                    ) with {
+                        case StructuredFailure.details(Details.pair(left, right))
+                            | StructuredFailure.details(Details.pair(left, right)) -> left + right;
+                    };
+                    fn guardedPropagation(): String raises StructuredFailure = handle (
+                        raise StructuredFailure.new(Details.new("a", "b"))
+                    ) with {
+                        case StructuredFailure.details(Details.pair(left, right))
+                            if left == "skip" -> "handled";
+                    };
+                    fn javaException(): Int = handle (1 / 0) with {
+                        case Failure -> 1;
+                    };
                     """.formatted(appPackage, libraryPackage, libraryPackage, libraryPackage,
                     libraryPackage, libraryPackage));
             final var appCompiler = CompilationService.forCompilationUnits(List.of(appUnit),
@@ -92,9 +125,26 @@ public final class TypedRaisedEffectsTest {
                     getClass().getClassLoader())) {
                 final var main = loader.loadClass(appPackage + ".Main");
                 assertEquals("library", main.getMethod("handled").invoke(null));
+                assertEquals("nestedpattern", main.getMethod("structured").invoke(null));
+                assertEquals("ab", main.getMethod("alternatives").invoke(null));
                 final var captured = main.getMethod("captured").invoke(null);
                 assertEquals("captured", captured.getClass().getInterfaces()[0]
                         .getMethod("invoke").invoke(captured));
+                try {
+                    main.getMethod("guardedPropagation").invoke(null);
+                    throw new AssertionError("A failed guarded pattern must propagate the effect.");
+                } catch (final InvocationTargetException exception) {
+                    final var carrier = exception.getCause();
+                    assertEquals("zeron.runtime.RaisedEffect", carrier.getClass().getName());
+                    assertEquals(appPackage + ".StructuredFailure",
+                            carrier.getClass().getMethod("payload").invoke(carrier).getClass().getName());
+                }
+                try {
+                    main.getMethod("javaException").invoke(null);
+                    throw new AssertionError("Effect handlers must not catch Java exceptions.");
+                } catch (final InvocationTargetException exception) {
+                    assertEquals(ArithmeticException.class, exception.getCause().getClass());
+                }
                 try {
                     main.getMethod("start").invoke(null);
                     throw new AssertionError("Unmatched effects must be rethrown.");
@@ -138,14 +188,13 @@ public final class TypedRaisedEffectsTest {
     }
 
     @Test
-    public void entryPointAndTopLevelInitializersCannotRaiseEffects() {
+    public void entryPointMayDeclareEffectsButTopLevelInitializersCannotRaiseThem() {
         final var entryPoint = parse("Main.zn", """
                 effect Failure {}
                 fn main(): Unit raises Failure = raise Failure.new();
                 """);
         final var entryPointResult = new ResolutionService().resolveUnitsWithDiagnostics(List.of(entryPoint));
-        assertTrue(entryPointResult.errors().stream()
-                .anyMatch(error -> error.message().contains("entry-point main")));
+        assertTrue(entryPointResult.errors().isEmpty());
 
         final var initializer = parse("Initializer.zn", """
                 effect Failure {}
@@ -165,11 +214,49 @@ public final class TypedRaisedEffectsTest {
                 fn handlesButOmitsArmEffect(): Int = handle (original()) with {
                     case Original -> raise FromHandler.new();
                 };
+                fn guardedDoesNotHandle(): Int = handle (original()) with {
+                    case Original if true -> 1;
+                };
                 """);
         final var armEffectResult = new ResolutionService().resolveUnitsWithDiagnostics(List.of(armEffects));
         assertTrue(armEffectResult.errors().stream()
                 .anyMatch(error -> error.message().contains("Undeclared raised effects")
                         && error.message().contains("FromHandler")));
+        assertTrue(armEffectResult.errors().stream()
+                .anyMatch(error -> error.message().contains("Undeclared raised effects")
+                        && error.message().contains("Original")));
+    }
+
+    @Test
+    public void unhandledMainEffectEscapesAsTheRaisedEffectCarrier() throws Exception {
+        final var packageName = "effectBoundary" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-effects-boundary-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                public effect Startup {}
+                fn main(): Unit raises Startup = raise Startup.new();
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit),
+                    packageName + ".Main", packageName, List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                try {
+                    loader.loadClass(packageName + ".Main").getMethod("main").invoke(null);
+                    throw new AssertionError("The host boundary must not swallow an unhandled effect.");
+                } catch (final InvocationTargetException exception) {
+                    final var carrier = exception.getCause();
+                    assertEquals("zeron.runtime.RaisedEffect", carrier.getClass().getName());
+                    assertEquals(packageName + ".Startup",
+                            carrier.getClass().getMethod("payload").invoke(carrier).getClass().getName());
+                }
+            }
+        } finally {
+            deleteTree(output);
+        }
     }
 
     private static CompilationUnit parse(final String sourcePath, final String source) {

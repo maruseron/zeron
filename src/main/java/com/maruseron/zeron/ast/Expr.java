@@ -87,6 +87,7 @@ public sealed interface Expr {
         private Stmt.ExtensionMethod resolvedExtensionMethod;
         private Call namespaceCall;
         private String resolvedClassName;
+        private boolean sumCaseFactory;
         private String resolvedOwnerName;
         private boolean receiverRequiresCast;
         private JavaCallTarget javaCallTarget;
@@ -134,6 +135,8 @@ public sealed interface Expr {
         public void setNamespaceCall(final Call call) { namespaceCall = call; }
         public String resolvedClassName() { return resolvedClassName; }
         public void setResolvedClassName(String className) { resolvedClassName = className; }
+        public boolean sumCaseFactory() { return sumCaseFactory; }
+        public void setSumCaseFactory(final boolean value) { sumCaseFactory = value; }
         public String resolvedOwnerName() { return resolvedOwnerName; }
         public void setResolvedOwnerName(String name) { resolvedOwnerName = name; }
         public boolean receiverRequiresCast() { return receiverRequiresCast; }
@@ -182,6 +185,7 @@ public sealed interface Expr {
         private ResolvedIntrinsicOperation intrinsicOperation;
         private String resolvedOwnerName;
         private boolean resolvedAsProperty;
+        private int sumPayloadIndex = -1;
         private JavaFieldTarget javaFieldTarget;
         private Token namespaceValueSymbol;
         private Stmt.Var namespaceValueDeclaration;
@@ -207,6 +211,8 @@ public sealed interface Expr {
         public void setResolvedOwnerName(final String ownerName) { resolvedOwnerName = ownerName; }
         public boolean resolvedAsProperty() { return resolvedAsProperty; }
         public void setResolvedAsProperty(final boolean value) { resolvedAsProperty = value; }
+        public int sumPayloadIndex() { return sumPayloadIndex; }
+        public void setSumPayloadIndex(final int index) { sumPayloadIndex = index; }
         public JavaFieldTarget javaFieldTarget() { return javaFieldTarget; }
         public void setJavaFieldTarget(final JavaFieldTarget target) { javaFieldTarget = target; }
         public Token namespaceValueSymbol() { return namespaceValueSymbol; }
@@ -423,6 +429,7 @@ public sealed interface Expr {
         public final Token operator;
         public final TypeDescriptor targetType;
         private TypeDescriptor type = TypeDescriptor.ofBoolean();
+        private TypeDescriptor resolvedTargetType;
 
         public TypeTest(final Expr value, final Token operator, final TypeDescriptor targetType) {
             this.value = value;
@@ -437,6 +444,36 @@ public sealed interface Expr {
         public void setType(final TypeDescriptor type) {
             this.type = type;
         }
+
+        public TypeDescriptor resolvedTargetType() {
+            return resolvedTargetType == null ? targetType : resolvedTargetType;
+        }
+
+        public void setResolvedTargetType(final TypeDescriptor resolvedTargetType) {
+            this.resolvedTargetType = resolvedTargetType;
+        }
+    }
+
+    final class SumCaseTest implements Expr {
+        public final Expr value;
+        public final Token operator;
+        public final MatchPattern pattern;
+        private TypeDescriptor type = TypeDescriptor.ofBoolean();
+        private TypeDescriptor resolvedCaseType;
+        private List<TypeDescriptor> payloadTypes = List.of();
+
+        public SumCaseTest(final Expr value, final Token operator, final MatchPattern pattern) {
+            this.value = value;
+            this.operator = operator;
+            this.pattern = pattern;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor type) { this.type = type; }
+        public TypeDescriptor resolvedCaseType() { return resolvedCaseType; }
+        public void setResolvedCaseType(final TypeDescriptor type) { resolvedCaseType = type; }
+        public List<TypeDescriptor> payloadTypes() { return payloadTypes; }
+        public void setPayloadTypes(final List<TypeDescriptor> types) { payloadTypes = List.copyOf(types); }
     }
 
     final class Cast implements Expr {
@@ -477,6 +514,7 @@ public sealed interface Expr {
         private TypeDescriptor declaredPatternType;
         private TypeDescriptor resolvedPatternType;
         private boolean legacyProperty;
+        private boolean sumCase;
 
         public MatchPattern(final Token keyword, final TypeDescriptor type, final Token extractor,
                             final List<MatchPattern> arguments, final Token binding, final Token alias,
@@ -504,6 +542,16 @@ public sealed interface Expr {
         public TypeDescriptor declaredPatternType() { return declaredPatternType; }
         public TypeDescriptor resolvedPatternType() { return resolvedPatternType; }
         public boolean legacyProperty() { return legacyProperty; }
+        public boolean sumCase() { return sumCase; }
+
+        public List<Token> bindingNames() {
+            if (!alternatives.isEmpty()) return alternatives.getFirst().bindingNames();
+            final var names = new java.util.ArrayList<Token>();
+            if (binding != null) names.add(binding);
+            if (alias != null) names.add(alias);
+            for (final var argument : arguments) names.addAll(argument.bindingNames());
+            return List.copyOf(names);
+        }
 
         public void resolve(final Stmt.Pattern declaration, final TypeDescriptor resolvedType,
                             final boolean legacyProperty) {
@@ -516,6 +564,8 @@ public sealed interface Expr {
             this.declaredPatternType = declaredType;
             this.resolvedPatternType = resolvedType;
         }
+
+        public void markSumCase() { sumCase = true; }
     }
 
     final class MatchArm {
@@ -587,40 +637,27 @@ public sealed interface Expr {
     final class HandleArm {
         private final Token keyword;
         private final TypeDescriptor effectType;
-        private final Token alias;
-        private final Token namedPattern;
-        private final Token binding;
+        private final MatchPattern pattern;
+        private final Expr guard;
         private final Expr expression;
         private TypeDescriptor resolvedEffectType;
-        private TypeDescriptor declaredPatternType;
-        private TypeDescriptor resolvedPatternType;
 
         public HandleArm(final Token keyword, final TypeDescriptor effectType,
-                         final Token alias, final Token namedPattern, final Token binding,
-                         final Expr expression) {
+                         final MatchPattern pattern, final Expr guard, final Expr expression) {
             this.keyword = keyword;
             this.effectType = effectType;
-            this.alias = alias;
-            this.namedPattern = namedPattern;
-            this.binding = binding;
+            this.pattern = pattern;
+            this.guard = guard;
             this.expression = expression;
         }
 
         public Token keyword() { return keyword; }
         public TypeDescriptor effectType() { return effectType; }
-        public Token alias() { return alias; }
-        public Token namedPattern() { return namedPattern; }
-        public Token binding() { return binding; }
+        public MatchPattern pattern() { return pattern; }
+        public Expr guard() { return guard; }
         public Expr expression() { return expression; }
         public TypeDescriptor resolvedEffectType() { return resolvedEffectType; }
         public void setResolvedEffectType(final TypeDescriptor type) { resolvedEffectType = type; }
-        public TypeDescriptor declaredPatternType() { return declaredPatternType; }
-        public TypeDescriptor resolvedPatternType() { return resolvedPatternType; }
-        public void setResolvedPatternTypes(final TypeDescriptor declaredType,
-                                            final TypeDescriptor resolvedType) {
-            declaredPatternType = declaredType;
-            resolvedPatternType = resolvedType;
-        }
     }
 
     final class Handle implements Expr {

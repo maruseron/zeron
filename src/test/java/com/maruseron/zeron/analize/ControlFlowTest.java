@@ -176,16 +176,14 @@ public final class ControlFlowTest {
     public void resolvesForOverAUserDefinedIterable() {
         final var source = parseUnit("""
                 import zeron.lang.Option;
-                import zeron.lang.Some;
-                import zeron.lang.None;
                 class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
                     public mut next(): Option<Int> {
-                        if (this.index >= 3) return None<Int>.none();
+                        if (this.index >= 3) return Option<Int>.None();
                         let value = this.index;
                         this.index = this.index + 1;
-                        return Some<Int>.from(value);
+                        return Option.Some(value);
                     }
                 }
                 class Counter is zeron.collections.Iterable<Int> {
@@ -234,16 +232,14 @@ public final class ControlFlowTest {
         final var classFile = Path.of("dist", className + ".class");
         final var declarations = parseUnit("""
                 import zeron.lang.Option;
-                import zeron.lang.Some;
-                import zeron.lang.None;
                 class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
                     public mut next(): Option<Int> {
-                        if (this.index >= 5) return None<Int>.none();
+                        if (this.index >= 5) return Option<Int>.None();
                         let value = this.index;
                         this.index = this.index + 1;
-                        return Some<Int>.from(value);
+                        return Option.Some(value);
                     }
                 }
                 class Counter is zeron.collections.Iterable<Int> {
@@ -255,9 +251,9 @@ public final class ControlFlowTest {
                     ready: Boolean;
                     public constructor new;
                     public mut next(): Option<T> {
-                        if (not this.ready) return None<T>.none();
+                        if (not this.ready) return Option<T>.None();
                         this.ready = false;
-                        return Some<T>.from(this.value);
+                        return Option.Some(this.value);
                     }
                 }
                 class Single<T> is zeron.collections.Iterable<T> {

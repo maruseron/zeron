@@ -54,7 +54,7 @@ public final class ParserDiagnosticsTest {
         final var result = Parser.of(Scanner.from("""
                 fn main(): Unit {
                     match (value) {
-                        case Some<Int> item -> item;
+                        case Option.Some(item) -> item;
                     }
                 }
                 """).scanWithDiagnostics())

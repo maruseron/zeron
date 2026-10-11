@@ -161,6 +161,7 @@
 
 - `Callee is not a function.`
 - `Unknown function '{name}'.`
+- `Unknown function '{name}' in the current scope.`
 - `This function does not declare type parameters.`
 - `Expected {expected} arguments, found {actual}.`
 - `Expected {expected} type arguments, found {actual}.`

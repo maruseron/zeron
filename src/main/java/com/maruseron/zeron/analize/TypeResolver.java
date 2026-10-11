@@ -11,6 +11,42 @@ import java.util.*;
 import static com.maruseron.zeron.analize.Resolver.*;
 
 final class TypeResolver {
+    static String resolveTypeName(final ResolutionContext context, final String name, final Token where) {
+        if (name.contains(".")) return name;
+        context.skipInvalidImportAlias(name);
+
+        final var currentPackageName = qualify(context.packageName, name);
+        if (context.types.contains(currentPackageName)) return currentPackageName;
+
+        final var importedName = context.currentImports.types().get(name);
+        if (importedName != null && (context.types.contains(importedName)
+                || context.javaClassPath.find(importedName) != null)) {
+            return importedName;
+        }
+
+        final var starCandidates = context.currentImports.onDemandPackages().stream()
+                .filter(importedPackage -> !importedPackage.equals(context.packageName))
+                .map(importedPackage -> qualify(importedPackage, name))
+                .filter(candidate -> {
+                    final var classDeclaration = context.classes.get(candidate);
+                    final var contractDeclaration = context.contracts.get(candidate);
+                    return classDeclaration != null && classDeclaration.isPublic()
+                            || contractDeclaration != null && contractDeclaration.isPublic();
+                })
+                .distinct()
+                .toList();
+        if (starCandidates.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT, where,
+                    "Ambiguous type '" + name + "' from star imports; add an explicit import or alias."));
+        }
+        if (starCandidates.size() == 1) return starCandidates.getFirst();
+        return name;
+    }
+
+    private static String qualify(final String packageName, final String name) {
+        return packageName.isEmpty() ? name : packageName + "." + name;
+    }
+
     static void validateFunctionTypes(final ResolutionContext context, final FunctionDescriptor function, final Token where) {
         for (final var parameter : function.parameters()) validateType(context, parameter, where);
         validateType(context, function.returnType(), where);
@@ -36,6 +72,7 @@ final class TypeResolver {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                         where, "A type-parameter bound must be a contract type."));
             }
+            validateType(context, bound, where);
             final var boundName = className(context, bound);
             final var contract = context.contracts.get(boundName);
             if (contract == null) {
@@ -43,7 +80,6 @@ final class TypeResolver {
                         "Type parameter bound '" + boundName + "' is not a contract."));
             }
             ensureTypeAccessible(context, boundName, where, contract.isPublic());
-            validateType(context, bound, where);
         }
     }
 
@@ -56,7 +92,7 @@ final class TypeResolver {
     static void validateType(final ResolutionContext context, final TypeDescriptor type, final Token where) {
         switch (type) {
             case NominalDescriptor nominal -> {
-                context.skipInvalidImportAlias(nominal.name());
+                nominal.resolveName(resolveTypeName(context, nominal.name(), where));
                 MemberInteropResolver.validateStarTypeAmbiguity(context, nominal.name(), where);
                 if (!context.types.contains(nominal.name())) {
                     final var javaClass = context.javaClassPath.find(nominal.name());
@@ -93,8 +129,9 @@ final class TypeResolver {
             case ReferenceDescriptor reference -> validateType(context, reference.baseType(), where);
             case FunctionDescriptor function -> validateFunctionTypes(context, function, where);
             case GenericDescriptor generic -> {
+                generic.baseType().resolveName(
+                        resolveTypeName(context, generic.baseType().name(), where));
                 final var name = generic.baseType().name();
-                context.skipInvalidImportAlias(name);
                 MemberInteropResolver.validateStarTypeAmbiguity(context, name, where);
                 final var classDeclaration = context.classes.get(name);
                 final var contractDeclaration = context.contracts.get(name);

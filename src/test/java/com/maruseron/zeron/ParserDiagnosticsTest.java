@@ -65,6 +65,20 @@ public final class ParserDiagnosticsTest {
     }
 
     @Test
+    public void preservesUnqualifiedTypeNamesForResolution() {
+        final var result = Parser.of(Scanner.from("""
+                import zeron.collections.*;
+                fn stringify<T: Display<T>>(value: T): String = "";
+                """).scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("display-bound.zn");
+
+        assertEquals(result.diagnostics().toString(), 0, result.diagnostics().size());
+        final var function = (Stmt.Function) result.compilationUnit().declarations().getFirst();
+        assertEquals("Display",
+                function.typeDescriptor().typeParameters().getFirst().bound().name());
+    }
+
+    @Test
     public void parsesPatternDeclarationsAndRecursiveOrPatterns() {
         final var result = Parser.of(Scanner.from("""
                 class Box {

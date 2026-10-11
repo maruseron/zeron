@@ -106,9 +106,25 @@ public sealed interface Stmt {
         }
     }
 
-    record ContractUse(Token name, List<TypeDescriptor> typeArguments) {
-        public ContractUse {
-            typeArguments = List.copyOf(typeArguments);
+    final class ContractUse {
+        private Token name;
+        private final List<TypeDescriptor> typeArguments;
+
+        public ContractUse(final Token name, final List<TypeDescriptor> typeArguments) {
+            this.name = name;
+            this.typeArguments = List.copyOf(typeArguments);
+        }
+
+        public Token name() {
+            return name;
+        }
+
+        public List<TypeDescriptor> typeArguments() {
+            return typeArguments;
+        }
+
+        public void resolveName(final String qualifiedName) {
+            name = new Token(name.type(), qualifiedName, name.literal(), name.span());
         }
     }
 

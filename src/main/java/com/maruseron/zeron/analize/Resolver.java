@@ -140,6 +140,24 @@ public final class Resolver {
             context.currentImports = importsByUnit.get(unit);
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                final var declaration = entry.declaration();
+                final var contractUses = declaration instanceof Stmt.ClassDecl classDeclaration
+                        ? classDeclaration.contractUses()
+                        : declaration instanceof Stmt.ContractDecl contractDeclaration
+                            ? contractDeclaration.permittedClasses()
+                            : List.<Stmt.ContractUse>of();
+                for (final var contractUse : contractUses) {
+                    attempt(context, () -> contractUse.resolveName(TypeResolver.resolveTypeName(
+                            context, contractUse.name().lexeme(), contractUse.name())));
+                }
+            }
+        }
+        for (final var unit : units) {
+            context.packageName = unit.packageName();
+            context.currentSourcePath = unit.sourcePath();
+            context.currentImports = importsByUnit.get(unit);
+            context.invalidImportAliases = invalidAliasesByUnit.get(unit);
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 if (entry.declaration() instanceof Stmt.Witness witness) {
                     attempt(context, () -> TypeClassEvidence.register(
                             context, witness, unit.packageName()));

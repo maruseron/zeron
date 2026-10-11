@@ -3,7 +3,7 @@ package com.maruseron.zeron.domain;
 import java.util.Objects;
 
 public final class NominalDescriptor implements TypeDescriptor {
-    private final QualifiedName qualifiedName;
+    private QualifiedName qualifiedName;
     public NominalDescriptor(String name) {
         this.qualifiedName = QualifiedName.parse(name);
     }
@@ -14,6 +14,14 @@ public final class NominalDescriptor implements TypeDescriptor {
 
     public QualifiedName qualifiedName() {
         return qualifiedName;
+    }
+
+    public void resolveName(final String name) {
+        if (qualifiedName.packageParts().isEmpty()) {
+            qualifiedName = QualifiedName.parse(name);
+        } else if (!qualifiedName.binaryName().equals(name)) {
+            throw new IllegalStateException("A qualified type name cannot be changed.");
+        }
     }
 
     @Override

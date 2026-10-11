@@ -53,6 +53,83 @@ public final class SumTypeTest {
     }
 
     @Test
+    public void matchesSumCasesByUnqualifiedName() throws Exception {
+        final var programName = "ShortSumMatch" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                type Choice<T> = Some(value: T) | Empty;
+                fn payload(choice: Choice<Int>): Int = match (choice) {
+                    case Some(value) -> value;
+                    case Empty() -> 0;
+                };
+                fn makeChoice(): Choice<Int> = Choice.Some(42);
+                fn makeEmpty(): Choice<Int> = Choice<Int>.Empty();
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                final var choice = program.getMethod("makeChoice").invoke(null);
+                final var empty = program.getMethod("makeEmpty").invoke(null);
+                final var choiceType = loader.loadClass("Choice");
+                assertEquals(42, program.getMethod("payload", choiceType).invoke(null, choice));
+                assertEquals(0, program.getMethod("payload", choiceType).invoke(null, empty));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Choice.class"));
+            Files.deleteIfExists(Path.of("dist", "Choice$$sum$Some.class"));
+            Files.deleteIfExists(Path.of("dist", "Choice$$sum$Empty.class"));
+        }
+    }
+
+    @Test
+    public void resolvesNamespaceFunctionsAlongsideSumConstructors() throws Exception {
+        final var programName = "SumNamespace" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                type Choice = Some(value: Int) | Empty;
+                namespace Choice {
+                    fn make(value: Int): Choice = Choice.Some(value);
+                }
+                fn result(): Int = match (Choice.make(42)) {
+                    case Some(value) -> value;
+                    case Empty() -> 0;
+                };
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(programName).getMethod("result").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Choice.class"));
+            Files.deleteIfExists(Path.of("dist", "Choice$$sum$Some.class"));
+            Files.deleteIfExists(Path.of("dist", "Choice$$sum$Empty.class"));
+            Files.deleteIfExists(Path.of("dist", "$zeron$Namespace$Choice.class"));
+        }
+    }
+
+    @Test
+    public void rejectsNamespaceFunctionsThatCollideWithSumCases() {
+        final var error = assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Choice = Some(value: Int) | Empty;
+                namespace Choice {
+                    fn Some(value: Int): Choice = Choice.Empty();
+                }
+                fn invalid(): Choice = Choice.Some(42);
+                """)));
+
+        assertEquals("Ambiguous name: both a sum case constructor and namespace function are declared.",
+                error.getMessage());
+    }
+
+    @Test
     public void rejectsNonExhaustiveAndMalformedSumPatterns() {
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 type Choice = First | Second;

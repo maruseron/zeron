@@ -1,7 +1,0 @@
-import zeron.collections.*;
-
-type List<T> = Nil | Cons(head: T, tail: List<T>);
-
-fn main() {
-    
-}

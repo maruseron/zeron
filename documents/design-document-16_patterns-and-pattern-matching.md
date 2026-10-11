@@ -145,7 +145,10 @@ patternDeclaration ::= visibility "pattern" IDENTIFIER
                        ["when" expression] block
 patternOutput      ::= IDENTIFIER ":" type
 
-matchArm           ::= "case" matchPattern ["if" expression] "->" expression ";"
+matchArm           ::= "case" matchCasePattern ["if" expression] "->" expression ";"
+matchCasePattern   ::= matchCaseAlternative {"|" matchCaseAlternative}
+matchCaseAlternative ::= IDENTIFIER "(" [patternArgument {"," patternArgument}] ")"
+                       | patternAlternative
 matchPattern       ::= patternAlternative {"|" patternAlternative}
 patternAlternative ::= "_"
                      | type ["." IDENTIFIER "(" [patternArgument
@@ -153,11 +156,25 @@ patternAlternative ::= "_"
 patternArgument    ::= "_" | IDENTIFIER | matchPattern
 ```
 
-The type-qualified call form keeps pattern selection explicit and fits the current
+The type-qualified call form keeps class-pattern selection explicit and fits the current
 `PermittedType.pattern(...)` match notation. A type-only case tests and covers the class without
 extracting outputs. A named pattern invocation must resolve to a public pattern declared by that
 class; it must not silently resolve to a property getter. The parser and resolver normalize the
 legacy one-property spelling only as a compatibility path, subject to the no-collision rule.
+
+Root cases of a nominal sum may use the case name without the sum type:
+
+```zeron
+match (list) {
+    case Cons(head, tail) -> head;
+    case Nil() -> 0;
+}
+```
+
+These names are resolved only against the scrutinee's sum declaration; they are not searched
+globally. The qualified form, such as `List.Cons(head, tail)`, remains valid. This shorthand is
+currently limited to root cases in `match` expressions, not nested patterns, `matches` conditions,
+or effect handlers.
 
 Pattern bodies use ordinary block syntax and assignments to the declared output names. Output names
 are local to the pattern body and are not class properties or mutable out-parameters. Definite

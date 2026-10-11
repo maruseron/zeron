@@ -4,6 +4,7 @@ import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.diagnostic.DiagnosticHelp;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
@@ -64,8 +65,11 @@ final class CallResolver {
             final var functionToken = functionName == null ? null : context.functionSymbolTokens.get(functionName);
             if (functionToken == null) {
                 if (context.frame.currentMethodOwner == null) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, call.callee,
-                            "Unknown function '" + call.callee.lexeme() + "'."));
+                    Zeron.resolutionError(ResolutionError.withHelp(DiagnosticCatalog.NAME_NOT_FOUND,
+                            call.callee,
+                            "Unknown function '" + call.callee.lexeme() + "' in the current scope.",
+                            new DiagnosticHelp(
+                                    "Declare this function or import it from the package that provides it.")));
                 }
                 final var receiver = new Expr.Variable(
                         new Token(TokenType.THIS, "this", null, call.callee.span()),

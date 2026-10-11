@@ -279,10 +279,29 @@ final class MemberInteropResolver {
                 call.receiver instanceof Expr.Variable typeName ? typeName.name : call.name);
         final var classDeclaration = classOwnerName == null ? null : context.classes.get(classOwnerName);
         final var sumDeclaration = classOwnerName == null ? null : context.sums.get(classOwnerName);
+        final var namespaceFunctionName = !call.safeNavigation()
+                ? namespaceMemberName(context, call.receiver, call.name.lexeme())
+                : null;
+        final var namespaceFunction = namespaceFunctionName == null
+                ? null : context.functions.get(namespaceFunctionName);
         if (sumDeclaration != null) {
             final var sumCase = sumDeclaration.cases().stream()
                     .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
                     .findFirst().orElse(null);
+            final var namespaceCall = namespaceFunction != null
+                    && !(namespaceFunction instanceof Stmt.ExtensionMethod);
+            if (sumCase != null && namespaceCall) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        call.name,
+                        "Ambiguous name: both a sum case constructor and namespace function are declared."));
+            }
+            if (sumCase == null && namespaceCall) {
+                if (!isNamespaceMemberAccessible(context, namespaceFunctionName, namespaceFunction.isPublic())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                            call.name, "Namespace function '" + namespaceFunctionName + "' is private."));
+                }
+                return context.callResolver.resolveNamespaceCall(call, namespaceFunctionName);
+            }
             if (sumCase == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                         call.name, "Unknown case '" + call.name.lexeme() + "' for sum '"
@@ -307,11 +326,6 @@ final class MemberInteropResolver {
         }
         final var classFactory = classDeclaration == null ? null
                 : findClassFactory(classDeclaration, call.name.lexeme());
-        final var namespaceFunctionName = !call.safeNavigation()
-                ? namespaceMemberName(context, call.receiver, call.name.lexeme())
-                : null;
-        final var namespaceFunction = namespaceFunctionName == null
-                ? null : context.functions.get(namespaceFunctionName);
         if (classFactory != null) {
             if (namespaceFunction != null && !(namespaceFunction instanceof Stmt.ExtensionMethod)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,

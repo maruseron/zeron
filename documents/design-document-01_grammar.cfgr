@@ -156,7 +156,10 @@ handleArm                  : "case" matchPattern ["if" expression] "->" expressi
 arrayLiteral               : "[" expression {"," expression} "]" ;
 ifExpr                     : "if" "(" expression ")" "then" expression "else" expression ;
 matchExpr                  : "match" "(" expression ")" "{" matchArm+ "}" ;
-matchArm                   : "case" matchPattern ["if" expression] "->" expression ";" ;
+matchArm                   : "case" matchCasePattern ["if" expression] "->" expression ";" ;
+matchCasePattern            : matchCaseAlternative {"|" matchCaseAlternative} ;
+matchCaseAlternative        : IDENTIFIER "(" [patternArgument {"," patternArgument}] ")"
+                            | patternAlternative ;
 matchPattern               : patternAlternative {"|" patternAlternative} ;
 patternAlternative         : "_" | IDENTIFIER | type ["." IDENTIFIER "("
                              [patternArgument {"," patternArgument}] ")"] ["as" IDENTIFIER] ;

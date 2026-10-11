@@ -103,12 +103,13 @@ public final class StandardLibraryTest {
     }
 
     @Test
-    public void defaultPackageSumDoesNotShadowBundledPackageClass() {
+    public void resolvesStarImportsAgainstDeclarationsAndProtectsCurrentPackage() {
         final var source = """
                 import zeron.collections.*;
 
                 type List<T> = Nil | Cons(head: T, tail: List<T>);
 
+                fn stringify<T: Display<T>>(value: T): String = value.toString();
                 fn main() {}
                 """;
         final var userUnit = parse("main.zn", source);
@@ -118,6 +119,35 @@ public final class StandardLibraryTest {
         final var resolution = compiler.resolveWithDiagnostics();
 
         assertTrue(resolution.errors().toString(), resolution.errors().isEmpty());
+    }
+
+    @Test
+    public void reportsAmbiguousUnqualifiedTypeFromStarImports() {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var firstPackage = "typesA" + suffix;
+        final var secondPackage = "typesB" + suffix;
+        final var appPackage = "typesApp" + suffix;
+        final var first = parse("first.zn", """
+                package %s;
+                public contract Clash {}
+                """.formatted(firstPackage));
+        final var second = parse("second.zn", """
+                package %s;
+                public contract Clash {}
+                """.formatted(secondPackage));
+        final var app = parse("app.zn", """
+                package %s;
+                import %s.*;
+                import %s.*;
+                fn require<T: Clash>(value: T): Unit {}
+                """.formatted(appPackage, firstPackage, secondPackage));
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(first, second, app), "Main", appPackage);
+
+        final var resolution = compiler.resolveWithDiagnostics();
+
+        assertTrue(resolution.errors().toString(),
+                resolution.errors().stream().anyMatch(error -> error.message().contains("Ambiguous type 'Clash'")));
     }
 
     @Test

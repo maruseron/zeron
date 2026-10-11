@@ -1030,12 +1030,22 @@ final class ExpressionFlowResolver {
             addPatternBinding(context, bindings, pattern.binding(), inputType);
             return new MatchPatternResolution(bindings, Set.of(), true, inputType);
         }
-        if (pattern.type() == null) {
+        final TypeDescriptor patternType;
+        if (pattern.type() == null && pattern.extractor() != null) {
+            if (!root || context.sums.get(inputType.name()) == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.keyword(),
+                        "Unqualified sum case patterns require a sum-typed match scrutinee."));
+            }
+            patternType = inputType;
+        } else if (pattern.type() == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     pattern.keyword(), "Expected a type, binding, or wildcard pattern."));
+            throw new IllegalStateException("Unreachable after reporting an invalid match pattern.");
+        } else {
+            patternType = resolveStarImportedPatternType(context, pattern);
         }
 
-        final var patternType = resolveStarImportedPatternType(context, pattern);
         final var sum = root ? context.sums.get(patternType.name()) : null;
         if (sum == null) TypeResolver.validateType(context, patternType, pattern.keyword());
         if (patternType instanceof NullableDescriptor || patternType instanceof ReferenceDescriptor) {
@@ -1177,21 +1187,13 @@ final class ExpressionFlowResolver {
                                                                  final Expr.MatchPattern pattern) {
         final var patternType = pattern.type();
         final var sourceTypeName = pattern.keyword().lexeme();
-        final var parsedTypeName = patternType.name();
-        final var starQualifiedName = context.currentImports.onDemandPackages().stream()
-                .map(importedPackage -> importedPackage + "." + sourceTypeName)
-                .filter(parsedTypeName::equals)
-                .findFirst()
-                .orElse(null);
-        if (starQualifiedName == null) return patternType;
-
         final var resolvedName = MemberInteropResolver.resolveClassName(
                 context, sourceTypeName, pattern.keyword());
         if (resolvedName == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, pattern.keyword(),
                     "Unknown type '" + sourceTypeName + "'."));
         }
-        if (resolvedName.equals(starQualifiedName)) return patternType;
+        if (resolvedName.equals(patternType.name())) return patternType;
 
         final var resolvedBase = TypeDescriptor.ofName(resolvedName);
         return patternType instanceof GenericDescriptor generic

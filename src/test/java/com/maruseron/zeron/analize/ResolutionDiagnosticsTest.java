@@ -118,4 +118,19 @@ public final class ResolutionDiagnosticsTest {
                         "Add an explicit function type annotation to the binding.")),
                 result.errors().getFirst().helps());
     }
+
+    @Test
+    public void explainsHowToFixAnUnknownFunctionCall() {
+        final var unit = Parser.of(Scanner.from("fn run(): Unit = append(1);", "src/main.zn").scanTokens())
+                .parseCompilationUnit("src/main.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(1, result.errors().size());
+        assertEquals("Unknown function 'append' in the current scope.",
+                result.errors().getFirst().message());
+        assertEquals(List.of(new DiagnosticHelp(
+                        "Declare this function or import it from the package that provides it.")),
+                result.errors().getFirst().helps());
+    }
 }

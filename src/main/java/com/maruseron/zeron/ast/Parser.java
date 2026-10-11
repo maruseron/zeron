@@ -320,7 +320,7 @@ public final class Parser {
     private TypeDescriptor witnessMappedType() {
         final var name = consume(IDENTIFIER, "Expect target class before constructor name.");
         TypeDescriptor type = activeTypeParameters.get(name.lexeme());
-        if (type == null) type = TypeDescriptor.of(qualifyTypeName(name.lexeme()));
+        if (type == null) type = TypeDescriptor.of(qualifyTypeReference(name.lexeme()));
         if (match(LESS)) {
             final var arguments = collectTypeArguments();
             consume(GREATER, "Expect '>' after target class type arguments.");
@@ -1255,7 +1255,9 @@ public final class Parser {
     }
 
     private Token qualifyDeclaredType(final Token token) {
-        return withLexeme(token, qualifyTypeName(token.lexeme()));
+        return withLexeme(token, packageName.isEmpty()
+                ? token.lexeme()
+                : packageName + "." + token.lexeme());
     }
 
     private Token qualifyTypeToken(final Token token) {
@@ -1264,7 +1266,21 @@ public final class Parser {
             advance();
             name.append('.').append(consume(IDENTIFIER, "Expect name after '.'.").lexeme());
         }
-        return withLexeme(token, qualifyTypeName(name.toString()));
+        return withLexeme(token, qualifyTypeReference(name.toString()));
+    }
+
+    private String qualifyTypeReference(final String name) {
+        if (name.indexOf('.') >= 0
+                || Set.of("Never", "Any", "Infer", "Unit", "Int", "Float", "Boolean", "String", "Array")
+                        .contains(name)
+                || activeTypeParameters.containsKey(name)) return name;
+        if (localTypeNames.contains(name)) {
+            return packageName.isEmpty() ? name : packageName + "." + name;
+        }
+        if (importedTypes.containsKey(name)) return importedTypes.get(name);
+        if (DEFAULT_ZERON_LANG_TYPES.contains(name)) return "zeron.lang." + name;
+        if (onDemandImports.isEmpty() && !packageName.isEmpty()) return packageName + "." + name;
+        return name;
     }
 
     private boolean isNamedPatternSuffix() {
@@ -1272,21 +1288,6 @@ public final class Parser {
                 && current + 2 < tokens.size()
                 && tokens.get(current + 1).type() == IDENTIFIER
                 && tokens.get(current + 2).type() == LEFT_PAREN;
-    }
-
-    private String qualifyTypeName(final String name) {
-        if (name.indexOf('.') >= 0
-            || Set.of("Never", "Any", "Infer", "Unit", "Int", "Float", "Boolean", "String", "Array")
-                .contains(name)
-            || activeTypeParameters.containsKey(name)) return name;
-        if (importedTypes.containsKey(name)) return importedTypes.get(name);
-        if (localTypeNames.contains(name)) return packageName.isEmpty() ? name : packageName + "." + name;
-        if (DEFAULT_ZERON_LANG_TYPES.contains(name)) return "zeron.lang." + name;
-        if (!onDemandImports.isEmpty()) {
-            final var explicitPackageType = onDemandImports.getFirst() + "." + name;
-            return explicitPackageType;
-        }
-        return packageName.isEmpty() ? name : packageName + "." + name;
     }
 
     private Token withLexeme(final Token token, final String lexeme) {
@@ -2057,7 +2058,7 @@ public final class Parser {
         final var arms = new ArrayList<Expr.MatchArm>();
         while (match(CASE)) {
             final var caseKeyword = previous();
-            var pattern = matchPattern(true);
+            var pattern = matchPattern(true, true);
             if (pattern.alternatives().isEmpty() && !pattern.wildcard()) {
                 final var alias = match(AS) ? consume(IDENTIFIER, "Expect binding name after 'as'.") : null;
                 if (alias != null) {
@@ -2079,16 +2080,20 @@ public final class Parser {
     }
 
     private Expr.MatchPattern matchPattern(final boolean root) {
+        return matchPattern(root, false);
+    }
+
+    private Expr.MatchPattern matchPattern(final boolean root, final boolean allowBareSumCase) {
         final var alternatives = new ArrayList<Expr.MatchPattern>();
-        alternatives.add(matchPatternAtom(root));
-        while (match(PIPE)) alternatives.add(matchPatternAtom(root));
+        alternatives.add(matchPatternAtom(root, allowBareSumCase));
+        while (match(PIPE)) alternatives.add(matchPatternAtom(root, allowBareSumCase));
         final var first = alternatives.getFirst();
         if (alternatives.size() == 1) return first;
         return new Expr.MatchPattern(first.keyword(), null, null, List.of(), null, null,
                 false, alternatives);
     }
 
-    private Expr.MatchPattern matchPatternAtom(final boolean root) {
+    private Expr.MatchPattern matchPatternAtom(final boolean root, final boolean allowBareSumCase) {
         final var keyword = peek();
         if (check(IDENTIFIER) && peek().lexeme().equals("_")) {
             advance();
@@ -2098,6 +2103,19 @@ public final class Parser {
                 && (tokens.get(current + 1).type() == COMMA || tokens.get(current + 1).type() == RIGHT_PAREN)) {
             final var binding = advance();
             return new Expr.MatchPattern(keyword, null, null, List.of(), binding, null, false, List.of());
+        }
+        if (root && allowBareSumCase && check(IDENTIFIER)
+                && tokens.get(current + 1).type() == LEFT_PAREN) {
+            final var caseName = advance();
+            final var arguments = new ArrayList<Expr.MatchPattern>();
+            consume(LEFT_PAREN, "Expect '(' after sum case name.");
+            if (!check(RIGHT_PAREN)) {
+                do {
+                    arguments.add(matchPattern(false));
+                } while (match(COMMA));
+            }
+            consume(RIGHT_PAREN, "Expect ')' after sum case arguments.");
+            return new Expr.MatchPattern(keyword, null, caseName, arguments, null, null, false, List.of());
         }
 
         final var previousStop = stopQualifiedTypeAtNamedPattern;

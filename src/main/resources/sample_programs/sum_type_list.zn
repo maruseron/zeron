@@ -1,0 +1,49 @@
+import zeron.collections.*;
+
+type List<T> = Nil | Cons(head: T, tail: List<T>);
+
+namespace List {
+    fn from<T>(elements: T...): List<T> {
+        let mut result: List<T> = List<T>.Nil();
+        for (let element in elements) {
+            let p = pure(element);
+            result = result.append(p);
+        }
+        return result;
+    }
+
+    fn pure<T>(head: T): List<T> = List.Cons(head, List.Nil());
+}
+
+extension<T> List<T> {
+    fn append(second: List<T>): List<T> = match (this) {
+        case Cons(head, tail) -> List.Cons(head, tail.append(second));
+        case Nil()            -> second;
+    };
+
+    fn fmap<U>(map: (T) -> U): List<U> = match (this) {
+        case Cons(head, tail) -> List.Cons(map(head), tail.fmap<U>(map));
+        case Nil()            -> List<U>.Nil();
+    };
+
+    fn bind<U>(map: (T) -> List<U>): List<U> = this.fmap(map).join();
+}
+
+extension<T> List<List<T>> {
+    fn join(): List<T> = match (this) {
+        case Cons(head, tail) -> head.append(tail.join());
+        case Nil()            -> List<T>.Nil();
+    };
+}
+
+witness<T: Display<T>> Display<T> for List<T> {
+    fn toString(): String = match (this) {
+        case List.Cons(head, tail) -> head.toString() + tail.toString();
+        case List.Nil()            -> "";
+    };
+}
+
+fn main() {
+    let list = List.from(1, 2, 3, 4, 5);
+    println(list.fmap(i -> i * 2).toString());
+}

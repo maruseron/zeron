@@ -256,6 +256,8 @@ final class NominalTypeEmitter {
     private static void generateNominalClass(CompilationContext context, final Stmt.ClassDecl declaration) throws IOException {
         final var className = declaration.name().lexeme();
         final var generatedSumCase = className.contains("$$sum$");
+        final var product = productDeclaration(context, className);
+        final var newtype = newtypeDeclaration(context, className);
         final var classDesc = ClassDesc.of(className);
         final var interfaces = declaration.contractUses().stream()
             .map(contractUse -> ClassDesc.of(contractUse.name().lexeme()))
@@ -266,9 +268,13 @@ final class NominalTypeEmitter {
                 classDesc,
                 builder -> {
                     builder.withFlags((declaration.isPublic() ? ClassFile.ACC_PUBLIC : 0) | ClassFile.ACC_FINAL);
-                    if (!context.lambdaPlan.lambdaImplementations().isEmpty()
-                            && isSamePackage(className, context.mainClassName)) {
-                        builder.with(NestHostAttribute.of(ClassDesc.of(context.mainClassName)));
+                    final var nestHost = newtype != null && newtype.validator() != null
+                            ? newtypeNestHost(context, newtype)
+                            : !context.lambdaPlan.lambdaImplementations().isEmpty()
+                                && isSamePackage(className, context.mainClassName)
+                                    ? context.mainClassName : null;
+                    if (nestHost != null) {
+                        builder.with(NestHostAttribute.of(ClassDesc.of(nestHost)));
                     }
                     if (!interfaces.isEmpty()) builder.withInterfaceSymbols(interfaces);
                     final var signature = ClassSignatureEmitter.nominalSignature(declaration.typeParameters(),
@@ -287,7 +293,9 @@ final class NominalTypeEmitter {
                     for (final var property : declaration.properties()) {
                         if (!property.isCustom()) {
                             builder.withField(Stmt.propertyBackingFieldName(property.name().lexeme()),
-                                    TypeDescriptor.toJavaClassDesc(property.type()), ClassFile.ACC_PRIVATE);
+                                    TypeDescriptor.toJavaClassDesc(property.type()),
+                                    ClassFile.ACC_PRIVATE
+                                            | (product == null && newtype == null ? 0 : ClassFile.ACC_FINAL));
                         }
                     }
                     if (!context.lambdaPlan.lambdaImplementations().isEmpty()
@@ -298,8 +306,11 @@ final class NominalTypeEmitter {
                             .map(type -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(type)))
                             .toList();
                     final var constructorType = MethodTypeDesc.of(ConstantDescs.CD_void, constructorParameters);
+                    final var constructorFlags = declaration.constructor().isPublic()
+                            ? ClassFile.ACC_PUBLIC
+                            : ClassFile.ACC_PRIVATE;
                     builder.withMethodBody("<init>", constructorType,
-                            declaration.constructor().isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE,
+                            constructorFlags,
                             code -> emitCanonicalConstructor(context, code, declaration, classDesc));
                     if (generatedSumCase && declaration.fields().isEmpty()) {
                         builder.withMethodBody("<clinit>", MethodTypeDesc.of(ConstantDescs.CD_void),
@@ -365,6 +376,7 @@ final class NominalTypeEmitter {
                     for (final var property : declaration.properties()) {
                         emitPropertyMethods(context, builder, declaration, property, classDesc);
                     }
+                    if (product != null) emitProductEqualityMethod(builder, product);
 
                     for (final var constructor : declaration.namedConstructors()) {
                         final var factoryType = (FunctionDescriptor) TypeSubstitution.erase(
@@ -375,6 +387,7 @@ final class NominalTypeEmitter {
                                 toJavaMethodDescriptor(factoryType), flags,
                                 code -> emitNamedConstructor(context, code, constructor));
                     }
+
                     final var generatedBridges = new HashSet<String>();
                     for (final var applied : ContractComposition.forClass(
                             context.resolution.contracts(), declaration)) {
@@ -413,6 +426,142 @@ final class NominalTypeEmitter {
                         }
                     }
                 });
+    }
+
+    private static Stmt.ProductDecl productDeclaration(final CompilationContext context,
+                                                       final String className) {
+        return context.compilationUnits.stream()
+                .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
+                .map(NamespaceMembers.Member::declaration)
+                .filter(Stmt.ProductDecl.class::isInstance)
+                .map(Stmt.ProductDecl.class::cast)
+                .filter(product -> product.name().lexeme().equals(className))
+                .findFirst().orElse(null);
+    }
+
+    private static Stmt.NewtypeDecl newtypeDeclaration(final CompilationContext context,
+                                                       final String className) {
+        return context.compilationUnits.stream()
+                .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
+                .map(NamespaceMembers.Member::declaration)
+                .filter(Stmt.NewtypeDecl.class::isInstance)
+                .map(Stmt.NewtypeDecl.class::cast)
+                .filter(newtype -> newtype.name().lexeme().equals(className))
+                .findFirst().orElse(null);
+    }
+
+    private static String newtypeNestHost(final CompilationContext context,
+                                          final Stmt.NewtypeDecl newtype) {
+        for (final var unit : context.compilationUnits) {
+            if (NamespaceMembers.flatten(unit.declarations()).stream()
+                    .map(NamespaceMembers.Member::declaration).anyMatch(declaration -> declaration == newtype)) {
+                final var namespaceName = newtype.name().lexeme()
+                        .substring(newtype.name().lexeme().lastIndexOf('.') + 1);
+                return CompilationMetadata.namespaceOwner(unit.packageName(), namespaceName);
+            }
+        }
+        throw new IllegalStateException("Newtype declaration has no compilation unit.");
+    }
+
+    private static void emitProductEqualityMethod(final ClassBuilder builder,
+                                                  final Stmt.ProductDecl product) {
+        final var owner = ClassDesc.of(product.name().lexeme());
+        final var appliedProduct = product.typeParameters().isEmpty()
+                ? (TypeDescriptor) TypeDescriptor.ofName(product.name().lexeme())
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(product.name().lexeme()),
+                        product.typeParameters().stream().map(parameter -> (TypeDescriptor) parameter).toList());
+        final var evidenceCount = product.components().stream()
+                .filter(component -> !isRecursiveProductComponent(component.type(), appliedProduct))
+                .count();
+        final var parameters = new ArrayList<ClassDesc>();
+        parameters.add(owner);
+        parameters.add(owner);
+        for (long index = 0; index < evidenceCount; index++) {
+            parameters.add(ClassDesc.of("java.lang.invoke.MethodHandle"));
+        }
+        final var methodType = MethodTypeDesc.of(ConstantDescs.CD_boolean, parameters);
+        builder.withMethodBody("$zeron$eq", methodType,
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                code -> {
+                    final var unequal = code.newLabel();
+                    var evidenceIndex = 0;
+                    for (final var component : product.components()) {
+                        final var componentType = component.type();
+                        final var componentClass = TypeDescriptor.toJavaClassDesc(
+                                TypeSubstitution.erase(componentType));
+                        final var recursive = isRecursiveProductComponent(componentType, appliedProduct);
+                        if (recursive) {
+                            final var leftSlot = 2 + (int) evidenceCount;
+                            final var rightSlot = leftSlot + 1;
+                            final var getterName = Stmt.propertyGetterName(component.name().lexeme());
+                            final var getterType = MethodTypeDesc.of(componentClass);
+                            final var compared = componentType instanceof NullableDescriptor
+                                    ? code.newLabel() : null;
+                            if (componentType instanceof NullableDescriptor) {
+                                final var checkRight = code.newLabel();
+                                code.aload(0);
+                                code.invokevirtual(owner, getterName, getterType);
+                                code.astore(leftSlot);
+                                code.aload(1);
+                                code.invokevirtual(owner, getterName, getterType);
+                                code.astore(rightSlot);
+                                code.aload(leftSlot);
+                                code.ifnonnull(checkRight);
+                                code.aload(rightSlot);
+                                code.ifnonnull(unequal);
+                                code.goto_(compared);
+                                code.labelBinding(checkRight);
+                                code.aload(rightSlot);
+                                code.ifnull(unequal);
+                                code.aload(leftSlot);
+                                code.checkcast(owner);
+                                code.aload(rightSlot);
+                                code.checkcast(owner);
+                            } else {
+                                code.aload(0);
+                                code.invokevirtual(owner, getterName, getterType);
+                                code.checkcast(owner);
+                                code.aload(1);
+                                code.invokevirtual(owner, getterName, getterType);
+                                code.checkcast(owner);
+                            }
+                            for (int handleIndex = 0; handleIndex < evidenceCount; handleIndex++) {
+                                code.aload(2 + handleIndex);
+                            }
+                            code.invokestatic(owner, "$zeron$eq", methodType);
+                            if (compared != null) {
+                                code.ifeq(unequal);
+                                code.labelBinding(compared);
+                            } else {
+                                code.ifeq(unequal);
+                            }
+                        } else {
+                            final var handleType = MethodTypeDesc.of(
+                                    ConstantDescs.CD_boolean, componentClass, componentClass);
+                            code.aload(2 + evidenceIndex++);
+                            code.aload(0);
+                            code.invokevirtual(owner, Stmt.propertyGetterName(component.name().lexeme()),
+                                    MethodTypeDesc.of(componentClass));
+                            code.aload(1);
+                            code.invokevirtual(owner, Stmt.propertyGetterName(component.name().lexeme()),
+                                    MethodTypeDesc.of(componentClass));
+                            code.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke", handleType);
+                            code.ifeq(unequal);
+                        }
+                    }
+                    code.iconst_1();
+                    code.ireturn();
+                    code.labelBinding(unequal);
+                    code.iconst_0();
+                    code.ireturn();
+                });
+    }
+
+    private static boolean isRecursiveProductComponent(final TypeDescriptor componentType,
+                                                       final TypeDescriptor appliedProduct) {
+        final var normalizedComponent = componentType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : componentType;
+        return sameAppliedType(normalizedComponent, appliedProduct);
     }
 
     private static void emitClassPattern(final CompilationContext context,

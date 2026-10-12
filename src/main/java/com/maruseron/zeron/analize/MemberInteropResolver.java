@@ -989,6 +989,7 @@ final class MemberInteropResolver {
                                     + call.arguments.size() + "."));
         }
         if (factory.canonical() && !declaration.constructor().isPublic()
+                && !call.internalNewtypeConstructor()
                 && !Objects.equals(context.frame.currentClassName, declaration.name().lexeme())) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
                     call.name, "Constructor is private."));

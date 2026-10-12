@@ -73,6 +73,86 @@ public final class ClassContractTest {
     }
 
     @Test
+    public void genericDiamondContractsDeduplicateRequirementsAndShadowAncestorDefaults() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "ContractDiamond" + suffix;
+        final var rootName = "DiamondRoot" + suffix;
+        final var leftName = "DiamondLeft" + suffix;
+        final var rightName = "DiamondRight" + suffix;
+        final var diamondName = "Diamond" + suffix;
+        final var implementationName = "DiamondImplementation" + suffix;
+        final var rootLabelName = "RootLabel" + suffix;
+        final var childLabelName = "ChildLabel" + suffix;
+        final var labelName = "ChildLabelImplementation" + suffix;
+        final var source = """
+                contract %s<T> {
+                    constructor from(value: T);
+                    value(): T;
+                }
+                contract %s<T> requires %s<T> {}
+                contract %s<T> requires %s<T> {}
+                contract %s<T> requires %s<T> + %s<T> {}
+                class %s is %s<String> {
+                    public constructor new;
+                    public constructor from(value: String) = %s.new();
+                    public value(): String = "diamond";
+                }
+                contract %s { default label(): String = "root"; }
+                contract %s requires %s {
+                    default label(): String = "child";
+                }
+                class %s is %s { public constructor new; }
+                fn read<T: %s<String>>(value: T): String = value.value();
+                fn readLabel<T: %s>(value: T): String = value.label();
+                fn run(): String =
+                    read(%s.from("ignored")) + ":" + readLabel(%s.new());
+                """.formatted(rootName, leftName, rootName, rightName, rootName,
+                diamondName, leftName, rightName, implementationName, diamondName,
+                implementationName, rootLabelName, childLabelName, rootLabelName,
+                labelName, childLabelName, diamondName, childLabelName,
+                implementationName, labelName);
+        final var generatedNames = List.of(programName, rootName, leftName, rightName, diamondName,
+                implementationName, rootLabelName, childLabelName, labelName);
+        try {
+            final var compiler = new CompilationService(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals("diamond:child", program.getMethod("run").invoke(null));
+                final var diamond = loader.loadClass(diamondName);
+                assertEquals(List.of(leftName, rightName),
+                        java.util.Arrays.stream(diamond.getInterfaces()).map(Class::getName).toList());
+            }
+        } finally {
+            for (final var name : generatedNames) Files.deleteIfExists(Path.of("dist", name + ".class"));
+        }
+    }
+
+    @Test
+    public void contractCompositionRejectsConflictingInheritedRequirements() {
+        final var methods = """
+                contract NumberValue { value(): Int; }
+                contract TextValue { value(): String; }
+                contract ConflictingValue requires NumberValue + TextValue {}
+                """;
+        final var constructors = """
+                contract IntFactory { constructor create(value: Int); }
+                contract StringFactory { constructor create(value: String); }
+                contract ConflictingFactory requires IntFactory + StringFactory {}
+                """;
+        final var invalidRedeclaration = """
+                contract Parent { value(): Int; }
+                contract Child requires Parent { value(): String; }
+                """;
+
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(methods)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(constructors)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(invalidRedeclaration)));
+    }
+
+    @Test
     public void nonNominalWitnessMethodIsDispatchedThroughItsStaticHelper() throws Exception {
         final var programName = "MethodWitness" + UUID.randomUUID().toString().replace("-", "");
         final var source = """
@@ -421,6 +501,7 @@ public final class ClassContractTest {
         .orElseThrow();
     final var constructor = method(counter, "<init>");
     final var increment = method(counter, "incrementInternal");
+    final var countSetter = method(counter, "$zeron$set$count");
     final var contractRead = method(contract, "read");
 
     assertTrue(valueField.flags().has(AccessFlag.PRIVATE));
@@ -429,7 +510,7 @@ public final class ClassContractTest {
     assertEquals("(I)V", constructor.methodType().stringValue());
     assertTrue(opcodes(constructor).contains(Opcode.PUTFIELD));
     assertTrue(opcodes(increment).contains(Opcode.GETFIELD));
-    assertTrue(opcodes(increment).contains(Opcode.PUTFIELD));
+    assertTrue(opcodes(countSetter).contains(Opcode.PUTFIELD));
     assertTrue(contract.flags().has(AccessFlag.INTERFACE));
     assertTrue(contractRead.flags().has(AccessFlag.PUBLIC));
     assertTrue(contractRead.flags().has(AccessFlag.ABSTRACT));
@@ -1486,9 +1567,30 @@ public final class ClassContractTest {
     }
 
     private static void compileCanonicalSample() throws Exception {
-        final var source = Files.readString(Path.of("src/main/resources/test.zn"));
-        final var unit = Parser.of(Scanner.from(source).scanTokens())
-            .parseCompilationUnit("src/main/resources/test.zn");
+        final var source = """
+                contract TestCounterView {
+                    read(): Int;
+                }
+                class TestCounter is TestCounterView {
+                    value: Int;
+                    public mut property count: Int = 0;
+                    public constructor new;
+                    public mut incrementInternal(): Unit {
+                        this.count += this.value;
+                    }
+                    public mut increment(): Unit {
+                        this.incrementInternal();
+                    }
+                    public read(): Int = this.value;
+                }
+                fn main(): Unit {
+                    let counter = TestCounter.new(0);
+                    counter.increment();
+                    let view: TestCounterView = counter;
+                    view.read();
+                }
+                """;
+        final var unit = Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit("test.zn");
         final var compiler = CompilationService.forCompilationUnits(List.of(unit), "test", "");
         compiler.resolve();
         compiler.compile();

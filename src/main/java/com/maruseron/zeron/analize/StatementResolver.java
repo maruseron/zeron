@@ -30,6 +30,8 @@ final class StatementResolver {
             case Stmt.ClassDecl declaration -> DeclarationResolver.resolveClass(context, declaration);
             case Stmt.ContractDecl declaration -> DeclarationResolver.resolveContract(context, declaration);
             case Stmt.SumDecl declaration -> DeclarationResolver.resolveSum(context, declaration);
+            case Stmt.ProductDecl declaration -> DeclarationResolver.resolveProduct(context, declaration);
+            case Stmt.NewtypeDecl declaration -> DeclarationResolver.resolveNewtype(context, declaration);
             case Stmt.ExternalClass _ -> {}
             case Stmt.Witness _ -> {}
             case Stmt.Block(List<Stmt> statements) -> {

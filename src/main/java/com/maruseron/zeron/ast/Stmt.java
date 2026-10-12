@@ -148,6 +148,19 @@ public sealed interface Stmt {
 
     record SumPayload(Token name, TypeDescriptor type) {}
 
+    record ProductDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                       List<ProductComponent> components, boolean isPublic) implements Stmt, Decl {
+        public ProductDecl {
+            typeParameters = List.copyOf(typeParameters);
+            components = List.copyOf(components);
+        }
+    }
+
+    record ProductComponent(Token name, TypeDescriptor type) {}
+
+    record NewtypeDecl(Token name, TypeDescriptor underlyingType, Expr validator,
+                       boolean isPublic) implements Stmt, Decl {}
+
     final class Witness implements Stmt, Decl {
         private final Token name;
         private final List<TypeParameterDescriptor> typeParameters;

@@ -340,16 +340,18 @@ public final class JavaInteropTest {
     }
 
     @Test
-    public void runClassAddsJavaClasspathJarToChildRuntime() throws Exception {
+    public void runCommandAddsJavaClasspathRootsToChildRuntime() throws Exception {
         final var packageName = "runJavaJar" + UUID.randomUUID().toString().replace("-", "");
-        final var sourceDirectory = Files.createTempDirectory(Path.of("target"), "zeron-java-runtime-source-");
-        final var sourcePath = sourceDirectory.resolve("Main.zn");
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-java-runtime-project-")
+                .toAbsolutePath().normalize();
+        final var sourceRoot = projectRoot.resolve("src");
+        final var packageDirectory = sourceRoot.resolve(packageName);
+        final var sourcePath = packageDirectory.resolve("Main.zn");
+        final var manifest = projectRoot.resolve("zeron.toml");
         final var jar = Files.createTempFile(Path.of("target"), "zeron-java-runtime-", ".jar");
-        final var standardLibraryJar = Path.of("target", "zeron-stdlib-runtime-"
-                + UUID.randomUUID().toString().replace("-", "") + ".jar");
-        final var classFile = Path.of("dist", packageName, "Main.class");
         try {
             writeFixtureJar(jar);
+            Files.createDirectories(packageDirectory);
             Files.writeString(sourcePath, """
                     package %s;
                     import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
@@ -357,19 +359,21 @@ public final class JavaInteropTest {
                         let value: Int = Fixture.add(19, 23);
                     }
                     """.formatted(packageName));
-            assertEquals(0, Zeron.runCli(sourcePath.toString(), "--java-classpath", jar.toString()));
-            assertTrue(Files.isRegularFile(classFile));
-            assertEquals(0, Zeron.runCli("--run-class", classFile.toString(),
-                    "--stdlib-jar", standardLibraryJar.toString(),
-                    "--java-classpath", jar.toString()));
-            assertEquals(0, Zeron.runCli("--run-class", classFile.toString(),
-                    "--stdlib-jar", standardLibraryJar.toString(),
-                    "--java-classpath", JAVA_FIXTURE_ROOT.toString()));
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/%s/Main.zn"
+                    source-roots = ["src"]
+                    output = "output"
+
+                    [dependencies]
+                    java-classpath = ["%s", "%s"]
+                    """.formatted(packageName, jar.toAbsolutePath().toString().replace("\\", "\\\\"),
+                    JAVA_FIXTURE_ROOT.toAbsolutePath().toString().replace("\\", "\\\\")));
+            assertEquals(0, Zeron.runCli("run", "--manifest", manifest.toString()));
+            assertTrue(Files.isRegularFile(projectRoot.resolve("output").resolve(packageName).resolve("Main.class")));
         } finally {
-            deleteTree(Path.of("dist"));
-            deleteTree(sourceDirectory);
+            deleteTree(projectRoot);
             Files.deleteIfExists(jar);
-            Files.deleteIfExists(standardLibraryJar);
         }
     }
 

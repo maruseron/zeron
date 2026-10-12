@@ -19,6 +19,8 @@ final class DeclarationRegistry {
     private final Map<String, Stmt.ExternalClass> externalClasses;
     private final Map<String, Stmt.ContractDecl> contracts;
     private final Map<String, Stmt.SumDecl> sums;
+    private final Map<String, Stmt.ProductDecl> products;
+    private final Map<String, Stmt.NewtypeDecl> newtypes;
     private final Map<String, Stmt.FunctionDeclaration> functions;
     private final Map<String, List<Stmt.ExtensionMethod>> extensionMethods;
     private final Map<String, Stmt.Var> topLevelValues;
@@ -37,6 +39,8 @@ final class DeclarationRegistry {
             final Map<String, Stmt.ExternalClass> externalClasses,
             final Map<String, Stmt.ContractDecl> contracts,
             final Map<String, Stmt.SumDecl> sums,
+            final Map<String, Stmt.ProductDecl> products,
+            final Map<String, Stmt.NewtypeDecl> newtypes,
             final Map<String, Stmt.FunctionDeclaration> functions,
             final Map<String, List<Stmt.ExtensionMethod>> extensionMethods,
             final Map<String, Stmt.Var> topLevelValues,
@@ -53,6 +57,8 @@ final class DeclarationRegistry {
         this.externalClasses = externalClasses;
         this.contracts = contracts;
         this.sums = sums;
+        this.products = products;
+        this.newtypes = newtypes;
         this.functions = functions;
         this.extensionMethods = extensionMethods;
         this.topLevelValues = topLevelValues;
@@ -89,9 +95,59 @@ final class DeclarationRegistry {
                 contracts.put(declaration.name().lexeme(), declaration);
             } else if (statement instanceof Stmt.SumDecl declaration) {
                 registerSum(declaration);
+            } else if (statement instanceof Stmt.ProductDecl declaration) {
+                registerProduct(declaration);
+            } else if (statement instanceof Stmt.NewtypeDecl declaration) {
+                registerNewtype(declaration);
             }
 
         }
+    }
+
+    private void registerNewtype(final Stmt.NewtypeDecl newtype) {
+        registerType(newtype.name());
+        if (newtypes.putIfAbsent(newtype.name().lexeme(), newtype) != null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                    newtype.name(), "Newtype '" + newtype.name().lexeme() + "' is already declared."));
+        }
+        final var valueName = new Token(TokenType.IDENTIFIER, "value", null, newtype.name().span());
+        final var property = new Stmt.Property(valueName, newtype.underlyingType(), null,
+                newtype.isPublic(), false, null, null, null, true);
+        final var constructor = new Stmt.Constructor(
+                new Token(TokenType.IDENTIFIER, "new", null, newtype.name().span()),
+                newtype.isPublic() && newtype.validator() == null);
+        classes.put(newtype.name().lexeme(), new Stmt.ClassDecl(newtype.name(), List.of(), List.of(),
+                List.of(), List.of(property), constructor, List.of(), List.of(), List.of(),
+                newtype.isPublic(), false));
+    }
+
+    private void registerProduct(final Stmt.ProductDecl product) {
+        registerType(product.name());
+        if (products.putIfAbsent(product.name().lexeme(), product) != null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                    product.name(), "Product type '" + product.name().lexeme() + "' is already declared."));
+        }
+        if (product.components().size() < 2) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    product.name(), "A product type must declare at least two components."));
+        }
+        final var componentNames = new HashSet<String>();
+        for (final var component : product.components()) {
+            if (!componentNames.add(component.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        component.name(), "Duplicate product component name."));
+            }
+        }
+        final var properties = product.components().stream()
+                .map(component -> new Stmt.Property(component.name(), component.type(), null,
+                        product.isPublic(), false, null, null, null, true))
+                .toList();
+        final var generatedClass = new Stmt.ClassDecl(product.name(), product.typeParameters(), List.of(),
+                List.of(), properties,
+                new Stmt.Constructor(new Token(TokenType.IDENTIFIER, "new", null,
+                        product.name().span()), product.isPublic()),
+                List.of(), List.of(), List.of(), product.isPublic(), false);
+        classes.put(product.name().lexeme(), generatedClass);
     }
 
     private void registerSum(final Stmt.SumDecl sum) {
@@ -383,19 +439,47 @@ final class DeclarationRegistry {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
                         "Registered JVM static method does not match public class-file metadata."));
             }
+        } else if (target instanceof FunctionBindingRegistry.InstanceMethod methodTarget) {
+            methodDescriptor = methodTarget.descriptor();
+            final var ownerName = binaryName(methodTarget.owner());
+            final var javaClass = javaClassPath.find(ownerName);
+            if (javaClass == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
+                        "External JVM owner '" + ownerName
+                                + "' was not found on the configured --java-classpath roots."));
+                return;
+            }
+            final var matches = javaClass.methods().stream()
+                    .anyMatch(method -> method.name().equals(methodTarget.methodName())
+                            && !method.isStatic()
+                            && !method.isConstructor()
+                            && !method.isVarArgs()
+                            && !method.hasGenericSignature()
+                            && method.descriptor().equals(methodDescriptor));
+            if (!matches) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
+                        "Registered JVM instance method does not match public class-file metadata."));
+            }
+            if (binding.signature().arity() != methodDescriptor.parameterCount() + 1
+                    || !matchesExternalType(methodTarget.owner(), binding.signature().parameters().getFirst())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                        name, "Registered JVM receiver does not match the external function signature."));
+            }
         } else if (target instanceof FunctionBindingRegistry.StaticFieldInstanceMethod methodTarget) {
             methodDescriptor = methodTarget.methodDescriptor();
         } else {
             throw new IllegalStateException("Unknown external JVM binding target.");
         }
 
-        if (methodDescriptor.parameterCount() != binding.signature().arity()) {
+        final var instanceMethod = target instanceof FunctionBindingRegistry.InstanceMethod;
+        if (methodDescriptor.parameterCount() != binding.signature().arity() - (instanceMethod ? 1 : 0)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
                     "Registered JVM method arity does not match the external function signature."));
+            return;
         }
         for (int index = 0; index < methodDescriptor.parameterCount(); index++) {
             if (!matchesExternalType(methodDescriptor.parameterType(index),
-                    binding.signature().parameters().get(index))) {
+                    binding.signature().parameters().get(index + (instanceMethod ? 1 : 0)))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
                         "Registered JVM parameter descriptor does not match the external function signature."));
             }

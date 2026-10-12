@@ -29,10 +29,11 @@ final class TypeClassEvidence {
         final var contract = context.contracts.get(nominalName(witness.contractType()));
         final var target = context.classes.get(nominalName(witness.targetType()));
         final var sumTarget = context.sums.get(nominalName(witness.targetType()));
-        if (sumTarget != null && contract != null
+        final var productTarget = context.products.get(nominalName(witness.targetType()));
+        if ((sumTarget != null || productTarget != null) && contract != null
                 && contract.name().lexeme().equals("zeron.lang.Eq")) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                    witness.name(), "Sum types use compiler-synthesized structural Eq evidence."));
+                    witness.name(), "Sum and product types use compiler-synthesized structural Eq evidence."));
         }
         if (contract == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
@@ -422,6 +423,7 @@ final class TypeClassEvidence {
                             where, resolving)) {
                 return true;
             }
+            if (hasStructuralProductEquality(context, contractType, actual, where, resolving)) return true;
             if (hasStructuralSumEquality(context, contractType, actual, where, resolving)) return true;
             var matchingWitnesses = 0;
             for (final var entry : context.typeClassWitnesses) {
@@ -552,6 +554,9 @@ final class TypeClassEvidence {
         final var sumEquality = structuralSumEqualityHandle(context, requiredBound, concrete, requirement,
                 targetParameter, targetBoundIndex, targetMethodIndex, where);
         if (sumEquality != null) return sumEquality;
+        final var productEquality = structuralProductEqualityHandle(context, requiredBound, concrete, requirement,
+                targetParameter, targetBoundIndex, targetMethodIndex, where);
+        if (productEquality != null) return productEquality;
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
                 "No method witness satisfies bound '" + requiredBound + "'."));
         throw new IllegalStateException("Unreachable");
@@ -756,6 +761,59 @@ final class TypeClassEvidence {
                 Expr.EvidenceHandleKind.INTERFACE_STATIC, prerequisites);
     }
 
+    private static Expr.EvidenceArgument structuralProductEqualityHandle(
+            final ResolutionContext context, final TypeDescriptor requiredBound,
+            final TypeDescriptor concrete, final Stmt.ContractMethod requirement,
+            final TypeParameterDescriptor targetParameter, final int targetBoundIndex,
+            final int targetMethodIndex, final com.maruseron.zeron.scan.Token where) {
+        if (!isEqContract(requiredBound) || !requirement.name().lexeme().equals("eq")
+                || !(requirement.typeDescriptor().returnType() instanceof BooleanDescriptor)
+                || requirement.typeDescriptor().parameters().size() != 1
+                || !eqTargetMatches(requiredBound, concrete)) return null;
+        final var product = context.products.get(nominalName(concrete));
+        if (product == null) return null;
+        final var actualArguments = typeArguments(concrete);
+        if (actualArguments.size() != product.typeParameters().size()) return null;
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int index = 0; index < actualArguments.size(); index++) {
+            substitutions.put(product.typeParameters().get(index), actualArguments.get(index));
+        }
+        final var prerequisites = new ArrayList<Expr.EvidenceArgument>();
+        for (final var component : product.components()) {
+            final var componentType = TypeSubstitution.substitute(component.type(), substitutions);
+            if (isRecursiveProductComponent(componentType, concrete)) continue;
+            final var componentBound = eqType(context, componentType);
+            if (!hasEvidence(context, componentBound, componentType, where)) return null;
+            prerequisites.add(selectMethodEvidence(context, targetParameter, targetBoundIndex,
+                    targetMethodIndex, componentBound, componentType, eqMethod(context), where));
+        }
+        final var signature = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(), concrete, concrete);
+        return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
+                product.name().lexeme(), "$zeron$eq", signature, null, true,
+                Expr.EvidenceHandleKind.STATIC, prerequisites);
+    }
+
+    private static boolean hasStructuralProductEquality(
+            final ResolutionContext context, final TypeDescriptor contractType,
+            final TypeDescriptor actualType, final com.maruseron.zeron.scan.Token where,
+            final Set<String> resolving) {
+        if (!isEqContract(contractType) || !eqTargetMatches(contractType, actualType)) return false;
+        final var product = context.products.get(nominalName(actualType));
+        if (product == null) return false;
+        final var actualArguments = typeArguments(actualType);
+        if (actualArguments.size() != product.typeParameters().size()) return false;
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int index = 0; index < actualArguments.size(); index++) {
+            substitutions.put(product.typeParameters().get(index), actualArguments.get(index));
+        }
+        for (final var component : product.components()) {
+            final var componentType = TypeSubstitution.substitute(component.type(), substitutions);
+            if (isRecursiveProductComponent(componentType, actualType)) continue;
+            if (!hasEvidence(context, eqType(context, componentType), componentType, where, resolving)) return false;
+        }
+        return true;
+    }
+
     private static boolean hasStructuralSumEquality(
             final ResolutionContext context, final TypeDescriptor contractType,
             final TypeDescriptor actualType, final com.maruseron.zeron.scan.Token where,
@@ -788,6 +846,13 @@ final class TypeClassEvidence {
         final var normalizedPayload = payloadType instanceof NullableDescriptor nullable
                 ? nullable.baseType() : payloadType;
         return sameAppliedType(normalizedPayload, sumType);
+    }
+
+    private static boolean isRecursiveProductComponent(final TypeDescriptor componentType,
+                                                       final TypeDescriptor productType) {
+        final var normalizedComponent = componentType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : componentType;
+        return sameAppliedType(normalizedComponent, productType);
     }
 
     private static TypeDescriptor eqType(final ResolutionContext context, final TypeDescriptor target) {

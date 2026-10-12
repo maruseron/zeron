@@ -29,6 +29,9 @@ separate interop facilities.
   `zeron.io.println` are ordinary Zeron functions implemented through the curated Java class facade.
 - `Int.toFloat()` is a public extension that calls the private external helper `zeron.lang.intToFloat`;
   the helper is bound to the `INT_TO_FLOAT` intrinsic and lowers to JVM `i2d`.
+- `String` operations in `zeron.lang` are ordinary Zeron extensions backed by a curated set of
+  typed immutable `java.lang.String` instance-method bindings. Their indexing units follow Java's
+  UTF-16 code-unit semantics; substring validates bounds and returns `Option<String>`.
 - `Float.toInt()` is a public checked conversion returning `Option<Int>`. It truncates toward zero,
   returning `Option<Int>.None()` for NaN, infinities, or values whose truncated result is outside the 32-bit
   `Int` range; fractional values in the fringe around either endpoint are accepted when truncation

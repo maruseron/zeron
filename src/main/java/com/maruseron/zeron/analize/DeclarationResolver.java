@@ -9,7 +9,6 @@ import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static com.maruseron.zeron.analize.Resolver.*;
 
@@ -23,9 +22,22 @@ final class DeclarationResolver {
         }
     }
 
+    static void resolveProduct(final ResolutionContext context, final Stmt.ProductDecl product) {
+        if (context.products.get(product.name().lexeme()) != product) return;
+        final var declaration = context.classes.get(product.name().lexeme());
+        if (declaration == null) return;
+        resolveClass(context, declaration);
+    }
+
+    static void resolveNewtype(final ResolutionContext context, final Stmt.NewtypeDecl newtype) {
+        if (context.newtypes.get(newtype.name().lexeme()) != newtype) return;
+        TypeResolver.validateType(context, newtype.underlyingType(), newtype.name());
+        final var declaration = context.classes.get(newtype.name().lexeme());
+        if (declaration != null) resolveClass(context, declaration);
+    }
+
     static void resolveContract(final ResolutionContext context, final Stmt.ContractDecl contract) {
         validateRequiredContracts(context, contract);
-        validateContractComposition(context, contract);
         validateSealedContract(context, contract);
         for (final var constructor : contract.namedConstructors()) {
             if (contract.namedConstructors().stream().anyMatch(existing -> existing != constructor
@@ -57,6 +69,7 @@ final class DeclarationResolver {
             }
             TypeResolver.validateType(context, property.type(), property.name());
         }
+        validateContractComposition(context, contract);
     }
 
     private static void validateRequiredContracts(final ResolutionContext context,

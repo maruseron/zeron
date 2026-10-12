@@ -113,8 +113,16 @@ The compiler writes generated Zeron programs under `dist/`. A default-package en
 `test.zn` emits `test.class` at the output root; a packaged entry emits its class under the matching
 package path (for example, `app.Main` at `dist/app/Main.class`). Generated lambda-shape interfaces
 currently remain in the default package at the output root, independently of the entry package.
-Prompt or direct compiler use without a source path falls back to `ZeronMain`. Maven's
-`target/classes` remains the output for the compiler itself, not for generated Zeron programs.
+The no-argument REPL compiles each submission into a uniquely named `ZeronRepl` holder and loads it
+from a session class loader over `dist/`. Expressions print their result, and import declarations
+plus top-level `let` and `let mut` bindings persist across submissions; redeclaring a binding is
+rejected. Imports are validated when entered and apply to subsequent expressions. Each submission
+receives current bindings as typed parameters and returns their updated values to the host, so mutable
+bindings can be reassigned between submissions without re-evaluating their initializers. Function,
+type, and contract declarations are not yet persistent REPL declarations. Multi-line input is
+accepted while delimiters, strings, or block comments are unfinished. Direct compiler use without a
+source path falls back to `ZeronMain`. Maven's `target/classes` remains the output for the compiler
+itself, not for generated Zeron programs.
 
 The shared output root removes the previous split between the process working directory and Maven's class output. A cleanup or incremental-build policy for obsolete generated shape interfaces remains future work; current consumers should load the main class and its required generated interfaces from `dist/`.
 

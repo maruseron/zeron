@@ -88,6 +88,10 @@ final class BytecodeEmitter {
             context.currentHolderName = namespace.getKey();
             context.classFile.buildTo(namespacePath.toAbsolutePath(), ClassDesc.of(namespace.getKey()), builder -> {
                 builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
+                final var nestMembers = validatedNewtypeNestMembers(context, namespace.getKey());
+                if (!nestMembers.isEmpty()) {
+                    builder.with(NestMembersAttribute.ofSymbols(nestMembers));
+                }
                 DeclarationEmitter.generateClass(context, builder, namespace.getValue(), false);
             });
         }
@@ -103,7 +107,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v22.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v24.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -1504,6 +1508,10 @@ final class BytecodeEmitter {
             methodDescriptor = staticMethod.descriptor();
             emitExternalFunctionArguments(context, composer, signature);
             composer.invokestatic(staticMethod.owner(), staticMethod.methodName(), methodDescriptor);
+        } else if (target instanceof FunctionBindingRegistry.InstanceMethod instanceMethod) {
+            methodDescriptor = instanceMethod.descriptor();
+            emitExternalFunctionArguments(context, composer, signature);
+            composer.invokevirtual(instanceMethod.owner(), instanceMethod.methodName(), methodDescriptor);
         } else if (target instanceof FunctionBindingRegistry.StaticFieldInstanceMethod fieldMethod) {
             methodDescriptor = fieldMethod.methodDescriptor();
             composer.getstatic(fieldMethod.fieldOwner(), fieldMethod.fieldName(), fieldMethod.fieldType());
@@ -1593,8 +1601,38 @@ final class BytecodeEmitter {
                 .map(declaration -> declaration.name().lexeme())
                 .filter(name -> !name.equals(context.mainClassName)
                         && !context.metadata.metadataTypeNames().contains(name)
+                        && !isValidatedNewtype(context, name)
                         && isSamePackage(name, context.mainClassName))
                 .map(ClassDesc::of)
+                .toList();
+    }
+
+    private static boolean isValidatedNewtype(final CompilationContext context, final String typeName) {
+        return context.compilationUnits.stream()
+                .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
+                .map(NamespaceMembers.Member::declaration)
+                .filter(Stmt.NewtypeDecl.class::isInstance)
+                .map(Stmt.NewtypeDecl.class::cast)
+                .anyMatch(newtype -> newtype.validator() != null
+                        && newtype.name().lexeme().equals(typeName));
+    }
+
+    private static List<ClassDesc> validatedNewtypeNestMembers(final CompilationContext context,
+                                                               final String namespaceOwner) {
+        return context.compilationUnits.stream()
+                .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream()
+                        .map(NamespaceMembers.Member::declaration)
+                        .filter(Stmt.NewtypeDecl.class::isInstance)
+                        .map(Stmt.NewtypeDecl.class::cast)
+                        .filter(newtype -> newtype.validator() != null)
+                        .filter(newtype -> {
+                            final var namespaceName = newtype.name().lexeme()
+                                    .substring(newtype.name().lexeme().lastIndexOf('.') + 1);
+                            return CompilationMetadata.namespaceOwner(unit.packageName(), namespaceName)
+                                    .equals(namespaceOwner);
+                        })
+                        .map(newtype -> ClassDesc.of(newtype.name().lexeme())))
+                .distinct()
                 .toList();
     }
 

@@ -88,6 +88,12 @@ public final class Resolver {
                 } else if (declaration instanceof Stmt.SumDecl sumDeclaration) {
                     attempt(context, () -> context.declarationRegistrar.registerTypes(
                             unit.packageName(), List.of(sumDeclaration)));
+                } else if (declaration instanceof Stmt.ProductDecl productDeclaration) {
+                    attempt(context, () -> context.declarationRegistrar.registerTypes(
+                            unit.packageName(), List.of(productDeclaration)));
+                } else if (declaration instanceof Stmt.NewtypeDecl newtypeDeclaration) {
+                    attempt(context, () -> context.declarationRegistrar.registerTypes(
+                            unit.packageName(), List.of(newtypeDeclaration)));
                 } else if (declaration instanceof Stmt.ExternalClass externalClass) {
                     attempt(context, () -> context.declarationRegistrar.registerTypes(
                             unit.packageName(), List.of(externalClass)));
@@ -272,6 +278,8 @@ public final class Resolver {
             case Stmt.ClassDecl classDeclaration -> classDeclaration.name();
             case Stmt.ContractDecl contractDeclaration -> contractDeclaration.name();
             case Stmt.SumDecl sumDeclaration -> sumDeclaration.name();
+            case Stmt.ProductDecl productDeclaration -> productDeclaration.name();
+            case Stmt.NewtypeDecl newtypeDeclaration -> newtypeDeclaration.name();
             case Stmt.ExternalClass externalClass -> externalClass.name();
             case Stmt.Witness witness -> witness.name();
             case Stmt.FunctionDeclaration function -> function.name();

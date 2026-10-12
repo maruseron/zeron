@@ -1725,6 +1725,8 @@ final class ExpressionFlowResolver {
 
     private static boolean isIdentityComparable(final ResolutionContext context, final TypeDescriptor type) {
         final var identityType = identityViewType(context, type);
+        if (identityType instanceof NominalDescriptor nominal
+                && context.newtypes.containsKey(nominal.name())) return false;
         return identityType instanceof AnyDescriptor
                 || identityType instanceof NominalDescriptor
                 || identityType instanceof GenericDescriptor

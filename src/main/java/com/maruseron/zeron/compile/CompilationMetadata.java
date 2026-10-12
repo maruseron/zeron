@@ -35,6 +35,10 @@ final class CompilationMetadata {
                     for (final var sumCase : sumDeclaration.cases()) {
                         metadataTypeNames.add(sumDeclaration.generatedCaseName(sumCase));
                     }
+                } else if (declaration instanceof Stmt.ProductDecl productDeclaration) {
+                    metadataTypeNames.add(productDeclaration.name().lexeme());
+                } else if (declaration instanceof Stmt.NewtypeDecl newtypeDeclaration) {
+                    metadataTypeNames.add(newtypeDeclaration.name().lexeme());
                 }
             }
         }

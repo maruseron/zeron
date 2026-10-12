@@ -98,6 +98,12 @@ final class CompilationContext {
                                 ClassHierarchyResolver.ClassHierarchyInfo.ofClass(
                                         ClassDesc.of("java.lang.Object")));
                     }
+                } else if (declaration instanceof Stmt.ProductDecl productDeclaration) {
+                    sourceTypes.put(ClassDesc.of(productDeclaration.name().lexeme()),
+                            ClassHierarchyResolver.ClassHierarchyInfo.ofClass(ClassDesc.of("java.lang.Object")));
+                } else if (declaration instanceof Stmt.NewtypeDecl newtypeDeclaration) {
+                    sourceTypes.put(ClassDesc.of(newtypeDeclaration.name().lexeme()),
+                            ClassHierarchyResolver.ClassHierarchyInfo.ofClass(ClassDesc.of("java.lang.Object")));
                 }
 
             }

@@ -15,6 +15,8 @@ final class ResolutionContext {
     final Map<String, Stmt.ExternalClass> externalClasses = new LinkedHashMap<>();
     final Map<String, Stmt.ContractDecl> contracts = new LinkedHashMap<>();
     final Map<String, Stmt.SumDecl> sums = new LinkedHashMap<>();
+    final Map<String, Stmt.ProductDecl> products = new LinkedHashMap<>();
+    final Map<String, Stmt.NewtypeDecl> newtypes = new LinkedHashMap<>();
     final List<TypeClassEvidence.WitnessEntry> typeClassWitnesses = new ArrayList<>();
     final Map<String, Stmt.FunctionDeclaration> functions = new LinkedHashMap<>();
     final Map<String, List<Stmt.ExtensionMethod>> extensionMethods = new LinkedHashMap<>();
@@ -61,7 +63,7 @@ final class ResolutionContext {
                 declarationPackages, javaClassPath);
         topLevelValuePlanner = new TopLevelValuePlanner(topLevelValues);
         declarationRegistrar = new DeclarationRegistry(
-                types, classes, externalClasses, contracts, sums, functions, extensionMethods,
+                types, classes, externalClasses, contracts, sums, products, newtypes, functions, extensionMethods,
                 topLevelValues, topLevelValueSymbols,
                 topLevelTokensByDeclaration, functionSymbolTokens, functionNamesByDeclaration,
                 externalFunctionBindings, symbols, javaClassPath, Objects.requireNonNull(functionBindings));

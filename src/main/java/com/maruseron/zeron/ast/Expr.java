@@ -88,6 +88,7 @@ public sealed interface Expr {
         private Call namespaceCall;
         private String resolvedClassName;
         private boolean sumCaseFactory;
+        private boolean internalNewtypeConstructor;
         private String resolvedOwnerName;
         private boolean receiverRequiresCast;
         private JavaCallTarget javaCallTarget;
@@ -137,6 +138,10 @@ public sealed interface Expr {
         public void setResolvedClassName(String className) { resolvedClassName = className; }
         public boolean sumCaseFactory() { return sumCaseFactory; }
         public void setSumCaseFactory(final boolean value) { sumCaseFactory = value; }
+        public boolean internalNewtypeConstructor() { return internalNewtypeConstructor; }
+        public void setInternalNewtypeConstructor(final boolean value) {
+            internalNewtypeConstructor = value;
+        }
         public String resolvedOwnerName() { return resolvedOwnerName; }
         public void setResolvedOwnerName(String name) { resolvedOwnerName = name; }
         public boolean receiverRequiresCast() { return receiverRequiresCast; }

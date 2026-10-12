@@ -8,6 +8,7 @@ import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import com.maruseron.zeron.diagnostic.Diagnostic;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.diagnostic.DiagnosticFormatter;
+import com.maruseron.zeron.diagnostic.DiagnosticCode;
 import com.maruseron.zeron.diagnostic.Severity;
 import com.maruseron.zeron.diagnostic.SourcePosition;
 import com.maruseron.zeron.diagnostic.SourceSpan;
@@ -15,10 +16,8 @@ import com.maruseron.zeron.domain.ZeronLibraryJar;
 import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,7 +26,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static java.lang.IO.println;
-import static java.lang.IO.print;
 
 public class Zeron {
     private static final java.util.Set<String> STANDARD_LIBRARY_TYPES = java.util.Set.of(
@@ -39,7 +37,6 @@ public class Zeron {
     static boolean hadCompilationError = false;
     private static boolean debugEnabled;
     private static final java.util.Map<String, List<String>> sourceLines = new java.util.HashMap<>();
-
     static void main(final String... args) throws IOException {
         final var exitCode = runCli(args);
         if (exitCode != 0) System.exit(exitCode);
@@ -59,6 +56,18 @@ public class Zeron {
     }
 
     private static int runCliInvocation(final String... args) throws IOException {
+        if (args.length > 0 && args[0].equals("init")) {
+            return initializeProject(args);
+        }
+        if (args.length > 0 && args[0].equals("build")) {
+            return runProjectCommand(false, args);
+        }
+        if (args.length > 0 && args[0].equals("run")) {
+            return runProjectCommand(true, args);
+        }
+        if (args.length > 0 && args[0].equals("explain")) {
+            return explainDiagnostic(args);
+        }
         final var scriptPaths = new ArrayList<String>();
         final var sourceRoots = new ArrayList<Path>();
         final var libraryRoots = new ArrayList<Path>();
@@ -66,10 +75,6 @@ public class Zeron {
         Path entry = null;
         Path standardLibraryOutput = null;
         Path jarOutput = null;
-        Path runClassFile = null;
-        Path standardLibraryJar = Paths.get("target", "zeron-stdlib-index-v"
-                + ZeronLibraryIndex.VERSION + "-api-v" + StandardLibrary.API_VERSION + ".jar");
-        var customStandardLibraryJar = false;
         var bundleStandardLibrarySources = true;
         for (var index = 0; index < args.length; index++) {
             final var argument = args[index];
@@ -96,12 +101,9 @@ public class Zeron {
                 if (++index >= args.length) throw new IllegalArgumentException("--jar-output requires a JAR file.");
                 jarOutput = Paths.get(args[index]);
             } else if (argument.equals("--run-class")) {
-                if (++index >= args.length) throw new IllegalArgumentException("--run-class requires a .class file.");
-                runClassFile = Paths.get(args[index]);
+                throw new IllegalArgumentException("--run-class was replaced by 'zeron run [--manifest <path>]'.");
             } else if (argument.equals("--stdlib-jar")) {
-                if (++index >= args.length) throw new IllegalArgumentException("--stdlib-jar requires a JAR file.");
-                standardLibraryJar = Paths.get(args[index]);
-                customStandardLibraryJar = true;
+                throw new IllegalArgumentException("--stdlib-jar is no longer supported; configure dependencies in zeron.toml.");
             } else if (argument.equals("--stdlib")) {
                 if (++index >= args.length) throw new IllegalArgumentException("--stdlib requires 'source' or 'compiled'.");
                 if (args[index].equals("source")) bundleStandardLibrarySources = true;
@@ -110,16 +112,6 @@ public class Zeron {
             } else {
                 scriptPaths.add(argument);
             }
-        }
-        if (runClassFile != null) {
-            if (entry != null || !sourceRoots.isEmpty() || !scriptPaths.isEmpty()
-                    || standardLibraryOutput != null || jarOutput != null || !bundleStandardLibrarySources) {
-                throw new IllegalArgumentException("--run-class cannot be combined with compilation options.");
-            }
-            return runGeneratedClass(runClassFile, standardLibraryJar, libraryRoots, javaClassPathRoots);
-        }
-        if (customStandardLibraryJar) {
-            throw new IllegalArgumentException("--stdlib-jar can only be used with --run-class.");
         }
         if (standardLibraryOutput != null) {
             if (entry != null || !sourceRoots.isEmpty() || !scriptPaths.isEmpty()
@@ -137,7 +129,7 @@ public class Zeron {
             if (!libraryRoots.isEmpty() || !javaClassPathRoots.isEmpty() || !bundleStandardLibrarySources) {
                 throw new IllegalArgumentException("Library options require source files or a project entry.");
             }
-            runPrompt();
+            Repl.runPrompt();
             return exitCode();
         }
 
@@ -170,6 +162,68 @@ public class Zeron {
         }
     }
 
+    private static int initializeProject(final String... args) throws IOException {
+        if (args.length != 1) throw new IllegalArgumentException("Usage: zeron init");
+        return initializeProject(Paths.get("."));
+    }
+
+    static int initializeProject(final Path projectDirectory) throws IOException {
+        final var manifestPath = projectDirectory.resolve("zeron.toml");
+        final var sourcePath = projectDirectory.resolve(Paths.get("src", "main.zn"));
+        if (Files.exists(manifestPath) || Files.exists(sourcePath)) {
+            throw new IllegalArgumentException("Cannot initialize project: zeron.toml or src/main.zn already exists.");
+        }
+
+        Files.createDirectories(sourcePath.getParent());
+        var manifestCreated = false;
+        try {
+            Files.writeString(manifestPath, """
+                    [project]
+                    entry = "src/main.zn"
+                    source-roots = ["src"]
+                    output = "dist"
+
+                    [platform]
+                    stdlib = "source"
+                    """, java.nio.file.StandardOpenOption.CREATE_NEW);
+            manifestCreated = true;
+            Files.writeString(sourcePath, """
+                    fn main() {
+                        println("Hello, world!");
+                    }
+                    """, java.nio.file.StandardOpenOption.CREATE_NEW);
+        } catch (final IOException exception) {
+            if (manifestCreated) Files.deleteIfExists(manifestPath);
+            throw exception;
+        }
+        println("Initialized Zeron project with zeron.toml and src/main.zn.");
+        return 0;
+    }
+
+    private static int runProjectCommand(final boolean launch, final String... args) throws IOException {
+        Path manifestPath = Paths.get("zeron.toml");
+        for (var index = 1; index < args.length; index++) {
+            final var argument = args[index];
+            if (argument.equals("--debug") || argument.equals("-d")) {
+                debugEnabled = true;
+            } else if (argument.equals("--manifest")) {
+                if (++index >= args.length) {
+                    throw new IllegalArgumentException("build --manifest requires a TOML file.");
+                }
+                manifestPath = Paths.get(args[index]);
+            } else {
+                throw new IllegalArgumentException("Unknown build option: " + argument);
+            }
+        }
+        final var project = ProjectManifest.load(manifestPath);
+        final var mainClass = runProject(project.sourceRoots(), project.entry(), project.libraryRoots(),
+                project.javaClassPathRoots(), project.bundleStandardLibrarySources(),
+                project.outputDirectory());
+        if (!launch || exitCode() != 0) return exitCode();
+        return runGeneratedClass(mainClass, project.outputDirectory(),
+                project.libraryRoots(), project.javaClassPathRoots());
+    }
+
     private static int exitCode() {
         if (hadError) return 65;
         if (hadResolutionError) return 71;
@@ -177,27 +231,27 @@ public class Zeron {
         return 0;
     }
 
-    private static int runGeneratedClass(final Path classFile,
-                                         final Path standardLibraryJar,
+    private static int explainDiagnostic(final String... args) throws IOException {
+        if (args.length != 2) throw new IllegalArgumentException("Usage: zeron explain <ZR0000>");
+        final var code = new DiagnosticCode(args[1]);
+        final var entry = DiagnosticCatalog.find(code)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown Zeron diagnostic code: " + code));
+        try (final var resource = Zeron.class.getClassLoader()
+                .getResourceAsStream(entry.explanationResource())) {
+            if (resource == null) {
+                throw new IOException("Missing bundled explanation for diagnostic " + code + ".");
+            }
+            System.out.print(new String(resource.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+        }
+        return 0;
+    }
+
+    private static int runGeneratedClass(final String className,
+                                         final Path outputDirectory,
                                          final List<Path> libraries,
                                          final List<Path> javaClassPathRoots) throws IOException {
-        final var outputRoot = Paths.get("dist").toAbsolutePath().normalize();
-        final var absoluteClassFile = classFile.toAbsolutePath().normalize();
-        if (!absoluteClassFile.startsWith(outputRoot)
-                || !absoluteClassFile.getFileName().toString().endsWith(".class")
-                || !Files.isRegularFile(absoluteClassFile)) {
-            throw new IllegalArgumentException("--run-class requires an existing .class file under dist/.");
-        }
         validateJavaClassPathRoots(javaClassPathRoots);
-        if (!Files.exists(standardLibraryJar)) {
-            buildStandardLibraryJar(standardLibraryJar);
-        } else {
-            ZeronLibraryIndex.readFromJar(standardLibraryJar);
-        }
         loadLibraries(libraries);
-        final var relativeClassFile = outputRoot.relativize(absoluteClassFile).toString()
-                .replace(File.separatorChar, '.');
-        final var className = relativeClassFile.substring(0, relativeClassFile.length() - ".class".length());
         final Path runtimeLocation;
         try {
             runtimeLocation = Path.of(Zeron.class.getProtectionDomain().getCodeSource()
@@ -206,8 +260,7 @@ public class Zeron {
             throw new IOException("Could not resolve the Zeron runtime classpath location.", exception);
         }
         final var classPathEntries = new ArrayList<String>();
-        classPathEntries.add(outputRoot.toString());
-        classPathEntries.add(standardLibraryJar.toAbsolutePath().normalize().toString());
+        classPathEntries.add(outputDirectory.toAbsolutePath().normalize().toString());
         classPathEntries.add(runtimeLocation.toString());
         for (final var library : libraries) {
             classPathEntries.add(library.toAbsolutePath().normalize().toString());
@@ -228,23 +281,6 @@ public class Zeron {
         } catch (final InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted while running generated class " + className + ".", exception);
-        }
-    }
-
-    private static void buildStandardLibraryJar(final Path jarPath) throws IOException {
-        final var absoluteJarPath = jarPath.toAbsolutePath().normalize();
-        final var parent = absoluteJarPath.getParent();
-        if (parent == null) throw new IOException("Standard-library JAR path must have a parent: " + jarPath);
-        Files.createDirectories(parent);
-        final var stagingDirectory = Files.createTempDirectory(parent, "zeron-stdlib-stage-");
-        try {
-            buildStandardLibrary(stagingDirectory);
-            if (exitCode() != 0) {
-                throw new IOException("Could not build the standard library required to run generated classes.");
-            }
-            ZeronLibraryJar.write(stagingDirectory, absoluteJarPath);
-        } finally {
-            deleteTree(stagingDirectory);
         }
     }
 
@@ -282,7 +318,7 @@ public class Zeron {
             bundleStandardLibrarySources, javaClassPathRoots, outputDirectory);
     }
 
-    private static void runProject(final List<Path> roots,
+    private static String runProject(final List<Path> roots,
                                    final Path entry,
                                    final List<Path> libraryRoots,
                                    final List<Path> javaClassPathRoots,
@@ -297,7 +333,7 @@ public class Zeron {
                 : absoluteRoots.getFirst().resolve(entry).normalize();
         if (!Files.isRegularFile(absoluteEntry)
                 || absoluteRoots.stream().noneMatch(absoluteEntry::startsWith)) {
-            throw new IllegalArgumentException("Entry source must exist under a configured --root: " + entry);
+            throw new IllegalArgumentException("Entry source must exist under a configured source root: " + entry);
         }
 
         final var sourcePaths = new java.util.TreeSet<Path>();
@@ -348,7 +384,7 @@ public class Zeron {
             units.add(unit);
         }
         if (hadError) {
-            return;
+            return null;
         }
         final var entryUnit = units.getFirst();
         final var programName = entryUnit.packageName().isEmpty()
@@ -356,6 +392,7 @@ public class Zeron {
                 : entryUnit.packageName() + "." + sourceClassName(absoluteEntry);
         runUnits(units, programName, entryUnit.packageName(), libraries,
             bundleStandardLibrarySources, javaClassPathRoots, outputDirectory);
+        return programName;
     }
 
     private static int sourceRootIndex(final List<Path> roots, final Path sourcePath) {
@@ -374,40 +411,6 @@ public class Zeron {
             throw new IllegalArgumentException("Source file is outside configured roots: " + sourcePath);
         }
         return selectedIndex;
-    }
-
-    private static void runPrompt() throws IOException {
-        try (final var reader = new BufferedReader(new InputStreamReader(System.in))) {
-            for (;;) {
-                print("> ");
-                final var line = reader.readLine();
-                if (line == null) break;
-                hadError = false;
-                hadResolutionError = false;
-                hadCompilationError = false;
-                sourceLines.clear();
-                run(line);
-            }
-        }
-    }
-
-    private static void run(final String source) throws IOException {
-        run(source, "ZeronMain");
-    }
-
-    private static void run(final String source, final String outputClassName) throws IOException {
-        rememberSource(null, source);
-        final var scanner = Scanner.from(source);
-        final var parser = Parser.of(scanner.scanWithDiagnostics());
-        final var result = parser.parseCompilationUnitWithDiagnostics(null);
-        reportParseDiagnostics(result.diagnostics());
-        final var unit = result.compilationUnit();
-
-        if (hadError) return;
-
-        runUnits(List.of(unit),
-            unit.packageName().isEmpty() ? outputClassName : unit.packageName() + "." + outputClassName,
-            unit.packageName(), List.of(), true, List.of(), Paths.get("dist"));
     }
 
     private static void runUnits(final List<CompilationUnit> units,
@@ -542,12 +545,22 @@ public class Zeron {
                 span, List.of(), List.of(), List.of()));
     }
 
-    private static void reportParseDiagnostics(final List<Diagnostic> diagnostics) {
+    static void beginReplSubmission() {
+        hadError = false;
+        hadResolutionError = false;
+        hadCompilationError = false;
+        sourceLines.clear();
+    }
+
+    static void reportParseDiagnostics(final List<Diagnostic> diagnostics) {
         diagnostics.forEach(Zeron::reportParseDiagnostic);
     }
 
     public static void reportDiagnostic(final Diagnostic diagnostic) {
         println(DiagnosticFormatter.format(diagnostic, Zeron::sourceLine));
+        if (DiagnosticCatalog.find(diagnostic.code()).isPresent()) {
+            println("  = help: Run 'zeron explain " + diagnostic.code() + "' for more information.");
+        }
     }
 
     public static void reportParseDiagnostic(final Diagnostic diagnostic) {
@@ -587,7 +600,7 @@ public class Zeron {
         reportDiagnostic(diagnostic);
     }
 
-    private static void rememberSource(final String sourcePath, final String source) {
+    static void rememberSource(final String sourcePath, final String source) {
         sourceLines.put(sourcePath, source.lines().toList());
     }
 

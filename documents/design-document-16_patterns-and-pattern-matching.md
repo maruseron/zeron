@@ -235,7 +235,7 @@ would change behavior. Evaluation order is left-to-right and source-defined.
 ## Libraries and compatibility
 
 Public pattern declarations are part of a class's source API. They were added to library-index
-schema v19; the current schema is v22 and preserves their names, generic output signatures, and
+schema v19; the current schema is v24 and preserves their names, generic output signatures, and
 total/refutable status so consumers can type-check patterns without library source files. Compiled
 classes expose the generated helper ABI, while keeping helper names out of source-level name
 resolution.

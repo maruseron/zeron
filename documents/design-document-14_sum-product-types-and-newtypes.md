@@ -2,15 +2,14 @@
 
 ## Status and scope
 
-This document specifies the nominal-sum MVP and keeps product and newtype design separate. It
+This document specifies nominal sums, products, and newtypes. It
 distinguishes three related but different ideas:
 
 - **Sum types** represent one alternative from a closed set of cases.
 - **Product types** represent a value containing all of a set of components.
 - **Newtypes** give an underlying value a distinct nominal identity and domain-specific API.
 
-Product type syntax and newtype syntax have not been selected. Transparent type aliases are not
-introduced by the sum declaration.
+Product and newtype declarations are nominal, not transparent aliases or structural tuples.
 
 ## Motivation and existing facilities
 
@@ -20,10 +19,57 @@ a sealed contract and one implementing class per case. Native sums make the clos
 explicit and let the compiler own construction, case coverage, and generated representations.
 `Option<T>` is now the bundled example of a native generic sum.
 
-Classes already represent named objects with fields and methods, and so can be used for product-like
-data. Standalone tuples, anonymous records, and native sum declarations are not currently
-implemented. Do not infer that a future product type must be structural: anonymous records have
-previously been excluded to avoid introducing structural typing.
+Classes remain appropriate for named objects with methods and custom behavior. Product declarations
+provide a compact form for shallowly immutable, structurally comparable data. Anonymous structural
+records are not introduced: product identity remains nominal.
+
+## Nominal product types
+
+### Declaration and construction
+
+A product is declared with a named, ordered list of at least two components:
+
+```zeron
+public type Pair<A, B> = (left: A, right: B);
+```
+
+The declaration creates a nominal type identified by its package and declared name. Product shape
+does not affect assignability or type identity. Component names must be unique. Generic parameters
+follow the existing invariant nominal-type rules.
+
+Construction uses the ordinary canonical nominal constructor:
+
+```zeron
+let pair: Pair<Int, String> = Pair<Int, String>.new(42, "answer");
+```
+
+Arguments are evaluated and stored in declaration order. Normal generic argument inference and
+contextual typing apply. Product constructors expose no alternate shorthand spelling.
+
+### Components and equality
+
+Each component is a generated read-only property, visible with the product declaration's visibility.
+There are no component-level visibility or mutability modifiers, setters, defaults, or custom
+accessors. Immutability is shallow: a component may refer to mutable state, which remains mutable
+through its own API.
+
+Every product receives compiler-synthesized structural `Eq<Product<...>>` evidence when all
+components have applicable `Eq` evidence. Equality compares corresponding components in declaration
+order, left-to-right, short-circuiting at the first unequal component. It is not JVM
+`Object.equals`; ordinary Java identity behavior is retained. A user-defined `Eq` witness for a
+product conflicts with this intrinsic derivation. Product equality does not imply `Hashable` or
+`Stable`.
+
+The initial product feature omits destructuring patterns, methods, defaults, custom accessors,
+mutable slots, and `Hashable`/`Stable` derivation. Products lower to final JVM classes with
+private-final component storage and generated accessors. The generated constructor and accessors
+preserve declaration order and generic erasure rules.
+
+Compiled-library metadata records product identity, generic parameters, and ordered component names
+and types. A consumer uses that metadata for construction, property typing, and conditional equality;
+it does not infer product semantics from JVM class files.
+The evidence rules and the distinction between value equality and JVM identity are shared with sums;
+see [design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
 
 ## Sum types
 
@@ -157,46 +203,42 @@ equality evidence. Direct self-recursive payloads are supported; mutually recurs
 are not yet synthesized as a recursive evidence group. See
 [design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
 
-## Product types
-
-A product combines all of its components into one value. A case payload such as
-`Some(value: T)` is itself a one-field product; multiple named payload fields would form a larger
-product:
-
-```zeron
-type Event = Moved(from: Coordinate, to: Coordinate) | Closed;
-```
-
-Zeron classes already cover nominal products with methods, visibility, and ordinary object identity.
-The design question is whether the language also needs a lighter tuple or record form, and if so,
-whether that form is nominal or structural.
-
-No syntax or semantics for standalone product values are selected here. In particular, questions
-remain about positional versus named fields, field mutability, equality, destructuring, labels,
-generic inference, and whether product shape contributes to type identity. Anonymous structural
-records would affect assignability and generic type identity and should not be introduced merely as
-an implementation convenience for sum payloads. A named nominal product or tuple type could be
-considered separately if there is a demonstrated use case beyond classes and named sum-case payloads.
-
 ## Newtypes and value-class-like wrappers
 
-A newtype represents one underlying value but has a distinct nominal source type. For example,
-`Meters` could wrap `Float` while preventing accidental interchange with arbitrary `Float` values.
-This differs from a transparent type alias, which would preserve interchangeability, and from a sum,
-which chooses among multiple cases.
+### Declaration, representation, and construction
 
-A newtype-like type should be able to expose methods and constructors that enforce domain rules.
-Illustratively, a `Meters` API might provide a validating constructor and operations that return
-`Meters` rather than `Float`. The exact declaration and constructor syntax remain open. The design
-should ensure that an invariant cannot be bypassed through an implicit raw constructor; visibility,
-deserialization, Java interop, and other host boundaries need explicit rules.
+A newtype declares a distinct nominal type over one concrete, non-generic immutable built-in
+representation. The initial supported representations are `Int`, `Float`, `Boolean`, and `String`.
+For example:
 
-The desired representation is value-class-like: avoid allocating a wrapper where the compiler can
-safely represent the value as its underlying type, while retaining distinct nominal typing in source.
-This is a representation goal, not yet a settled guarantee that wrappers are erased in every
-context. Generics, nullable values, contracts/interfaces, function values, identity-sensitive
-operations, and ABI boundaries may require boxing or adaptation. The language must specify equality,
-nullability, and API compatibility independently of the chosen JVM layout.
+```zeron
+public newtype Meters = Float;
+public newtype UserId = String where value != "";
+```
+
+The first declaration exposes `Meters.new(value)`; the second exposes only
+`UserId.tryNew(value): Option<UserId>`. The validator introduces an immutable local named `value`
+of the underlying type. It must resolve to `Boolean`, is evaluated once after evaluating the
+argument once, and `false` produces `Option.None`; `true` produces `Option.Some` containing the new
+value. A validator has no declared raised effects. Zeron does not promise general purity or
+determinism for validator expressions; invariant validity is established at construction time, and
+the built-in representation restriction ensures that the wrapped value cannot later mutate.
+
+Validated newtypes have no source-accessible unchecked constructor. Unvalidated newtypes use the
+ordinary `.new(value)` constructor. Both forms expose a generated read-only `.value` property with
+the visibility of the declaration. Reading `.value` reveals the representation but does not permit
+forging a validated newtype.
+
+Newtypes do not implicitly inherit `Eq`, `Comparable`, or any other evidence from the underlying
+type. Equality and other behavior require explicit ordinary witnesses or extensions. JVM identity
+comparison (`===`) is not defined for newtypes; use value equality only when the corresponding
+evidence is available.
+
+The initial implementation uses a final JVM wrapper class. This preserves nominal identity and gives
+nullable and generic uses a conventional reference representation, but allocates on construction.
+Direct-carrier lowering is a future optimization, not a property of this MVP. Any later erasure must
+preserve the source-level distinction and define boxing/adaptation at nullable, generic, contract,
+function, Java, and library ABI boundaries.
 
 ## Compilation strategies to evaluate
 
@@ -222,27 +264,23 @@ Changing the metadata schema is distinct from changing the standard-library API 
 
 ### Product and newtype representation
 
-Named product types could lower to ordinary objects, like classes, or to tuples/records with a
-specialized representation if such a feature is justified. Newtypes could lower directly to their
-underlying JVM representation in eligible contexts and use generated wrappers or bridges where
-boxing is needed. Any representation optimization must preserve nominal checks, validated
-construction, generic behavior, and stable public library metadata.
+Products lower to final nominal classes with private-final component storage, a canonical constructor,
+and generated read-only accessors. Newtypes initially lower to final wrapper classes with private-final
+representation storage and a generated read-only accessor. Any future representation optimization
+must preserve nominal checks, validated construction, generic behavior, and stable public library
+metadata.
 
 ## Deferred design questions
 
-Product types remain separate from sum payload products. Classes already provide nominal
-product-like objects; a standalone tuple/record needs a demonstrated use case and decisions about
-identity, mutability, labels, equality, destructuring, and generic type identity.
-
-Newtypes need their own declaration syntax, validated-construction boundary, visibility and
-deserialization rules, equality/nullability semantics, and boxing/ABI contract before implementation.
-They must not be represented by an implicit alias or smuggled into this sum feature.
+Newtype deserialization and host interop must not bypass validated construction. Direct-carrier
+lowering, generic newtypes, mutable or user-defined representations, derived equality, and
+identity-sensitive operations remain deferred.
 
 ## Suggested sequencing
 
 1. Sum MVP implementation is complete, including generated nominal case classes and singleton
-   nullary cases. Keep standalone product syntax and newtypes deferred; consider mutual-recursion
-   evidence only as a separate, explicit extension.
-2. Evaluate product types separately against the capabilities of classes and named case payloads.
-3. Specify newtype construction invariants and source semantics before selecting erased/boxed lowering.
-   Treat representation and ABI as part of the design, not as an invisible optimization.
+   nullary cases. Product MVP implementation is complete; mutual-recursion evidence between
+   declarations remains a separate extension.
+2. The concrete newtype MVP is implemented using wrapper classes and guarded `tryNew` construction.
+   Treat direct-carrier lowering and its ABI as a later representation change, not as an invisible
+   optimization.

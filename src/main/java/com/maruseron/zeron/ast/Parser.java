@@ -136,7 +136,13 @@ public final class Parser {
         collectLocalTypeNames();
         final var statements = new ArrayList<Stmt>();
         while (!isAtEnd()) {
-            statements.add(declaration());
+            final var parsed = declaration();
+            if (parsed != null) {
+                statements.add(parsed);
+                if (parsed instanceof Stmt.NewtypeDecl newtype && newtype.validator() != null) {
+                    statements.add(validatedNewtypeNamespace(newtype));
+                }
+            }
         }
         statements.removeIf(statement -> statement == null);
 
@@ -148,7 +154,8 @@ public final class Parser {
         for (var index = current; index + 1 < tokens.size(); index++) {
             final var token = tokens.get(index);
             if (braceDepth == 0 && (token.type() == CLASS || token.type() == EFFECT || token.type() == CONTRACT
-                    || token.type() == TYPE)
+                    || token.type() == TYPE
+                    || token.type() == IDENTIFIER && token.lexeme().equals("newtype"))
                     && tokens.get(index + 1).type() == IDENTIFIER) {
                 localTypeNames.add(tokens.get(index + 1).lexeme());
             }
@@ -175,7 +182,8 @@ public final class Parser {
                 if (match(CLASS)) return classDeclaration(true);
                 if (match(EFFECT)) return effectDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
-                if (match(TYPE)) return sumDeclaration(true);
+                if (match(TYPE)) return typeDeclaration(true);
+                if (matchSoftKeyword("newtype")) return newtypeDeclaration(true);
                 if (match(SEALED)) {
                     consume(CONTRACT, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION,
                             "Only contracts can be sealed.");
@@ -188,13 +196,14 @@ public final class Parser {
                 if (match(FN)) return fnDeclaration(true);
                 if (match(EXTENSION)) return extensionDeclaration(true);
                 throw error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
-                        "Only values, functions, classes, contracts, sums, and extensions may be public.");
+                        "Only values, functions, classes, contracts, types, and extensions may be public.");
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
             if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
             if (levelMarker == null && match(EFFECT)) return effectDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
-            if (levelMarker == null && match(TYPE)) return sumDeclaration(false);
+            if (levelMarker == null && match(TYPE)) return typeDeclaration(false);
+            if (levelMarker == null && matchSoftKeyword("newtype")) return newtypeDeclaration(false);
             if (levelMarker == null && match(SEALED)) {
                 consume(CONTRACT, DiagnosticCatalog.INVALID_SEALED_CONTRACT_DECLARATION,
                         "Only contracts can be sealed.");
@@ -210,13 +219,26 @@ public final class Parser {
         }
     }
 
-    private Stmt.SumDecl sumDeclaration(final boolean isPublic) {
-        final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect sum type name."));
+    private Stmt typeDeclaration(final boolean isPublic) {
+        final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect type name."));
         final var typeParameters = typeParameterDeclaration(name, false);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
-            consume(EQUAL, "Expect '=' before sum cases.");
+            consume(EQUAL, "Expect '=' before type definition.");
+            if (match(LEFT_PAREN)) {
+                final var components = new ArrayList<Stmt.ProductComponent>();
+                if (!check(RIGHT_PAREN)) {
+                    do {
+                        final var componentName = consume(IDENTIFIER, "Expect product component name.");
+                        consume(COLON, "Expect ':' after product component name.");
+                        components.add(new Stmt.ProductComponent(componentName, collectType()));
+                    } while (match(COMMA));
+                }
+                consume(RIGHT_PAREN, "Expect ')' after product components.");
+                consume(SEMICOLON, "Expect ';' after product declaration.");
+                return new Stmt.ProductDecl(name, List.copyOf(typeParameters.values()), components, isPublic);
+            }
             final var cases = new ArrayList<Stmt.SumCase>();
             do {
                 final var caseName = consume(IDENTIFIER, "Expect sum case name.");
@@ -238,6 +260,53 @@ public final class Parser {
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
+    }
+
+    private Stmt.NewtypeDecl newtypeDeclaration(final boolean isPublic) {
+        final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect newtype name."));
+        consume(EQUAL, "Expect '=' before newtype representation.");
+        final var underlyingType = collectType();
+        if (!(underlyingType instanceof IntDescriptor || underlyingType instanceof FloatDescriptor
+                || underlyingType instanceof BooleanDescriptor || underlyingType instanceof StringDescriptor)) {
+            throw error(previous(), DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    "A newtype representation must be Int, Float, Boolean, or String.");
+        }
+        final var validator = matchSoftKeyword("where") ? expression() : null;
+        consume(SEMICOLON, "Expect ';' after newtype declaration.");
+        return new Stmt.NewtypeDecl(name, underlyingType, validator, isPublic);
+    }
+
+    private Stmt.Namespace validatedNewtypeNamespace(final Stmt.NewtypeDecl newtype) {
+        final var name = newtype.name();
+        final var value = new Token(IDENTIFIER, "value", null, name.span());
+        final var valueType = newtype.underlyingType();
+        final var newtypeType = TypeDescriptor.ofName(name.lexeme());
+        final var optionType = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName("zeron.lang.Option"), newtypeType);
+        final var newtypeReceiver = new Expr.Variable(
+                new Token(IDENTIFIER, name.lexeme(), null, name.span()), TypeDescriptor.ofInfer());
+        final var constructor = new Expr.MemberCall(newtypeReceiver,
+                new Token(IDENTIFIER, "new", null, name.span()), name,
+                List.of(new Expr.Variable(value, valueType)), List.of(), TypeDescriptor.ofInfer());
+        constructor.setInternalNewtypeConstructor(true);
+        final var optionReceiver = new Expr.Variable(
+                new Token(IDENTIFIER, "Option", null, name.span()), TypeDescriptor.ofInfer());
+        final var some = new Expr.MemberCall(optionReceiver,
+                new Token(IDENTIFIER, "Some", null, name.span()), name,
+                List.of(constructor), List.of(), TypeDescriptor.ofInfer());
+        final var none = new Expr.MemberCall(new Expr.Variable(
+                new Token(IDENTIFIER, "Option", null, name.span()), TypeDescriptor.ofInfer()),
+                new Token(IDENTIFIER, "None", null, name.span()), name,
+                List.of(), List.of(), TypeDescriptor.ofInfer());
+        final var functionName = new Token(IDENTIFIER, "tryNew", null, name.span());
+        final var functionType = TypeDescriptor.functionOf("tryNew", optionType, valueType);
+        final var function = new Stmt.Function(functionName, List.of(value), functionType,
+                List.of(new Stmt.If(name, newtype.validator(),
+                        new Stmt.Return(some, name), new Stmt.Return(none, name))),
+                newtype.isPublic());
+        final var namespaceName = name.lexeme().substring(name.lexeme().lastIndexOf('.') + 1);
+        return new Stmt.Namespace(new Token(IDENTIFIER, namespaceName, null, name.span()),
+                List.of(function));
     }
 
     private Stmt.Witness witnessDeclaration() {

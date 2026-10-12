@@ -1,0 +1,26 @@
+package zeron.lang;
+
+public extension String {
+    public fn length(): Int = stringLength(this);
+    public fn isEmpty(): Boolean = stringIsEmpty(this);
+    public fn indexOf(value: String): Int = stringIndexOf(this, value);
+    public fn lastIndexOf(value: String): Int = stringLastIndexOf(this, value);
+    public fn contains(value: String): Boolean = this.indexOf(value) >= 0;
+    public fn startsWith(prefix: String): Boolean = stringStartsWith(this, prefix);
+    public fn endsWith(suffix: String): Boolean = stringEndsWith(this, suffix);
+
+    public fn substring(start: Int, end: Int): Option<String> {
+        if (start < 0 or end < start or end > this.length()) return Option<String>.None();
+        let result = stringSubstring(this, start, end);
+        if (result == null) return Option<String>.None();
+        return Option.Some(result);
+    }
+}
+
+external fn stringLength(value: String?): Int;
+external fn stringIsEmpty(value: String?): Boolean;
+external fn stringIndexOf(value: String?, search: String?): Int;
+external fn stringLastIndexOf(value: String?, search: String?): Int;
+external fn stringStartsWith(value: String?, prefix: String?): Boolean;
+external fn stringEndsWith(value: String?, suffix: String?): Boolean;
+external fn stringSubstring(value: String?, start: Int, end: Int): String?;

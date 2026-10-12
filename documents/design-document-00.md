@@ -153,8 +153,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     curated external-class facade supports `System.out` and `PrintStream.print`/`println`; general
     external classes and member declarations, and expected-class declarations, remain future work.
     See the [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
-    Native sum declarations are implemented; discriminated unions beyond native sums and sealed
-    contracts, standalone product types, and value-class-like newtypes remain design explorations; see
+    Native sums, nominal products, and concrete built-in newtypes with guarded construction are
+    implemented. Direct-carrier newtype lowering and discriminated unions beyond native sums and
+    sealed contracts remain deferred; see
     [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
 - Immutable collection types, list comprehensions, and explicit resource management.
 - Safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`), and explicit
@@ -253,7 +254,7 @@ be written as ordinary declared types.
 | `Int` | Integer values. | Supported. |
 | `Float` | Floating-point values. | Supported. |
 | `Boolean` | Truth values. | Supported. |
-| `String` | Text values. | Supported. |
+| `String` | Immutable text values backed by `java.lang.String`. | Supported; `zeron.lang` provides UTF-16 length, search, prefix/suffix checks, and bounds-checked substring. |
 
 #### Internal and nominal types
 

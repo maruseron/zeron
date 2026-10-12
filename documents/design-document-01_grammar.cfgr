@@ -2,20 +2,19 @@ module ZeronGrammar;
 
 # IDENTIFIER, INT, DOUBLE, and STRING denote scanner token kinds.
 # `type` below is source syntax; design-document-02 describes encoded descriptors.
-# Quoted words are hard keywords unless listed here as soft keywords. Soft keywords are scanned as
-# IDENTIFIER and recognized by exact spelling only at their grammatical position:
-# "permits", "requires", "when", "with", "matches", "map", "flatMap", "filter", and "collect".
+# soft("word") denotes a soft keyword: it is scanned as IDENTIFIER and recognized by exact spelling
+# only at the indicated grammatical position. Other quoted words are hard keywords.
 
 program                    : [packageDeclaration] {importDeclaration} {topLevelDeclaration} EOF ;
 packageDeclaration         : "package" qualifiedName ";" ;
 qualifiedName              : IDENTIFIER {"." IDENTIFIER} ;
 importDeclaration          : "import" qualifiedName ["as" IDENTIFIER] ";" ;
 
-topLevelDeclaration        : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl | sumDecl
+topLevelDeclaration        : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl | typeDecl
                            | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
                            | externalClassDecl | publicExternalClassDecl
                            | effectDecl | publicEffectDecl | extensionDecl | publicExtensionDecl
-                           | publicClassDecl | publicContractDecl | publicSealedContractDecl | publicSumDecl ;
+                           | publicClassDecl | publicContractDecl | publicSealedContractDecl | publicTypeDecl ;
 publicFunDecl              : "public" funDecl ;
 publicExternalFunctionDecl : "public" externalFunctionDecl ;
 publicEffectDecl           : "public" effectDecl ;
@@ -24,9 +23,13 @@ publicExternalClassDecl    : "public" externalClassDecl ;
 publicClassDecl            : "public" classDecl ;
 publicContractDecl         : "public" contractDecl ;
 publicSealedContractDecl   : "public" sealedContractDecl ;
-publicSumDecl              : "public" sumDecl ;
+publicTypeDecl             : "public" typeDecl ;
 sealedContractDecl         : "sealed" contractDecl ;
-sumDecl                    : "type" IDENTIFIER [typeParameters] "=" sumCase {"|" sumCase} ";" ;
+typeDecl                   : "type" IDENTIFIER [typeParameters] "=" (productComponents | sumCase {"|" sumCase}) ";" ;
+productComponents          : "(" productComponent "," productComponent {"," productComponent} ")" ;
+productComponent           : IDENTIFIER ":" type ;
+newtypeDecl                : soft("newtype") IDENTIFIER "=" builtinType [soft("where") expression] ";" ;
+builtinType                : "Int" | "Float" | "Boolean" | "String" ;
 sumCase                    : IDENTIFIER ["(" [sumPayload {"," sumPayload}] ")"] ;
 sumPayload                 : IDENTIFIER ":" type ;
 declaration                : varDecl | funDecl | statement ;
@@ -71,10 +74,10 @@ methodDecl                 : visibility ["mut"] IDENTIFIER [typeParameters] "(" 
                              [raisesClause]
                              ("=" expression ";" | block) ;
 patternDecl                : visibility "pattern" IDENTIFIER "(" [patternOutput {"," patternOutput}] ")"
-                             ["when" expression] block ;
+                             [soft("when") expression] block ;
 patternOutput              : IDENTIFIER ":" type ;
-contractDecl               : "contract" IDENTIFIER [typeParameters] ["requires" contractUse
-                             {"+" contractUse}] ["permits" permittedClass {"," permittedClass}]
+contractDecl               : "contract" IDENTIFIER [typeParameters] [soft("requires") contractUse
+                             {"+" contractUse}] [soft("permits") permittedClass {"," permittedClass}]
                              "{" contractMember* "}" ;
 permittedClass             : qualifiedName [typeArguments] ;
 contractMember             : contractProperty | contractMethod | contractConstructor ;
@@ -117,7 +120,7 @@ bitwiseOr                  : bitwiseXor {"|" bitwiseXor} ;
 bitwiseXor                 : bitwiseAnd {"^" bitwiseAnd} ;
 bitwiseAnd                 : equality {"&" equality} ;
 equality                   : typeTest {("!=" | "==" | "===") typeTest} ;
-typeTest                   : comparison ["is" ["not"] type | "matches" matchPattern] ;
+typeTest                   : comparison ["is" ["not"] type | soft("matches") matchPattern] ;
 comparison                 : shift {(">" | ">=" | "<" | "<=") shift} ;
 shift                      : term {("<<" | ">>" | ">>>") term} ;
 term                       : factor {("-" | "+") factor} ;
@@ -155,7 +158,7 @@ primary                    : INT
                            | "(" ")"
                            | "(" expression ")"
                            | range ;
-handleExpr                 : "handle" "(" expression ")" "with" "{" handleArm+ "}" ;
+handleExpr                 : "handle" "(" expression ")" soft("with") "{" handleArm+ "}" ;
 handleArm                  : "case" matchPattern ["if" expression] "->" expression ";" ;
 arrayLiteral               : "[" expression {"," expression} "]" ;
 ifExpr                     : "if" "(" expression ")" "then" expression "else" expression ;
@@ -170,10 +173,10 @@ patternAlternative         : "_" | IDENTIFIER | type ["." IDENTIFIER "("
 patternArgument            : "_" | IDENTIFIER | matchPattern ;
 forExpr                    : "for" expr { forStage } [ collectStage ] ;
 forStage                   : forMapStage | forFlatMapStage | forFilterStage ;
-forMapStage                : "map" ( IDENTIFIER | "_" ) "->" expression ;
-forFlatMapStage            : "flatMap" ( IDENTIFIER | "_" ) "->" expression ;
-forFilterStage             : "filter" ( IDENTIFIER | "_" ) "->" expression ;
-collectStage               : "collect" expression ;
+forMapStage                : soft("map") ( IDENTIFIER | "_" ) "->" expression ;
+forFlatMapStage            : soft("flatMap") ( IDENTIFIER | "_" ) "->" expression ;
+forFilterStage             : soft("filter") ( IDENTIFIER | "_" ) "->" expression ;
+collectStage               : soft("collect") expression ;
 lambda                     : IDENTIFIER "->" lambdaBody
                            | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
 lambdaBody                 : expression | block ;

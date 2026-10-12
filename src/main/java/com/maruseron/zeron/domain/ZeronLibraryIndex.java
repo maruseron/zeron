@@ -2,6 +2,7 @@ package com.maruseron.zeron.domain;
 
 import com.maruseron.zeron.StandardLibrary;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.ast.ImportDeclaration;
 import com.maruseron.zeron.ast.NamespaceMembers;
@@ -27,7 +28,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 22;
+    public static final int VERSION = 24;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -159,6 +160,19 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                             .toList();
                     statements.add(new Stmt.SumDecl(sumName, sum.typeParameters(), cases, true));
                 }
+                case ProductExport product -> {
+                    final var productName = token(product.qualifiedName());
+                    final var components = product.components().stream()
+                            .map(component -> new Stmt.ProductComponent(token(component.name()), component.type()))
+                            .toList();
+                    statements.add(new Stmt.ProductDecl(productName, product.typeParameters(), components, true));
+                }
+                case NewtypeExport newtype -> {
+                    final Expr validator = newtype.validated()
+                            ? new Expr.Literal(Boolean.TRUE, TypeDescriptor.ofBoolean()) : null;
+                    statements.add(new Stmt.NewtypeDecl(token(newtype.qualifiedName()),
+                            newtype.underlyingType(), validator, true));
+                }
                 case WitnessExport witness -> {
                     final var mappings = witness.mappings().stream()
                             .map(mapping -> new Stmt.WitnessFactoryMapping(token(mapping.requirementName()),
@@ -189,7 +203,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
 
     public sealed interface ExportedDeclaration permits NamespacedDeclaration, ClassExport, ContractExport,
-            SumExport, WitnessExport {
+            SumExport, ProductExport, NewtypeExport, WitnessExport {
         String qualifiedName();
     }
 
@@ -353,6 +367,34 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         public SumCaseExport {
             Objects.requireNonNull(name);
             payloads = List.copyOf(payloads);
+        }
+    }
+
+    public record ProductExport(String qualifiedName, List<TypeParameterDescriptor> typeParameters,
+                                List<ProductComponentExport> components) implements ExportedDeclaration {
+        public ProductExport {
+            Objects.requireNonNull(qualifiedName);
+            typeParameters = List.copyOf(typeParameters);
+            components = List.copyOf(components);
+        }
+    }
+
+    public record ProductComponentExport(String name, TypeDescriptor type) {
+        public ProductComponentExport {
+            Objects.requireNonNull(name);
+            Objects.requireNonNull(type);
+        }
+    }
+
+    public record NewtypeExport(String qualifiedName, TypeDescriptor underlyingType,
+                                boolean validated) implements ExportedDeclaration {
+        public NewtypeExport {
+            Objects.requireNonNull(qualifiedName);
+            Objects.requireNonNull(underlyingType);
+            if (!(underlyingType instanceof IntDescriptor || underlyingType instanceof FloatDescriptor
+                    || underlyingType instanceof BooleanDescriptor || underlyingType instanceof StringDescriptor)) {
+                throw new IllegalArgumentException("Unsupported newtype representation.");
+            }
         }
     }
 
@@ -585,6 +627,15 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                         .toList()))
                                         .toList()));
                     }
+                    case Stmt.ProductDecl product when product.isPublic() ->
+                            exports.add(new ProductExport(product.name().lexeme(), product.typeParameters(),
+                                    product.components().stream()
+                                            .map(component -> new ProductComponentExport(
+                                                    component.name().lexeme(), component.type()))
+                                            .toList()));
+                    case Stmt.NewtypeDecl newtype when newtype.isPublic() ->
+                            exports.add(new NewtypeExport(newtype.name().lexeme(),
+                                    newtype.underlyingType(), newtype.validator() != null));
                     case Stmt.ContractDecl contract when contract.isPublic() ->
                             exports.add(new ContractExport(contract.name().lexeme(), contract.typeParameters(),
                                     contract.requiredContracts().stream()
@@ -675,7 +726,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v22.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v24.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -701,7 +752,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v22.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v24.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -827,6 +878,23 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         writeType(output, payload.type(), context);
                     }
                 }
+            }
+            case ProductExport product -> {
+                output.writeByte(8);
+                output.writeUTF(product.qualifiedName());
+                final var context = new WriteContext();
+                writeTypeParameters(output, product.typeParameters(), context);
+                output.writeInt(product.components().size());
+                for (final var component : product.components()) {
+                    output.writeUTF(component.name());
+                    writeType(output, component.type(), context);
+                }
+            }
+            case NewtypeExport newtype -> {
+                output.writeByte(9);
+                output.writeUTF(newtype.qualifiedName());
+                writeType(output, newtype.underlyingType(), new WriteContext());
+                output.writeBoolean(newtype.validated());
             }
             case WitnessExport witness -> {
                 output.writeByte(6);
@@ -964,6 +1032,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 }
                 yield new SumExport(name, typeParameters, cases);
             }
+            case 8 -> {
+                final var name = input.readUTF();
+                final var context = new ReadContext();
+                final var typeParameters = readTypeParameters(input, context);
+                final var components = new ArrayList<ProductComponentExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    components.add(new ProductComponentExport(input.readUTF(), readType(input, context)));
+                }
+                yield new ProductExport(name, typeParameters, components);
+            }
+            case 9 -> new NewtypeExport(input.readUTF(), readType(input, new ReadContext()),
+                    input.readBoolean());
             case 6 -> {
                 final var name = input.readUTF();
                 final var context = new ReadContext();

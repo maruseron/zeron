@@ -5,9 +5,10 @@
 This document records the agreed direction and implementation status for value equality and hashing.
 `Eq<T>` and evidence-driven equality are now implemented for built-in scalar types, generic bounds,
 nominal conformances, and explicit witnesses. Nullable values lift custom `Eq<T>` evidence, and sums
-use compiler-generated structural equality with generic payload evidence. Direct self-recursive sums
-are supported; mutually recursive sum declarations are not yet synthesized as a recursive evidence
-group. Contract composition with `requires` is implemented. A `Hashable<T>` contract skeleton exists
+and nominal products use compiler-generated structural equality with generic component evidence.
+Direct self-recursive sums and products are supported; mutually recursive declarations are not yet
+synthesized as a recursive evidence group. Contract composition with `requires` is implemented. A
+`Hashable<T>` contract skeleton exists
 in the bundled source, but hash-evidence selection, implementations, hash laws, and hash-based
 collections remain future work; explicit derivation is also deferred.
 

@@ -26,8 +26,8 @@ a source package a JVM module.
   resource generation; runtime loading uses the index, so adding a standard-library source does not
   require a separate registration-list edit. Standard-library declarations remain explicit imports,
   and the canonical source tree mirrors package names.
-- The compiler writes `META-INF/zeron/api-v22.bin`. The index has schema version 22 and carries the
-  required standard-library API version, currently 15.
+- The compiler writes `META-INF/zeron/api-v24.bin`. The index has schema version 24 and carries the
+  required standard-library API version, currently 16.
 - Zeron libraries can be built into a class directory and consumed in compiled mode. Library loading
   validates the API-index schema and standard-library API versions and creates metadata-only
   declarations; consumer compilation does not re-emit library classes. Zeron library JARs are also
@@ -61,26 +61,58 @@ library API index exports ordinary top-level and namespace-member immutable valu
 declared type, storage owner, optional namespace, and provider initialization owner. Generated
 program classes are written to `dist/`; compiler classes remain under Maven's `target/classes`.
 
-The single-file command remains available for default-package scripts. Multi-file project builds use
-`--root <directory>` and `--entry <source-file>`. More general build manifests, incremental
-compilation, and configurable artifact layouts remain open. When the entry source unit declares
+The single-file command remains available for default-package scripts. Multi-file project builds can
+use the explicit `--root <directory>` and `--entry <source-file>` options or `zeron build`, which
+loads `zeron.toml` from the current directory; `zeron build --manifest <path>` selects another
+manifest. Build settings come only from the manifest, with `--debug` accepted as an operational
+option. Paths in the manifest are resolved relative to the manifest file. The initial manifest
+schema is:
+
+`zeron init` creates a starter `zeron.toml` and `src/main.zn` in the current directory. It refuses
+to overwrite either file if already present.
+
+```toml
+[project]
+entry = "src/main.zn"
+source-roots = ["src"]
+output = "dist"
+
+[platform]
+stdlib = "source" # or "compiled"
+
+[dependencies]
+zeron-libraries = ["lib/shared.jar"]
+java-classpath = ["lib/host-api.jar"]
+```
+
+`project.entry` and at least one `project.source-roots` directory are required; `project.output`
+defaults to `dist`, and the standard-library mode defaults to `source`. Dependency paths are local class directories or JARs and are available for compile-time resolution;
+they are not embedded into generated output. `zeron run` builds the manifest project and launches its
+entry class from the configured output directory. Its child JVM classpath includes the compiler
+runtime, that output directory, and every declared Zeron library and Java classpath root. Compiled
+standard-library mode requires a compatible standard-library artifact in `zeron-libraries`. Unknown
+keys and incorrect value types are rejected. Dependency fetching, lockfiles, incremental compilation,
+and configurable artifact packaging remain open. When the entry source unit declares
 zero-argument `fn main(): Unit`, the generated entry class also includes the standard
 `public static void main(String[] args)` launcher method, which delegates to the Zeron function.
-Run a generated launcher from `dist/` with `--run-class <path-to-class-file>`, for example
-`--run-class dist/main.class`. The command launches a child JVM with `dist/`, the compiler runtime,
-and a cached standard-library JAR named for the current API-index schema and standard-library API
-versions (for example, `target/zeron-stdlib-index-v22-api-v15.jar`). If that versioned JAR is missing,
-it is built; `--stdlib-jar <path>` overrides the default. Repeatable `--library` arguments add
-validated library JARs or class directories to the runtime classpath. Java classpath roots used for
-metadata discovery are not recorded in generated classes or automatically reused at launch; pass
-each required `--java-classpath <class-directory-or-JAR>` again with `--run-class` to add those
-runtime dependencies to the child JVM. Both directory and JAR roots are supported. If launching
-outside this command, the host is responsible for supplying all required Java dependencies on its
-runtime classpath.
+`zeron explain <ZR0000>` prints the bundled Markdown explanation for a diagnostic code, and compiler
+diagnostics direct users to that command. The legacy `--run-class` and `--stdlib-jar` flags are
+unsupported; launching a built project uses its manifest so compile-time and runtime dependencies
+stay consistent.
+
+### Local Release Prototype
+
+Run `powershell -ExecutionPolicy Bypass -File scripts/release.ps1` from a checkout with JDK 26 and
+Maven installed. The script runs the preview-enabled test/package build, stages a self-contained
+compiler JAR, builds the versioned compiled standard-library JAR, copies both launcher scripts and
+the source error-code Markdown, exercises `explain` and a compiled-standard-library build/run, then
+creates `target/releases/zeron-<version>.zip` and a SHA-256 sidecar. The archive is a portable
+distribution requiring the supported JDK; it is not a native executable. Error explanations are
+also embedded in the compiler JAR so `zeron explain` works offline.
 
 ## Zeron Library Artifacts
 
-The API index is a binary sidecar at `META-INF/zeron/api-v22.bin`. Its schema version is separate from
+The API index is a binary sidecar at `META-INF/zeron/api-v24.bin`. Its schema version is separate from
 the standard-library API version. It records qualified public signatures, generated JVM owners,
 declaration and method generic parameters, nullability, reference views, mutability markers, callback
 shapes, and each callable's minimum accepted arity. Public property requirements and getter/setter
@@ -120,7 +152,7 @@ provider's initializer bodies.
 `--jar-output <file.jar>` packages a successful source/project compilation from a temporary staging
 directory, leaving the default `dist/` output unchanged when the option is omitted. When combined
 with `--build-stdlib`, the requested class directory is preserved and also packaged as a JAR.
-Archives contain the compiled classes and `META-INF/zeron/api-v22.bin`, with entries in deterministic
+Archives contain the compiled classes and `META-INF/zeron/api-v24.bin`, with entries in deterministic
 order. The JAR is published only after packaging succeeds.
 
 Consumers may select a Zeron library class directory or JAR with `--library`; compiled standard
@@ -129,9 +161,10 @@ API-index loading and, when needed, as a normal runtime classpath entry. A consu
 whose schema version is unsupported or whose required standard-library API version does not exactly
 match its compiler. Increment `StandardLibrary.API_VERSION` when the bundled source contract changes
 incompatibly; do not use it as a substitute for the binary index schema version. The index schema is
-independent of its JAR packaging. The current schema is version 22; it includes extension exports,
+independent of its JAR packaging. The current schema is version 24; it includes extension exports,
 extension-property markers, effect markers, raised-effect signatures, witness and pattern metadata,
-and applied contract requirements alongside callable and value exports.
+applied contract requirements, ordered nominal product components, and newtype representation and
+validation markers alongside callable and value exports.
 
 `ZeronLibraryIndexDump` accepts an index file, a class directory, or a Zeron library JAR.
 
@@ -198,10 +231,9 @@ The supported source mappings are intentionally narrow:
 Java generics, typed reference/primitive Java array signatures, callbacks/SAM conversion, inherited members,
 static field writes, and JPMS module-path/readability configuration are deferred. JDK module exports
 are honored for discovered classes; only unqualified exports are accessible to generated unnamed
-modules. Java classpath roots provide compile-time metadata lookup only. Generated programs still
-require the corresponding Java classes at runtime: `--run-class` accepts repeatable
-`--java-classpath` roots and appends them to its child JVM classpath, while any other launcher must
-configure its own runtime classpath.
+modules. Java classpath roots provide compile-time metadata lookup. Generated programs also require the
+corresponding Java classes at runtime: `zeron run` reuses the roots declared in the project manifest,
+while any external launcher must configure its own runtime classpath.
 Zeron library JAR support remains separate from `--java-classpath` and must not be inferred from the
 Zeron API-index reader.
 
@@ -226,6 +258,12 @@ The curated bundled facade uses `external class` declarations and ordinary Java 
 It is limited to two JDK owners and three members. Other public types in exported JDK packages are
 available through direct Java symbol discovery, subject to the supported interop mappings; generic
 types and unsupported signatures remain unavailable.
+
+The standard library also binds a small set of immutable `java.lang.String` instance methods through
+typed external function bindings. These are curated compiler bindings, not a general relaxation of
+Java interop receiver mutability or arbitrary instance method access. The Zeron `String` extension
+API exposes UTF-16 code-unit `length`, `isEmpty`, `indexOf`/`lastIndexOf` (returning `-1` when absent),
+`contains`, `startsWith`, `endsWith`, and bounds-checked `substring(start, end): Option<String>`.
 
 ## Roadmap
 
@@ -256,10 +294,9 @@ types and unsupported signatures remain unavailable.
 The implemented Zeron library boundary accepts class directories and JARs and requires explicit
 dependencies. Java interop metadata discovery accepts ordered class directories/JARs and exported
 JDK-module class files. Generated programs need their own output directory plus each Zeron library
-artifact and Java class directory or JAR on the runtime classpath. The `--run-class` launcher
-constructs that runtime classpath from `--library` and `--java-classpath`; external launchers must
-provide the same dependencies themselves. Imports provide compile-time name resolution; they do not
-load or package runtime code.
+artifact and Java class directory or JAR on the runtime classpath. `zeron run` constructs that
+classpath from the project manifest; external launchers must provide the same dependencies
+themselves. Imports provide compile-time name resolution; they do not load or package runtime code.
 
 Future work should preserve that separation among source package identity, compilation units,
 library artifacts, and Java symbols. JPMS modules remain distinct from source packages; intrinsic

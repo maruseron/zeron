@@ -885,34 +885,45 @@ public final class StandardLibraryTest {
     }
 
     @Test
-    public void cliRunsGeneratedClassAndBuildsMissingStandardLibraryJar() throws Exception {
+    public void cliRunsProjectFromManifest() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var packageName = "runClient" + suffix;
-        final var className = packageName + ".Main";
-        final var classFile = Path.of("dist", packageName, "Main.class");
-        final var standardLibraryJar = Path.of("target", "zeron-stdlib-run-" + suffix + ".jar");
-        final var source = parse("Main.zn", """
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-run-project-" + suffix)
+                .toAbsolutePath().normalize();
+        final var sourcePath = projectRoot.resolve("src").resolve(packageName).resolve("Main.zn");
+        final var manifest = projectRoot.resolve("zeron.toml");
+        Files.createDirectories(sourcePath.getParent());
+        Files.writeString(sourcePath, """
                 package %s;
-                import zeron.io.println;
-                fn main(): Unit {
-                    println("run command works");
-                }
+                fn main(): Unit {}
                 """.formatted(packageName));
-        final var compiler = CompilationService.forCompilationUnits(
-                StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
+        Files.writeString(manifest, """
+                [project]
+                entry = "src/%s/Main.zn"
+                source-roots = ["src"]
+                output = "output"
+                """.formatted(packageName));
 
         try {
-            deleteTree(Path.of("dist"));
-            compiler.resolve();
-            compiler.compile();
-            assertFalse(Files.exists(standardLibraryJar));
-            assertEquals(0, Zeron.runCli("--run-class", classFile.toString(),
-                    "--stdlib-jar", standardLibraryJar.toString()));
-            assertTrue(Files.exists(standardLibraryJar));
+            assertEquals(0, Zeron.runCli("run", "--manifest", manifest.toString()));
+            assertTrue(Files.isRegularFile(projectRoot.resolve("output").resolve(packageName).resolve("Main.class")));
         } finally {
-            deleteTree(Path.of("dist"));
-            Files.deleteIfExists(standardLibraryJar);
+            deleteTree(projectRoot);
         }
+    }
+
+    @Test
+    public void explainCommandPrintsBundledDiagnosticDescription() throws Exception {
+        final var output = new ByteArrayOutputStream();
+        final var originalOut = System.out;
+        try {
+            System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+            assertEquals(0, Zeron.runCli("explain", "ZR2014"));
+        } finally {
+            System.setOut(originalOut);
+        }
+        assertTrue(output.toString(StandardCharsets.UTF_8)
+                .startsWith("# Error code ZR2014: Type mismatch or failed inference"));
     }
 
     @Test
@@ -1903,9 +1914,9 @@ public final class StandardLibraryTest {
             libraryCompiler.compile();
 
             copyTree(Path.of("dist", libraryPackage), libraryRoot.resolve(libraryPackage));
-            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v22.bin"));
+            final var libraryIndex = libraryRoot.resolve(Path.of("META-INF", "zeron", "api-v24.bin"));
             Files.createDirectories(libraryIndex.getParent());
-            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v22.bin"), libraryIndex);
+            Files.copy(Path.of("dist", "META-INF", "zeron", "api-v24.bin"), libraryIndex);
 
             deleteTree(Path.of("dist"));
             Files.writeString(clientSource, """
@@ -1971,7 +1982,7 @@ public final class StandardLibraryTest {
             assertEquals(0, Zeron.runCli(librarySource.toString(), "--jar-output", secondLibraryJar.toString()));
             assertArrayEquals(Files.readAllBytes(libraryJar), Files.readAllBytes(secondLibraryJar));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v22.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v24.bin") != null);
                 assertTrue(jar.stream().anyMatch(entry -> entry.getName().equals(
                         libraryPackage.replace('.', '/') + "/Answer.class")));
             }
@@ -1999,7 +2010,7 @@ public final class StandardLibraryTest {
         final var libraryJar = Path.of("target", "zeron-stdlib-" + suffix + ".jar");
         final var sourceFile = Path.of("target", "CompiledStdlibClient" + suffix + ".zn");
         final var entryName = sourceFile.getFileName().toString().replaceFirst("\\.zn$", "");
-        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v22.bin"));
+        final var apiIndex = libraryOutput.resolve(Path.of("META-INF", "zeron", "api-v24.bin"));
         final var iterableClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterable.class"));
         final var iteratorClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterator.class"));
         final var arrayIteratorClass = libraryOutput.resolve(
@@ -2046,7 +2057,7 @@ public final class StandardLibraryTest {
             assertTrue(Files.exists(rangeClass));
             assertTrue(Files.exists(unitClass));
             try (final var jar = new JarFile(libraryJar.toFile())) {
-                assertTrue(jar.getJarEntry("META-INF/zeron/api-v22.bin") != null);
+                assertTrue(jar.getJarEntry("META-INF/zeron/api-v24.bin") != null);
                 assertTrue(jar.getJarEntry("zeron/collections/Stream.class") != null);
                 assertTrue(jar.getJarEntry("zeron/lang/Unit.class") != null);
             }

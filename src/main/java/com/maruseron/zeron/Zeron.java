@@ -189,7 +189,6 @@ public class Zeron {
             manifestCreated = true;
             Files.writeString(sourcePath, """
                     fn main() {
-                        println("Hello, world!");
                     }
                     """, java.nio.file.StandardOpenOption.CREATE_NEW);
         } catch (final IOException exception) {

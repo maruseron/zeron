@@ -149,6 +149,8 @@ final class ExpressionFlowEmitter {
     private static final ClassDesc SINK_CLASS = ClassDesc.of("zeron.collections.Sink");
 
     private record PipelineCapture(Token token, TypeDescriptor type, Bind value) {}
+    private record PipelineOperation(String methodName, TypeDescriptor resultElementType,
+                                     Expr.Lambda lambda, Expr countExpression) {}
 
     private static void emitLazyPipeline(final CompilationContext context, final CodeBuilder composer,
                                          final Expr.Pipeline pipeline) {
@@ -170,39 +172,44 @@ final class ExpressionFlowEmitter {
 
         var elementType = pipeline.sourceElementType();
         for (final var stage : pipeline.stages) {
-            final Expr.Lambda lambda;
-            final String methodName;
-            final TypeDescriptor resultElementType;
-            switch (stage) {
-                case Expr.PipelineStage.Map map -> {
-                    lambda = map.lambda();
-                    methodName = "map";
-                    resultElementType = map.type();
-                }
-                case Expr.PipelineStage.Filter filter -> {
-                    lambda = filter.lambda();
-                    methodName = "filter";
-                    resultElementType = elementType;
-                }
-                case Expr.PipelineStage.FlatMap flatMap -> {
-                    lambda = flatMap.lambda();
-                    methodName = "flatMap";
-                    resultElementType = flatMap.type();
-                }
+            final var operation = switch (stage) {
+                case Expr.PipelineStage.Map map ->
+                        new PipelineOperation("map", map.type(), map.lambda(), null);
+                case Expr.PipelineStage.Filter filter ->
+                        new PipelineOperation("filter", elementType, filter.lambda(), null);
+                case Expr.PipelineStage.FlatMap flatMap ->
+                        new PipelineOperation("flatMap", flatMap.type(), flatMap.lambda(), null);
+                case Expr.PipelineStage.Drop _ ->
+                        new PipelineOperation("drop", elementType, null, stage.expression());
+                case Expr.PipelineStage.Take _ ->
+                        new PipelineOperation("take", elementType, null, stage.expression());
+                case Expr.PipelineStage.DropWhile dropWhile ->
+                        new PipelineOperation("dropWhile", elementType, dropWhile.lambda(), null);
+                case Expr.PipelineStage.TakeWhile takeWhile ->
+                        new PipelineOperation("takeWhile", elementType, takeWhile.lambda(), null);
                 case Expr.PipelineStage.Collect _ -> throw new IllegalStateException(
                         "A lazy for-expression cannot contain a collect stage.");
+            };
+            if (operation.countExpression() != null) {
+                emitExpr(context, composer, operation.countExpression());
+                emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofInt());
+                composer.invokevirtual(STREAM_CLASS, operation.methodName(),
+                        MethodTypeDesc.of(STREAM_CLASS, TypeDescriptor.toJavaClassDesc(TypeDescriptor.ofInt())));
+            } else {
+                final var functionType = (FunctionDescriptor) operation.lambda().getType();
+                final var invocationFunctionType = TypeDescriptor.functionOf("", switch (operation.methodName()) {
+                    case "map" -> TypeDescriptor.ofName("java.lang.Object");
+                    case "filter", "dropWhile", "takeWhile" -> TypeDescriptor.ofBoolean();
+                    case "flatMap" -> TypeDescriptor.genericOf(
+                            TypeDescriptor.ofName("zeron.collections.Iterable"), TypeDescriptor.ofAny());
+                    default -> throw new IllegalStateException("Unexpected callback pipeline operation.");
+                }, TypeDescriptor.ofName("java.lang.Object"));
+                emitExpr(context, composer, operation.lambda());
+                emitConversion(context, composer, functionType, invocationFunctionType);
+                composer.invokevirtual(STREAM_CLASS, operation.methodName(),
+                        MethodTypeDesc.of(STREAM_CLASS, TypeDescriptor.toJavaClassDesc(invocationFunctionType)));
             }
-            final var functionType = (FunctionDescriptor) lambda.getType();
-            final var invocationFunctionType = TypeDescriptor.functionOf("", methodName.equals("map")
-                    ? TypeDescriptor.ofName("java.lang.Object")
-                    : methodName.equals("filter") ? TypeDescriptor.ofBoolean()
-                    : TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.collections.Iterable"),
-                    TypeDescriptor.ofAny()), TypeDescriptor.ofName("java.lang.Object"));
-            emitExpr(context, composer, lambda);
-            emitConversion(context, composer, functionType, invocationFunctionType);
-            composer.invokevirtual(STREAM_CLASS, methodName,
-                    MethodTypeDesc.of(STREAM_CLASS, TypeDescriptor.toJavaClassDesc(invocationFunctionType)));
-            elementType = resultElementType;
+            elementType = operation.resultElementType();
         }
         context.lastEmittedType = pipeline.getType();
     }
@@ -255,33 +262,51 @@ final class ExpressionFlowEmitter {
         composer.astore(sinkLocal.lvt() + context.localSlotOffset);
 
         final var stageCaptures = new IdentityHashMap<Expr.PipelineStage, List<PipelineCapture>>();
+        final var stageState = new IdentityHashMap<Expr.PipelineStage, Bind>();
         for (final var stage : pipeline.stages) {
             if (stage instanceof Expr.PipelineStage.Collect) continue;
-            final var lambda = switch (stage) {
-                case Expr.PipelineStage.Map map -> map.lambda();
-                case Expr.PipelineStage.FlatMap flatMap -> flatMap.lambda();
-                case Expr.PipelineStage.Filter filter -> filter.lambda();
-                case Expr.PipelineStage.Collect _ -> throw new IllegalStateException(
-                        "A collect stage does not have a callback.");
-            };
-            final var captures = new ArrayList<PipelineCapture>();
-            final var captureTokens = context.lambdaPlan.captures(lambda);
-            final var captureTypes = context.lambdaPlan.captureTypes(lambda);
-            for (int i = 0; i < captureTokens.size(); i++) {
-                final var token = captureTokens.get(i);
-                final var captureType = captureTypes.get(i);
-                emitVariable(context, composer, token);
-                emitConversion(context, composer, context.lastEmittedType, captureType);
-                final var value = declareLoopLocal(context, nextLoopTemporary(context, "capture"), captureType);
-                storePipelineValue(context, composer, value, captureType);
-                captures.add(new PipelineCapture(token, captureType, value));
+            if (stage instanceof Expr.PipelineStage.Drop
+                    || stage instanceof Expr.PipelineStage.Take) {
+                emitExpr(context, composer, stage.expression());
+                emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofInt());
+                final var remaining = declareLoopLocal(context, nextLoopTemporary(context, "remaining"),
+                        TypeDescriptor.ofInt());
+                storePipelineValue(context, composer, remaining, TypeDescriptor.ofInt());
+                stageState.put(stage, remaining);
+            } else if (stage instanceof Expr.PipelineStage.DropWhile) {
+                composer.iconst_1();
+                final var dropping = declareLoopLocal(context, nextLoopTemporary(context, "dropping"),
+                        TypeDescriptor.ofBoolean());
+                storePipelineValue(context, composer, dropping, TypeDescriptor.ofBoolean());
+                stageState.put(stage, dropping);
             }
-            stageCaptures.put(stage, List.copyOf(captures));
+            final var lambda = pipelineLambda(stage);
+            if (lambda != null) {
+                final var captures = new ArrayList<PipelineCapture>();
+                final var captureTokens = context.lambdaPlan.captures(lambda);
+                final var captureTypes = context.lambdaPlan.captureTypes(lambda);
+                for (int i = 0; i < captureTokens.size(); i++) {
+                    final var token = captureTokens.get(i);
+                    final var captureType = captureTypes.get(i);
+                    emitVariable(context, composer, token);
+                    emitConversion(context, composer, context.lastEmittedType, captureType);
+                    final var value = declareLoopLocal(context, nextLoopTemporary(context, "capture"), captureType);
+                    storePipelineValue(context, composer, value, captureType);
+                    captures.add(new PipelineCapture(token, captureType, value));
+                }
+                stageCaptures.put(stage, List.copyOf(captures));
+            }
         }
 
         final var loopStart = composer.newLabel();
         final var loopContinue = composer.newLabel();
         final var loopExit = composer.newLabel();
+        for (final var stage : pipeline.stages) {
+            if (!(stage instanceof Expr.PipelineStage.Take)) continue;
+            loadPipelineValue(context, composer, stageState.get(stage), TypeDescriptor.ofInt());
+            composer.iconst_0();
+            composer.if_icmple(loopExit);
+        }
         composer.labelBinding(loopStart);
         if (isArray) {
             final var arrayType = (ArrayDescriptor) sourceType;
@@ -311,7 +336,7 @@ final class ExpressionFlowEmitter {
         }
 
         emitCollectedStages(context, composer, pipeline, 0, initialValue, sourceElementType,
-                stageCaptures, sinkLocal, loopContinue);
+                stageCaptures, stageState, sinkLocal, loopContinue, loopExit);
 
         composer.labelBinding(loopContinue);
         if (isArray) {
@@ -330,7 +355,9 @@ final class ExpressionFlowEmitter {
                                             final Expr.Pipeline pipeline, final int stageIndex,
                                             final Bind currentValue, final TypeDescriptor currentType,
                                             final IdentityHashMap<Expr.PipelineStage, List<PipelineCapture>> stageCaptures,
-                                            final Bind sinkLocal, final Label continueLabel) {
+                                            final IdentityHashMap<Expr.PipelineStage, Bind> stageState,
+                                            final Bind sinkLocal, final Label continueLabel,
+                                            final Label pipelineExit) {
         final var collect = (Expr.PipelineStage.Collect) pipeline.stages.getLast();
         if (stageIndex == pipeline.stages.size() - 1) {
             composer.aload(sinkLocal.lvt() + context.localSlotOffset);
@@ -343,37 +370,75 @@ final class ExpressionFlowEmitter {
                     MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(TypeDescriptor.ofUnit()),
                             ConstantDescs.CD_Object));
             emitPop(context, composer, TypeDescriptor.ofUnit());
-            composer.goto_(continueLabel);
             return;
         }
 
         final var stage = pipeline.stages.get(stageIndex);
-        final var lambda = switch (stage) {
-            case Expr.PipelineStage.Map map -> map.lambda();
-            case Expr.PipelineStage.FlatMap flatMap -> flatMap.lambda();
-            case Expr.PipelineStage.Filter filter -> filter.lambda();
-            case Expr.PipelineStage.Collect _ -> throw new IllegalStateException(
-                    "A collect stage must be the final pipeline stage.");
-        };
-        final var functionType = (FunctionDescriptor) lambda.getType();
-        final var captures = stageCaptures.get(stage);
-        beginScope(context);
-        try {
-            for (final var capture : captures) {
-                final var binding = declareLoopLocal(context, capture.token(), capture.type());
-                loadPipelineValue(context, composer, capture.value(), capture.type());
-                storePipelineValue(context, composer, binding, capture.type());
-            }
-            final var parameter = declareLoopLocal(
-                    context, lambda.params.getFirst(), functionType.parameters().getFirst());
-            loadPipelineValue(context, composer, currentValue, currentType);
-            emitConversion(context, composer, currentType, functionType.parameters().getFirst());
-            storePipelineValue(context, composer, parameter, functionType.parameters().getFirst());
-            emitExpr(context, composer, stage.expression());
-            emitConversion(context, composer, context.lastEmittedType, functionType.returnType());
-        } finally {
-            endScope(context);
+        if (stage instanceof Expr.PipelineStage.Drop) {
+            final var remaining = stageState.get(stage);
+            final var pass = composer.newLabel();
+            loadPipelineValue(context, composer, remaining, TypeDescriptor.ofInt());
+            composer.iconst_0();
+            composer.if_icmple(pass);
+            loadPipelineValue(context, composer, remaining, TypeDescriptor.ofInt());
+            composer.iconst_1();
+            composer.isub();
+            composer.istore(remaining.lvt() + context.localSlotOffset);
+            composer.goto_(continueLabel);
+            composer.labelBinding(pass);
+            emitCollectedStages(context, composer, pipeline, stageIndex + 1, currentValue, currentType,
+                    stageCaptures, stageState, sinkLocal, continueLabel, pipelineExit);
+            return;
         }
+
+        if (stage instanceof Expr.PipelineStage.Take) {
+            final var remaining = stageState.get(stage);
+            loadPipelineValue(context, composer, remaining, TypeDescriptor.ofInt());
+            composer.iconst_0();
+            composer.if_icmple(pipelineExit);
+            loadPipelineValue(context, composer, remaining, TypeDescriptor.ofInt());
+            composer.iconst_1();
+            composer.isub();
+            composer.istore(remaining.lvt() + context.localSlotOffset);
+            final var downstreamComplete = composer.newLabel();
+            emitCollectedStages(context, composer, pipeline, stageIndex + 1, currentValue, currentType,
+                    stageCaptures, stageState, sinkLocal, downstreamComplete, pipelineExit);
+            composer.labelBinding(downstreamComplete);
+            loadPipelineValue(context, composer, remaining, TypeDescriptor.ofInt());
+            composer.iconst_0();
+            composer.if_icmple(pipelineExit);
+            return;
+        }
+
+        if (stage instanceof Expr.PipelineStage.DropWhile) {
+            final var dropping = stageState.get(stage);
+            final var pass = composer.newLabel();
+            loadPipelineValue(context, composer, dropping, TypeDescriptor.ofBoolean());
+            composer.ifeq(pass);
+            emitCollectedStageLambda(context, composer, stage, currentValue, currentType,
+                    stageCaptures.get(stage));
+            composer.ifne(continueLabel);
+            composer.iconst_0();
+            composer.istore(dropping.lvt() + context.localSlotOffset);
+            composer.labelBinding(pass);
+            emitCollectedStages(context, composer, pipeline, stageIndex + 1, currentValue, currentType,
+                    stageCaptures, stageState, sinkLocal, continueLabel, pipelineExit);
+            return;
+        }
+
+        if (stage instanceof Expr.PipelineStage.TakeWhile) {
+            emitCollectedStageLambda(context, composer, stage, currentValue, currentType,
+                    stageCaptures.get(stage));
+            composer.ifeq(pipelineExit);
+            emitCollectedStages(context, composer, pipeline, stageIndex + 1, currentValue, currentType,
+                    stageCaptures, stageState, sinkLocal, continueLabel, pipelineExit);
+            return;
+        }
+
+        final var lambda = pipelineLambda(stage);
+        final var functionType = (FunctionDescriptor) lambda.getType();
+        emitCollectedStageLambda(context, composer, stage, currentValue, currentType,
+                stageCaptures.get(stage));
 
         switch (stage) {
             case Expr.PipelineStage.Map map -> {
@@ -381,14 +446,12 @@ final class ExpressionFlowEmitter {
                 final var mappedValue = declareLoopLocal(context, nextLoopTemporary(context, "mapped"), mappedType);
                 storePipelineValue(context, composer, mappedValue, mappedType);
                 emitCollectedStages(context, composer, pipeline, stageIndex + 1, mappedValue, mappedType,
-                        stageCaptures, sinkLocal, continueLabel);
+                        stageCaptures, stageState, sinkLocal, continueLabel, pipelineExit);
             }
             case Expr.PipelineStage.Filter _ -> {
-                final var next = composer.newLabel();
                 composer.ifeq(continueLabel);
                 emitCollectedStages(context, composer, pipeline, stageIndex + 1, currentValue, currentType,
-                        stageCaptures, sinkLocal, continueLabel);
-                composer.labelBinding(next);
+                        stageCaptures, stageState, sinkLocal, continueLabel, pipelineExit);
             }
             case Expr.PipelineStage.FlatMap flatMap -> {
                 final var flattenedType = flatMap.type();
@@ -421,12 +484,52 @@ final class ExpressionFlowEmitter {
                         declareLoopLocal(context, nextLoopTemporary(context, "flatValue"), flattenedType);
                 storePipelineValue(context, composer, flattenedValue, flattenedType);
                 emitCollectedStages(context, composer, pipeline, stageIndex + 1, flattenedValue, flattenedType,
-                        stageCaptures, sinkLocal, innerStart);
+                        stageCaptures, stageState, sinkLocal, innerStart, pipelineExit);
                 composer.goto_(innerStart);
                 composer.labelBinding(innerExit);
             }
+            case Expr.PipelineStage.DropWhile _, Expr.PipelineStage.TakeWhile _ ->
+                    throw new IllegalStateException("While stages are handled before callback emission.");
+            case Expr.PipelineStage.Drop _, Expr.PipelineStage.Take _ ->
+                    throw new IllegalStateException("Count stages are handled before callback emission.");
             case Expr.PipelineStage.Collect _ -> throw new IllegalStateException(
                     "A collect stage must be the final pipeline stage.");
+        }
+    }
+
+    private static Expr.Lambda pipelineLambda(final Expr.PipelineStage stage) {
+        return switch (stage) {
+            case Expr.PipelineStage.Map map -> map.lambda();
+            case Expr.PipelineStage.FlatMap flatMap -> flatMap.lambda();
+            case Expr.PipelineStage.Filter filter -> filter.lambda();
+            case Expr.PipelineStage.DropWhile dropWhile -> dropWhile.lambda();
+            case Expr.PipelineStage.TakeWhile takeWhile -> takeWhile.lambda();
+            case Expr.PipelineStage.Drop _, Expr.PipelineStage.Take _, Expr.PipelineStage.Collect _ -> null;
+        };
+    }
+
+    private static void emitCollectedStageLambda(final CompilationContext context, final CodeBuilder composer,
+                                                 final Expr.PipelineStage stage, final Bind currentValue,
+                                                 final TypeDescriptor currentType,
+                                                 final List<PipelineCapture> captures) {
+        final var lambda = pipelineLambda(stage);
+        final var functionType = (FunctionDescriptor) lambda.getType();
+        beginScope(context);
+        try {
+            for (final var capture : captures) {
+                final var binding = declareLoopLocal(context, capture.token(), capture.type());
+                loadPipelineValue(context, composer, capture.value(), capture.type());
+                storePipelineValue(context, composer, binding, capture.type());
+            }
+            final var parameter = declareLoopLocal(
+                    context, lambda.params.getFirst(), functionType.parameters().getFirst());
+            loadPipelineValue(context, composer, currentValue, currentType);
+            emitConversion(context, composer, currentType, functionType.parameters().getFirst());
+            storePipelineValue(context, composer, parameter, functionType.parameters().getFirst());
+            emitExpr(context, composer, stage.expression());
+            emitConversion(context, composer, context.lastEmittedType, functionType.returnType());
+        } finally {
+            endScope(context);
         }
     }
 

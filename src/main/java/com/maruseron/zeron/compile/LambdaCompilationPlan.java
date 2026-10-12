@@ -323,6 +323,14 @@ final class LambdaCompilationPlan {
                         case Expr.PipelineStage.Filter filter -> collectPipelineLambda(filter.lambda(),
                                 TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(),
                                         TypeDescriptor.ofName("java.lang.Object")));
+                        case Expr.PipelineStage.DropWhile dropWhile -> collectPipelineLambda(dropWhile.lambda(),
+                                TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(),
+                                        TypeDescriptor.ofName("java.lang.Object")));
+                        case Expr.PipelineStage.TakeWhile takeWhile -> collectPipelineLambda(takeWhile.lambda(),
+                                TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(),
+                                        TypeDescriptor.ofName("java.lang.Object")));
+                        case Expr.PipelineStage.Drop drop -> collectLambdaShapes(drop.expression());
+                        case Expr.PipelineStage.Take take -> collectLambdaShapes(take.expression());
                         case Expr.PipelineStage.Collect collect -> collectLambdaShapes(collect.expression());
                     }
                 }

@@ -367,6 +367,8 @@ final class LambdaResolver {
                     if (stage instanceof Expr.PipelineStage.Map m && m.binding() != null) stageNames.remove(m.binding().lexeme());
                     if (stage instanceof Expr.PipelineStage.FlatMap f && f.binding() != null) stageNames.remove(f.binding().lexeme());
                     if (stage instanceof Expr.PipelineStage.Filter f && f.binding() != null) stageNames.remove(f.binding().lexeme());
+                    if (stage instanceof Expr.PipelineStage.DropWhile d && d.binding() != null) stageNames.remove(d.binding().lexeme());
+                    if (stage instanceof Expr.PipelineStage.TakeWhile t && t.binding() != null) stageNames.remove(t.binding().lexeme());
                     return referencesAnyVariable(context, stage.expression(), stageNames);
                 });
             case Expr.Match match -> referencesAnyVariable(context, match.scrutinee, names)

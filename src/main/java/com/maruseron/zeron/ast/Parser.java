@@ -2232,13 +2232,20 @@ public final class Parser {
         final var stages = new ArrayList<Expr.PipelineStage>();
         boolean isTerminal = false;
         while (isPipelineStage()) {
-            final var opKeyword = consumeSoftKeyword("map", "flatMap", "filter", "collect");
+            final var opKeyword = consumeSoftKeyword(
+                    "map", "flatMap", "filter", "drop", "take", "dropWhile", "takeWhile", "collect");
             if (isTerminal) {
                 error(opKeyword, DiagnosticCatalog.INVALID_PIPELINE_OPERATION,
                         "The collect stage must be the final for-expression stage.");
             }
             switch (opKeyword.lexeme()) {
-                case "map", "flatMap", "filter" -> {
+                case "drop", "take" -> {
+                    final var expression = expression();
+                    stages.add(opKeyword.lexeme().equals("drop")
+                            ? new Expr.PipelineStage.Drop(opKeyword, expression)
+                            : new Expr.PipelineStage.Take(opKeyword, expression));
+                }
+                case "map", "flatMap", "filter", "dropWhile", "takeWhile" -> {
                     final var wildcard = check(IDENTIFIER) && peek().lexeme().equals("_");
                     Token binding = null;
                     if (wildcard) {
@@ -2265,12 +2272,15 @@ public final class Parser {
             case "map" -> new Expr.PipelineStage.Map(opKeyword, binding, wildcard, expression);
             case "flatMap" -> new Expr.PipelineStage.FlatMap(opKeyword, binding, wildcard, expression);
             case "filter" -> new Expr.PipelineStage.Filter(opKeyword, binding, wildcard, expression);
+            case "dropWhile" -> new Expr.PipelineStage.DropWhile(opKeyword, binding, wildcard, expression);
+            case "takeWhile" -> new Expr.PipelineStage.TakeWhile(opKeyword, binding, wildcard, expression);
             default -> throw new IllegalStateException("Unreachable");
         };
     }
 
     private boolean isPipelineStage() {
-        return isSoftKeyword("map", "flatMap", "filter", "collect");
+        return isSoftKeyword("map", "flatMap", "filter", "drop", "take",
+                "dropWhile", "takeWhile", "collect");
     }
 
     private boolean looksLikeParenthesizedLambda() {

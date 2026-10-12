@@ -71,3 +71,6 @@
 - `documents/design-document-12_intrinsics-and-external-bindings.md`: compiler intrinsic registry and external declaration design.
 - `documents/design-document-13_typed-raised-effects.md`: typed raised effects, runtime behavior, and open design questions.
 - `documents/design-document-14_sum-product-types-and-newtypes.md`: exploratory design for algebraic sums, products, and value-class-like newtypes.
+- `documents/design-document-15_type-class-witnesses-and-generic-bounds.md`: type-class witnesses, applied contract bounds, and generic bounds.
+- `documents/design-document-16_patterns-and-pattern-matching.md`: pattern syntax, resolution, exhaustiveness, and compilation.
+- `documents/design-document-17_structural-equality-and-hashing.md`: structural equality, hashing, `Eq<T>`, and contract composition.

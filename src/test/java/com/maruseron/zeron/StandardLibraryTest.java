@@ -1625,6 +1625,64 @@ public final class StandardLibraryTest {
                         collect List<Int>.empty();
                     return values.size * 1000 + values.at(0) + values.at(1) + values.at(7);
                 }
+                fn lazyLimitAndWhilePipeline(): Int {
+                    let values: Stream<Int> = for [1, 2, 3, 4, 5, 6, 7]
+                        drop 1
+                        take 5
+                        dropWhile item -> item < 3
+                        takeWhile item -> item < 6;
+                    return values.fold(0, (sum, item) -> sum * 10 + item);
+                }
+                fn collectedLimitAndWhilePipeline(): Int {
+                    let values = for [1, 2, 3, 4, 5, 6, 7, 8]
+                        drop 1
+                        take 6
+                        dropWhile item -> item < 4
+                        takeWhile item -> item < 7
+                        collect List<Int>.empty();
+                    return values.size * 100 + values.at(0) * 10 + values.at(1) + values.at(2);
+                }
+                fn collectedLimitsAfterFlatMap(): Int {
+                    let values = for [1, 2, 3]
+                        flatMap item -> List<Int>.of(item, item * 10)
+                        drop 2
+                        take 3
+                        collect List<Int>.empty();
+                    return values.size * 1000 + values.at(0) * 100 + values.at(1) * 10 + values.at(2);
+                }
+                fn collectedTakeStopsUpstream(): Int {
+                    let calls = Calls.new(0);
+                    let values = for [1, 2, 3, 4]
+                        map item -> calls.record(item)
+                        take 2
+                        collect List<Int>.empty();
+                    return calls.read() * 100 + values.size * 10 + values.at(0) + values.at(1);
+                }
+                fn collectedTakeWithFilteredDownstream(): Int {
+                    let calls = Calls.new(0);
+                    let values = for [1, 2, 3, 4]
+                        map item -> calls.record(item)
+                        take 2
+                        filter item -> item > 2
+                        collect List<Int>.empty();
+                    return calls.read() * 100 + values.size;
+                }
+                fn collectedTakeBeforeFlatMap(): Int {
+                    let values = for [1, 2, 3]
+                        take 2
+                        flatMap item -> List<Int>.of(item, item * 10)
+                        collect List<Int>.empty();
+                    return values.size * 100 + values.at(0) + values.at(1)
+                        + values.at(2) + values.at(3);
+                }
+                fn collectedTakeWhileStopsUpstream(): Int {
+                    let calls = Calls.new(0);
+                    let values = for [1, 2, 3, 4]
+                        map item -> calls.record(item)
+                        takeWhile item -> item < 3
+                        collect List<Int>.empty();
+                    return calls.read() * 100 + values.size * 10 + values.at(0) + values.at(1);
+                }
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(List.of(source), className, packageName);
 
@@ -1642,10 +1700,33 @@ public final class StandardLibraryTest {
                 assertEquals(642, test.getMethod("lazyFlatMapPipeline").invoke(null));
                 assertEquals(308, test.getMethod("collectedFlatMapPipeline").invoke(null));
                 assertEquals(8410, test.getMethod("nestedFlatMapPipeline").invoke(null));
+                assertEquals(345, test.getMethod("lazyLimitAndWhilePipeline").invoke(null));
+                assertEquals(351, test.getMethod("collectedLimitAndWhilePipeline").invoke(null));
+                assertEquals(3403, test.getMethod("collectedLimitsAfterFlatMap").invoke(null));
+                assertEquals(223, test.getMethod("collectedTakeStopsUpstream").invoke(null));
+                assertEquals(200, test.getMethod("collectedTakeWithFilteredDownstream").invoke(null));
+                assertEquals(433, test.getMethod("collectedTakeBeforeFlatMap").invoke(null));
+                assertEquals(323, test.getMethod("collectedTakeWhileStopsUpstream").invoke(null));
             }
         } finally {
             deleteTree(Path.of("dist"));
         }
+    }
+
+    @Test
+    public void forExpressionCollectRequiresMutableSink() {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "immutableForSink" + suffix;
+        final var source = parse("Main.zn", """
+                package %s;
+                import zeron.collections.List;
+                fn collect(sink: List<Int>): List<Int> = for [1, 2] collect sink;
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(source)),
+                packageName + ".Main", packageName);
+
+        assertThrows(ResolutionError.class, compiler::resolve);
     }
 
     @Test

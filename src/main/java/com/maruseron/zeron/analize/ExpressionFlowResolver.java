@@ -950,9 +950,46 @@ final class ExpressionFlowResolver {
                     f.setLambda(lambda);
                     yield elementType;
                 }
+                case Expr.PipelineStage.Drop d -> {
+                    final var countType = resolveExpression(context, d.expression());
+                    Resolver.ensureAssignable(context, TypeDescriptor.ofInt(), countType, d.keyword());
+                    d.setType(elementType);
+                    yield elementType;
+                }
+                case Expr.PipelineStage.Take t -> {
+                    final var countType = resolveExpression(context, t.expression());
+                    Resolver.ensureAssignable(context, TypeDescriptor.ofInt(), countType, t.keyword());
+                    t.setType(elementType);
+                    yield elementType;
+                }
+                case Expr.PipelineStage.DropWhile d -> {
+                    final var parameter = d.wildcard() ? Resolver.SYNTHETIC_IDENTIFIER : d.binding();
+                    final var lambda = new Expr.Lambda(d.keyword(), List.of(parameter),
+                            List.of(new Stmt.Return(d.expression(), d.keyword())),
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(), elementType));
+                    Resolver.resolveLambda(context, lambda,
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(), elementType));
+                    d.setLambda(lambda);
+                    yield elementType;
+                }
+                case Expr.PipelineStage.TakeWhile t -> {
+                    final var parameter = t.wildcard() ? Resolver.SYNTHETIC_IDENTIFIER : t.binding();
+                    final var lambda = new Expr.Lambda(t.keyword(), List.of(parameter),
+                            List.of(new Stmt.Return(t.expression(), t.keyword())),
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(), elementType));
+                    Resolver.resolveLambda(context, lambda,
+                            TypeDescriptor.functionOf("", TypeDescriptor.ofBoolean(), elementType));
+                    t.setLambda(lambda);
+                    yield elementType;
+                }
                 case Expr.PipelineStage.Collect c -> {
                     sinkType = resolveExpression(context, stage.expression());
                     c.setType(sinkType);
+                    if (!(sinkType instanceof ReferenceDescriptor)) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_PIPELINE_OPERATION, c.keyword(),
+                                "The collect stage requires a mutable reference to a type conforming to Sink<T>."));
+                    }
                     sinkElementType = Resolver.ensureSink(context, sinkType, c.keyword());
                     Resolver.ensureAssignable(context, sinkElementType, elementType, c.keyword());
                     yield elementType;

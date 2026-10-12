@@ -864,7 +864,8 @@ public sealed interface Expr {
     }
 
     sealed interface PipelineStage permits PipelineStage.Map, PipelineStage.FlatMap,
-            PipelineStage.Filter, PipelineStage.Collect {
+            PipelineStage.Filter, PipelineStage.Drop, PipelineStage.Take,
+            PipelineStage.DropWhile, PipelineStage.TakeWhile, PipelineStage.Collect {
         public Token keyword();
         public Expr expression();
         public TypeDescriptor type();
@@ -943,6 +944,110 @@ public sealed interface Expr {
             private Lambda lambda;
 
             public Filter(Token keyword, Token binding, boolean wildcard, Expr expression) {
+                this.keyword = keyword;
+                this.binding = binding;
+                this.wildcard = wildcard;
+                this.expression = expression;
+            }
+
+            public Token keyword() { return keyword; }
+            public Token binding() { return binding; }
+            public boolean wildcard() { return wildcard; }
+            public Expr expression() { return expression; }
+            public TypeDescriptor type() { return type; }
+            public Lambda lambda() { return lambda; }
+
+            public void setType(TypeDescriptor type) {
+                this.type = type;
+            }
+
+            public void setLambda(Lambda lambda) {
+                this.lambda = lambda;
+            }
+        }
+
+        public final static class Drop implements PipelineStage {
+            private final Token keyword;
+            private final Expr expression;
+
+            private TypeDescriptor type;
+
+            public Drop(Token keyword, Expr expression) {
+                this.keyword = keyword;
+                this.expression = expression;
+            }
+
+            public Token keyword() { return keyword; }
+            public Expr expression() { return expression; }
+            public TypeDescriptor type() { return type; }
+
+            public void setType(TypeDescriptor type) {
+                this.type = type;
+            }
+        }
+
+        public final static class Take implements PipelineStage {
+            private final Token keyword;
+            private final Expr expression;
+
+            private TypeDescriptor type;
+
+            public Take(Token keyword, Expr expression) {
+                this.keyword = keyword;
+                this.expression = expression;
+            }
+
+            public Token keyword() { return keyword; }
+            public Expr expression() { return expression; }
+            public TypeDescriptor type() { return type; }
+
+            public void setType(TypeDescriptor type) {
+                this.type = type;
+            }
+        }
+
+        public final static class DropWhile implements PipelineStage {
+            private final Token keyword;
+            private final Token binding;
+            private final boolean wildcard;
+            private final Expr expression;
+
+            private TypeDescriptor type = TypeDescriptor.ofBoolean();
+            private Lambda lambda;
+
+            public DropWhile(Token keyword, Token binding, boolean wildcard, Expr expression) {
+                this.keyword = keyword;
+                this.binding = binding;
+                this.wildcard = wildcard;
+                this.expression = expression;
+            }
+
+            public Token keyword() { return keyword; }
+            public Token binding() { return binding; }
+            public boolean wildcard() { return wildcard; }
+            public Expr expression() { return expression; }
+            public TypeDescriptor type() { return type; }
+            public Lambda lambda() { return lambda; }
+
+            public void setType(TypeDescriptor type) {
+                this.type = type;
+            }
+
+            public void setLambda(Lambda lambda) {
+                this.lambda = lambda;
+            }
+        }
+
+        public final static class TakeWhile implements PipelineStage {
+            private final Token keyword;
+            private final Token binding;
+            private final boolean wildcard;
+            private final Expr expression;
+
+            private TypeDescriptor type = TypeDescriptor.ofBoolean();
+            private Lambda lambda;
+
+            public TakeWhile(Token keyword, Token binding, boolean wildcard, Expr expression) {
                 this.keyword = keyword;
                 this.binding = binding;
                 this.wildcard = wildcard;

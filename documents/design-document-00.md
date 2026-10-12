@@ -86,25 +86,27 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Basic nullable types: a non-null value can be widened to `T?`, and `null` can initialize an
     explicitly nullable binding or parameter.
 - Single-expression function bodies and range-literal syntax.
-- For-expressions support ordered `map`, `flatMap`, and `filter` stages. A `flatMap` expression must
-    return an `Iterable<T>`; each produced iterable is traversed before advancing to the next source
-    element. An expression without `collect` evaluates its source once and produces a lazy `Stream<T>`.
-    Stage callbacks are created in source order when the pipeline is built, while their bodies run only
-    as traversal demands elements. Each traversal requests a new iterator from the source; this does not
-    guarantee that the source is replayable or yields the same values on every traversal. Stages execute
-    in order, with filters skipping later stages for rejected elements; terminal operations may stop
-    traversal early.
-    A final `collect` expression is evaluated as a `Sink<T>` and the pipeline is lowered directly to
-    iteration and sink additions; the expression returns that sink. Before traversal, the collected form
-    evaluates the source and acquires its iterator for iterable inputs, then evaluates the collector, then
-    snapshots each stage's captured values in source order. Stage expressions are emitted inline in the
-    collected loop, so there is no per-element stage callback invocation; stage bodies still run for each
-    relevant element during traversal. Stream fusion, `find`, and `take` stages are not part of the current
-    syntax. Lazy for-expressions compose ordinary `Stream<T>` operators and therefore retain intermediate
-    stream/iterator wrappers and per-element callback calls. A fused lazy iterator/state machine could
-    reduce that overhead, but would add machinery for stage state, captures, repeated traversal,
-    short-circuiting, exceptions, and `flatMap` ordering; defer it until measurements show the wrappers or
-    callback dispatch are a meaningful cost.
+- For-expressions support ordered `map`, `flatMap`, `filter`, `drop`, `take`, `dropWhile`, and
+    `takeWhile` stages. A `flatMap` expression must return an `Iterable<T>`; each produced iterable is
+    traversed before advancing to the next source element. `drop` and `take` accept `Int` counts;
+    negative counts behave like zero. `dropWhile` skips values while its predicate is true, and
+    `takeWhile` ends traversal at the first false result. An expression without `collect` evaluates its
+    source once and produces a lazy `Stream<T>`. Stage callbacks are created and count expressions
+    evaluated in source order when the pipeline is built, while callback bodies run only as traversal
+    demands elements. Each traversal requests a new iterator from the source; this does not guarantee
+    that the source is replayable or yields the same values on every traversal. Stages execute in order,
+    and `take`/`takeWhile` may stop traversal early.
+    A final `collect` expression is the only terminal stage; it must evaluate to a mutable reference to a
+    `Sink<T>`, and the expression returns that sink. The pipeline is lowered directly to iteration and
+    sink additions. Before traversal, the collected form evaluates the source and acquires its iterator
+    for iterable inputs, then evaluates the collector, then evaluates count expressions and snapshots
+    stage captures in source order. Stage expressions are emitted inline in the collected loop, so there
+    is no per-element stage callback invocation; stage bodies still run for each relevant element during
+    traversal. Lazy for-expressions compose ordinary `Stream<T>` operators and therefore retain
+    intermediate stream/iterator wrappers and per-element callback calls. A fused lazy iterator/state
+    machine could reduce that overhead, but would add machinery for stage state, captures, repeated
+    traversal, short-circuiting, exceptions, and `flatMap` ordering; defer it until measurements show the
+    wrappers or callback dispatch are a meaningful cost.
 
 #### Prototypes and partial support
 

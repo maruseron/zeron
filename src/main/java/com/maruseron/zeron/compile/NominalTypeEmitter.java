@@ -1,6 +1,7 @@
 package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.analize.Resolver;
+import com.maruseron.zeron.analize.ContractComposition;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.domain.BindingMutability;
@@ -28,19 +29,32 @@ final class NominalTypeEmitter {
             }
             final var contractPath = outputPath(context, contractName);
             Files.createDirectories(contractPath.getParent());
+            final var sumDeclaration = context.compilationUnits.stream()
+                    .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
+                    .map(NamespaceMembers.Member::declaration)
+                    .filter(Stmt.SumDecl.class::isInstance)
+                    .map(Stmt.SumDecl.class::cast)
+                    .filter(sum -> sum.name().lexeme().equals(contractName))
+                    .findFirst().orElse(null);
             context.classFile.buildTo(contractPath.toAbsolutePath(),
                     ClassDesc.of(contractName),
                     builder -> {
                         builder.withFlags((contract.isPublic() ? ClassFile.ACC_PUBLIC : 0)
                             | ClassFile.ACC_INTERFACE | ClassFile.ACC_ABSTRACT);
+                        if (!contract.requiredContracts().isEmpty()) {
+                            builder.withInterfaceSymbols(contract.requiredContracts().stream()
+                                    .map(required -> ClassDesc.of(required.name().lexeme())).toList());
+                        }
                         if (contract.isSealed()) {
                             builder.with(PermittedSubclassesAttribute.ofSymbols(contract.permittedClasses().stream()
                                     .map(permitted -> ClassDesc.of(permitted.name().lexeme())).toList()));
                         }
-                        final var signature = ClassSignatureEmitter.nominalSignature(contract.typeParameters(), List.of());
+                        final var signature = ClassSignatureEmitter.nominalSignature(
+                                contract.typeParameters(), contract.requiredContracts());
                         if (signature != null) {
                             builder.with(SignatureAttribute.of(builder.constantPool().utf8Entry(signature)));
                         }
+                        if (sumDeclaration != null) emitSumEqualityMethod(builder, sumDeclaration);
                         for (final var method : contract.methods()) {
                             final var flags = ClassFile.ACC_PUBLIC
                                     | (method.isDefault() ? 0 : ClassFile.ACC_ABSTRACT);
@@ -82,6 +96,7 @@ final class NominalTypeEmitter {
                                                 methodBuilder.with(SignatureAttribute.of(
                                                         methodBuilder.constantPool().utf8Entry(methodSignature)));
                                             }
+
                                             if (method.isDefault()) {
                                                 methodBuilder.withCode(BytecodeEmitter::emitEvidenceUnavailable);
                                             }
@@ -115,6 +130,127 @@ final class NominalTypeEmitter {
             }
             generateNominalClass(context, declaration);
         }
+    }
+
+    private static void emitSumEqualityMethod(final ClassBuilder builder, final Stmt.SumDecl sum) {
+        final var root = ClassDesc.of(sum.name().lexeme());
+        final var appliedRoot = sum.typeParameters().isEmpty()
+                ? (TypeDescriptor) TypeDescriptor.ofName(sum.name().lexeme())
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(sum.name().lexeme()),
+                        sum.typeParameters().stream().map(parameter -> (TypeDescriptor) parameter).toList());
+        final var evidenceCount = sum.cases().stream().flatMap(sumCase -> sumCase.payloads().stream())
+                .filter(payload -> !isRecursiveSumPayload(payload.type(), appliedRoot)).count();
+        final var parameters = new ArrayList<ClassDesc>();
+        parameters.add(root);
+        parameters.add(root);
+        for (long index = 0; index < evidenceCount; index++) {
+            parameters.add(ClassDesc.of("java.lang.invoke.MethodHandle"));
+        }
+        final var methodType = MethodTypeDesc.of(ConstantDescs.CD_boolean, parameters);
+        builder.withMethodBody("$zeron$eq", methodType,
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                code -> {
+                    final var unequal = code.newLabel();
+                    var evidenceIndex = 0;
+                    for (int caseIndex = 0; caseIndex < sum.cases().size(); caseIndex++) {
+                        final var sumCase = sum.cases().get(caseIndex);
+                        final var caseClass = ClassDesc.of(sum.generatedCaseName(sumCase));
+                        final var nextCase = code.newLabel();
+                        code.aload(0);
+                        code.instanceOf(caseClass);
+                        code.ifeq(nextCase);
+                        code.aload(1);
+                        code.instanceOf(caseClass);
+                        code.ifeq(unequal);
+                        for (int payloadIndex = 0; payloadIndex < sumCase.payloads().size(); payloadIndex++) {
+                            final var payloadType = sumCase.payloads().get(payloadIndex).type();
+                            final var payloadClass = TypeDescriptor.toJavaClassDesc(
+                                    TypeSubstitution.erase(payloadType));
+                            final var recursive = isRecursiveSumPayload(payloadType, appliedRoot);
+                            if (recursive) {
+                                final var leftSlot = 2 + (int) evidenceCount;
+                                final var rightSlot = leftSlot + 1;
+                                final var payloadDone = payloadType instanceof NullableDescriptor
+                                        ? code.newLabel() : null;
+                                if (payloadType instanceof NullableDescriptor) {
+                                    final var checkRight = code.newLabel();
+                                    code.aload(0);
+                                    code.checkcast(caseClass);
+                                    code.invokevirtual(caseClass, "$zeron$payload$" + payloadIndex,
+                                            MethodTypeDesc.of(payloadClass));
+                                    code.astore(leftSlot);
+                                    code.aload(1);
+                                    code.checkcast(caseClass);
+                                    code.invokevirtual(caseClass, "$zeron$payload$" + payloadIndex,
+                                            MethodTypeDesc.of(payloadClass));
+                                    code.astore(rightSlot);
+                                    code.aload(leftSlot);
+                                    code.ifnonnull(checkRight);
+                                    code.aload(rightSlot);
+                                    code.ifnonnull(unequal);
+                                    code.goto_(payloadDone);
+                                    code.labelBinding(checkRight);
+                                    code.aload(rightSlot);
+                                    code.ifnull(unequal);
+                                    code.aload(leftSlot);
+                                    code.checkcast(root);
+                                    code.aload(rightSlot);
+                                    code.checkcast(root);
+                                } else {
+                                    code.aload(0);
+                                    code.checkcast(caseClass);
+                                    code.invokevirtual(caseClass, "$zeron$payload$" + payloadIndex,
+                                            MethodTypeDesc.of(payloadClass));
+                                    code.aload(1);
+                                    code.checkcast(caseClass);
+                                    code.invokevirtual(caseClass, "$zeron$payload$" + payloadIndex,
+                                            MethodTypeDesc.of(payloadClass));
+                                }
+                                for (int handleIndex = 0; handleIndex < evidenceCount; handleIndex++) {
+                                    code.aload(2 + handleIndex);
+                                }
+                                code.invokestatic(root, "$zeron$eq", methodType, true);
+                                if (payloadType instanceof NullableDescriptor) {
+                                    code.ifeq(unequal);
+                                    code.labelBinding(payloadDone);
+                                }
+                            } else {
+                                code.aload(2 + evidenceIndex);
+                                code.aload(0);
+                                code.checkcast(caseClass);
+                                code.invokevirtual(caseClass, "$zeron$payload$" + payloadIndex,
+                                        MethodTypeDesc.of(payloadClass));
+                                code.aload(1);
+                                code.checkcast(caseClass);
+                                code.invokevirtual(caseClass, "$zeron$payload$" + payloadIndex,
+                                        MethodTypeDesc.of(payloadClass));
+                                code.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
+                                        MethodTypeDesc.of(ConstantDescs.CD_boolean, payloadClass, payloadClass));
+                                evidenceIndex++;
+                            }
+                            if (!recursive || !(payloadType instanceof NullableDescriptor)) code.ifeq(unequal);
+                        }
+                        code.iconst_1();
+                        code.ireturn();
+                        code.labelBinding(nextCase);
+                    }
+                    code.labelBinding(unequal);
+                    code.iconst_0();
+                    code.ireturn();
+                });
+    }
+
+    private static boolean sameAppliedType(final TypeDescriptor left, final TypeDescriptor right) {
+        final var normalizedLeft = left instanceof ReferenceDescriptor reference ? reference.baseType() : left;
+        final var normalizedRight = right instanceof ReferenceDescriptor reference ? reference.baseType() : right;
+        return normalizedLeft.equals(normalizedRight);
+    }
+
+    private static boolean isRecursiveSumPayload(final TypeDescriptor payloadType,
+                                                 final TypeDescriptor appliedRoot) {
+        final var normalizedPayload = payloadType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : payloadType;
+        return sameAppliedType(normalizedPayload, appliedRoot);
     }
 
     private static void generateNominalClass(CompilationContext context, final Stmt.ClassDecl declaration) throws IOException {
@@ -240,8 +376,10 @@ final class NominalTypeEmitter {
                                 code -> emitNamedConstructor(context, code, constructor));
                     }
                     final var generatedBridges = new HashSet<String>();
-                    for (final var contractUse : declaration.contractUses()) {
-                        final var contract = context.resolution.contracts().get(contractUse.name().lexeme());
+                    for (final var applied : ContractComposition.forClass(
+                            context.resolution.contracts(), declaration)) {
+                        final var contractUse = applied.use();
+                        final var contract = applied.declaration();
                         for (final var required : contract.methods()) {
                             final var implementation = context.resolution.implementationFor(
                                     declaration, contractUse, required);

@@ -131,6 +131,77 @@ public final class OperatorTest {
     }
 
     @Test
+    public void comparesCustomTypesThroughComparableOrdering() throws Exception {
+        final var className = "ComparableOperators" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                class Rank {
+                    public property value: Int;
+                    public constructor new;
+                }
+                witness zeron.lang.Comparable<&Rank> for Rank {
+                    fn compareTo(other: &Rank): zeron.lang.Ordering =
+                        if (this.value < other.value) then zeron.lang.Ordering.LT()
+                        else if (this.value > other.value) then zeron.lang.Ordering.GT()
+                        else zeron.lang.Ordering.EQ();
+                }
+                class NominalRank is zeron.lang.Comparable<&NominalRank> {
+                    public property value: Int;
+                    public constructor new;
+                    public compareTo(other: &NominalRank): zeron.lang.Ordering =
+                        if (this.value < other.value) then zeron.lang.Ordering.LT()
+                        else if (this.value > other.value) then zeron.lang.Ordering.GT()
+                        else zeron.lang.Ordering.EQ();
+                }
+                fn less(): Boolean = Rank.new(1) < Rank.new(2);
+                fn lessFalse(): Boolean = Rank.new(3) < Rank.new(2);
+                fn lessOrEqual(): Boolean = Rank.new(2) <= Rank.new(2);
+                fn lessOrEqualFalse(): Boolean = Rank.new(3) <= Rank.new(2);
+                fn greater(): Boolean = Rank.new(3) > Rank.new(2);
+                fn greaterFalse(): Boolean = Rank.new(1) > Rank.new(2);
+                fn greaterOrEqual(): Boolean = Rank.new(2) >= Rank.new(2);
+                fn greaterOrEqualFalse(): Boolean = Rank.new(1) >= Rank.new(2);
+                fn nominalLess(): Boolean = NominalRank.new(1) < NominalRank.new(2);
+                fn generic<T: zeron.lang.Comparable<T>>(left: T, right: T): Boolean = left < right;
+                fn genericLess(): Boolean = generic(Rank.new(1), Rank.new(2));
+                """;
+        final var classFile = Path.of("dist", className + ".class");
+        try {
+            final var compiler = new CompilationService(parse(source), className);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(true, generated.getMethod("less").invoke(null));
+                assertEquals(false, generated.getMethod("lessFalse").invoke(null));
+                assertEquals(true, generated.getMethod("lessOrEqual").invoke(null));
+                assertEquals(false, generated.getMethod("lessOrEqualFalse").invoke(null));
+                assertEquals(true, generated.getMethod("greater").invoke(null));
+                assertEquals(false, generated.getMethod("greaterFalse").invoke(null));
+                assertEquals(true, generated.getMethod("greaterOrEqual").invoke(null));
+                assertEquals(false, generated.getMethod("greaterOrEqualFalse").invoke(null));
+                assertEquals(true, generated.getMethod("nominalLess").invoke(null));
+                assertEquals(true, generated.getMethod("genericLess").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(Path.of("dist", "Rank.class"));
+            Files.deleteIfExists(Path.of("dist", "NominalRank.class"));
+        }
+    }
+
+    @Test
+    public void requiresComparableEvidenceForCustomRelationalOperands() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                class Rank { public constructor new; }
+                fn invalid(left: Rank, right: Rank): Boolean = left < right;
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn invalid<T>(left: T, right: T): Boolean = left < right;
+                """)));
+    }
+
+    @Test
     public void parsesNestedGenericClosersAlongsideRightShiftOperators() {
         final var statements = parse("""
                 fn nested(values: Array<Array<Int>>): Int = values[0][0];

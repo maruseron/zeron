@@ -70,7 +70,9 @@ final class ExpressionFlowResolver {
                             assignment.property.name, "Extension properties are read-only."));
                 }
                 final var receiverType = assignment.property.receiver.getType();
-                final var ownerName = className(context, receiverType);
+                final var ownerName = assignment.property.resolvedOwnerName() == null
+                        ? className(context, receiverType)
+                        : assignment.property.resolvedOwnerName();
                 if (!(receiverType instanceof ReferenceDescriptor)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                             assignment.property.name,
@@ -86,8 +88,7 @@ final class ExpressionFlowResolver {
                                 assignment.property.name,
                                 "Property is read-only."));
                     }
-                    expectedType = MemberInteropResolver.resolvedPropertyType(
-                            context, ownerName, propertyDeclaration, receiverType);
+                    expectedType = assignment.property.getType();
                 } else {
                     final var field = MemberInteropResolver.findField(
                             context, ownerName, assignment.property.name);
@@ -140,7 +141,9 @@ final class ExpressionFlowResolver {
                             assignment.property.name,
                             "Property compound assignment requires a mutable reference."));
                 }
-                final var ownerName = className(context, receiverType);
+                final var ownerName = assignment.property.resolvedOwnerName() == null
+                        ? className(context, receiverType)
+                        : assignment.property.resolvedOwnerName();
                 final var property = MemberInteropResolver.findProperty(
                         context, ownerName, assignment.property.name);
                 if (property == null || !property.isMutating()) {
@@ -334,34 +337,42 @@ final class ExpressionFlowResolver {
                 }
                 final var equalityOperator = binary.operator.type() == TokenType.EQUAL_EQUAL
                         || binary.operator.type() == TokenType.BANG_EQUAL;
-                if (!equalityOperator
+                if (!equalityOperator && !isRelationalOperator(binary.operator.type())
                         && (TypeSubstitution.containsTypeParameter(refinedLeftType)
                         || TypeSubstitution.containsTypeParameter(refinedRightType))) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                             binary.operator,
                         "Operators on generic type parameters require constraints, which are not supported."));
                 }
-                if (refinedLeftType.isNullable() || refinedRightType.isNullable()
-                    || refinedLeftType instanceof NullDescriptor || refinedRightType instanceof NullDescriptor) {
+                if ((!equalityOperator && (refinedLeftType.isNullable() || refinedRightType.isNullable()))
+                        || refinedLeftType instanceof NullDescriptor || refinedRightType instanceof NullDescriptor) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
                             binary.operator,
                         "Nullable operands require a null check before using this operator."));
                 }
                 ensureExact(context, binary.operator, refinedLeftType, refinedRightType);
-                final var isComparison = switch (binary.operator.type()) {
-                    case EQUAL_EQUAL, BANG_EQUAL, GREATER, GREATER_EQUAL, LESS, LESS_EQUAL -> true;
-                    default -> false;
-                };
-                if ((binary.operator.type() == TokenType.GREATER || binary.operator.type() == TokenType.GREATER_EQUAL
-                    || binary.operator.type() == TokenType.LESS || binary.operator.type() == TokenType.LESS_EQUAL)
-                    && !(refinedLeftType instanceof IntDescriptor
-                    || refinedLeftType instanceof FloatDescriptor)) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
-                            binary.operator,
-                        "Relational comparisons require numeric operands."));
+                if (equalityOperator) {
+                    resolveEquality(context, binary, refinedLeftType);
+                    binary.setType(TypeDescriptor.ofBoolean());
+                    yield TypeDescriptor.ofBoolean();
                 }
-                if (!isComparison
-                    && !(refinedLeftType instanceof InferDescriptor)
+                if (isRelationalOperator(binary.operator.type())) {
+                    if (refinedLeftType.isNullable() || refinedRightType.isNullable()
+                            || refinedLeftType instanceof NullDescriptor
+                            || refinedRightType instanceof NullDescriptor) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
+                                binary.operator,
+                                "Nullable operands require a null check before using this operator."));
+                    }
+                    ensureExact(context, binary.operator, refinedLeftType, refinedRightType);
+                    if (!(refinedLeftType instanceof IntDescriptor)
+                            && !(refinedLeftType instanceof FloatDescriptor)) {
+                        resolveComparableComparison(context, binary, refinedLeftType);
+                    }
+                    binary.setType(TypeDescriptor.ofBoolean());
+                    yield TypeDescriptor.ofBoolean();
+                }
+                if (!(refinedLeftType instanceof InferDescriptor)
                     && !(refinedRightType instanceof InferDescriptor)) {
                     final var validOperands = switch (binary.operator.type()) {
                     case PLUS -> refinedLeftType instanceof IntDescriptor
@@ -383,9 +394,7 @@ final class ExpressionFlowResolver {
                         }));
                     }
                 }
-                final var resolvedType = isComparison
-                    ? TypeDescriptor.ofBoolean()
-                    : refinedLeftType.orElse(refinedRightType);
+                final var resolvedType = refinedLeftType.orElse(refinedRightType);
 
                 binary.setType(resolvedType);
                 yield resolvedType;
@@ -699,6 +708,106 @@ final class ExpressionFlowResolver {
         }
         binary.setDisplayCall(call);
         return TypeDescriptor.ofString();
+    }
+
+    private static void resolveEquality(final ResolutionContext context,
+                                       final Expr.Binary binary,
+                                       final TypeDescriptor operandType) {
+        final var operandBaseType = operandType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : operandType;
+        final var nullableBaseType = operandBaseType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : operandBaseType;
+        final var comparableType = nullableBaseType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : nullableBaseType;
+        if (comparableType instanceof IntDescriptor || comparableType instanceof FloatDescriptor
+                || comparableType instanceof BooleanDescriptor || comparableType instanceof StringDescriptor
+                || comparableType instanceof UnitDescriptor) {
+            return;
+        }
+
+        final var equalityContract = context.contracts.get("zeron.lang.Eq");
+        if (equalityContract == null || equalityContract.typeParameters().size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    binary.operator, "The standard Eq<T> contract is not available."));
+        }
+        final var equalityTarget = operandBaseType instanceof NullableDescriptor
+                ? operandBaseType : comparableType;
+        final var equalityType = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName(equalityContract.name().lexeme()), equalityTarget);
+        if (comparableType instanceof TypeParameterDescriptor parameter
+                && parameter.bounds().stream().noneMatch(bound ->
+                        bound.equals(TypeDescriptor.genericOf(
+                                TypeDescriptor.ofName(equalityContract.name().lexeme()), parameter)))) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    binary.operator, "Equality on type parameter '" + parameter.name()
+                            + "' requires an explicit Eq<" + parameter.name() + "> bound."));
+        }
+        if (!TypeClassEvidence.hasEvidence(context, equalityType, equalityTarget, binary.operator)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    binary.operator, "No Eq witness is in scope for '" + equalityTarget + "'."));
+        }
+        final var equalityEvidence = TypeClassEvidence.selectEqualityMethod(
+                context, equalityTarget, binary.operator);
+        if (!(equalityEvidence.signature().returnType() instanceof BooleanDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    binary.operator, "Eq.eq must return Boolean."));
+        }
+        binary.setSynthesizedEqualityEvidence(equalityEvidence);
+    }
+
+    private static boolean isRelationalOperator(final TokenType operator) {
+        return operator == TokenType.GREATER || operator == TokenType.GREATER_EQUAL
+                || operator == TokenType.LESS || operator == TokenType.LESS_EQUAL;
+    }
+
+    private static void resolveComparableComparison(final ResolutionContext context,
+                                                    final Expr.Binary binary,
+                                                    final TypeDescriptor operandType) {
+        final var comparableContract = context.contracts.get("zeron.lang.Comparable");
+        final var ordering = context.sums.get("zeron.lang.Ordering");
+        if (comparableContract == null || comparableContract.typeParameters().size() != 1 || ordering == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    binary.operator, "The standard Comparable<T> and Ordering declarations are not available."));
+        }
+        final var orderingCases = Set.of("LT", "EQ", "GT");
+        if (ordering.cases().size() != orderingCases.size()
+                || ordering.cases().stream().map(sumCase -> sumCase.name().lexeme()).distinct().count()
+                        != orderingCases.size()
+                || ordering.cases().stream().anyMatch(sumCase ->
+                        !orderingCases.contains(sumCase.name().lexeme()) || !sumCase.payloads().isEmpty())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    binary.operator, "Ordering must contain exactly the nullary cases LT, EQ, and GT."));
+        }
+        final var comparableType = operandType;
+        final var comparableContractType = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName(comparableContract.name().lexeme()), comparableType);
+        final var token = new Token(TokenType.IDENTIFIER, "compareTo", null, binary.operator.span());
+        final var call = new Expr.MemberCall(binary.left, token, binary.operator,
+                List.of(binary.right), List.of(), TypeDescriptor.ofInfer());
+        if (!TypeClassEvidence.hasEvidence(context, comparableContractType, comparableType, binary.operator)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    binary.operator, "No Comparable<" + comparableType + "> witness is in scope."));
+        }
+        final TypeDescriptor returnType;
+        if (comparableType instanceof TypeParameterDescriptor
+                || context.typeCompatibility.isContractProjection(comparableContractType, comparableType)) {
+            returnType = MemberInteropResolver.resolveMemberCall(context, call);
+        } else {
+            returnType = MemberInteropResolver.resolveWitnessMethodForContract(
+                    context, call, comparableType, comparableContractType);
+        }
+        if (returnType == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    binary.operator, "Comparable<" + comparableType + "> has no compareTo method."));
+        }
+        final var expectedOrdering = TypeDescriptor.ofName(ordering.name().lexeme());
+        if (!expectedOrdering.equals(returnType)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    binary.operator, "Comparable.compareTo must return zeron.lang.Ordering."));
+        }
+        binary.setComparisonCall(call);
+        RaisedEffectFlow.add(context, new LinkedHashSet<>(call.resolvedDescriptor().raisedEffects()),
+                binary.operator);
     }
 
     private static TypeDescriptor resolveHandle(final ResolutionContext context, final Expr.Handle handle) {

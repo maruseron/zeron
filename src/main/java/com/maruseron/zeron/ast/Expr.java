@@ -16,7 +16,7 @@ import java.util.Objects;
 
 public sealed interface Expr {
 
-    enum EvidenceHandleKind { STATIC, VIRTUAL, INTERFACE }
+    enum EvidenceHandleKind { STATIC, INTERFACE_STATIC, VIRTUAL, INTERFACE }
 
     record EvidenceArgument(TypeParameterDescriptor parameter, int boundIndex, int constructorIndex,
                             String ownerName, String constructorName, FunctionDescriptor signature,
@@ -377,6 +377,8 @@ public sealed interface Expr {
         public final Expr right;
         private TypeDescriptor type;
         private MemberCall displayCall;
+        private MemberCall comparisonCall;
+        private EvidenceArgument synthesizedEqualityEvidence;
         private boolean builtInStringification;
         private boolean nullableStringification;
 
@@ -393,6 +395,12 @@ public sealed interface Expr {
 
         public MemberCall displayCall() { return displayCall; }
         public void setDisplayCall(final MemberCall call) { displayCall = call; }
+        public MemberCall comparisonCall() { return comparisonCall; }
+        public void setComparisonCall(final MemberCall call) { comparisonCall = call; }
+        public EvidenceArgument synthesizedEqualityEvidence() { return synthesizedEqualityEvidence; }
+        public void setSynthesizedEqualityEvidence(final EvidenceArgument evidence) {
+            synthesizedEqualityEvidence = evidence;
+        }
         public boolean builtInStringification() { return builtInStringification; }
         public void setBuiltInStringification(final boolean value) { builtInStringification = value; }
         public boolean nullableStringification() { return nullableStringification; }

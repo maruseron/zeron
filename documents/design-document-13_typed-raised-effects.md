@@ -129,11 +129,11 @@ accepts a value whose effect set is a subset of the expected effect set. Erased 
 names and SAM descriptors do not include raised effects because JVM invocation types are unchanged.
 Runtime effect checking is preserved inside generated lambda bodies.
 
-The compiled-library index schema was bumped to version 15. The index serializes both the effect
-marker on exported nominal classes and raised sets on exported callable signatures. The standard
-library API version remains independent of this binary schema version. Consumers of older schema
-files must rebuild or use a compatible compiler; an older index cannot communicate effect markers or
-raised signatures safely.
+Effect metadata was first added in compiled-library index schema version 15. The current schema is
+version 22. The index serializes both the effect marker on exported nominal classes and raised sets on
+exported callable signatures. The standard-library API version remains independent of this binary
+schema version. Consumers of schemas that predate effect metadata must rebuild or use a compatible
+compiler; such an index cannot communicate effect markers or raised signatures safely.
 
 ## Runtime model
 

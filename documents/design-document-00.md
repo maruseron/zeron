@@ -153,15 +153,15 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     curated external-class facade supports `System.out` and `PrintStream.print`/`println`; general
     external classes and member declarations, and expected-class declarations, remain future work.
     See the [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
-    Native algebraic data-type declarations, discriminated unions beyond sealed contracts, and
-    structural or nominal tuples are also future work. Native sum declarations, standalone product
-    types, and value-class-like newtypes remain design explorations; see
+    Native sum declarations are implemented; discriminated unions beyond native sums and sealed
+    contracts, standalone product types, and value-class-like newtypes remain design explorations; see
     [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
 - Immutable collection types, list comprehensions, and explicit resource management.
 - Safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`), and explicit
-    reference identity (`===`) are implemented. Structural equality remains future work; existing
-    `==`/`!=` behavior is unchanged. See the
-    [small language features discussion](design-document-10_small-miscelaneous.md).
+    reference identity (`===`) are implemented. Value equality uses `Eq<T>` evidence, and custom
+    relational comparisons use `Comparable<T>` and `Ordering`. See the
+    [small language features discussion](design-document-10_small-miscelaneous.md) and the
+    [equality and hashing design](design-document-17_structural-equality-and-hashing.md).
 - One trailing `T...` parameter is supported on functions, class methods, contract methods, and
     signature-only external functions. Its body type and full function-value parameter type are
     `Array<T>`; direct calls pack the positional arguments after fixed parameters, while indirect
@@ -180,9 +180,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Generic bounds over applied contracts and coherent type-class witnesses. Declared nominal
     conformance supplies instance-method evidence; explicit witness mappings may select or remap
     class-side factories, whose result is `&Self`. Evidence is passed implicitly to generic
-    implementations, with compile-time selection independent of imports. The initial implementation
-    rejects duplicate nominal contract/target witnesses and excludes non-nominal instances and
-    witness-dispatched instance methods; see
+    implementations, with compile-time selection independent of imports. Non-nominal witnesses and
+    witness-method dispatch are supported; complete generic-pattern overlap analysis remains future
+    work. See
     [design-document-15](design-document-15_type-class-witnesses-and-generic-bounds.md).
 - Class-defined extractor patterns for match expressions, including refutable patterns, nesting,
     and OR-patterns; see [design-document-16](design-document-16_patterns-and-pattern-matching.md).
@@ -192,8 +192,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Pattern assignment and derived creation.
 - Typed raised effects have an initial implementation: callable `raises` clauses and function-type
     annotations, `raise` expressions, and `handle (...) with { case Effect [as value] -> ...; }`.
-    Property patterns, catch-all cases, effect generics, effects in entry-point `main` and top-level
-    initializers, and automatic Java-exception conversion remain unsupported. See
+    Property patterns, catch-all cases, effect generics, effects in top-level initializers, and
+    automatic Java-exception conversion remain unsupported. Entry-point `main` may declare effects
+    like any other callable. See
     [design-document-13](design-document-13_typed-raised-effects.md) for semantics and next steps.
 - Low priority: optional `do` notation for sequencing short-circuiting `Option`/`Result` values.
     A block may mix ordinary statements with `<-` binds; a bind short-circuits on the context's
@@ -202,10 +203,14 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     not implicitly lifted. This sequences value-level failures and does not handle declared
     `raises` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
 - Low priority: compiler-recognized type-admissibility constraints on generic type parameters, such
-    as `NonNull` to exclude nullable type arguments or `Numeric` to admit only `Int` and `Float`.
-    These constraints restrict which types may be supplied but do not expose operations; generic
-    operator support remains a separate operator-witness design. Define constraint inference,
-    forwarding, and compiled-library representation before implementation.
+    as `NonNull` to exclude nullable type arguments, `Numeric` to admit only `Int` and `Float`, or
+    `Stable` to admit only values whose equality- and hash-relevant state cannot change while used as
+    keys in hash-based collections. A sound `Stable` guarantee may need to ensure aliasable reachable
+    state is deeply copied; ordinary immutable views alone do not rule out mutation through another
+    alias. This could require substantially more analysis and runtime support, so its enforcement
+    strategy remains open. These constraints restrict which types may be supplied but do not expose
+    operations; generic operator support remains a separate operator-witness design. Define constraint
+    inference, forwarding, and compiled-library representation before implementation.
 - Low priority: type-predicate return types such as `isSome(): this is Option.Some`, which connect a
     successful Boolean check to flow refinement of a stable receiver. Define how predicate bodies
     are verified so the refinement is sound, which receivers may be narrowed, and how generic
@@ -704,8 +709,8 @@ concrete class name rather than dynamically through a contract value. Methods an
 the instance API. Contracts can require method signatures and read-only or writable properties; the
 source design permits multiple declaration-site conformances, checked statically, and calls through
 contract-typed references use interface dispatch, including when a class conforms to multiple
-contracts. Default contract methods are implemented. Separate `implement` declarations,
-contract-to-contract inheritance, and class inheritance remain deferred.
+contracts. Default contract methods and applied contract composition with `requires` are implemented. Separate
+`implement` declarations and class inheritance remain deferred.
 
 ```zeron
 class PersonList is Iterable<Person> { ... }

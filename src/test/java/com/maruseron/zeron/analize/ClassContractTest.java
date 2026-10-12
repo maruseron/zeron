@@ -26,6 +26,53 @@ import static org.junit.Assert.assertThrows;
 
 public final class ClassContractTest {
     @Test
+    public void requiredContractsComposeMembersBoundsAndJvmInterfaces() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "ContractComposition" + suffix;
+        final var source = """
+                contract Base%s<T> {
+                    mut property item: T;
+                    constructor from(value: T);
+                    value(): T;
+                    default extra(): Int = 1;
+                }
+                contract Derived%s<U> requires Base%s<U> {}
+                class Implementation%s is Derived%s<Int> {
+                    public mut property item: Int;
+                    public constructor new;
+                    public constructor from(value: Int) = Implementation%s.new(value);
+                    public value(): Int = this.item;
+                }
+                fn read<T: Derived%s<Int>>(value: T): Int = value.value() + value.extra();
+                fn readBase<T: Base%s<Int>>(value: T): Int = value.value();
+                fn readItem<T: Base%s<Int>>(value: T): Int = value.item;
+                fn update<T: Base%s<Int>>(value: &T): Unit { value.item = 9; }
+                fn run(): Int {
+                    let item = Implementation%s.from(7);
+                    update(item);
+                    return read(item) + readBase(item) + readItem(item);
+                }
+                """.formatted(suffix, suffix, suffix, suffix, suffix, suffix, suffix, suffix, suffix,
+                suffix, suffix);
+        final var compiler = new CompilationService(parse(source), programName);
+        final var names = List.of("Base" + suffix, "Derived" + suffix, "Implementation" + suffix);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(28, loader.loadClass(programName).getMethod("run").invoke(null));
+                final var derived = loader.loadClass("Derived" + suffix);
+                assertEquals(1, derived.getInterfaces().length);
+                assertEquals(loader.loadClass("Base" + suffix), derived.getInterfaces()[0]);
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            for (final var name : names) Files.deleteIfExists(Path.of("dist", name + ".class"));
+        }
+    }
+
+    @Test
     public void nonNominalWitnessMethodIsDispatchedThroughItsStaticHelper() throws Exception {
         final var programName = "MethodWitness" + UUID.randomUUID().toString().replace("-", "");
         final var source = """

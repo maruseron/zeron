@@ -27,7 +27,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 21;
+    public static final int VERSION = 22;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -141,8 +141,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     final var permittedClasses = contract.permittedClasses().stream()
                         .map(use -> new Stmt.ContractUse(token(use.qualifiedName()), use.typeArguments()))
                         .toList();
+                    final var requiredContracts = contract.requiredContracts().stream()
+                        .map(use -> new Stmt.ContractUse(token(use.qualifiedName()), use.typeArguments()))
+                        .toList();
                     statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(),
-                            constructors, methods, properties, true, contract.sealed(), permittedClasses));
+                            requiredContracts, constructors, methods, properties, true,
+                            contract.sealed(), permittedClasses));
                 }
                 case SumExport sum -> {
                     final var sumName = token(sum.qualifiedName());
@@ -300,6 +304,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     public record ContractExport(String qualifiedName,
                                  List<TypeParameterDescriptor> typeParameters,
+                                 List<ContractUseExport> requiredContracts,
                                  List<NamedConstructorExport> constructors,
                                  List<MethodExport> methods,
                                  List<PropertyExport> properties,
@@ -308,6 +313,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         public ContractExport {
             Objects.requireNonNull(qualifiedName);
             typeParameters = List.copyOf(typeParameters);
+            requiredContracts = List.copyOf(requiredContracts);
             constructors = List.copyOf(constructors);
             methods = List.copyOf(methods);
             properties = List.copyOf(properties);
@@ -319,7 +325,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                               List<NamedConstructorExport> constructors,
                               List<MethodExport> methods,
                               List<PropertyExport> properties) {
-            this(qualifiedName, typeParameters, constructors, methods, properties, false, List.of());
+            this(qualifiedName, typeParameters, List.of(), constructors, methods, properties, false, List.of());
+        }
+
+        public ContractExport(String qualifiedName,
+                              List<TypeParameterDescriptor> typeParameters,
+                              List<NamedConstructorExport> constructors,
+                              List<MethodExport> methods,
+                              List<PropertyExport> properties,
+                              boolean sealed,
+                              List<ContractUseExport> permittedClasses) {
+            this(qualifiedName, typeParameters, List.of(), constructors, methods, properties,
+                    sealed, permittedClasses);
         }
     }
 
@@ -570,6 +587,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     }
                     case Stmt.ContractDecl contract when contract.isPublic() ->
                             exports.add(new ContractExport(contract.name().lexeme(), contract.typeParameters(),
+                                    contract.requiredContracts().stream()
+                                            .map(use -> new ContractUseExport(
+                                                    use.name().lexeme(), use.typeArguments()))
+                                            .toList(),
                                     contract.namedConstructors().stream()
                                             .map(constructor -> new NamedConstructorExport(
                                                     constructor.name().lexeme(),
@@ -654,7 +675,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v20.bin");
+            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v22.bin");
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -680,7 +701,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v20.bin"));
+        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v22.bin"));
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -770,6 +791,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeUTF(contract.qualifiedName());
                 final var context = new WriteContext();
                 writeTypeParameters(output, contract.typeParameters(), context);
+                output.writeInt(contract.requiredContracts().size());
+                for (final var required : contract.requiredContracts()) {
+                    output.writeUTF(required.qualifiedName());
+                    output.writeInt(required.typeArguments().size());
+                    for (final var type : required.typeArguments()) writeType(output, type, context);
+                }
                 output.writeInt(contract.constructors().size());
                 for (final var constructor : contract.constructors()) {
                     output.writeUTF(constructor.name());
@@ -892,6 +919,15 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var name = input.readUTF();
                 final var context = new ReadContext();
                 final var typeParameters = readTypeParameters(input, context);
+                final var requiredContracts = new ArrayList<ContractUseExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var requiredName = input.readUTF();
+                    final var arguments = new ArrayList<TypeDescriptor>();
+                    for (int j = 0, argumentCount = readCount(input); j < argumentCount; j++) {
+                        arguments.add(readType(input, context));
+                    }
+                    requiredContracts.add(new ContractUseExport(requiredName, arguments));
+                }
                 final var constructors = new ArrayList<NamedConstructorExport>();
                 for (int i = 0, count = readCount(input); i < count; i++) {
                     final var constructorName = input.readUTF();
@@ -910,7 +946,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     }
                     permitted.add(new ContractUseExport(permittedName, arguments));
                 }
-                yield new ContractExport(name, typeParameters, constructors, methods, properties, sealed, permitted);
+                yield new ContractExport(name, typeParameters, requiredContracts, constructors,
+                        methods, properties, sealed, permitted);
             }
             case 7 -> {
                 final var name = input.readUTF();

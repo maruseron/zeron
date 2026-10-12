@@ -1,6 +1,7 @@
 package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.analize.Bind;
+import com.maruseron.zeron.analize.ContractComposition;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
@@ -778,33 +779,36 @@ final class LambdaCompilationPlan {
     }
 
     private void collectContractBridgeAdapters(final Stmt.ClassDecl declaration) {
-        for (final var contractUse : declaration.contractUses()) {
-            final var contract = contracts.get(contractUse.name().lexeme());
-            if (contract == null) continue;
+        for (final var applied : ContractComposition.forClass(contracts, declaration)) {
+            final var contract = applied.declaration();
             for (final var required : contract.methods()) {
+                final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
+                        required.typeDescriptor(), applied.substitutions());
                 final var implementation = declaration.methods().stream()
                         .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
                         .findFirst()
                         .orElse(null);
                 if (implementation == null) continue;
-                for (int i = 0; i < Math.min(required.typeDescriptor().arity(),
+                for (int i = 0; i < Math.min(requiredType.arity(),
                         implementation.typeDescriptor().arity()); i++) {
                     collectFunctionAdapters(
-                            TypeSubstitution.erase(required.typeDescriptor().parameters().get(i)),
+                            TypeSubstitution.erase(requiredType.parameters().get(i)),
                             implementation.typeDescriptor().parameters().get(i));
                 }
                 collectFunctionAdapters(implementation.typeDescriptor().returnType(),
-                        TypeSubstitution.erase(required.typeDescriptor().returnType()));
+                        TypeSubstitution.erase(requiredType.returnType()));
             }
             for (final var required : contract.properties()) {
+                final var requiredType = TypeSubstitution.substitute(
+                        required.type(), applied.substitutions());
                 final var implementation = declaration.properties().stream()
                         .filter(property -> property.name().lexeme().equals(required.name().lexeme()))
                         .findFirst()
                         .orElse(null);
                 if (implementation == null) continue;
-                collectFunctionAdapters(implementation.type(), TypeSubstitution.erase(required.type()));
+                collectFunctionAdapters(implementation.type(), TypeSubstitution.erase(requiredType));
                 if (required.isMutating()) {
-                    collectFunctionAdapters(TypeSubstitution.erase(required.type()), implementation.type());
+                    collectFunctionAdapters(TypeSubstitution.erase(requiredType), implementation.type());
                 }
             }
         }

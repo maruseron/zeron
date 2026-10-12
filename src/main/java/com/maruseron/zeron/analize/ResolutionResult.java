@@ -106,10 +106,17 @@ public record ResolutionResult(
     private List<Resolver.DefaultMethodSelection> defaultMethodsFor(final Stmt.ClassDecl declaration,
                                                                     final FunctionDescriptor requiredType) {
         final var matches = new ArrayList<Resolver.DefaultMethodSelection>();
-        for (final var contractUse : declaration.contractUses()) {
-            final var candidateContract = contracts.get(contractUse.name().lexeme());
-            final var substitutions = contractSubstitutions(contractUse);
-            for (final var candidate : candidateContract.methods()) {
+        final var seen = new HashSet<String>();
+        for (final var root : declaration.contractUses()) {
+            for (final var applied : ContractComposition.closure(contracts, root)) {
+                final var candidateContract = applied.declaration();
+                final var substitutions = applied.substitutions();
+                for (final var candidate : candidateContract.methods()) {
+                    if (ContractComposition.isShadowedByAncestor(
+                            contracts, root, applied.use(), candidate.name().lexeme())) continue;
+                    final var key = applied.use().name().lexeme() + applied.use().typeArguments()
+                            + "#" + candidate.name().lexeme();
+                    if (!seen.add(key)) continue;
                 if (!candidate.isDefault()
                         || !candidate.name().lexeme().equals(requiredType.name())) continue;
                 final var candidateType = (FunctionDescriptor) TypeSubstitution.substitute(
@@ -117,6 +124,7 @@ public record ResolutionResult(
                 if (compatibleMethodSignatures(requiredType, candidateType)) {
                     matches.add(new Resolver.DefaultMethodSelection(candidateContract.name().lexeme(),
                             candidate, candidateType));
+                }
                 }
             }
         }

@@ -320,25 +320,37 @@ public sealed interface Stmt {
     record PatternOutput(Token name, TypeDescriptor type) {}
 
     record ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                        List<ContractUse> requiredContracts,
                         List<NamedContractConstructor> namedConstructors,
                         List<ContractMethod> methods, List<ContractProperty> properties,
                         boolean isPublic, boolean isSealed,
                         List<ContractUse> permittedClasses) implements Stmt, Decl {
         public ContractDecl {
+            requiredContracts = List.copyOf(requiredContracts);
             permittedClasses = List.copyOf(permittedClasses);
+        }
+
+        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                            List<NamedContractConstructor> namedConstructors,
+                            List<ContractMethod> methods, List<ContractProperty> properties,
+                            boolean isPublic, boolean isSealed, List<ContractUse> permittedClasses) {
+            this(name, typeParameters, List.of(), namedConstructors, methods, properties,
+                    isPublic, isSealed, permittedClasses);
         }
 
         public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters, 
                             List<NamedContractConstructor> namedConstructors,
                             List<ContractMethod> methods, boolean isPublic) {
-            this(name, typeParameters, namedConstructors, methods, List.of(), isPublic, false, List.of());
+            this(name, typeParameters, List.of(), namedConstructors, methods, List.of(),
+                    isPublic, false, List.of());
         }
 
         public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters, 
                             List<NamedContractConstructor> namedConstructors,
                             List<ContractMethod> methods, List<ContractProperty> properties,
                             boolean isPublic) {
-            this(name, typeParameters, namedConstructors, methods, properties, isPublic, false, List.of());
+            this(name, typeParameters, List.of(), namedConstructors, methods, properties,
+                    isPublic, false, List.of());
         }
     }
 

@@ -1,0 +1,5 @@
+package zeron.lang;
+
+public contract Eq<T> {
+    eq(other: T): Boolean;
+}

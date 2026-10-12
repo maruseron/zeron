@@ -15,13 +15,12 @@ not a proposed feature in this note. See [design-document-05_classes-and-contrac
 - `?.` is implemented for property reads and method calls. `??` is implemented with
   right-associative short-circuit evaluation, nullable-path flow joins, and common-branch typing.
   `??=` is implemented for mutable local bindings.
-- `==` and `!=` compare primitive values and strings by value. Reference comparisons currently use
-  `Objects.equals`; generated classes inherit `Object.equals` unless behavior is supplied elsewhere,
-  so nominal instances currently compare by identity.
-- `==` and `!=` are also allowed on matching generic type parameters without an explicit equality
-  constraint. At generic erasure they use `Objects.equals`; other operators on unconstrained type
-  parameters remain rejected.
-- Compound assignments are supported for variables, but not for properties or array indices.
+- `==` and `!=` use `Eq<T>` evidence for non-built-in values. Built-in scalar types have compiler
+  evidence; classes and generic type parameters require conformance, a witness, or an explicit
+  `Eq<T>` bound. Matching nullable values lift the underlying equality evidence.
+- Sum types receive compiler-synthesized structural equality when all payload types have `Eq`
+  evidence. Ordinary classes do not receive structural equality implicitly.
+- Compound assignments are supported for variables and writable properties, but not for array indices.
 
 ## Conditional Navigation: `?.`
 
@@ -102,9 +101,9 @@ assignment path; assignment writes invalidate refinements within enclosing short
 
 ## Structural and Referential Equality: `==` and `===`
 
-Existing `==` and `!=` semantics are preserved. They compare primitive values and strings by value
-and use `Objects.equals` for other reference values. Generated nominal classes normally inherit
-`Object.equals`, so they compare by identity unless behavior is supplied elsewhere.
+`==` and `!=` are value-equality operators driven by `Eq<T>`. Built-in scalar types have compiler
+evidence; classes and generic type parameters require explicit equality evidence. Without evidence,
+resolution fails rather than falling back to JVM `Object.equals` or object identity.
 
 `===` explicitly checks reference identity:
 
@@ -124,20 +123,21 @@ reference type can be inferred.
 The operator does not call `equals` and never inspects fields. It has the same equality precedence as
 `==`. Null checks using `=== null` participate in the existing null-flow refinement.
 
-Structural equality remains deferred. If added later, it should require an explicit equality
-contract or opt-in; the language must not derive it silently from private fields. Recursive values,
-cycles, `Any`, and generic constraints remain open design questions for that separate feature.
+`Eq<T>` drives `==`/`!=`: built-in scalar types use compiler-provided evidence, while generic
+functions and ordinary classes require explicit bounds, conformance, or witnesses. Nullable values
+lift custom equality; sums use compiler-synthesized structural evidence, including directly
+self-recursive sums. Ordinary classes do not gain structural equality implicitly. `===` remains
+reference identity. The staged contract, hashing, and derivation design is recorded in
+[design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
 
 ### Equality on generic type parameters
 
-Generic functions may compare two operands of the same unconstrained type parameter with `==` or
-`!=`. This narrow exception does not add general operator constraints or overload resolution.
-Resolved operand types must still match exactly, and arithmetic or relational operations on
-unconstrained type parameters remain unsupported.
+Generic functions may compare two operands of the same type parameter with `==` or `!=` only when
+the parameter declares an `Eq<T>` bound. Resolved operand types must still match exactly, and
+arithmetic or relational operations on unconstrained type parameters remain unsupported.
 
-Generic type parameters erase to reference values, so their equality currently lowers through
-`Objects.equals`. This can differ from direct primitive `Float` comparison for NaN and signed zero.
-Whether `Float` equality should consistently follow boxed `Double.equals` semantics remains open.
+Generic equality calls pass compiler-generated or resolved `Eq<T>` method-handle evidence. Built-in
+floating-point equality treats NaN as equal to NaN and distinguishes positive from negative zero.
 
 ## Suggested Order
 
@@ -148,9 +148,12 @@ Whether `Float` equality should consistently follow boxed `Double.equals` semant
 3. **Null-fallback assignment: implemented.** `??=` is limited to mutable local bindings, with its
    expression result and flow effects specified above.
 4. **Reference identity: implemented.** `===` compares compatible reference values without calling
-   `equals`; `==` and `!=` retain their existing behavior.
-5. Define a coherent structural-equality contract alongside any future data/value-type design; do
-   not change existing `==` behavior until compatibility is understood.
+   `equals`.
+5. **`Eq<T>` equality: implemented.** Built-ins, explicit bounds, nominal conformance, witnesses,
+   nullable lifting, and structural evidence for sums (including direct self-recursion) work.
+   Mutually recursive sum declarations remain unsupported. See
+   [design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md)
+   for the agreed `Eq<T>`-first roadmap and compatibility considerations.
 
 The order can change if a concrete use case emerges. These features should reuse nullable and flow
 analysis rather than add independent null-state rules.

@@ -781,18 +781,25 @@ final class ExpressionFlowEmitter {
         } else switch (operandDescriptor) {
             case "I", "Z" -> branchIntegerComparison(context, composer, binary.operator.type(), matched);
             case "D" -> {
-                switch (binary.operator.type()) {
-                    case LESS, LESS_EQUAL -> composer.dcmpg();
-                    default -> composer.dcmpl();
-                }
-                switch (binary.operator.type()) {
-                    case EQUAL_EQUAL -> composer.ifeq(matched);
-                    case BANG_EQUAL -> composer.ifne(matched);
-                    case GREATER -> composer.ifgt(matched);
-                    case GREATER_EQUAL -> composer.ifge(matched);
-                    case LESS -> composer.iflt(matched);
-                    case LESS_EQUAL -> composer.ifle(matched);
-                    default -> throw new IllegalStateException("Unsupported comparison operator.");
+                if (binary.operator.type() == TokenType.EQUAL_EQUAL
+                        || binary.operator.type() == TokenType.BANG_EQUAL) {
+                    composer.invokestatic(ClassDesc.of("java.lang.Double"), "compare",
+                            MethodTypeDesc.of(ConstantDescs.CD_int,
+                                    ConstantDescs.CD_double, ConstantDescs.CD_double));
+                    if (binary.operator.type() == TokenType.EQUAL_EQUAL) composer.ifeq(matched);
+                    else composer.ifne(matched);
+                } else {
+                    switch (binary.operator.type()) {
+                        case LESS, LESS_EQUAL -> composer.dcmpg();
+                        default -> composer.dcmpl();
+                    }
+                    switch (binary.operator.type()) {
+                        case GREATER -> composer.ifgt(matched);
+                        case GREATER_EQUAL -> composer.ifge(matched);
+                        case LESS -> composer.iflt(matched);
+                        case LESS_EQUAL -> composer.ifle(matched);
+                        default -> throw new IllegalStateException("Unsupported comparison operator.");
+                    }
                 }
             }
             default -> {
@@ -813,6 +820,53 @@ final class ExpressionFlowEmitter {
         composer.labelBinding(matched);
         composer.iconst_1();
         composer.labelBinding(done);
+        context.lastEmittedType = TypeDescriptor.ofBoolean();
+    }
+
+    static void emitOrderingComparison(final CompilationContext context, final CodeBuilder composer,
+                                       final TokenType operator) {
+        final var matched = composer.newLabel();
+        final var unmatched = composer.newLabel();
+        final var result = composer.newLabel();
+        final var less = ClassDesc.of("zeron.lang.Ordering$$sum$LT");
+        final var equal = ClassDesc.of("zeron.lang.Ordering$$sum$EQ");
+        final var greater = ClassDesc.of("zeron.lang.Ordering$$sum$GT");
+        final var checkEqual = composer.newLabel();
+        final var checkGreater = composer.newLabel();
+
+        composer.dup();
+        composer.instanceOf(less);
+        composer.ifeq(checkEqual);
+        if (operator == TokenType.LESS || operator == TokenType.LESS_EQUAL) {
+            composer.pop();
+            composer.goto_(matched);
+        } else composer.goto_(unmatched);
+
+        composer.labelBinding(checkEqual);
+        composer.dup();
+        composer.instanceOf(equal);
+        composer.ifeq(checkGreater);
+        if (operator == TokenType.LESS_EQUAL || operator == TokenType.GREATER_EQUAL) {
+            composer.pop();
+            composer.goto_(matched);
+        } else composer.goto_(unmatched);
+
+        composer.labelBinding(checkGreater);
+        composer.dup();
+        composer.instanceOf(greater);
+        composer.ifeq(unmatched);
+        if (operator == TokenType.GREATER || operator == TokenType.GREATER_EQUAL) {
+            composer.pop();
+            composer.goto_(matched);
+        } else composer.goto_(unmatched);
+
+        composer.labelBinding(unmatched);
+        composer.pop();
+        composer.iconst_0();
+        composer.goto_(result);
+        composer.labelBinding(matched);
+        composer.iconst_1();
+        composer.labelBinding(result);
         context.lastEmittedType = TypeDescriptor.ofBoolean();
     }
 

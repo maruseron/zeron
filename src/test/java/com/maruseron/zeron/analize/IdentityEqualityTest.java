@@ -37,10 +37,13 @@ public final class IdentityEqualityTest {
     public void checksObjectIdentityWithoutChangingValueEquality() throws Exception {
         final var className = "IdentityEquality" + UUID.randomUUID().toString().replace("-", "");
         final var boxName = "IdentityBox" + UUID.randomUUID().toString().replace("-", "");
+        final var valueBoxName = "EqualityBox" + UUID.randomUUID().toString().replace("-", "");
         final var contractName = "IdentityView" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
         final var boxFile = Path.of("dist", boxName + ".class");
+        final var valueBoxFile = Path.of("dist", valueBoxName + ".class");
         final var source = """
+                import zeron.lang.Eq;
                 contract %s {
                     read(): Int;
                 }
@@ -49,6 +52,12 @@ public final class IdentityEqualityTest {
                     public constructor new;
                     public read(): Int = this.value;
                 }
+                class %s is Eq<%s> {
+                    value: Int;
+                    public constructor new;
+                    public eq(other: %s): Boolean = this.value == other.value;
+                }
+                fn equalValues(): Boolean = %s.new(1) == %s.new(1);
                 fn sameBox(): Boolean {
                     let value = %s.new(1);
                     return value === value;
@@ -62,6 +71,11 @@ public final class IdentityEqualityTest {
                 }
                 fn sameString(left: String, right: String): Boolean = left === right;
                 fn equalStrings(left: String, right: String): Boolean = left == right;
+                fn equalNullableValues(left: %s?, right: %s?): Boolean = left == right;
+                fn equalNullableGeneric<T: Eq<T>>(left: T?, right: T?): Boolean = left == right;
+                fn equalNullableInts(): Boolean = equalNullableGeneric(1, 1);
+                fn equalFloats(left: Float, right: Float): Boolean = left == right;
+                fn equalNullableFloats(left: Float?, right: Float?): Boolean = left == right;
                 fn sameArray(left: Array<Int>, right: Array<Int>): Boolean = left === right;
                 fn nullableIdentity(left: String?, right: String?): Boolean = left === right;
                 fn nullIdentity(value: String?): Boolean = value === null;
@@ -69,8 +83,9 @@ public final class IdentityEqualityTest {
                     if (value === null) return "null";
                     return value;
                 }
-                """.formatted(contractName, boxName, contractName, boxName, boxName,
-                        boxName, boxName, contractName);
+                """.formatted(contractName, boxName, contractName, valueBoxName, valueBoxName,
+                        valueBoxName, valueBoxName, valueBoxName, boxName, boxName, boxName, boxName,
+                        contractName, valueBoxName, valueBoxName);
 
         try {
             final var compiler = new CompilationService(parse(source), className);
@@ -80,6 +95,7 @@ public final class IdentityEqualityTest {
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 final var generated = loader.loadClass(className);
+                assertTrue((Boolean) generated.getMethod("equalValues").invoke(null));
                 assertTrue((Boolean) generated.getMethod("sameBox").invoke(null));
                 assertFalse((Boolean) generated.getMethod("distinctBoxes").invoke(null));
                 assertTrue((Boolean) generated.getMethod("sameThroughContractAndAny").invoke(null));
@@ -92,6 +108,29 @@ public final class IdentityEqualityTest {
                         .invoke(null, equalDistinctStrings, equalDistinctStrings));
                 assertTrue((Boolean) generated.getMethod("equalStrings", String.class, String.class)
                         .invoke(null, equalDistinctStrings, anotherEqualString));
+                final var valueBoxClass = loader.loadClass(valueBoxName);
+                final var constructor = valueBoxClass.getDeclaredConstructor(int.class);
+                constructor.setAccessible(true);
+                final var equalBox = constructor.newInstance(3);
+                final var anotherEqualBox = constructor.newInstance(3);
+                assertTrue((Boolean) generated.getMethod("equalNullableValues",
+                        valueBoxClass, valueBoxClass)
+                        .invoke(null, new Object[]{null, null}));
+                assertFalse((Boolean) generated.getMethod("equalNullableValues",
+                        valueBoxClass, valueBoxClass)
+                        .invoke(null, new Object[]{null, equalBox}));
+                assertTrue((Boolean) generated.getMethod("equalNullableValues",
+                        valueBoxClass, valueBoxClass)
+                        .invoke(null, equalBox, anotherEqualBox));
+                assertTrue((Boolean) generated.getMethod("equalNullableInts").invoke(null));
+                assertTrue((Boolean) generated.getMethod("equalFloats", double.class, double.class)
+                        .invoke(null, Double.NaN, Double.NaN));
+                assertFalse((Boolean) generated.getMethod("equalFloats", double.class, double.class)
+                        .invoke(null, -0.0d, 0.0d));
+                assertTrue((Boolean) generated.getMethod("equalNullableFloats", Double.class, Double.class)
+                        .invoke(null, Double.NaN, Double.NaN));
+                assertFalse((Boolean) generated.getMethod("equalNullableFloats", Double.class, Double.class)
+                        .invoke(null, -0.0d, 0.0d));
                 final var array = new Object[]{1};
                 final var anotherArray = new Object[]{1};
                 assertTrue((Boolean) generated.getMethod("sameArray", Object[].class, Object[].class)
@@ -114,6 +153,7 @@ public final class IdentityEqualityTest {
         } finally {
             Files.deleteIfExists(classFile);
             Files.deleteIfExists(boxFile);
+            Files.deleteIfExists(valueBoxFile);
         }
     }
 
@@ -124,6 +164,11 @@ public final class IdentityEqualityTest {
                 "fn invalid(left: Int?, right: Int?): Boolean = left === right;",
                 "fn invalid(left: Unit, right: Unit): Boolean = left === right;",
                 "fn invalid(): Boolean = null === null;",
+                "fn invalid<T>(left: T, right: T): Boolean = left == right;",
+                """
+                class Box { value: Int; public constructor new; }
+                fn invalid(left: Box, right: Box): Boolean = left == right;
+                """,
                 """
                 class Left { value: Int; public constructor new; }
                 class Right { value: Int; public constructor new; }

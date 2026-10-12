@@ -2,6 +2,9 @@ module ZeronGrammar;
 
 # IDENTIFIER, INT, DOUBLE, and STRING denote scanner token kinds.
 # `type` below is source syntax; design-document-02 describes encoded descriptors.
+# Quoted words are hard keywords unless listed here as soft keywords. Soft keywords are scanned as
+# IDENTIFIER and recognized by exact spelling only at their grammatical position:
+# "permits", "requires", "when", "with", "matches", "map", "flatMap", "filter", and "collect".
 
 program                    : [packageDeclaration] {importDeclaration} {topLevelDeclaration} EOF ;
 packageDeclaration         : "package" qualifiedName ";" ;
@@ -70,8 +73,9 @@ methodDecl                 : visibility ["mut"] IDENTIFIER [typeParameters] "(" 
 patternDecl                : visibility "pattern" IDENTIFIER "(" [patternOutput {"," patternOutput}] ")"
                              ["when" expression] block ;
 patternOutput              : IDENTIFIER ":" type ;
-contractDecl               : "contract" IDENTIFIER [typeParameters] ["permits" permittedClass
-                             {"," permittedClass}] "{" contractMember* "}" ;
+contractDecl               : "contract" IDENTIFIER [typeParameters] ["requires" contractUse
+                             {"+" contractUse}] ["permits" permittedClass {"," permittedClass}]
+                             "{" contractMember* "}" ;
 permittedClass             : qualifiedName [typeArguments] ;
 contractMember             : contractProperty | contractMethod | contractConstructor ;
 contractProperty           : ["mut"] "property" IDENTIFIER ":" type ";" ;

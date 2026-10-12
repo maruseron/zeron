@@ -29,6 +29,11 @@ final class TypeClassEvidence {
         final var contract = context.contracts.get(nominalName(witness.contractType()));
         final var target = context.classes.get(nominalName(witness.targetType()));
         final var sumTarget = context.sums.get(nominalName(witness.targetType()));
+        if (sumTarget != null && contract != null
+                && contract.name().lexeme().equals("zeron.lang.Eq")) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                    witness.name(), "Sum types use compiler-synthesized structural Eq evidence."));
+        }
         if (contract == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     witness.name(), "A witness must name a contract and a supported target type."));
@@ -78,23 +83,14 @@ final class TypeClassEvidence {
                 classSubstitutions.put(targetParameters.get(index), witness.typeParameters().get(index));
             }
         }
-        final var classContract = target == null ? null : target.contractUses().stream()
-                .filter(use -> use.name().lexeme().equals(contract.name().lexeme()))
-                .filter(use -> use.typeArguments().size() == contractArguments.size())
-                .filter(use -> {
-                    for (int index = 0; index < use.typeArguments().size(); index++) {
-                        if (!contractArguments.get(index)
-                                .equals(TypeSubstitution.substitute(use.typeArguments().get(index),
-                                        classSubstitutions))) return false;
-                    }
-                    return true;
-                })
-                .findFirst().orElse(null);
-        if (target != null && classContract != null && !witness.methods().isEmpty()) {
+        final var classContract = target != null && ContractComposition.forClass(context, target).stream()
+                .anyMatch(applied -> sameAppliedType(
+                        appliedType(applied, classSubstitutions), witness.contractType()));
+        if (classContract && !witness.methods().isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     witness.name(), "A witness cannot override methods of a nominally conforming class."));
         }
-        if (target == null || classContract == null) {
+        if (target == null || !classContract) {
             synthesizeDefaultWitnessMethods(context, witness, contract, targetSubstitutions, contractArguments);
             validateWitnessMethods(context, witness, contract, targetSubstitutions, contractArguments);
         }
@@ -114,10 +110,12 @@ final class TypeClassEvidence {
                         mapping.constructorName(),
                         "A witness factory must target the witness's implementing class type."));
             }
-            final var required = contract.namedConstructors().stream()
-                    .filter(value -> value.name().lexeme().equals(mapping.requirementName().lexeme()))
+            final var requiredSlot = ContractComposition.constructors(context,
+                            contractUse(witness.contractType()))
+                    .stream().filter(slot -> slot.constructor().name().lexeme()
+                            .equals(mapping.requirementName().lexeme()))
                     .findFirst().orElse(null);
-            if (required == null) {
+            if (requiredSlot == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                         mapping.requirementName(), "Unknown contract factory requirement."));
             }
@@ -129,18 +127,16 @@ final class TypeClassEvidence {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
                         mapping.constructorName(), "Witness target must be a public named constructor."));
             }
-            final var contractSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-            for (int index = 0; index < contract.typeParameters().size(); index++) {
-                contractSubstitutions.put(contract.typeParameters().get(index),
-                        TypeSubstitution.substitute(contractArguments.get(index), targetSubstitutions));
-            }
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
-                    required.typeDescriptor(), contractSubstitutions);
+                    (FunctionDescriptor) TypeSubstitution.substitute(
+                            requiredSlot.constructor().typeDescriptor(),
+                            requiredSlot.applied().substitutions()), targetSubstitutions);
             final var implementationType = (FunctionDescriptor) TypeSubstitution.substitute(
                     implementation.typeDescriptor(), targetSubstitutions);
-            if (required.variadic() != implementation.variadic()
+            if (requiredSlot.constructor().variadic() != implementation.variadic()
                     || !DeclarationResolver.compatibleMethodSignatures(context, requiredType,
-                            required.variadic(), implementationType, implementation.variadic())) {
+                            requiredSlot.constructor().variadic(), implementationType,
+                            implementation.variadic())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
                         mapping.constructorName(), "Mapped constructor does not satisfy the factory requirement."));
             }
@@ -179,19 +175,17 @@ final class TypeClassEvidence {
         final var implementedNames = witness.methods().stream()
                 .map(method -> method.requirementName().lexeme())
                 .collect(java.util.stream.Collectors.toSet());
-        final var contractSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        for (int index = 0; index < contract.typeParameters().size(); index++) {
-            contractSubstitutions.put(contract.typeParameters().get(index),
-                    TypeSubstitution.substitute(contractArguments.get(index), targetSubstitutions));
-        }
-        for (final var required : contract.methods()) {
+        for (final var slot : ContractComposition.methods(context, contractUse(witness.contractType()))) {
+            final var required = slot.method();
             if (!required.isDefault() || implementedNames.contains(required.name().lexeme())) continue;
             if (required.isMutating()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                         required.name(), "Witnesses cannot use mutating default contract methods."));
             }
             final var sourceType = (FunctionDescriptor) TypeSubstitution.substitute(
-                    required.typeDescriptor(), contractSubstitutions);
+                    (FunctionDescriptor) TypeSubstitution.substitute(
+                            required.typeDescriptor(), slot.applied().substitutions()),
+                    targetSubstitutions);
             final var sourceMethod = new Stmt.Function(required.name(), required.parameters(), sourceType,
                     required.body(), false, required.defaultValues(), required.minimumArity(),
                     required.variadic());
@@ -224,37 +218,38 @@ final class TypeClassEvidence {
                                                final Stmt.ContractDecl contract,
                                                final Map<TypeParameterDescriptor, TypeDescriptor> targetSubstitutions,
                                                final List<TypeDescriptor> contractArguments) {
-        final var contractSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        for (int index = 0; index < contract.typeParameters().size(); index++) {
-            contractSubstitutions.put(contract.typeParameters().get(index),
-                    TypeSubstitution.substitute(contractArguments.get(index), targetSubstitutions));
-        }
+        final var methodSlots = ContractComposition.methods(context, contractUse(witness.contractType()));
         final var implementations = new LinkedHashMap<String, Stmt.WitnessMethod>();
         for (final var method : witness.methods()) {
             if (implementations.putIfAbsent(method.requirementName().lexeme(), method) != null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                         method.requirementName(), "Duplicate witness method implementation."));
             }
-            final var required = contract.methods().stream()
-                    .filter(candidate -> candidate.name().lexeme().equals(method.requirementName().lexeme()))
+            final var requiredSlot = methodSlots.stream()
+                    .filter(slot -> slot.method().name().lexeme()
+                            .equals(method.requirementName().lexeme()))
                     .findFirst().orElse(null);
-            if (required == null) {
+            if (requiredSlot == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                         method.requirementName(), "Unknown contract method requirement."));
             }
+            final var required = requiredSlot.method();
             if (required.isMutating()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                         method.requirementName(), "Witnesses cannot implement mutating contract methods."));
             }
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
-                    required.typeDescriptor(), contractSubstitutions);
+                    (FunctionDescriptor) TypeSubstitution.substitute(
+                            required.typeDescriptor(), requiredSlot.applied().substitutions()),
+                    targetSubstitutions);
             if (!DeclarationResolver.compatibleMethodSignatures(context, requiredType, required.variadic(),
                     method.methodSignature().typeDescriptor(), method.methodSignature().variadic())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
                         method.requirementName(), "Witness method does not satisfy the contract requirement."));
             }
         }
-        for (final var required : contract.methods()) {
+        for (final var slot : methodSlots) {
+            final var required = slot.method();
             if (required.isMutating()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                         required.name(), "Witnesses cannot implement contracts with mutating methods."));
@@ -322,10 +317,9 @@ final class TypeClassEvidence {
         for (final var entry : context.typeClassWitnesses) {
             if (!isActive(context, entry)) continue;
             final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-            if (!matchPattern(entry.declaration().contractType(), contractType,
+            if (!matchPattern(entry.declaration().targetType(), targetType,
                     entry.declaration().typeParameters(), substitutions)
-                    || !matchPattern(entry.declaration().targetType(), targetType,
-                            entry.declaration().typeParameters(), substitutions)) continue;
+                    || !witnessEntails(context, entry.declaration(), substitutions, contractType)) continue;
             entry.declaration().mappings().stream()
                     .filter(mapping -> mapping.requirementName().lexeme().equals(requirementName))
                     .forEach(matches::add);
@@ -343,25 +337,27 @@ final class TypeClassEvidence {
         final var result = new ArrayList<Expr.EvidenceArgument>();
         for (int boundIndex = 0; boundIndex < parameter.bounds().size(); boundIndex++) {
             final var bound = parameter.bounds().get(boundIndex);
-            final var contractName = nominalName(bound);
-            final var contract = context.contracts.get(contractName);
-            if (contract == null) continue;
-            for (int constructorIndex = 0; constructorIndex < contract.namedConstructors().size(); constructorIndex++) {
-                final var constructor = contract.namedConstructors().get(constructorIndex);
-                result.add(new Expr.EvidenceArgument(parameter, boundIndex, constructorIndex,
-                        null, null, constructor.typeDescriptor(), null));
+            final var use = contractUse(bound);
+            if (use == null) continue;
+            for (final var slot : ContractComposition.constructors(context, use)) {
+                final var constructor = (FunctionDescriptor) TypeSubstitution.substitute(
+                        slot.constructor().typeDescriptor(), slot.applied().substitutions());
+                result.add(new Expr.EvidenceArgument(parameter, boundIndex, slot.index(),
+                        null, null, constructor, null));
             }
-            for (int methodIndex = 0; methodIndex < contract.methods().size(); methodIndex++) {
-                final var method = contract.methods().get(methodIndex);
+            for (final var slot : ContractComposition.methods(context, use)) {
+                final var method = slot.method();
+                final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                        method.typeDescriptor(), slot.applied().substitutions());
                 final var methodParameters = new ArrayList<TypeDescriptor>();
                 methodParameters.add(parameter);
-                methodParameters.addAll(method.typeDescriptor().parameters());
+                methodParameters.addAll(descriptor.parameters());
                 final var methodType = TypeDescriptor.functionWithEffectsOf(method.name().lexeme(),
-                        method.typeDescriptor().returnType(), methodParameters,
-                        method.typeDescriptor().typeParameters(), method.typeDescriptor().raisedEffects());
-                result.add(new Expr.EvidenceArgument(parameter, boundIndex, methodIndex,
+                        descriptor.returnType(), methodParameters,
+                        descriptor.typeParameters(), descriptor.raisedEffects());
+                result.add(new Expr.EvidenceArgument(parameter, boundIndex, slot.index(),
                         null, null, methodType,
-                        Expr.methodEvidenceToken(parameter, boundIndex, methodIndex), true));
+                        Expr.methodEvidenceToken(parameter, boundIndex, slot.index()), true));
             }
         }
         return List.copyOf(result);
@@ -378,18 +374,26 @@ final class TypeClassEvidence {
             for (final var slot : requirements(context, parameter)) {
                 final var requiredBound = TypeSubstitution.substitute(
                         parameter.bounds().get(slot.boundIndex()), substitutions);
-                final var contract = context.contracts.get(nominalName(requiredBound));
-                if (contract == null) continue;
                 if (slot.instanceMethod()) {
-                    if (slot.constructorIndex() >= contract.methods().size()) continue;
+                    final var use = contractUse(requiredBound);
+                    if (use == null) continue;
+                    final var methods = ContractComposition.methods(context, use);
+                    if (slot.constructorIndex() >= methods.size()) continue;
+                    final var methodSlot = methods.get(slot.constructorIndex());
+                    final var appliedBound = appliedType(methodSlot.applied(), substitutions);
                     evidence.add(selectMethodEvidence(context, parameter, slot.boundIndex(),
-                            slot.constructorIndex(), requiredBound, actual,
-                            contract.methods().get(slot.constructorIndex()), where));
+                            slot.constructorIndex(), appliedBound, actual,
+                            methodSlot.method(), where));
                     continue;
                 }
-                if (slot.constructorIndex() >= contract.namedConstructors().size()) continue;
+                final var use = contractUse(requiredBound);
+                if (use == null) continue;
+                final var constructors = ContractComposition.constructors(context, use);
+                if (slot.constructorIndex() >= constructors.size()) continue;
+                final var constructorSlot = constructors.get(slot.constructorIndex());
                 evidence.add(select(context, parameter, slot.boundIndex(), slot.constructorIndex(),
-                        requiredBound, actual, contract.namedConstructors().get(slot.constructorIndex()), where));
+                        appliedType(constructorSlot.applied(), substitutions), actual,
+                        constructorSlot.constructor(), where));
             }
         }
         return List.copyOf(evidence);
@@ -407,20 +411,25 @@ final class TypeClassEvidence {
                                        final Set<String> resolving) {
         if (context.typeCompatibility.isContractProjection(contractType, actualType)) return true;
         if (actualType instanceof TypeParameterDescriptor parameter
-                && parameter.bounds().contains(contractType)) return true;
+                && parameter.bounds().stream().anyMatch(bound -> entails(context, bound, contractType))) return true;
         final var evidenceKey = contractType + " for " + actualType;
         if (!resolving.add(evidenceKey)) return false;
         final var actual = actualType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : actualType;
         try {
+            if (isEqContract(contractType) && actual instanceof NullableDescriptor nullable
+                    && hasEvidence(context, eqType(context, nullable.baseType()), nullable.baseType(),
+                            where, resolving)) {
+                return true;
+            }
+            if (hasStructuralSumEquality(context, contractType, actual, where, resolving)) return true;
             var matchingWitnesses = 0;
             for (final var entry : context.typeClassWitnesses) {
                 if (!isActive(context, entry)) continue;
                 final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-                if (matchPattern(entry.declaration().contractType(), contractType,
+                if (matchPattern(entry.declaration().targetType(), actual,
                         entry.declaration().typeParameters(), substitutions)
-                        && matchPattern(entry.declaration().targetType(), actual,
-                                entry.declaration().typeParameters(), substitutions)
+                        && witnessEntails(context, entry.declaration(), substitutions, contractType)
                         && prerequisitesAvailable(context, entry.declaration(), substitutions, where, resolving)) {
                     matchingWitnesses++;
                 }
@@ -429,7 +438,8 @@ final class TypeClassEvidence {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
                         "Ambiguous witness for contract '" + contractType + "' and type '" + actualType + "'."));
             }
-            return matchingWitnesses == 1 || isBuiltInDisplay(contractType, actual);
+            return matchingWitnesses == 1 || isBuiltInDisplay(contractType, actual)
+                    || isBuiltInEq(contractType, actual);
         } finally {
             resolving.remove(evidenceKey);
         }
@@ -458,9 +468,41 @@ final class TypeClassEvidence {
             final com.maruseron.zeron.scan.Token where) {
         if (actualType instanceof TypeParameterDescriptor actualParameter) {
             for (int boundIndex = 0; boundIndex < actualParameter.bounds().size(); boundIndex++) {
+                final var boundUse = contractUse(actualParameter.bounds().get(boundIndex));
+                if (boundUse == null) continue;
+                for (final var slot : ContractComposition.methods(context, boundUse)) {
+                    if (slot.method().name().lexeme().equals(requirement.name().lexeme())
+                            && sameAppliedType(appliedType(slot.applied(), Map.of()), requiredBound)) {
+                        return new Expr.EvidenceArgument(actualParameter, boundIndex, slot.index(),
+                                null, null, signatureForMethod(slot, actualParameter),
+                                Expr.methodEvidenceToken(actualParameter, boundIndex, slot.index()), true);
+                    }
+                }
+            }
+        }
+        if (isEqContract(requiredBound) && actualType instanceof NullableDescriptor nullable
+                && !isBuiltInEq(requiredBound, actualType)) {
+            final var baseEvidence = selectMethodEvidence(context, targetParameter, targetBoundIndex,
+                    targetMethodIndex, eqType(context, nullable.baseType()), nullable.baseType(),
+                    eqMethod(context), where);
+            final var signature = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(),
+                    TypeDescriptor.ofAny(), TypeDescriptor.ofAny());
+            return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
+                    "zeron.runtime.EqSupport", "eqNullableWithHandle", signature, null, true,
+                    Expr.EvidenceHandleKind.STATIC, List.of(baseEvidence));
+        }
+        if (actualType instanceof TypeParameterDescriptor actualParameter) {
+            for (int boundIndex = 0; boundIndex < actualParameter.bounds().size(); boundIndex++) {
                 if (actualParameter.bounds().get(boundIndex).equals(requiredBound)) {
+                    final var methodParameters = new ArrayList<TypeDescriptor>();
+                    methodParameters.add(actualParameter);
+                    methodParameters.addAll(requirement.typeDescriptor().parameters());
+                    final var methodSignature = TypeDescriptor.functionWithEffectsOf(
+                            requirement.name().lexeme(), requirement.typeDescriptor().returnType(),
+                            methodParameters, requirement.typeDescriptor().typeParameters(),
+                            requirement.typeDescriptor().raisedEffects());
                     return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
-                            null, null, requirement.typeDescriptor(),
+                            null, null, methodSignature,
                             Expr.methodEvidenceToken(actualParameter, boundIndex, targetMethodIndex),
                             true);
                 }
@@ -504,6 +546,12 @@ final class TypeClassEvidence {
         final var builtin = builtinDisplayHandle(requiredBound, concrete, requirement, targetParameter,
                 targetBoundIndex, targetMethodIndex);
         if (builtin != null) return builtin;
+        final var builtinEquality = builtinEqualityHandle(requiredBound, concrete, requirement,
+                targetParameter, targetBoundIndex, targetMethodIndex);
+        if (builtinEquality != null) return builtinEquality;
+        final var sumEquality = structuralSumEqualityHandle(context, requiredBound, concrete, requirement,
+                targetParameter, targetBoundIndex, targetMethodIndex, where);
+        if (sumEquality != null) return sumEquality;
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
                 "No method witness satisfies bound '" + requiredBound + "'."));
         throw new IllegalStateException("Unreachable");
@@ -514,6 +562,57 @@ final class TypeClassEvidence {
             final TypeDescriptor concrete, final String methodName,
             final com.maruseron.zeron.scan.Token where) {
         return selectMethod(context, concrete, contractType, methodName, where);
+    }
+
+    private static FunctionDescriptor signatureForMethod(
+            final ContractComposition.MethodSlot slot, final TypeParameterDescriptor target) {
+        final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                slot.method().typeDescriptor(), slot.applied().substitutions());
+        final var parameters = new ArrayList<TypeDescriptor>();
+        parameters.add(target);
+        parameters.addAll(descriptor.parameters());
+        return TypeDescriptor.functionWithEffectsOf(descriptor.name(), descriptor.returnType(), parameters,
+                descriptor.typeParameters(), descriptor.raisedEffects());
+    }
+
+    private static boolean entails(final ResolutionContext context, final TypeDescriptor bound,
+                                   final TypeDescriptor required) {
+        final var use = contractUse(bound);
+        if (use == null) return false;
+        return ContractComposition.closure(context, use).stream()
+                .anyMatch(applied -> sameAppliedType(appliedType(applied, Map.of()), required));
+    }
+
+    private static boolean witnessEntails(
+            final ResolutionContext context, final Stmt.Witness witness,
+            final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+            final TypeDescriptor requiredContract) {
+        final var witnessContract = TypeSubstitution.substitute(witness.contractType(), substitutions);
+        final var use = contractUse(witnessContract);
+        return use != null && ContractComposition.closure(context, use).stream()
+                .anyMatch(applied -> sameAppliedType(appliedType(applied, Map.of()), requiredContract));
+    }
+
+    private static Stmt.ContractUse contractUse(final TypeDescriptor type) {
+        final var base = type instanceof ReferenceDescriptor reference ? reference.baseType() : type;
+        final var name = nominalName(base);
+        if (name == null) return null;
+        final var arguments = base instanceof GenericDescriptor generic
+                ? generic.typeParameters() : List.<TypeDescriptor>of();
+        return new Stmt.ContractUse(new com.maruseron.zeron.scan.Token(
+                com.maruseron.zeron.scan.TokenType.IDENTIFIER, name, null,
+                com.maruseron.zeron.diagnostic.SourceSpan.line(null, 1)), arguments);
+    }
+
+    private static TypeDescriptor appliedType(
+            final ContractComposition.Applied applied,
+            final Map<TypeParameterDescriptor, TypeDescriptor> substitutions) {
+        final var arguments = applied.use().typeArguments().stream()
+                .map(argument -> TypeSubstitution.substitute(argument, substitutions))
+                .toList();
+        return arguments.isEmpty()
+                ? TypeDescriptor.ofName(applied.use().name().lexeme())
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(applied.use().name().lexeme()), arguments);
     }
 
     private static Expr.EvidenceArgument builtinDisplayHandle(
@@ -565,6 +664,154 @@ final class TypeClassEvidence {
                     || concrete instanceof UnitDescriptor);
     }
 
+    private static Expr.EvidenceArgument builtinEqualityHandle(
+            final TypeDescriptor requiredBound, final TypeDescriptor concrete,
+            final Stmt.ContractMethod requirement, final TypeParameterDescriptor parameter,
+            final int boundIndex, final int methodIndex) {
+        if (!isBuiltInEq(requiredBound, concrete)
+                || !requirement.name().lexeme().equals("eq")
+                || !(requirement.typeDescriptor().returnType() instanceof BooleanDescriptor)
+                || requirement.typeDescriptor().parameters().size() != 1) return null;
+        final var signature = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(), concrete, concrete);
+        return new Expr.EvidenceArgument(parameter, boundIndex, methodIndex,
+                "zeron.runtime.EqSupport", builtinEqualityMethod(concrete), signature, null,
+                true, Expr.EvidenceHandleKind.STATIC);
+    }
+
+    private static String builtinEqualityMethod(final TypeDescriptor concrete) {
+        if (concrete instanceof NullableDescriptor nullable) {
+            final var base = nullable.baseType();
+            if (base instanceof IntDescriptor || base instanceof FloatDescriptor
+                    || base instanceof BooleanDescriptor || base instanceof StringDescriptor
+                    || base instanceof UnitDescriptor) return "eqNullable";
+        }
+        if (concrete instanceof IntDescriptor) return "eqInt";
+        if (concrete instanceof FloatDescriptor) return "eqFloat";
+        if (concrete instanceof BooleanDescriptor) return "eqBoolean";
+        if (concrete instanceof StringDescriptor) return "eqString";
+        if (concrete instanceof UnitDescriptor) return "eqUnit";
+        throw new IllegalArgumentException("Unsupported built-in Eq type: " + concrete);
+    }
+
+    private static boolean isBuiltInEq(final TypeDescriptor contractType,
+                                       final TypeDescriptor concreteType) {
+        final var concrete = concreteType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : concreteType;
+        final var arguments = typeArguments(contractType);
+        final var target = arguments.isEmpty() ? null
+                : arguments.getFirst() instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : arguments.getFirst();
+        final var isBuiltInType = concrete instanceof NullableDescriptor nullable
+                ? nullable.baseType() instanceof IntDescriptor || nullable.baseType() instanceof FloatDescriptor
+                    || nullable.baseType() instanceof BooleanDescriptor
+                    || nullable.baseType() instanceof StringDescriptor
+                    || nullable.baseType() instanceof UnitDescriptor
+                : concrete instanceof IntDescriptor || concrete instanceof FloatDescriptor
+                    || concrete instanceof BooleanDescriptor || concrete instanceof StringDescriptor
+                    || concrete instanceof UnitDescriptor;
+        return nominalName(contractType).equals("zeron.lang.Eq")
+                && arguments.size() == 1 && target.equals(concrete)
+                && isBuiltInType;
+    }
+
+    static Expr.EvidenceArgument selectEqualityMethod(final ResolutionContext context,
+                                                       final TypeDescriptor actualType,
+                                                       final com.maruseron.zeron.scan.Token where) {
+        return selectMethodEvidence(context, null, 0, 0, eqType(context, actualType), actualType,
+                eqMethod(context), where);
+    }
+
+    private static Expr.EvidenceArgument structuralSumEqualityHandle(
+            final ResolutionContext context, final TypeDescriptor requiredBound,
+            final TypeDescriptor concrete, final Stmt.ContractMethod requirement,
+            final TypeParameterDescriptor targetParameter, final int targetBoundIndex,
+            final int targetMethodIndex, final com.maruseron.zeron.scan.Token where) {
+        if (!isEqContract(requiredBound) || !requirement.name().lexeme().equals("eq")
+                || !(requirement.typeDescriptor().returnType() instanceof BooleanDescriptor)
+                || requirement.typeDescriptor().parameters().size() != 1) return null;
+        if (!eqTargetMatches(requiredBound, concrete)) return null;
+        final var sum = context.sums.get(nominalName(concrete));
+        if (sum == null) return null;
+        final var actualArguments = typeArguments(concrete);
+        if (actualArguments.size() != sum.typeParameters().size()) return null;
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int index = 0; index < actualArguments.size(); index++) {
+            substitutions.put(sum.typeParameters().get(index), actualArguments.get(index));
+        }
+        final var prerequisites = new ArrayList<Expr.EvidenceArgument>();
+        for (final var sumCase : sum.cases()) {
+            for (final var payload : sumCase.payloads()) {
+                final var payloadType = TypeSubstitution.substitute(payload.type(), substitutions);
+                if (isRecursiveSumPayload(payloadType, concrete)) continue;
+                final var payloadBound = eqType(context, payloadType);
+                if (!hasEvidence(context, payloadBound, payloadType, where)) return null;
+                prerequisites.add(selectMethodEvidence(context, targetParameter, targetBoundIndex,
+                        targetMethodIndex, payloadBound, payloadType, eqMethod(context), where));
+            }
+        }
+        final var signature = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(),
+                concrete, concrete);
+        return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
+                sum.name().lexeme(), "$zeron$eq", signature, null, true,
+                Expr.EvidenceHandleKind.INTERFACE_STATIC, prerequisites);
+    }
+
+    private static boolean hasStructuralSumEquality(
+            final ResolutionContext context, final TypeDescriptor contractType,
+            final TypeDescriptor actualType, final com.maruseron.zeron.scan.Token where,
+            final Set<String> resolving) {
+        if (!isEqContract(contractType) || !eqTargetMatches(contractType, actualType)
+                || context.sums.get(nominalName(actualType)) == null) return false;
+        final var sum = context.sums.get(nominalName(actualType));
+        final var actualArguments = typeArguments(actualType);
+        if (actualArguments.size() != sum.typeParameters().size()) return false;
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int index = 0; index < actualArguments.size(); index++) {
+            substitutions.put(sum.typeParameters().get(index), actualArguments.get(index));
+        }
+        for (final var sumCase : sum.cases()) {
+            for (final var payload : sumCase.payloads()) {
+                final var payloadType = TypeSubstitution.substitute(payload.type(), substitutions);
+                if (isRecursiveSumPayload(payloadType, actualType)) continue;
+                if (!hasEvidence(context, eqType(context, payloadType), payloadType, where, resolving)) return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean sameAppliedType(final TypeDescriptor left, final TypeDescriptor right) {
+        return matchPattern(left, right, List.of(), new LinkedHashMap<>());
+    }
+
+    private static boolean isRecursiveSumPayload(final TypeDescriptor payloadType,
+                                                final TypeDescriptor sumType) {
+        final var normalizedPayload = payloadType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : payloadType;
+        return sameAppliedType(normalizedPayload, sumType);
+    }
+
+    private static TypeDescriptor eqType(final ResolutionContext context, final TypeDescriptor target) {
+        final var contract = context.contracts.get("zeron.lang.Eq");
+        if (contract == null) throw new IllegalStateException("Eq<T> contract is unavailable.");
+        return TypeDescriptor.genericOf(TypeDescriptor.ofName(contract.name().lexeme()), target);
+    }
+
+    private static Stmt.ContractMethod eqMethod(final ResolutionContext context) {
+        final var contract = context.contracts.get("zeron.lang.Eq");
+        if (contract == null) throw new IllegalStateException("Eq<T> contract is unavailable.");
+        return contract.methods().stream().filter(method -> method.name().lexeme().equals("eq"))
+                .findFirst().orElseThrow(() -> new IllegalStateException("Eq.eq method is unavailable."));
+    }
+
+    private static boolean isEqContract(final TypeDescriptor contractType) {
+        return nominalName(contractType).equals("zeron.lang.Eq") && typeArguments(contractType).size() == 1;
+    }
+
+    private static boolean eqTargetMatches(final TypeDescriptor contractType, final TypeDescriptor actualType) {
+        final var target = typeArguments(contractType).getFirst();
+        return sameAppliedType(target, actualType);
+    }
+
     static Expr.EvidenceArgument select(final ResolutionContext context,
                                         final TypeParameterDescriptor targetParameter,
                                         final int targetBoundIndex,
@@ -596,12 +843,10 @@ final class TypeClassEvidence {
                     Map<TypeParameterDescriptor, TypeDescriptor>>>();
             for (final var entry : context.typeClassWitnesses) {
                 if (!isActive(context, entry)) continue;
-                if (!nominalName(entry.declaration().contractType()).equals(nominalName(requiredBound))) continue;
                 final var witnessSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
                 if (matchPattern(entry.declaration().targetType(), concrete,
                         entry.declaration().typeParameters(), witnessSubstitutions)
-                        && matchPattern(entry.declaration().contractType(), requiredBound,
-                                entry.declaration().typeParameters(), witnessSubstitutions)
+                        && witnessEntails(context, entry.declaration(), witnessSubstitutions, requiredBound)
                         && prerequisitesAvailable(context, entry.declaration(), witnessSubstitutions,
                                 where, new HashSet<>())) {
                     explicitWitnesses.add(Map.entry(entry, witnessSubstitutions));
@@ -666,8 +911,8 @@ final class TypeClassEvidence {
             final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
             if (!matchPattern(entry.declaration().targetType(), actual,
                     entry.declaration().typeParameters(), substitutions)) continue;
-            if (requiredContractType != null && !matchPattern(entry.declaration().contractType(),
-                    requiredContractType, entry.declaration().typeParameters(), substitutions)) continue;
+            if (requiredContractType != null && !witnessEntails(
+                    context, entry.declaration(), substitutions, requiredContractType)) continue;
             if (!prerequisitesAvailable(context, entry.declaration(), substitutions,
                 where, new HashSet<>())) continue;
             for (final var method : entry.declaration().methods()) {

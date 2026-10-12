@@ -3,6 +3,7 @@ package com.maruseron.zeron.compile;
 import com.maruseron.zeron.UnitLiteral;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.analize.Bind;
+import com.maruseron.zeron.analize.ContractComposition;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.ast.NamespaceMembers;
@@ -29,6 +30,7 @@ final class BytecodeEmitter {
         Files.createDirectories(context.outputDirectory);
         RuntimeSupportEmitter.emitUnitClass(context.outputDirectory);
         RuntimeSupportEmitter.emitRaisedEffectClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitEqualitySupportClass(context.outputDirectory);
         final var signatureDeclarations = context.compilationUnits.stream()
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
                 .map(NamespaceMembers.Member::declaration).toList();
@@ -101,7 +103,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v20.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v22.bin")));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -491,7 +493,17 @@ final class BytecodeEmitter {
             }
             case Expr.CoalesceAssignment assignment -> ExpressionFlowEmitter.emitCoalesceAssignment(context, composer, assignment);
             case Expr.Binary binary -> {
-                if (binary.getType() instanceof BooleanDescriptor) {
+                if (binary.synthesizedEqualityEvidence() != null) {
+                    emitEqualityEvidenceCall(context, composer, binary);
+                    if (binary.operator.type() == TokenType.BANG_EQUAL) {
+                        composer.iconst_1();
+                        composer.ixor();
+                    }
+                    context.lastEmittedType = TypeDescriptor.ofBoolean();
+                } else if (binary.comparisonCall() != null) {
+                    emitMemberCall(context, composer, binary.comparisonCall());
+                    ExpressionFlowEmitter.emitOrderingComparison(context, composer, binary.operator.type());
+                } else if (binary.getType() instanceof BooleanDescriptor) {
                     ExpressionFlowEmitter.emitComparison(context, composer, binary);
                 } else switch (TypeDescriptor.toJavaClassDesc(binary.getType()).descriptorString()) {
                     case "I" -> {
@@ -800,12 +812,15 @@ final class BytecodeEmitter {
                             ? reference.baseType().name() : bound.name();
                 final var contract = context.resolution.contracts().get(contractName);
                 if (contract == null) continue;
-                for (int constructorIndex = 0; constructorIndex < contract.namedConstructors().size();
-                     constructorIndex++) {
-                    slots.add(Expr.evidenceToken(parameter, boundIndex, constructorIndex));
+                final var contractUse = ContractComposition.fromType(bound);
+                if (contractUse == null) continue;
+                for (final var constructor : ContractComposition.constructors(
+                        context.resolution.contracts(), contractUse)) {
+                    slots.add(Expr.evidenceToken(parameter, boundIndex, constructor.index()));
                 }
-                for (int methodIndex = 0; methodIndex < contract.methods().size(); methodIndex++) {
-                    slots.add(Expr.methodEvidenceToken(parameter, boundIndex, methodIndex));
+                for (final var method : ContractComposition.methods(
+                        context.resolution.contracts(), contractUse)) {
+                    slots.add(Expr.methodEvidenceToken(parameter, boundIndex, method.index()));
                 }
             }
         }
@@ -841,23 +856,40 @@ final class BytecodeEmitter {
                         : context.metadata.functionOwner(argument.ownerName());
                 final var kind = switch (argument.handleKind()) {
                     case STATIC -> DirectMethodHandleDesc.Kind.STATIC;
+                    case INTERFACE_STATIC -> DirectMethodHandleDesc.Kind.INTERFACE_STATIC;
                     case VIRTUAL -> DirectMethodHandleDesc.Kind.VIRTUAL;
                     case INTERFACE -> DirectMethodHandleDesc.Kind.INTERFACE_VIRTUAL;
                 };
                 final var erasedSignature = (FunctionDescriptor) TypeSubstitution.erase(argument.signature());
-                final var evidenceCount = witnessSlots(context, argument.signature()).size();
-                final var methodType = argument.handleKind() == Expr.EvidenceHandleKind.STATIC
-                        ? toJavaMethodDescriptor(erasedSignature)
-                        : toJavaMethodDescriptor(TypeDescriptor.functionWithEffectsOf(
-                                erasedSignature.name(), erasedSignature.returnType(),
-                                erasedSignature.parameters().subList(1, erasedSignature.parameters().size()),
-                                List.of(), erasedSignature.raisedEffects()));
+                final var evidenceCount = Math.max(witnessSlots(context, argument.signature()).size(),
+                        argument.prerequisiteEvidence().size());
+                final var methodType = switch (argument.handleKind()) {
+                    case STATIC -> toJavaMethodDescriptor(erasedSignature);
+                    case INTERFACE_STATIC -> toJavaMethodDescriptor(erasedSignature);
+                    case VIRTUAL -> toJavaMethodDescriptor(TypeDescriptor.functionWithEffectsOf(
+                            erasedSignature.name(), erasedSignature.returnType(),
+                            erasedSignature.parameters().subList(1, erasedSignature.parameters().size()),
+                            List.of(), erasedSignature.raisedEffects()));
+                    case INTERFACE -> {
+                        final var contract = context.resolution.contracts().get(argument.ownerName());
+                        final var method = contract == null ? null : contract.methods().stream()
+                                .filter(candidate -> candidate.name().lexeme()
+                                        .equals(argument.constructorName()))
+                                .findFirst().orElse(null);
+                        if (method == null) {
+                            throw new IllegalStateException("Resolved contract evidence method was not found.");
+                        }
+                        yield toJavaMethodDescriptor((FunctionDescriptor) TypeSubstitution.erase(
+                                method.typeDescriptor()));
+                    }
+                };
                 final var handleType = withEvidenceParameters(methodType, evidenceCount);
                 composer.ldc(MethodHandleDesc.of(kind, ClassDesc.of(ownerName),
                         argument.constructorName(), handleType.descriptorString()));
                 if (!argument.prerequisiteEvidence().isEmpty()) {
                     final var boundArgumentPosition = erasedSignature.parameters().size()
-                            - (argument.handleKind() == Expr.EvidenceHandleKind.STATIC ? 0 : 1);
+                            - (argument.handleKind() == Expr.EvidenceHandleKind.STATIC
+                                    || argument.handleKind() == Expr.EvidenceHandleKind.INTERFACE_STATIC ? 0 : 1);
                     composer.loadConstant(Integer.valueOf(boundArgumentPosition));
                     composer.loadConstant(Integer.valueOf(argument.prerequisiteEvidence().size()));
                     composer.anewarray(ClassDesc.of("java.lang.Object"));
@@ -880,6 +912,22 @@ final class BytecodeEmitter {
                         toJavaMethodDescriptor(targetType).descriptorString()));
             }
         }
+
+    }
+
+    private static void emitEqualityEvidenceCall(final CompilationContext context,
+                                                 final CodeBuilder composer,
+                                                 final Expr.Binary binary) {
+        final var evidence = binary.synthesizedEqualityEvidence();
+        emitEvidenceArguments(context, composer, List.of(evidence));
+        emitExpr(context, composer, binary.left);
+        emitExpr(context, composer, binary.right);
+        final var signature = (FunctionDescriptor) TypeSubstitution.erase(evidence.signature());
+        final var parameterTypes = signature.parameters().stream()
+                .map(TypeDescriptor::toJavaClassDesc).toList();
+        composer.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
+                MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(signature.returnType()), parameterTypes));
+        context.lastEmittedType = signature.returnType();
     }
 
     private static void emitStringConcatenationRight(final CompilationContext context,
@@ -1250,13 +1298,15 @@ final class BytecodeEmitter {
                         sourceType.parameters().get(i + 1));
             }
         }
+        emitEvidenceArguments(context, composer, call.evidenceArguments());
         final var invokedType = call.variadicElementType() != null
                 ? call.arguments.size() < call.variadicFixedArity()
                     ? prefixFunctionType(runtimeType, call.arguments.size() + 1)
                     : runtimeType
                 : prefixFunctionType(runtimeType, call.arguments.size() + 1);
         composer.invokestatic(ClassDesc.of(owner), extension.name().lexeme(),
-                toJavaMethodDescriptor(invokedType));
+                withEvidenceParameters(toJavaMethodDescriptor(invokedType),
+                        call.evidenceArguments().size()));
         emitConversion(context, composer, runtimeType.returnType(), call.getType());
         context.lastEmittedType = call.getType();
     }

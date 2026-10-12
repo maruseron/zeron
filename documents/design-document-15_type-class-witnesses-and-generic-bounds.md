@@ -181,8 +181,11 @@ operator use.
 For nullable `T?`, stringification is built-in nullable lifting: null renders as `"null"` and a
 non-null value uses `Display<T>`. No `Display<T?>` witness is needed. Compiler-provided built-in
 `Display` evidence covers `Int`, `Float`, `Boolean`, `String`, and `Unit`. `Array<T>` and `Any` are
-deferred. The existing `==` and `!=` behavior is unchanged; any future `Eq<T>` integration with
-operators is a separate design.
+deferred. `Eq<T>` now provides evidence-driven `==` and `!=` for built-in scalar types and through
+explicit bounds, nominal conformance, and witnesses. Nullable lifting and structural equality for
+sums, including direct self-recursion, are implemented; mutually recursive sum declarations remain
+unsupported. See
+[design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
 
 ## JVM representation and library metadata
 
@@ -219,7 +222,8 @@ Agreed direction:
    packages, but explicit symbol imports do not.
 9. `Display.toString` supplies `String + T`; nullable lifting and compiler-provided built-ins apply
    as described above. Generic bounds are explicit.
-10. `==` and `!=` are unchanged; future `Eq<T>` operator behavior is separate work.
+10. `Eq<T>` evidence drives `==` and `!=`; nullable values lift evidence, and sums synthesize
+    structural evidence from their payload requirements.
 
 Implementation must include generic and default witness methods, recursive evidence, import-scoped
 ambiguity, built-in display, API-index round trips, separately compiled consumers, erased JVM

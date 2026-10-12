@@ -60,7 +60,6 @@ public final class Scanner {
             entry("namespace",    NAMESPACE),
             entry("or",          OR),
             entry("package",     PACKAGE),
-            entry("permits",     PERMITS),
             entry("pattern",     PATTERN),
             entry("property",    PROPERTY),
             entry("public",      PUBLIC),
@@ -78,8 +77,7 @@ public final class Scanner {
             entry("typeof",      TYPEOF),
             entry("until",       UNTIL),
             entry("witness",     WITNESS),
-            entry("while",       WHILE),
-            entry("when",        WHEN));
+            entry("while",       WHILE));
 
     Scanner(final String source, final String sourcePath) {
         this.source = source;

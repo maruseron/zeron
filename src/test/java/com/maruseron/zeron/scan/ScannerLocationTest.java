@@ -41,6 +41,20 @@ public final class ScannerLocationTest {
     }
 
     @Test
+    public void scansContextualKeywordsAsIdentifiers() {
+        final var tokens = Scanner.from("permits requires when with matches map flatMap filter collect").scanTokens();
+
+        assertEquals(TokenType.IDENTIFIER, tokens.get(0).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(1).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(2).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(3).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(4).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(5).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(6).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(7).type());
+    }
+
+    @Test
     public void collectsCodedScannerDiagnosticsWithoutReportingEagerly() {
         final var previousOutput = System.out;
         final var output = new ByteArrayOutputStream();

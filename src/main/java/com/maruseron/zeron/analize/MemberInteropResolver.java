@@ -14,7 +14,7 @@ import java.util.*;
 import static com.maruseron.zeron.analize.Resolver.*;
 
 final class MemberInteropResolver {
-    record PropertyInfo(TypeDescriptor type, boolean isPublic, boolean isMutating) {}
+    record PropertyInfo(String name, TypeDescriptor type, boolean isPublic, boolean isMutating) {}
     private record SafeNavigationFlows(FlowState nonNull, FlowState nullPath) {}
     private record JavaCandidate(JavaClassPath.JavaMethod method, List<TypeDescriptor> parameterTypes,
                                  TypeDescriptor returnType, int cost, boolean varArgs) {}
@@ -136,6 +136,35 @@ final class MemberInteropResolver {
             property.setType(resultType);
             finishSafeNavigation(context, safeFlows);
             return resultType;
+        }
+        if (baseType instanceof TypeParameterDescriptor parameter) {
+            final var properties = parameter.bounds().stream()
+                    .map(ContractComposition::fromType)
+                    .filter(Objects::nonNull)
+                    .flatMap(use -> ContractComposition.closure(context, use).stream())
+                    .flatMap(applied -> applied.declaration().properties().stream()
+                            .filter(required -> required.name().lexeme().equals(property.name.lexeme()))
+                            .map(required -> Map.entry(applied, required)))
+                    .toList();
+            if (!properties.isEmpty()) {
+                final var selected = properties.getFirst();
+                final var propertyType = TypeSubstitution.substitute(
+                        selected.getValue().type(), selected.getKey().substitutions());
+                if (properties.stream().skip(1).anyMatch(candidate -> !TypeClassEvidence.sameAppliedType(
+                        propertyType, TypeSubstitution.substitute(
+                                candidate.getValue().type(), candidate.getKey().substitutions())))) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                            property.name, "Property is ambiguous across the type parameter's contract bounds."));
+                }
+                property.setResolvedOwnerName(selected.getKey().declaration().name().lexeme());
+                property.setResolvedAsProperty(true);
+                final var resultType = property.safeNavigation()
+                        ? propertyType.toNullable()
+                        : propertyType;
+                property.setType(resultType);
+                finishSafeNavigation(context, safeFlows);
+                return resultType;
+            }
         }
         final var ownerName = className(context, baseType);
         final var owner = context.classes.get(ownerName);
@@ -372,12 +401,22 @@ final class MemberInteropResolver {
                 .filter(method -> method.isPublic() || Objects.equals(context.frame.currentClassName, ownerName))
                 .filter(method -> !method.isMutating() || receiverType instanceof ReferenceDescriptor).toList();
         final var contract = context.contracts.get(ownerName);
-        final var contractMethods = contract == null ? List.<Stmt.ContractMethod>of() : contract.methods().stream()
-                .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
-                .filter(method -> !method.isMutating() || receiverType instanceof ReferenceDescriptor).toList();
+        final var appliedContract = contract == null ? null
+                : contractCompositionForType(context, ownerName, receiverType).stream()
+                        .filter(applied -> applied.declaration().methods().stream().anyMatch(method ->
+                                method.name().lexeme().equals(call.name.lexeme())
+                                        && (!method.isMutating()
+                                            || receiverType instanceof ReferenceDescriptor)))
+                        .findFirst().orElse(null);
+        final var contractMethods = appliedContract == null ? List.<Stmt.ContractMethod>of()
+                : appliedContract.declaration().methods().stream()
+                        .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
+                        .filter(method -> !method.isMutating()
+                                || receiverType instanceof ReferenceDescriptor).toList();
         final var classMethod = classMethods.isEmpty() ? null : classMethods.getFirst();
         final var contractMethod = classMethod != null || contractMethods.isEmpty()
                 ? null : contractMethods.getFirst();
+        final var contractMethodOwner = appliedContract == null ? null : appliedContract.declaration();
         call.setResolvedSourceMethod(classMethod);
         call.setResolvedContractMethod(contractMethod);
         if (owner != null && classMethod != null
@@ -504,9 +543,11 @@ final class MemberInteropResolver {
                 : contractMethod.typeDescriptor();
         final var typeParameters = classMethod != null
             ? owner.typeParameters()
-            : contract.typeParameters();
-        final var instantiatedDescriptor = (FunctionDescriptor) TypeSubstitution.substitute(
-            descriptor, TypeResolver.substitutionsFor(context, typeParameters, receiverType));
+            : contractMethodOwner.typeParameters();
+        final var instantiatedDescriptor = (FunctionDescriptor) TypeSubstitution.substitute(descriptor,
+                classMethod != null
+                        ? TypeResolver.substitutionsFor(context, typeParameters, receiverType)
+                        : appliedContract.substitutions());
         final var isMutating = classMethod != null
                 ? classMethod.isMutating()
                 : contractMethod.isMutating();
@@ -717,10 +758,15 @@ final class MemberInteropResolver {
                                 + "'; provide an explicit type argument."));
             }
             for (final var bound : parameter.bounds()) {
-                ensureAssignable(context, TypeSubstitution.substitute(bound, substitutions),
-                        substitutions.get(parameter), call.name);
+                final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
+                final var actualType = substitutions.get(parameter);
+                if (!TypeClassEvidence.hasEvidence(context, requiredBound, actualType, call.name)) {
+                    ensureAssignable(context, requiredBound, actualType, call.name);
+                }
             }
         }
+        call.setEvidenceArguments(TypeClassEvidence.selectArguments(
+                context, signature.typeParameters(), substitutions, call.name));
         final var instantiatedDescriptor = (FunctionDescriptor) TypeSubstitution.substitute(signature, substitutions);
         call.setResolvedExtensionMethod(method);
         call.setResolvedDescriptor(instantiatedDescriptor);
@@ -1177,7 +1223,10 @@ final class MemberInteropResolver {
             }
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
-                ensureAssignable(context, requiredBound, substitutions.get(parameter), call.name);
+                final var actualType = substitutions.get(parameter);
+                if (!TypeClassEvidence.hasEvidence(context, requiredBound, actualType, call.name)) {
+                    ensureAssignable(context, requiredBound, actualType, call.name);
+                }
             }
         }
 
@@ -1379,57 +1428,50 @@ final class MemberInteropResolver {
                     "Member access on an unconstrained type parameter is not allowed."));
         }
         TypeDescriptor bound = null;
-        Stmt.ContractDecl contract = null;
         Stmt.ContractMethod method = null;
         Stmt.NamedContractConstructor factory = null;
+        Map<TypeParameterDescriptor, TypeDescriptor> selectedContractSubstitutions = Map.of();
         int selectedBoundIndex = -1;
         int selectedFactoryIndex = -1;
+        int selectedMethodIndex = -1;
         var hasMutatingMethod = false;
         for (int boundIndex = 0; boundIndex < parameter.bounds().size(); boundIndex++) {
             final var candidateBound = parameter.bounds().get(boundIndex);
-            final var candidateName = className(context, candidateBound);
-            final var candidateContract = context.contracts.get(candidateName);
-            final var candidateFactory = candidateContract == null ? null
-                    : candidateContract.namedConstructors().stream()
-                    .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
-                    .findFirst().orElse(null);
+            final var candidateUse = ContractComposition.fromType(candidateBound);
+            final var factorySlot = candidateUse == null ? null
+                    : ContractComposition.constructors(context, candidateUse).stream()
+                            .filter(slot -> slot.constructor().name().lexeme().equals(call.name.lexeme()))
+                            .findFirst().orElse(null);
+            final var candidateFactory = factorySlot == null ? null : factorySlot.constructor();
             if (candidateFactory != null) {
                 bound = candidateBound;
-                contract = candidateContract;
                 factory = candidateFactory;
+                selectedContractSubstitutions = factorySlot.applied().substitutions();
                 selectedBoundIndex = boundIndex;
-                selectedFactoryIndex = candidateContract.namedConstructors().indexOf(candidateFactory);
+                selectedFactoryIndex = factorySlot.index();
                 break;
             }
-            final var candidateMethod = candidateContract == null ? null : candidateContract.methods().stream()
-                    .filter(candidate -> candidate.name().lexeme().equals(call.name.lexeme()))
-                    .findFirst().orElse(null);
+            final var methodSlot = candidateUse == null ? null
+                    : ContractComposition.methods(context, candidateUse).stream()
+                            .filter(slot -> slot.method().name().lexeme().equals(call.name.lexeme()))
+                            .findFirst().orElse(null);
+            final var candidateMethod = methodSlot == null ? null : methodSlot.method();
             if (candidateMethod != null) {
                 if (candidateMethod.isMutating()) {
                     hasMutatingMethod = true;
                     continue;
                 }
                 bound = candidateBound;
-                contract = candidateContract;
                 method = candidateMethod;
+                selectedContractSubstitutions = methodSlot.applied().substitutions();
                 selectedBoundIndex = boundIndex;
+                selectedMethodIndex = methodSlot.index();
                 break;
             }
         }
         if (factory != null) {
-            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-            final var boundBase = bound instanceof ReferenceDescriptor reference ? reference.baseType() : bound;
-            if (boundBase instanceof GenericDescriptor genericBound) {
-                if (genericBound.typeParameters().size() != contract.typeParameters().size()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                            call.name, "Invalid generic contract bound '" + bound + "'."));
-                }
-                for (int index = 0; index < contract.typeParameters().size(); index++) {
-                    substitutions.put(contract.typeParameters().get(index), genericBound.typeParameters().get(index));
-                }
-            }
             final var declaredType = (FunctionDescriptor) TypeSubstitution.substitute(
-                    factory.typeDescriptor(), substitutions);
+                    factory.typeDescriptor(), selectedContractSubstitutions);
             final var factoryType = TypeDescriptor.functionOf(factory.name().lexeme(),
                     new ReferenceDescriptor(parameter), declaredType.parameters().toArray(TypeDescriptor[]::new));
             if (call.arguments.size() < factoryType.arity()
@@ -1462,28 +1504,15 @@ final class MemberInteropResolver {
         }
         final var ownerName = className(context, bound);
 
-        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        final var boundBase = bound instanceof ReferenceDescriptor reference ? reference.baseType() : bound;
-        if (boundBase instanceof GenericDescriptor genericBound) {
-            if (genericBound.typeParameters().size() != contract.typeParameters().size()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                        call.name,
-                        "Invalid generic contract bound '" + bound + "'."));
-            }
-            for (int index = 0; index < contract.typeParameters().size(); index++) {
-                substitutions.put(contract.typeParameters().get(index), genericBound.typeParameters().get(index));
-            }
-        }
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
-                method.typeDescriptor(), substitutions);
-        final var methodIndex = contract.methods().indexOf(method);
+                method.typeDescriptor(), selectedContractSubstitutions);
         final var evidenceMethodParameters = new ArrayList<TypeDescriptor>();
         evidenceMethodParameters.add(parameter);
         evidenceMethodParameters.addAll(descriptor.parameters());
         final var evidenceMethodType = TypeDescriptor.functionWithEffectsOf(
                 method.name().lexeme(), descriptor.returnType(), evidenceMethodParameters,
                 descriptor.typeParameters(), descriptor.raisedEffects());
-        call.setWitnessMethodEvidence(Expr.methodEvidenceToken(parameter, selectedBoundIndex, methodIndex),
+        call.setWitnessMethodEvidence(Expr.methodEvidenceToken(parameter, selectedBoundIndex, selectedMethodIndex),
                 evidenceMethodType);
         final var variadic = method.variadic();
         final var fixedArity = Stmt.fixedArity(method.parameters(), variadic);
@@ -1748,27 +1777,58 @@ final class MemberInteropResolver {
             return owner.properties().stream()
                     .filter(property -> property.name().lexeme().equals(name.lexeme()))
                     .findFirst()
-                    .map(property -> new PropertyInfo(property.type(), property.isPublic(),
+                    .map(property -> new PropertyInfo(property.name().lexeme(), property.type(), property.isPublic(),
                             property.isMutating()))
                     .orElse(null);
         }
         final var contract = context.contracts.get(ownerName);
         if (contract == null) return null;
-        return contract.properties().stream()
-                .filter(property -> property.name().lexeme().equals(name.lexeme()))
-                .findFirst()
-                .map(property -> new PropertyInfo(property.type(), true, property.isMutating()))
-                .orElse(null);
+        for (final var applied : ContractComposition.closure(context,
+                new Stmt.ContractUse(new Token(TokenType.IDENTIFIER, ownerName, null, name.span()),
+                        nominalArguments(context, ownerName, name)))) {
+            for (final var property : applied.declaration().properties()) {
+                if (property.name().lexeme().equals(name.lexeme())) {
+                    return new PropertyInfo(property.name().lexeme(),
+                            TypeSubstitution.substitute(property.type(), applied.substitutions()),
+                            true, property.isMutating());
+                }
+            }
+        }
+        return null;
     }
 
     static TypeDescriptor resolvedPropertyType(final ResolutionContext context, final String ownerName,
                                                 final PropertyInfo property,
                                                 final TypeDescriptor receiverType) {
         final var owner = context.classes.get(ownerName);
-        final var parameters = owner != null
-                ? owner.typeParameters()
-                : context.contracts.get(ownerName).typeParameters();
-        return TypeSubstitution.substitute(property.type(), TypeResolver.substitutionsFor(context, parameters, receiverType));
+        if (owner != null) {
+            return TypeSubstitution.substitute(property.type(),
+                    TypeResolver.substitutionsFor(context, owner.typeParameters(), receiverType));
+        }
+        final var applied = contractCompositionForType(context, ownerName, receiverType).stream()
+                .filter(candidate -> candidate.declaration().properties().stream()
+                        .anyMatch(required -> required.name().lexeme().equals(property.name())))
+                .findFirst().orElse(null);
+        return applied == null ? property.type()
+                : TypeSubstitution.substitute(property.type(), applied.substitutions());
+    }
+
+    private static List<TypeDescriptor> nominalArguments(final ResolutionContext context,
+                                                         final String ownerName, final Token where) {
+        final var owner = context.contracts.get(ownerName);
+        if (owner == null || owner.typeParameters().isEmpty()) return List.of();
+        return owner.typeParameters().stream().map(parameter -> (TypeDescriptor) parameter).toList();
+    }
+
+    private static List<ContractComposition.Applied> contractCompositionForType(
+            final ResolutionContext context, final String ownerName, final TypeDescriptor receiverType) {
+        final var baseType = receiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : receiverType;
+        final var arguments = baseType instanceof GenericDescriptor generic
+                ? generic.typeParameters() : List.<TypeDescriptor>of();
+        final var token = new Token(TokenType.IDENTIFIER, ownerName, null,
+                com.maruseron.zeron.diagnostic.SourceSpan.line(null, 1));
+        return ContractComposition.closure(context, new Stmt.ContractUse(token, arguments));
     }
 
     static void ensureFieldAccessible(final ResolutionContext context, final Token where, final String owner) {

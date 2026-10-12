@@ -1,8 +1,11 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.compile.CompilationService;
+import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
@@ -11,10 +14,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
+import java.util.Comparator;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public final class SumTypeTest {
     @Test
@@ -50,6 +56,127 @@ public final class SumTypeTest {
             Files.deleteIfExists(Path.of("dist", someName + ".class"));
             Files.deleteIfExists(Path.of("dist", emptyName + ".class"));
         }
+    }
+
+    @Test
+    public void comparesGenericRecursiveSumsStructurally() throws Exception {
+        final var programName = "SumEquality" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                import zeron.lang.Eq;
+                type Tree<T> = Branch(value: T, next: Tree<T>?) | Empty;
+                fn same<T: Eq<T>>(left: Tree<T>, right: Tree<T>): Boolean = left == right;
+                fn empty(): Tree<Int> = Tree.Empty();
+                fn branch(value: Int, next: Tree<Int>?): Tree<Int> = Tree.Branch(value, next);
+                fn equalTrees(): Boolean = same(branch(1, empty()), branch(1, empty()));
+                fn differentValues(): Boolean = same(branch(1, null), branch(2, null));
+                fn differentCases(): Boolean = same(empty(), branch(1, null));
+                fn equalNullTails(): Boolean = same(branch(1, null), branch(1, null));
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertTrue((Boolean) program.getMethod("equalTrees").invoke(null));
+                assertFalse((Boolean) program.getMethod("differentValues").invoke(null));
+                assertFalse((Boolean) program.getMethod("differentCases").invoke(null));
+                assertTrue((Boolean) program.getMethod("equalNullTails").invoke(null));
+            }
+
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Tree.class"));
+            Files.deleteIfExists(Path.of("dist", "Tree$$sum$Branch.class"));
+            Files.deleteIfExists(Path.of("dist", "Tree$$sum$Empty.class"));
+        }
+    }
+
+    @Test
+    public void comparesDirectRecursiveSumPayloadsStructurally() throws Exception {
+        final var programName = "DirectRecursiveSumEquality" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                import zeron.lang.Eq;
+                type List<T> = Nil | Cons(head: T, tail: List<T>);
+                fn same<T: Eq<T>>(left: List<T>, right: List<T>): Boolean = left == right;
+                fn nil(): List<Int> = List.Nil();
+                fn cons(head: Int, tail: List<Int>): List<Int> = List.Cons(head, tail);
+                fn equalLists(): Boolean = same(cons(1, nil()), cons(1, nil()));
+                fn differentTails(): Boolean = same(cons(1, nil()), cons(1, cons(2, nil())));
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertTrue((Boolean) program.getMethod("equalLists").invoke(null));
+                assertFalse((Boolean) program.getMethod("differentTails").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "List.class"));
+            Files.deleteIfExists(Path.of("dist", "List$$sum$Cons.class"));
+            Files.deleteIfExists(Path.of("dist", "List$$sum$Nil.class"));
+        }
+    }
+
+    @Test
+    public void retainsSumEqualityAcrossCompiledLibraryBoundaries() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "sumlib" + suffix;
+        final var appPackage = "sumapp" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-sum-library-");
+        final var appOutput = Files.createTempDirectory(Path.of("target"), "zeron-sum-client-");
+        final var libraryUnit = parse("Library.zn", """
+                package %s;
+                public type Maybe<T> = Value(value: T) | Empty;
+                """.formatted(libraryPackage));
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
+                    libraryPackage + ".Library", libraryPackage, List.of(), true, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+
+            final var appUnit = parse("Main.zn", """
+                    package %s;
+                    import %s.Maybe;
+                    import zeron.lang.Eq;
+                    fn same<T: Eq<T>>(left: Maybe<T>, right: Maybe<T>): Boolean = left == right;
+                    fn value(value: Int): Maybe<Int> = Maybe.Value(value);
+                    fn equal(): Boolean = same(value(7), value(7));
+                    """.formatted(appPackage, libraryPackage));
+            final var appCompiler = CompilationService.forCompilationUnits(List.of(appUnit),
+                    appPackage + ".Main", appPackage, List.of(index), true, List.of(), appOutput);
+            appCompiler.resolve();
+            appCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    appOutput.toUri().toURL(), libraryOutput.toUri().toURL()}, getClass().getClassLoader())) {
+                assertTrue((Boolean) loader.loadClass(appPackage + ".Main")
+                        .getMethod("equal").invoke(null));
+            }
+        } finally {
+            deleteTree(appOutput);
+            deleteTree(libraryOutput);
+        }
+    }
+
+    @Test
+    public void requiresPayloadEvidenceAndRejectsSumEqualityWitnesses() {
+        assertThrows(ResolutionError.class, () -> new CompilationService(parse("""
+                type Box<T> = Boxed(value: T);
+                fn invalid<T>(left: Box<T>, right: Box<T>): Boolean = left == right;
+                """), "MissingSumEq").resolve());
+        assertThrows(ResolutionError.class, () -> new CompilationService(parse("""
+                import zeron.lang.Eq;
+                type Marker = Red | Blue;
+                witness Eq<Marker> for Marker {
+                    fn eq(other: Marker): Boolean = true;
+                }
+                """), "OverriddenSumEq").resolve());
     }
 
     @Test
@@ -286,5 +413,18 @@ public final class SumTypeTest {
 
     private static List<Stmt> parse(final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
+    }
+
+    private static CompilationUnit parse(final String sourcePath, final String source) {
+        return Parser.of(Scanner.from(source, sourcePath).scanTokens()).parseCompilationUnit(sourcePath);
+    }
+
+    private static void deleteTree(final Path path) throws Exception {
+        if (!Files.exists(path)) return;
+        try (var paths = Files.walk(path)) {
+            for (final var entry : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(entry);
+            }
+        }
     }
 }

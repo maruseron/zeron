@@ -1,0 +1,7 @@
+package zeron.lang;
+
+public type Ordering = LT | EQ | GT;
+
+public contract Comparable<T> {
+    compareTo(other: T): Ordering;
+}

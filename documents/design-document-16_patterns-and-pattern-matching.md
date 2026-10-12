@@ -234,10 +234,11 @@ would change behavior. Evaluation order is left-to-right and source-defined.
 
 ## Libraries and compatibility
 
-Public pattern declarations are part of a class's source API. Library-index schema v19 preserves
-their names, generic output signatures, and total/refutable status so consumers can type-check
-patterns without library source files. Compiled classes expose the generated helper ABI, while
-keeping helper names out of source-level name resolution.
+Public pattern declarations are part of a class's source API. They were added to library-index
+schema v19; the current schema is v22 and preserves their names, generic output signatures, and
+total/refutable status so consumers can type-check patterns without library source files. Compiled
+classes expose the generated helper ABI, while keeping helper names out of source-level name
+resolution.
 
 The implementation prefers a declared pattern when one exists. If there is no declared pattern
 with the requested name, the old single-public-property extraction form remains available for
@@ -252,7 +253,7 @@ matches.
 3. Completed: named-pattern resolution and helper emission for multiple outputs.
 4. Completed: refutable `when` patterns and null-result failure lowering.
 5. Completed: nested patterns, short-circuiting, OR bindings, and conservative coverage propagation.
-6. Completed: public-pattern metadata in library-index schema v19 and separately compiled consumers.
+6. Completed: public-pattern metadata (introduced in schema v19) and separately compiled consumers.
 7. Remaining: broaden negative tests for output assignment, visibility, mutability, and invalid OR
    bindings; decide when to migrate standard-library property patterns and remove the compatibility
    fallback.

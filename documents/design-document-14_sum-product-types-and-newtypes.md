@@ -51,8 +51,10 @@ covers both payload-bearing alternatives and enum-like sets of named constants. 
 The MVP declaration introduces a **nominal, closed type**, not a transparent alias or a structural
 union. A type's identity is its declared name and package, regardless of whether another sum has
 identical cases. A declaration must contain at least one uniquely named case. Cases cannot be
-extended, implemented, or subclassed by consumers. A sum has no user-declared methods, contract
-conformance, or additional members in the MVP.
+extended, implemented, or subclassed by consumers. A sum has no user-declared methods or additional
+members in the MVP. Declaration-site contract conformance remains unsupported; compiler-synthesized
+structural `Eq` support for sums is described in
+[design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
 
 ### Cases, payloads, construction, and visibility
 
@@ -150,6 +152,11 @@ for individual generated case classes, and no case-specific witnesses are synthe
 mappings remain unsupported for sum witnesses; they are class-side constructor mappings and sums
 have case factories instead.
 
+Structural `Eq<T>` evidence for sums is implemented when every non-recursive payload has applicable
+equality evidence. Direct self-recursive payloads are supported; mutually recursive sum declarations
+are not yet synthesized as a recursive evidence group. See
+[design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
+
 ## Product types
 
 A product combines all of its components into one value. A case payload such as
@@ -233,8 +240,9 @@ They must not be represented by an implicit alias or smuggled into this sum feat
 
 ## Suggested sequencing
 
-1. Implement the specified sum MVP with generated nominal case classes and singleton nullary cases.
-   Keep enum lowering, advanced patterns, product syntax, and newtypes deferred.
+1. Sum MVP implementation is complete, including generated nominal case classes and singleton
+   nullary cases. Keep standalone product syntax and newtypes deferred; consider mutual-recursion
+   evidence only as a separate, explicit extension.
 2. Evaluate product types separately against the capabilities of classes and named case payloads.
 3. Specify newtype construction invariants and source semantics before selecting erased/boxed lowering.
    Treat representation and ABI as part of the design, not as an invisible optimization.

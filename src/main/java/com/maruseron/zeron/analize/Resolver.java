@@ -144,7 +144,9 @@ public final class Resolver {
                 final var contractUses = declaration instanceof Stmt.ClassDecl classDeclaration
                         ? classDeclaration.contractUses()
                         : declaration instanceof Stmt.ContractDecl contractDeclaration
-                            ? contractDeclaration.permittedClasses()
+                            ? java.util.stream.Stream.concat(
+                                    contractDeclaration.requiredContracts().stream(),
+                                    contractDeclaration.permittedClasses().stream()).toList()
                             : List.<Stmt.ContractUse>of();
                 for (final var contractUse : contractUses) {
                     attempt(context, () -> contractUse.resolveName(TypeResolver.resolveTypeName(

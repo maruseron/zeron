@@ -24,6 +24,8 @@ final class DeclarationResolver {
     }
 
     static void resolveContract(final ResolutionContext context, final Stmt.ContractDecl contract) {
+        validateRequiredContracts(context, contract);
+        validateContractComposition(context, contract);
         validateSealedContract(context, contract);
         for (final var constructor : contract.namedConstructors()) {
             if (contract.namedConstructors().stream().anyMatch(existing -> existing != constructor
@@ -55,6 +57,124 @@ final class DeclarationResolver {
             }
             TypeResolver.validateType(context, property.type(), property.name());
         }
+    }
+
+    private static void validateRequiredContracts(final ResolutionContext context,
+                                                 final Stmt.ContractDecl contract) {
+        for (final var required : contract.requiredContracts()) {
+            final var requiredName = required.name();
+            final var requiredContract = context.contracts.get(requiredName.lexeme());
+            if (requiredContract == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND,
+                        requiredName, "Unknown required contract."));
+            }
+            ensureTypeAccessible(context, requiredName.lexeme(), requiredName, requiredContract.isPublic());
+            if (required.typeArguments().size() != requiredContract.typeParameters().size()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                        requiredName, "Expected " + requiredContract.typeParameters().size()
+                                + " required contract type arguments, found "
+                                + required.typeArguments().size() + "."));
+            }
+            required.typeArguments().forEach(type -> TypeResolver.validateType(context, type, requiredName));
+            if (canReachContract(context, requiredName.lexeme(), contract.name().lexeme(), new HashSet<>())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        requiredName, "Contract requirements cannot contain a cycle."));
+            }
+        }
+    }
+
+    private static void validateContractComposition(final ResolutionContext context,
+                                                    final Stmt.ContractDecl contract) {
+            final var rootArguments = contract.typeParameters().stream()
+                    .map(parameter -> (TypeDescriptor) parameter).toList();
+            final var rootUse = new Stmt.ContractUse(contract.name(), rootArguments);
+            final var closure = ContractComposition.closure(context, rootUse);
+            final var methods = new LinkedHashMap<String, FunctionDescriptor>();
+            final var methodMutability = new HashMap<String, Boolean>();
+            final var methodVariadic = new HashMap<String, Boolean>();
+            final var properties = new LinkedHashMap<String, TypeDescriptor>();
+            final var constructors = new LinkedHashMap<String, FunctionDescriptor>();
+            final var constructorVariadic = new HashMap<String, Boolean>();
+
+            for (final var applied : closure) {
+                for (final var method : applied.declaration().methods()) {
+                    final var signature = (FunctionDescriptor) TypeSubstitution.substitute(
+                            method.typeDescriptor(), applied.substitutions());
+                    final var name = method.name().lexeme();
+                    final var previous = methods.putIfAbsent(name, signature);
+                    final var previousMutating = methodMutability.putIfAbsent(name, method.isMutating());
+                    final var previousVariadic = methodVariadic.putIfAbsent(name, method.variadic());
+                    if (previous != null && (!compatibleMethodSignatures(context, previous, method.variadic(),
+                            signature, method.variadic())
+                            || previousVariadic != method.variadic()
+                            || previousMutating != method.isMutating())) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                                method.name(), "Incompatible inherited contract method '" + name + "'." ));
+                    }
+                }
+                for (final var property : applied.declaration().properties()) {
+                    final var type = TypeSubstitution.substitute(property.type(), applied.substitutions());
+                    final var previous = properties.putIfAbsent(property.name().lexeme(), type);
+                    if (previous != null && !previous.equals(type)) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                                property.name(), "Incompatible inherited contract property '"
+                                        + property.name().lexeme() + "'." ));
+                    }
+                }
+                for (final var constructor : applied.declaration().namedConstructors()) {
+                    final var signature = (FunctionDescriptor) TypeSubstitution.substitute(
+                            constructor.typeDescriptor(), applied.substitutions());
+                    final var name = constructor.name().lexeme();
+                    final var previous = constructors.putIfAbsent(name, signature);
+                    final var previousVariadic = constructorVariadic.putIfAbsent(name, constructor.variadic());
+                    if (previous != null && (previousVariadic != constructor.variadic()
+                            || !compatibleMethodSignatures(context, previous, constructor.variadic(),
+                                    signature, constructor.variadic()))) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                                constructor.name(), "Incompatible inherited contract constructor '" + name + "'." ));
+                    }
+                }
+            }
+
+            final var inheritedMethods = ContractComposition.closure(context, rootUse).stream()
+                    .skip(1)
+                    .flatMap(applied -> applied.declaration().methods().stream().map(method ->
+                            Map.entry(method, applied.substitutions())))
+                    .toList();
+            for (final var declared : contract.methods()) {
+                final var inherited = inheritedMethods.stream()
+                        .filter(entry -> entry.getKey().name().lexeme().equals(declared.name().lexeme()))
+                        .findFirst().orElse(null);
+                if (inherited == null) continue;
+                final var inheritedType = (FunctionDescriptor) TypeSubstitution.substitute(
+                        inherited.getKey().typeDescriptor(), inherited.getValue());
+                if (declared.isMutating() != inherited.getKey().isMutating()
+                        || !compatibleMethodSignatures(context, inheritedType, inherited.getKey().variadic(),
+                                declared.typeDescriptor(), declared.variadic())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            declared.name(), "A redeclared contract method must preserve its inherited signature." ));
+                }
+            }
+            for (final var declared : contract.properties()) {
+                if (methods.containsKey(declared.name().lexeme())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            declared.name(), "A contract property conflicts with an inherited or declared method." ));
+                }
+                final var inheritedType = properties.get(declared.name().lexeme());
+                if (inheritedType != null && !inheritedType.equals(declared.type())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            declared.name(), "A redeclared contract property must preserve its inherited type." ));
+                }
+            }
+    }
+
+    private static boolean canReachContract(final ResolutionContext context, final String from,
+                                            final String target, final Set<String> visited) {
+        if (from.equals(target)) return true;
+        if (!visited.add(from)) return false;
+        final var contract = context.contracts.get(from);
+        return contract != null && contract.requiredContracts().stream()
+                .anyMatch(required -> canReachContract(context, required.name().lexeme(), target, visited));
     }
 
     private static void validateSealedContract(final ResolutionContext context, final Stmt.ContractDecl contract) {
@@ -589,6 +709,12 @@ final class DeclarationResolver {
                                 + required.name().lexeme() + "'."));
             }
         }
+
+        final var closure = ContractComposition.closure(context, contractUse);
+        for (int index = 1; index < closure.size(); index++) {
+            final var inherited = closure.get(index);
+            checkConformance(context, declaration, inherited.use(), inherited.declaration());
+        }
     }
 
     static Resolver.DefaultMethodSelection defaultMethodFor(final ResolutionContext context, final Stmt.ClassDecl declaration,
@@ -608,10 +734,17 @@ final class DeclarationResolver {
                                                                    final FunctionDescriptor requiredType,
                                                                    final boolean requiredVariadic) {
         final var matches = new ArrayList<Resolver.DefaultMethodSelection>();
-        for (final var contractUse : declaration.contractUses()) {
-            final var candidateContract = context.contracts.get(contractUse.name().lexeme());
-            final var substitutions = contractSubstitutions(context, contractUse);
-            for (final var candidate : candidateContract.methods()) {
+        final var seen = new HashSet<String>();
+        for (final var root : declaration.contractUses()) {
+            for (final var applied : ContractComposition.closure(context, root)) {
+                final var candidateContract = applied.declaration();
+                final var substitutions = applied.substitutions();
+                for (final var candidate : candidateContract.methods()) {
+                    if (ContractComposition.isShadowedByAncestor(context, root, applied.use(),
+                            candidate.name().lexeme())) continue;
+                    final var key = applied.use().name().lexeme() + applied.use().typeArguments()
+                            + "#" + candidate.name().lexeme();
+                    if (!seen.add(key)) continue;
                 if (!candidate.isDefault()
                         || !candidate.name().lexeme().equals(requiredType.name())) continue;
                 final var candidateType = (FunctionDescriptor) TypeSubstitution.substitute(
@@ -620,6 +753,7 @@ final class DeclarationResolver {
                         candidateType, candidate.variadic())) {
                     matches.add(new Resolver.DefaultMethodSelection(candidateContract.name().lexeme(), candidate,
                             candidateType));
+                    }
                 }
             }
         }
@@ -629,10 +763,17 @@ final class DeclarationResolver {
     static List<Resolver.DefaultMethodSelection> defaultMethodsOnClass(final ResolutionContext context, final Stmt.ClassDecl declaration,
                                                                        final String methodName) {
         final var matches = new ArrayList<Resolver.DefaultMethodSelection>();
-        for (final var contractUse : declaration.contractUses()) {
-            final var contract = context.contracts.get(contractUse.name().lexeme());
-            final var substitutions = contractSubstitutions(context, contractUse);
-            for (final var method : contract.methods()) {
+        final var seen = new HashSet<String>();
+        for (final var root : declaration.contractUses()) {
+            for (final var applied : ContractComposition.closure(context, root)) {
+                final var contract = applied.declaration();
+                final var substitutions = applied.substitutions();
+                for (final var method : contract.methods()) {
+                    if (ContractComposition.isShadowedByAncestor(context, root, applied.use(),
+                            method.name().lexeme())) continue;
+                    final var key = applied.use().name().lexeme() + applied.use().typeArguments()
+                            + "#" + method.name().lexeme();
+                    if (!seen.add(key)) continue;
                 if ((!method.isDefault()
                         && method.minimumArity()
                             == Stmt.fixedArity(method.parameters(), method.variadic()))
@@ -640,6 +781,7 @@ final class DeclarationResolver {
                 final var type = (FunctionDescriptor) TypeSubstitution.substitute(
                         method.typeDescriptor(), substitutions);
                 matches.add(new Resolver.DefaultMethodSelection(contract.name().lexeme(), method, type));
+                }
             }
         }
         return List.copyOf(matches);

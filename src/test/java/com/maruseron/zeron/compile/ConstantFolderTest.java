@@ -26,6 +26,14 @@ public final class ConstantFolderTest {
     }
 
     @Test
+    public void foldsBuiltInScalarEqualityLiterals() {
+        assertEquals(1, ConstantFolder.fold(expression("1 == 1;")));
+        assertEquals(0, ConstantFolder.fold(expression("1 != 1;")));
+        assertEquals(1, ConstantFolder.fold(expression("\"same\" == \"same\";")));
+        assertEquals(0, ConstantFolder.fold(expression("0.0 == -0.0;")));
+    }
+
+    @Test
     public void classifiesFoldedFieldValuesAndTypes() {
         assertTrue(ConstantFolder.isConstantFieldValue(TypeDescriptor.ofInt(), 3));
         assertTrue(ConstantFolder.isConstantFieldValue(TypeDescriptor.ofString(), "text"));

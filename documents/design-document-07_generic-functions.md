@@ -57,8 +57,8 @@ against inferred or explicit type arguments. Class bounds, bounds on generic cla
 mutating bound methods remain unsupported. Generic functions and methods may also call class-side
 factory requirements through bounds; the compiler selects a compatible public named constructor,
 honoring explicit witness remapping, and passes its method handle as hidden evidence. Witness
-metadata is preserved in API-index v18 for separately compiled libraries. Full generic-pattern
-overlap analysis remains future work. See
+metadata is preserved in the current API-index schema (`api-v22.bin`) for separately compiled
+libraries. Full generic-pattern overlap analysis remains future work. See
 [design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
 Type parameters may appear recursively in parameters, results, function signatures, nullable and
 reference types, and the built-in `Array<T>` descriptor. Function type annotations accept zero or

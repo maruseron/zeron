@@ -1,6 +1,20 @@
 package zeron.collections;
 
+import zeron.lang.Eq;
+
 public extension <T> Array<T> {
+    public fn fold<R>(initial: R, accumulator: (R, T) -> R): R {
+        let mut result = initial;
+        for (let item in this) result = accumulator(result, item);
+        return result;
+    }
+
+    public fn stream(): Stream<T> {
+        return Stream.fromArray(this);
+    }
+}
+
+public extension <T: Eq<T>> Array<T> {
     public fn contains(item: T): Boolean = this.indexOf(item) >= 0;
 
     public fn indexOf(item: T): Int {
@@ -14,8 +28,6 @@ public extension <T> Array<T> {
         return -1;
     }
 
-    public fn isEmpty(): Boolean = this.length > 0;
-
     public fn lastIndexOf(item: T): Int {
         let mut index = this.length - 1;
         while (index >= 0) {
@@ -25,15 +37,5 @@ public extension <T> Array<T> {
             index -= 1;
         }
         return -1;
-    }
-
-    public fn fold<R>(initial: R, accumulator: (R, T) -> R): R {
-        let mut result = initial;
-        for (let item in this) result = accumulator(result, item);
-        return result;
-    }
-
-    public fn stream(): Stream<T> {
-        return Stream.fromArray(this);
     }
 }

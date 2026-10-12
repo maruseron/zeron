@@ -33,7 +33,7 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v20.bin|class-directory|library.jar>");
+            System.err.println("Usage: ZeronLibraryIndexDump <api-v22.bin|class-directory|library.jar>");
             return;
         }
         final var path = Path.of(args[0]);
@@ -116,8 +116,15 @@ public final class ZeronLibraryIndexDump {
                     }
                 }
                 case ZeronLibraryIndex.ContractExport contract -> {
+                    final var requirements = contract.requiredContracts().isEmpty() ? ""
+                            : " requires " + String.join(" + ", contract.requiredContracts().stream()
+                                    .map(required -> required.qualifiedName()
+                                            + (required.typeArguments().isEmpty() ? ""
+                                                    : "<" + String.join(", ", required.typeArguments().stream()
+                                                            .map(ZeronLibraryIndexDump::formatType).toList()) + ">"))
+                                    .toList());
                     System.out.println("contract " + contract.qualifiedName()
-                            + formatTypeParameters(contract.typeParameters()));
+                            + formatTypeParameters(contract.typeParameters()) + requirements);
                     for (final var method : contract.methods()) {
                         System.out.println("  " + (method.defaultMethod() ? "default " : "")
                                 + (method.mutating() ? "mut " : "") + method.name()

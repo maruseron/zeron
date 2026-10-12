@@ -105,4 +105,43 @@ public final class ParserDiagnosticsTest {
         assertEquals(2, alternatives.size());
         assertEquals(2, alternatives.getFirst().arguments().size());
     }
+
+    @Test
+    public void parsesSoftKeywordsInContextAndAsIdentifiers() {
+        final var result = Parser.of(Scanner.from("""
+                sealed contract Choice permits Selected {}
+                class Selected is Choice {}
+                contract requirements {}
+                contract Composed requires requirements {}
+                class PatternBox {
+                    public pattern permits(when: Int) when when > 0 {
+                        permits = when;
+                    }
+                }
+                fn permits(when: Int): Int = when;
+                fn when(permits: Int): Int = permits;
+                fn requires(value: Int): Int = value;
+                """).scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("soft-keywords.zn");
+
+        assertEquals(result.diagnostics().toString(), 0, result.diagnostics().size());
+    }
+
+    @Test
+    public void parsesForStageSoftKeywordsAndAllowsThemAsNames() {
+        final var result = Parser.of(Scanner.from("""
+                fn map(value: Int): Int = value;
+                fn flatMap(value: Int): Int = value;
+                fn filter(value: Int): Int = value;
+                fn collect(value: Int): Int = value;
+                fn stages(values: Array<Int>): Stream<Int> =
+                    for values map item -> item
+                    filter item -> item > 0
+                    flatMap item -> [item]
+                    collect ListSink<Int>.empty();
+                """).scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("for-stage-soft-keywords.zn");
+
+        assertEquals(result.diagnostics().toString(), 0, result.diagnostics().size());
+    }
 }

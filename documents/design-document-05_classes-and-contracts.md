@@ -4,7 +4,7 @@
 
 This document records the initial class-and-contract feature set for Zeron and its later roadmap. It builds on the type overview in [design-document-00.md](design-document-00.md), the binding/reference distinction in [design-document-04_mutability.md](design-document-04_mutability.md), and the current function representation in [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md).
 
-The goal is to establish useful object semantics before adding inheritance or advanced contract composition. Classes should also provide explicit shared heap state for programs and closures without changing the rule that lambdas cannot implicitly capture mutable local bindings.
+The goal is to establish useful object semantics before adding class inheritance or broader type-system features. Applied contract composition with `requires` is implemented. Classes should also provide explicit shared heap state for programs and closures without changing the rule that lambdas cannot implicitly capture mutable local bindings.
 
 ## Implemented Foundation
 
@@ -194,6 +194,49 @@ class type argument or a more informative expected type is required. Explicit cl
 supported and are checked against constructor arguments. This inference applies to constructor calls,
 not standalone class references or arbitrary generic expressions.
 
+### Contract composition with `requires`
+
+A contract can require one or more applied contracts after its type parameters. `requires` is a
+soft keyword recognized only in this declaration position, and `+` separates multiple requirements.
+For sealed contracts, `requires` precedes `permits`:
+
+```zeron
+contract Hashable<T> requires Eq<T> {
+    hashCode(): Int;
+}
+
+sealed contract Lookup<T> requires Eq<T> permits Found<T>, Missing<T> {
+    isFound(): Boolean;
+}
+```
+
+Requirements compose the complete contract surface transitively: abstract and default instance
+methods, properties, and named-constructor requirements. Applying a requiring contract substitutes
+its type arguments through every transitive requirement. Thus `Hashable<User>` entails
+`Eq<User>`, but `Eq<User>` does not entail `Hashable<User>`.
+
+A class conforming to a requiring contract also conforms to each transitive required contract.
+Repeated paths and an explicitly repeated direct conformance to the same applied contract are
+deduplicated. Generic bounds on a requiring contract expose inherited members and satisfy bounds on
+its required contracts. A witness for a requiring contract likewise entails its required bounds and
+forwards their method/factory evidence; a witness for a required contract alone does not establish
+the requiring contract.
+
+Inherited defaults follow class conformance rules: a compatible public class method overrides a
+default, one unique applicable default can satisfy a requirement, and multiple applicable defaults
+require an explicit class method. A requiring contract may redeclare an inherited method with a
+compatible signature to replace its inherited default; redeclaration cannot change the inherited
+signature. Property requirements merge under the ordinary conformance rules. Identical named
+constructor requirements collapse to one obligation; incompatible same-name constructor
+requirements make the composition invalid.
+
+Cycles in the requirement graph are invalid. The compiler checks requirements after type
+substitution, rejects incompatible inherited member requirements, and emits nominal JVM contract
+interfaces as extending their required interfaces. Constructor requirements remain statically
+dispatched class-side factories: composition propagates their compile-time obligation and evidence,
+but creates no virtual constructor slot. Compiled-library metadata records applied requirement
+declarations so separate compilation performs the same substitution and conformance checks.
+
 ### Contract constructor requirements
 
 A contract may declare named constructor signatures without bodies:
@@ -338,8 +381,8 @@ the existing nominal and nullable compatibility rules; parameter types and recei
 still match exactly. Identical requirements from several contracts can be satisfied by one method.
 Requirements with the same name are matched by parameter signature; incompatible requirements are
 diagnosed, and calls are resolved against the statically known contract type. Calls through
-contract-typed references use interface dispatch. Each class remains final; multiple contract conformance is not
-class inheritance or contract-to-contract inheritance.
+contract-typed references use interface dispatch. `requires` composes applied contracts transitively;
+it does not introduce class inheritance. Each class remains final.
 
 Defer associated types, multiple inheritance, and intersection types. These features depend on a
 working base model and should not be prerequisites for ordinary classes or simple contracts.
@@ -362,7 +405,9 @@ Generic contracts use declaration-site conformance with explicit contract argume
 
 Callback adaptation across erased generic nominal boundaries is implemented. Lambdas are contextually resolved against substituted constructor and member signatures; the compiler plans adapters for callback-valued fields, member arguments/results, and erased contract bridges. Generated bridge methods can call the public synthetic static adapters in the program class. Resolver, runtime, and ABI tests cover primitive/reference specializations, field reads/writes, method arguments/results, nested and nullable callbacks, mutable function views, and both contract bridge directions. Broader shape combinations and adapter reuse remain follow-up coverage.
 
-Bounds, variance, raw generic uses, and advanced contract composition remain outside this slice.
+Bounds on generic classes and contracts, variance, and raw generic uses remain outside this slice.
+Applied contract composition with `requires` is implemented; additional edge-case coverage and
+diagnostic hardening remain follow-up work.
 
 ```zeron
 contract Readable<T> {
@@ -453,7 +498,7 @@ constructor signature.
     the ordinary member namespace; contract property requirements, generic ABI metadata, receiver
     mutability checks, and receiver-once compound assignment are covered by runtime tests.
 5. **Expand the type-system surface.** Consider class inheritance, abstract classes,
-    contract-to-contract inheritance, intersection types, bounds, variance,
+    intersection types, bounds, variance,
     broader inference, and module-qualified type identity as separate designs.
 
 ## Acceptance Criteria
@@ -484,12 +529,12 @@ internal array intrinsic registry does not introduce this language feature. See
 [design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md)
 for the current distinction between intrinsic IDs and future external/expected declarations.
 
-Class inheritance, abstract classes, bounds, variance, broader
-inference, contract-to-contract inheritance, intersection types, extension
-methods, JPMS integration, serialization, public fields, generated accessors, and ownership/borrow
-checking remain deferred. Class-directory compiled-library discovery and the initial Java interop
-slice are implemented; JAR discovery and broader Java platform integration remain future work. Each deferred feature adds semantic rules that should build
-on tested nominal identity, construction, access control, and receiver capability rather than being
-inferred from JVM behavior.
+Class inheritance, abstract classes, class/contract type-parameter bounds, variance, broader
+inference, intersection types, JPMS integration, serialization, public fields on Zeron classes, and
+ownership/borrow checking remain deferred. Extension methods, generated property accessors, compiled
+library JARs, and Java classpath JAR discovery are implemented. Broader Java platform integration
+remains future work. Each deferred feature adds semantic rules that should build on tested nominal
+identity, construction, access control, and receiver capability rather than being inferred from JVM
+behavior.
 
 Revisit these deferrals after the initial object and contract model meets the acceptance criteria above.

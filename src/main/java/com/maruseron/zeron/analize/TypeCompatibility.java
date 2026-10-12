@@ -146,15 +146,15 @@ final class TypeCompatibility {
         for (int i = 0; i < classArguments.size(); i++) {
             classSubstitutions.put(declaration.typeParameters().get(i), classArguments.get(i));
         }
-        for (final var contractUse : declaration.contractUses()) {
-            if (!contractUse.name().lexeme().equals(contract.name())) continue;
-            final var appliedArguments = contractUse.typeArguments().stream()
+        for (final var applied : ContractComposition.forClass(contracts, declaration)) {
+            if (!applied.use().name().lexeme().equals(contract.name())) continue;
+            final var appliedArguments = applied.use().typeArguments().stream()
                     .map(argument -> TypeSubstitution.substitute(argument, classSubstitutions))
                     .toList();
             final TypeDescriptor appliedContract = appliedArguments.isEmpty()
                     ? TypeDescriptor.ofName(contract.name())
                     : TypeDescriptor.genericOf(TypeDescriptor.ofName(contract.name()), appliedArguments);
-            if (appliedContract.equals(contractType)) return true;
+            if (TypeClassEvidence.sameAppliedType(appliedContract, contractType)) return true;
         }
         return false;
     }

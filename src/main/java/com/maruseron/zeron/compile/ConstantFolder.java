@@ -39,6 +39,21 @@ final class ConstantFolder {
                 final var left = fold(bin.left);
                 final var right = fold(bin.right);
                 if (left == null || right == null) yield null;
+                if (bin.operator.type() == com.maruseron.zeron.scan.TokenType.EQUAL_EQUAL
+                        || bin.operator.type() == com.maruseron.zeron.scan.TokenType.BANG_EQUAL) {
+                    final var equal = switch (left) {
+                        case Integer leftInteger -> right instanceof Integer rightInteger
+                                && leftInteger.intValue() == rightInteger.intValue();
+                        case Double leftFloat -> right instanceof Double rightFloat
+                                && Double.compare(leftFloat, rightFloat) == 0;
+                        case String leftString -> right instanceof String rightString
+                                && leftString.equals(rightString);
+                        default -> false;
+                    };
+                    final var result = bin.operator.type()
+                            == com.maruseron.zeron.scan.TokenType.EQUAL_EQUAL ? equal : !equal;
+                    yield result ? 1 : 0;
+                }
                 if (left.getClass() != right.getClass()) yield null;
                 switch (left) {
                     case Integer li -> {

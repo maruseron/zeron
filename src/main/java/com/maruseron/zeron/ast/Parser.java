@@ -823,7 +823,7 @@ public final class Parser {
             } while (match(COMMA));
         }
         consume(RIGHT_PAREN, "Expect ')' after pattern outputs.");
-        final var condition = match(WHEN) ? expression() : null;
+        final var condition = matchSoftKeyword("when") ? expression() : null;
         consume(LEFT_BRACE, "Expect '{' before pattern body.");
         final var previousLevelMarker = levelMarker;
         levelMarker = new LevelMarker(levelMarker);
@@ -988,8 +988,21 @@ public final class Parser {
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
+            final var requiredContracts = new ArrayList<Stmt.ContractUse>();
+            if (matchSoftKeyword("requires")) {
+                do {
+                    final var requiredName = qualifyTypeToken(
+                            consume(IDENTIFIER, "Expect required contract name."));
+                    final var hasTypeArguments = match(LESS);
+                    final var typeArguments = hasTypeArguments
+                            ? collectTypeArguments()
+                            : List.<TypeDescriptor>of();
+                    if (hasTypeArguments) consume(GREATER, "Expect '>' after required contract type arguments.");
+                    requiredContracts.add(new Stmt.ContractUse(requiredName, typeArguments));
+                } while (match(PLUS));
+            }
             final var permittedClasses = new ArrayList<Stmt.ContractUse>();
-            if (match(PERMITS)) {
+            if (matchSoftKeyword("permits")) {
                 do {
                     final var className = qualifyTypeToken(
                             consume(IDENTIFIER, "Expect permitted class name."));
@@ -1055,8 +1068,10 @@ public final class Parser {
                 }
             }
             consume(RIGHT_BRACE, "Expect '}' after contract members.");
-                return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()), List.copyOf(namedConstructors),
-                        List.copyOf(methods), List.copyOf(properties), isTopLevelPublic, isSealed, permittedClasses);
+                return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()),
+                        List.copyOf(requiredContracts), List.copyOf(namedConstructors),
+                        List.copyOf(methods), List.copyOf(properties), isTopLevelPublic, isSealed,
+                        permittedClasses);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -1634,8 +1649,8 @@ public final class Parser {
                     ? test
                     : new Expr.Unary(negation, test, TypeDescriptor.ofBoolean());
         }
-        if (check(IDENTIFIER) && peek().lexeme().equals("matches")) {
-            final var operator = advance();
+        if (matchSoftKeyword("matches")) {
+            final var operator = previous();
             return new Expr.SumCaseTest(value, operator, matchPattern(true));
         }
         return value;
@@ -1988,9 +2003,8 @@ public final class Parser {
         consume(LEFT_PAREN, "Expect '(' after 'handle'.");
         final var protectedExpression = expression();
         consume(RIGHT_PAREN, "Expect ')' after handled expression.");
-        consume(IDENTIFIER, "Expect 'with' after handled expression.");
-        if (!previous().lexeme().equals("with")) {
-            throw error(previous(), DiagnosticCatalog.EXPECTED_SYNTAX,
+        if (!matchSoftKeyword("with")) {
+            throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX,
                     "Expect 'with' after handled expression.");
         }
         consume(LEFT_BRACE, "Expect '{' before handler cases.");
@@ -2149,7 +2163,7 @@ public final class Parser {
         final var stages = new ArrayList<Expr.PipelineStage>();
         boolean isTerminal = false;
         while (isPipelineStage()) {
-            final var opKeyword = consume(IDENTIFIER, "Expect operation after source expression.");
+            final var opKeyword = consumeSoftKeyword("map", "flatMap", "filter", "collect");
             if (isTerminal) {
                 error(opKeyword, DiagnosticCatalog.INVALID_PIPELINE_OPERATION,
                         "The collect stage must be the final for-expression stage.");
@@ -2187,11 +2201,7 @@ public final class Parser {
     }
 
     private boolean isPipelineStage() {
-        return check(IDENTIFIER)
-            && (peek().lexeme().equals("map")
-            ||  peek().lexeme().equals("flatMap")
-            ||  peek().lexeme().equals("filter")
-            ||  peek().lexeme().equals("collect"));
+        return isSoftKeyword("map", "flatMap", "filter", "collect");
     }
 
     private boolean looksLikeParenthesizedLambda() {
@@ -2234,6 +2244,27 @@ public final class Parser {
             }
         }
 
+        return false;
+    }
+
+    private boolean matchSoftKeyword(final String lexeme) {
+        if (!isSoftKeyword(lexeme)) return false;
+        advance();
+        return true;
+    }
+
+    private Token consumeSoftKeyword(final String... lexemes) {
+        for (final var lexeme : lexemes) {
+            if (matchSoftKeyword(lexeme)) return previous();
+        }
+        throw error(peek(), "Expect contextual keyword.");
+    }
+
+    private boolean isSoftKeyword(final String... lexemes) {
+        if (!check(IDENTIFIER)) return false;
+        for (final var lexeme : lexemes) {
+            if (peek().lexeme().equals(lexeme)) return true;
+        }
         return false;
     }
 

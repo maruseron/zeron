@@ -800,23 +800,20 @@ public final class ExtensionMethodTest {
         try {
             final var app = unit("""
                     package app;
-                    fn equal<T>(left: T, right: T): Boolean = left == right;
-                    fn notEqual<T>(left: T, right: T): Boolean = left != right;
+                    import zeron.lang.Eq;
+                    fn equal<T: Eq<T>>(left: T, right: T): Boolean = left == right;
+                    fn notEqual<T: Eq<T>>(left: T, right: T): Boolean = left != right;
                     fn sameValues(): Boolean = equal("value", "value") and notEqual(1, 2);
                     fn differentValues(): Boolean = notEqual("left", "right") and equal(3, 3);
                     """, "GenericEquality.zn");
             final var compiler = CompilationService.forCompilationUnits(
-                    List.of(app), "app.GenericEquality", "app", List.of(), false,
+                    List.of(app), "app.GenericEquality", "app", List.of(), true,
                     List.of(), output);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
                 final var generated = loader.loadClass("app.GenericEquality");
-                assertEquals(true, generated.getMethod("equal", Object.class, Object.class)
-                        .invoke(null, "value", "value"));
-                assertEquals(true, generated.getMethod("notEqual", Object.class, Object.class)
-                        .invoke(null, 1, 2));
                 assertEquals(true, generated.getMethod("sameValues").invoke(null));
                 assertEquals(true, generated.getMethod("differentValues").invoke(null));
             }

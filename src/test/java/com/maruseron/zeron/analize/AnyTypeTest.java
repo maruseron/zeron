@@ -84,8 +84,8 @@ public final class AnyTypeTest {
                 fn anyNull(): Any? = null;
                 fn anyNullViaGeneric(): Any? = identity<Any?>(null);
                 fn sameUnit(): Boolean {
-                    let first: Any = ();
-                    let second: Any = ();
+                    let first: Unit = ();
+                    let second: Unit = ();
                     return first == second;
                 }
                 """);

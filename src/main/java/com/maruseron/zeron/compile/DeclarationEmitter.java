@@ -200,7 +200,7 @@ final class DeclarationEmitter {
                     if (entryHolder) for (final var reference : context.lambdaPlan.functionReferences()) {
                         classBuilder.withMethodBody(
                                 reference.helperName(),
-                                toJavaMethodDescriptor(reference.targetType()),
+                                LambdaSupportEmitter.functionReferenceMethodType(reference),
                                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                                 composer -> LambdaSupportEmitter.emitFunctionReferenceImplementation(context, composer, reference));
                     }

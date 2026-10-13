@@ -16,8 +16,13 @@ import java.nio.file.Path;
 final class RuntimeSupportEmitter {
     private static final ClassDesc UNIT_CLASS = ClassDesc.of("zeron.lang.Unit");
     private static final ClassDesc RAISED_EFFECT_CLASS = ClassDesc.of("zeron.runtime.RaisedEffect");
+    private static final ClassDesc RESOURCE_SUPPORT_CLASS = ClassDesc.of("zeron.runtime.ResourceSupport");
     private static final ClassDesc EQ_SUPPORT_CLASS = ClassDesc.of("zeron.runtime.EqSupport");
+    private static final ClassDesc HASH_SUPPORT_CLASS = ClassDesc.of("zeron.runtime.HashSupport");
     private static final ClassDesc RUNTIME_EXCEPTION_CLASS = ClassDesc.of("java.lang.RuntimeException");
+    private static final ClassDesc THROWABLE_CLASS = ClassDesc.of("java.lang.Throwable");
+    private static final ClassDesc ARRAY_LIST_CLASS = ClassDesc.of("java.util.ArrayList");
+    private static final ClassDesc DISPOSABLE_CLASS = ClassDesc.of("zeron.resource.Disposable");
 
     private RuntimeSupportEmitter() {}
 
@@ -56,10 +61,17 @@ final class RuntimeSupportEmitter {
             builder.withSuperclass(RUNTIME_EXCEPTION_CLASS);
             builder.withField("payload", ConstantDescs.CD_Object,
                     field -> field.withFlags(ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL));
+            builder.withField("suppressedOutcomes", ARRAY_LIST_CLASS,
+                    field -> field.withFlags(ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL));
             builder.withMethodBody("<init>", MethodTypeDesc.of(ConstantDescs.CD_void,
                     ConstantDescs.CD_Object), ClassFile.ACC_PUBLIC, code -> {
                 code.aload(0);
                 code.invokespecial(RUNTIME_EXCEPTION_CLASS, "<init>", emptyVoidMethod());
+                code.aload(0);
+                code.new_(ARRAY_LIST_CLASS);
+                code.dup();
+                code.invokespecial(ARRAY_LIST_CLASS, "<init>", emptyVoidMethod());
+                code.putfield(RAISED_EFFECT_CLASS, "suppressedOutcomes", ARRAY_LIST_CLASS);
                 code.aload(0);
                 code.aload(1);
                 code.putfield(RAISED_EFFECT_CLASS, "payload", ConstantDescs.CD_Object);
@@ -70,6 +82,125 @@ final class RuntimeSupportEmitter {
                         code.aload(0);
                         code.getfield(RAISED_EFFECT_CLASS, "payload", ConstantDescs.CD_Object);
                         code.areturn();
+                    });
+            builder.withMethodBody("addSuppressedOutcome",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object, THROWABLE_CLASS),
+                    ClassFile.ACC_PUBLIC, code -> {
+                        final var done = code.newLabel();
+                        code.aload(0);
+                        code.getfield(RAISED_EFFECT_CLASS, "suppressedOutcomes", ARRAY_LIST_CLASS);
+                        code.aload(1);
+                        code.invokevirtual(ARRAY_LIST_CLASS, "add",
+                                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
+                        code.pop();
+                        code.aload(0);
+                        code.aload(2);
+                        code.if_acmpeq(done);
+                        code.aload(0);
+                        code.aload(2);
+                        code.invokevirtual(THROWABLE_CLASS, "addSuppressed",
+                                MethodTypeDesc.of(ConstantDescs.CD_void, THROWABLE_CLASS));
+                        code.labelBinding(done);
+                        code.return_();
+                    });
+            builder.withMethodBody("suppressedOutcomes",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()), ClassFile.ACC_PUBLIC, code -> {
+                        code.aload(0);
+                        code.getfield(RAISED_EFFECT_CLASS, "suppressedOutcomes", ARRAY_LIST_CLASS);
+                        code.invokevirtual(ARRAY_LIST_CLASS, "toArray",
+                                MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+                        code.areturn();
+                    });
+        });
+    }
+
+    static void emitResourceSupportClass(final Path outputDirectory) throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "ResourceSupport.class"));
+        Files.createDirectories(output.getParent());
+        ClassFile.of().buildTo(output, RESOURCE_SUPPORT_CLASS, builder -> {
+            builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
+            builder.withMethodBody("dispose", MethodTypeDesc.of(THROWABLE_CLASS,
+                    ConstantDescs.CD_Object.arrayType(), ConstantDescs.CD_int, THROWABLE_CLASS),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        final var loop = code.newLabel();
+                        final var end = code.newLabel();
+                        final var startDispose = code.newLabel();
+                        final var endDispose = code.newLabel();
+                        final var handler = code.newLabel();
+                        final var hasPrimary = code.newLabel();
+                        final var ordinaryPrimary = code.newLabel();
+                        final var rawOutcome = code.newLabel();
+                        final var outcomeReady = code.newLabel();
+                        final var next = code.newLabel();
+
+                        code.iload(1);
+                        code.iconst_1();
+                        code.isub();
+                        code.istore(3);
+                        code.labelBinding(loop);
+                        code.iload(3);
+                        code.iflt(end);
+                        code.labelBinding(startDispose);
+                        code.aload(0);
+                        code.iload(3);
+                        code.aaload();
+                        code.checkcast(DISPOSABLE_CLASS);
+                        code.invokeinterface(DISPOSABLE_CLASS, "dispose",
+                                MethodTypeDesc.of(UNIT_CLASS));
+                        code.pop();
+                        code.labelBinding(endDispose);
+                        code.goto_(next);
+
+                        code.labelBinding(handler);
+                        code.astore(4);
+                        code.aload(2);
+                        code.ifnonnull(hasPrimary);
+                        code.aload(4);
+                        code.astore(2);
+                        code.goto_(next);
+
+                        code.labelBinding(hasPrimary);
+                        code.aload(2);
+                        code.instanceOf(RAISED_EFFECT_CLASS);
+                        code.ifeq(ordinaryPrimary);
+                        code.aload(2);
+                        code.checkcast(RAISED_EFFECT_CLASS);
+                        code.aload(4);
+                        code.instanceOf(RAISED_EFFECT_CLASS);
+                        code.ifeq(rawOutcome);
+                        code.aload(4);
+                        code.checkcast(RAISED_EFFECT_CLASS);
+                        code.invokevirtual(RAISED_EFFECT_CLASS, "payload",
+                                MethodTypeDesc.of(ConstantDescs.CD_Object));
+                        code.goto_(outcomeReady);
+                        code.labelBinding(rawOutcome);
+                        code.aload(4);
+                        code.labelBinding(outcomeReady);
+                        code.aload(4);
+                        code.invokevirtual(RAISED_EFFECT_CLASS, "addSuppressedOutcome",
+                                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object,
+                                        THROWABLE_CLASS));
+                        code.goto_(next);
+
+                        code.labelBinding(ordinaryPrimary);
+                        code.aload(2);
+                        code.aload(4);
+                        code.if_acmpeq(next);
+                        code.aload(2);
+                        code.aload(4);
+                        code.invokevirtual(THROWABLE_CLASS, "addSuppressed",
+                                MethodTypeDesc.of(ConstantDescs.CD_void, THROWABLE_CLASS));
+
+                        code.labelBinding(next);
+                        code.iload(3);
+                        code.iconst_1();
+                        code.isub();
+                        code.istore(3);
+                        code.goto_(loop);
+                        code.labelBinding(end);
+                        code.aload(2);
+                        code.areturn();
+                        code.exceptionCatch(startDispose, endDispose, handler, THROWABLE_CLASS);
                     });
         });
     }
@@ -180,11 +311,66 @@ final class RuntimeSupportEmitter {
                     code.ireturn();
                 });
             }
+
             builder.withMethodBody("eqUnit", MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     UNIT_CLASS, UNIT_CLASS), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                         code.iconst_1();
                         code.ireturn();
                     });
+        });
+    }
+
+    static void emitHashSupportClass(final Path outputDirectory) throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "HashSupport.class"));
+        Files.createDirectories(output.getParent());
+        ClassFile.of().buildTo(output, HASH_SUPPORT_CLASS, builder -> {
+            builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
+            builder.withMethodBody("hashInt", MethodTypeDesc.of(ConstantDescs.CD_int,
+                    ConstantDescs.CD_int), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                code.iload(0);
+                code.ireturn();
+            });
+            builder.withMethodBody("hashFloat", MethodTypeDesc.of(ConstantDescs.CD_int,
+                    ConstantDescs.CD_double), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                code.dload(0);
+                code.invokestatic(ClassDesc.of("java.lang.Double"), "hashCode",
+                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_double));
+                code.ireturn();
+            });
+            builder.withMethodBody("hashBoolean", MethodTypeDesc.of(ConstantDescs.CD_int,
+                    ConstantDescs.CD_boolean), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                code.iload(0);
+                code.invokestatic(ClassDesc.of("java.lang.Boolean"), "hashCode",
+                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_boolean));
+                code.ireturn();
+            });
+            builder.withMethodBody("hashString", MethodTypeDesc.of(ConstantDescs.CD_int,
+                    ConstantDescs.CD_String), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                code.aload(0);
+                code.invokevirtual(ConstantDescs.CD_String, "hashCode",
+                        MethodTypeDesc.of(ConstantDescs.CD_int));
+                code.ireturn();
+            });
+            builder.withMethodBody("hashUnit", MethodTypeDesc.of(ConstantDescs.CD_int,
+                    UNIT_CLASS), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                code.iconst_0();
+                code.ireturn();
+            });
+            builder.withMethodBody("hashNullableWithHandle", MethodTypeDesc.of(ConstantDescs.CD_int,
+                    ConstantDescs.CD_Object, ClassDesc.of("java.lang.invoke.MethodHandle")),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                final var present = code.newLabel();
+                code.aload(0);
+                code.ifnonnull(present);
+                code.iconst_0();
+                code.ireturn();
+                code.labelBinding(present);
+                code.aload(1);
+                code.aload(0);
+                code.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
+                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_Object));
+                code.ireturn();
+            });
         });
     }
 

@@ -39,7 +39,7 @@ The implemented language includes:
 - Sum and product types, guarded newtypes, flow-sensitive type tests and casts, and pattern matching
   with public-property and class-defined patterns.
 - `Option<T>`, `Result<T, E>`, evidence-driven equality and ordering, and typed synchronous raised
-  effects.
+  effects, with synchronous `using` scopes for disposable resources.
 - Packages, imports, separate compilation and library indexes, a REPL, project manifests, and
   selected Java interoperability.
 
@@ -70,3 +70,24 @@ mvn -DargLine=--enable-preview test
 The [language overview](documents/design-document-00.md) summarizes the implemented foundations and
 planned work. The [design documents](documents/) contain deeper specifications and implementation
 notes.
+
+## License
+
+Unless otherwise noted, Zeron's compiler, bundled standard library, compiler-emitted runtime
+support, documentation, and VS Code grammar are licensed under the Apache License 2.0; see
+[LICENSE](LICENSE). Third-party components remain under their respective licenses.
+
+Programs written by Zeron users remain under the terms chosen by their authors. Where a generated
+distribution includes Zeron-authored runtime or support components, those components are covered by
+the Apache License 2.0.
+
+## VS Code syntax highlighting
+
+The repository includes a grammar-only VS Code extension in [editors/vscode](editors/vscode/README.md).
+It associates `.zn` files with Zeron and provides TextMate syntax highlighting, comment toggling,
+and bracket matching; it does not yet provide compiler diagnostics or language-server features.
+From the repository root, start an Extension Development Host with:
+
+```sh
+code --extensionDevelopmentPath=editors/vscode .
+```

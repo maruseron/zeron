@@ -54,6 +54,13 @@ final class NominalTypeEmitter {
                         if (signature != null) {
                             builder.with(SignatureAttribute.of(builder.constantPool().utf8Entry(signature)));
                         }
+                        for (final var evidenceSlot : BytecodeEmitter.evidenceFields(
+                                context, contract.typeParameters(), "contract", contract.name().lexeme())) {
+                            builder.withMethod(evidenceSlot.fieldName(),
+                                    MethodTypeDesc.of(ClassDesc.of("java.lang.invoke.MethodHandle")),
+                                    ClassFile.ACC_PUBLIC | ClassFile.ACC_ABSTRACT | ClassFile.ACC_SYNTHETIC,
+                                    _ -> {});
+                        }
                         if (sumDeclaration != null) emitSumEqualityMethod(builder, sumDeclaration);
                         for (final var method : contract.methods()) {
                             final var flags = ClassFile.ACC_PUBLIC
@@ -119,6 +126,7 @@ final class NominalTypeEmitter {
                                         ClassFile.ACC_PUBLIC | ClassFile.ACC_ABSTRACT, _ -> {});
                             }
                         }
+
                     });
         }
 
@@ -286,6 +294,12 @@ final class NominalTypeEmitter {
                         builder.withField(field.name().lexeme(), TypeDescriptor.toJavaClassDesc(field.type()),
                                 ClassFile.ACC_PRIVATE);
                     }
+                    final var classEvidenceSlots = BytecodeEmitter.classEvidenceFields(context, declaration);
+                    for (final var evidenceSlot : classEvidenceSlots) {
+                        builder.withField(evidenceSlot.fieldName(),
+                                ClassDesc.of("java.lang.invoke.MethodHandle"),
+                                ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL | ClassFile.ACC_SYNTHETIC);
+                    }
                     if (generatedSumCase && declaration.fields().isEmpty()) {
                         builder.withField("$zeron$singleton", classDesc,
                                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL);
@@ -309,9 +323,15 @@ final class NominalTypeEmitter {
                     final var constructorFlags = declaration.constructor().isPublic()
                             ? ClassFile.ACC_PUBLIC
                             : ClassFile.ACC_PRIVATE;
-                    builder.withMethodBody("<init>", constructorType,
+                    builder.withMethodBody("<init>",
+                            BytecodeEmitter.withEvidenceParameters(constructorType, classEvidenceSlots.size()),
                             constructorFlags,
-                            code -> emitCanonicalConstructor(context, code, declaration, classDesc));
+                            code -> emitCanonicalConstructor(context, code, declaration, classDesc,
+                                    classEvidenceSlots));
+                    if (!classEvidenceSlots.isEmpty()) {
+                        builder.withMethodBody("<init>", constructorType, constructorFlags,
+                                BytecodeEmitter::emitEvidenceUnavailable);
+                    }
                     if (generatedSumCase && declaration.fields().isEmpty()) {
                         builder.withMethodBody("<clinit>", MethodTypeDesc.of(ConstantDescs.CD_void),
                                 ClassFile.ACC_STATIC, code -> {
@@ -381,11 +401,18 @@ final class NominalTypeEmitter {
                     for (final var constructor : declaration.namedConstructors()) {
                         final var factoryType = (FunctionDescriptor) TypeSubstitution.erase(
                                 constructor.typeDescriptor());
+                        final var evidenceType = BytecodeEmitter.withEvidenceParameters(
+                                toJavaMethodDescriptor(factoryType), classEvidenceSlots.size());
                         final var flags = (constructor.isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE)
                                 | ClassFile.ACC_STATIC;
                         builder.withMethodBody(constructor.name().lexeme(),
-                                toJavaMethodDescriptor(factoryType), flags,
-                                code -> emitNamedConstructor(context, code, constructor));
+                                evidenceType, flags,
+                                code -> emitNamedConstructor(context, code, constructor, classEvidenceSlots));
+                        if (!classEvidenceSlots.isEmpty()) {
+                            builder.withMethodBody(constructor.name().lexeme(),
+                                    toJavaMethodDescriptor(factoryType), flags,
+                                    BytecodeEmitter::emitEvidenceUnavailable);
+                        }
                     }
 
                     final var generatedBridges = new HashSet<String>();
@@ -393,6 +420,18 @@ final class NominalTypeEmitter {
                             context.resolution.contracts(), declaration)) {
                         final var contractUse = applied.use();
                         final var contract = applied.declaration();
+                        for (final var evidenceSlot : BytecodeEmitter.evidenceFields(
+                                context, contract.typeParameters(), "contract", contract.name().lexeme())) {
+                            builder.withMethodBody(evidenceSlot.fieldName(),
+                                    MethodTypeDesc.of(ClassDesc.of("java.lang.invoke.MethodHandle")),
+                                    ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL | ClassFile.ACC_SYNTHETIC,
+                                    code -> {
+                                        code.aload(0);
+                                        code.getfield(classDesc, evidenceSlot.fieldName(),
+                                                ClassDesc.of("java.lang.invoke.MethodHandle"));
+                                        code.areturn();
+                                    });
+                        }
                         for (final var required : contract.methods()) {
                             final var implementation = context.resolution.implementationFor(
                                     declaration, contractUse, required);
@@ -785,7 +824,8 @@ final class NominalTypeEmitter {
 
     private static void emitCanonicalConstructor(CompilationContext context, final CodeBuilder code,
                                           final Stmt.ClassDecl declaration,
-                                          final ClassDesc classDesc ){
+                                          final ClassDesc classDesc,
+                                          final List<BytecodeEmitter.EvidenceField> classEvidenceSlots){
         code.aload(0);
         code.invokespecial(ConstantDescs.CD_Object, "<init>", emptyVoidMethod());
         final var previousOffset = context.localSlotOffset;
@@ -811,6 +851,17 @@ final class NominalTypeEmitter {
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, parameter, fieldType,
                         BindingMutability.IMMUTABLE);
                 context.symbols.define(parameter);
+            }
+            for (final var evidenceSlot : classEvidenceSlots) {
+                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceSlot.token(),
+                        TypeDescriptor.ofName("java.lang.invoke.MethodHandle"), BindingMutability.IMMUTABLE);
+                context.symbols.define(evidenceSlot.token());
+            }
+            for (final var evidenceSlot : classEvidenceSlots) {
+                code.aload(0);
+                BytecodeEmitter.emitVariable(context, code, evidenceSlot.token());
+                code.putfield(classDesc, evidenceSlot.fieldName(),
+                        ClassDesc.of("java.lang.invoke.MethodHandle"));
             }
             var slot = 1;
             var fieldIndex = 0;
@@ -1008,6 +1059,17 @@ final class NominalTypeEmitter {
                                         functionType.parameters().get(i), BindingMutability.IMMUTABLE);
                                 context.symbols.define(parameters.get(i));
                             }
+                            if (!isContract) {
+                                final var classDeclaration = context.resolution.classes().get(ownerName);
+                                if (classDeclaration != null) {
+                                    declareClassEvidenceSlots(context, code, classDeclaration, ownerDesc);
+                                }
+                            } else {
+                                final var contractDeclaration = context.resolution.contracts().get(ownerName);
+                                if (contractDeclaration != null) {
+                                    declareContractEvidenceSlots(context, code, contractDeclaration, ownerDesc);
+                                }
+                            }
                             for (int i = suppliedArity; i < fixedArity; i++) {
                                 emitExpr(context, code, defaultValues.get(i - minimumArity));
                                 emitConversion(context, code, context.lastEmittedType, functionType.parameters().get(i));
@@ -1082,6 +1144,7 @@ final class NominalTypeEmitter {
             context.symbols.define(parameter);
         }
         declareEvidenceSlots(context, method.typeDescriptor());
+        declareClassEvidenceSlots(context, code, owner, ClassDesc.of(owner.name().lexeme()));
         try {
             StatementEmitter.emitStmts(context, code, method.body());
             if (context.currentReturnType instanceof UnitDescriptor) {
@@ -1120,6 +1183,7 @@ final class NominalTypeEmitter {
             context.symbols.define(parameter);
         }
         declareEvidenceSlots(context, method.typeDescriptor());
+        declareContractEvidenceSlots(context, code, owner, ClassDesc.of(owner.name().lexeme()));
         try {
             StatementEmitter.emitStmts(context, code, method.body());
             if (context.currentReturnType instanceof UnitDescriptor) {
@@ -1143,7 +1207,8 @@ final class NominalTypeEmitter {
     }
 
     private static void emitNamedConstructor(CompilationContext context, final CodeBuilder code,
-                                      final Stmt.NamedConstructor constructor ){
+                                      final Stmt.NamedConstructor constructor,
+                                      final List<BytecodeEmitter.EvidenceField> classEvidenceSlots){
         final var previousReturnType = context.currentReturnType;
         final var previousOffset = context.localSlotOffset;
         context.currentReturnType = constructor.typeDescriptor().returnType();
@@ -1155,12 +1220,48 @@ final class NominalTypeEmitter {
                     constructor.typeDescriptor().parameters().get(i), BindingMutability.IMMUTABLE);
             context.symbols.define(parameter);
         }
+        for (final var evidenceSlot : classEvidenceSlots) {
+            context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceSlot.token(),
+                    TypeDescriptor.ofName("java.lang.invoke.MethodHandle"), BindingMutability.IMMUTABLE);
+            context.symbols.define(evidenceSlot.token());
+        }
         try {
             StatementEmitter.emitStmts(context, code, constructor.body());
         } finally {
             endScope(context);
             context.localSlotOffset = previousOffset;
             context.currentReturnType = previousReturnType;
+        }
+    }
+
+    private static void declareClassEvidenceSlots(final CompilationContext context,
+                                                  final CodeBuilder code,
+                                                  final Stmt.ClassDecl owner,
+                                                  final ClassDesc classDesc) {
+        for (final var evidenceSlot : BytecodeEmitter.classEvidenceFields(context, owner)) {
+            final var localSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceSlot.token(),
+                    TypeDescriptor.ofName("java.lang.invoke.MethodHandle"), BindingMutability.IMMUTABLE);
+            context.symbols.define(evidenceSlot.token());
+            code.aload(0);
+            code.getfield(classDesc, evidenceSlot.fieldName(),
+                    ClassDesc.of("java.lang.invoke.MethodHandle"));
+            code.astore(localSlot + context.localSlotOffset);
+        }
+    }
+
+    private static void declareContractEvidenceSlots(final CompilationContext context,
+                                                     final CodeBuilder code,
+                                                     final Stmt.ContractDecl owner,
+                                                     final ClassDesc contractDesc) {
+        for (final var evidenceSlot : BytecodeEmitter.evidenceFields(
+                context, owner.typeParameters(), "contract", owner.name().lexeme())) {
+            final var localSlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceSlot.token(),
+                    TypeDescriptor.ofName("java.lang.invoke.MethodHandle"), BindingMutability.IMMUTABLE);
+            context.symbols.define(evidenceSlot.token());
+            code.aload(0);
+            code.invokeinterface(contractDesc, evidenceSlot.fieldName(),
+                    MethodTypeDesc.of(ClassDesc.of("java.lang.invoke.MethodHandle")));
+            code.astore(localSlot + context.localSlotOffset);
         }
     }
 

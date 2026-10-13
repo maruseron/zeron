@@ -1,0 +1,40 @@
+{
+  "name": "zeron-language-support",
+  "displayName": "Zeron Language Support",
+  "description": "Syntax highlighting for the Zeron programming language.",
+  "version": "0.1.0",
+  "publisher": "maruseron",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "zeron",
+        "aliases": [
+          "Zeron",
+          "zeron"
+        ],
+        "extensions": [
+          ".zn"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "zeron",
+        "scopeName": "source.zeron",
+        "path": "./syntaxes/zeron.tmLanguage.json"
+      }
+    ]
+  },
+  "files": [
+    "README.md",
+    "language-configuration.json",
+    "syntaxes/**"
+  ]
+}

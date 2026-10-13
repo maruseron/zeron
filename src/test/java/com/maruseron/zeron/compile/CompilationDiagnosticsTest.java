@@ -108,7 +108,7 @@ public final class CompilationDiagnosticsTest {
             assertEquals(71, Zeron.runCli(source.toString()));
 
             final var diagnostic = output.toString(StandardCharsets.UTF_8);
-            assertTrue(diagnostic.contains("error[ZR2014]: Cannot infer the lambda's function type."));
+            assertTrue(diagnostic.contains("error[ZR2023]: Cannot infer the lambda's function type."));
             assertTrue(diagnostic.contains("Add an explicit function type annotation to the binding."));
             assertFalse(diagnostic.contains("Exception in thread"));
         } finally {

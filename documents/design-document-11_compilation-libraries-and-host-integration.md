@@ -26,16 +26,20 @@ a source package a JVM module.
   resource generation; runtime loading uses the index, so adding a standard-library source does not
   require a separate registration-list edit. Standard-library declarations remain explicit imports,
   and the canonical source tree mirrors package names.
-- The compiler writes `META-INF/zeron/api-v24.bin`. The index has schema version 24 and carries the
-  required standard-library API version, currently 16.
+- The compiler writes `META-INF/zeron/api-v<schema-version>.bin`. The index carries both the API
+  index schema version and the required standard-library API version; their canonical definitions
+  are in [ZeronVersions](../src/main/java/com/maruseron/zeron/ZeronVersions.java).
 - Zeron libraries can be built into a class directory and consumed in compiled mode. Library loading
   validates the API-index schema and standard-library API versions and creates metadata-only
   declarations; consumer compilation does not re-emit library classes. Zeron library JARs are also
   supported, with the same index and compatibility checks.
-- Java interop reads public class-file metadata from ordered, explicit class-directory and JAR roots. Public
-  constructors and declared methods are callable, including expanded varargs for supported component
-  types. A separate curated source facade exposes only `java.lang.System.out` and
-  `java.io.PrintStream.print(Object)` / `println(Object)`; this does not enable general JDK discovery.
+- Java interop reads public class-file metadata from ordered, explicit class-directory and JAR roots,
+  and directly from exported JDK modules. Public constructors and declared methods are callable,
+  including expanded varargs for supported component types. Bundled external-class declarations
+  expose a validated allowlist for `java.lang.System.out`, `java.io.PrintStream.print(Object)` /
+  `println(Object)`, selected `java.io.File` constructors and instance methods, and the NIO members
+  required by `zeron.fs.Path` and whole-file text I/O; this does not enable package scanning or
+  wildcard discovery.
   Ordinary Java member interop supports `Object[]` parameters and results with explicit mappings;
   typed reference and primitive array signatures remain unsupported.
 - Compiler intrinsic IDs and lowering are described separately in
@@ -112,8 +116,8 @@ also embedded in the compiler JAR so `zeron explain` works offline.
 
 ## Zeron Library Artifacts
 
-The API index is a binary sidecar at `META-INF/zeron/api-v24.bin`. Its schema version is separate from
-the standard-library API version. It records qualified public signatures, generated JVM owners,
+The API index is a binary sidecar at `META-INF/zeron/api-v<schema-version>.bin`. Its schema version
+is separate from the standard-library API version. It records qualified public signatures, generated JVM owners,
 declaration and method generic parameters, nullability, reference views, mutability markers, callback
 shapes, and each callable's minimum accepted arity. Public property requirements and getter/setter
 capabilities are recorded alongside
@@ -152,19 +156,20 @@ provider's initializer bodies.
 `--jar-output <file.jar>` packages a successful source/project compilation from a temporary staging
 directory, leaving the default `dist/` output unchanged when the option is omitted. When combined
 with `--build-stdlib`, the requested class directory is preserved and also packaged as a JAR.
-Archives contain the compiled classes and `META-INF/zeron/api-v24.bin`, with entries in deterministic
-order. The JAR is published only after packaging succeeds.
+Archives contain the compiled classes and the versioned API-index sidecar, with entries in
+deterministic order. The JAR is published only after packaging succeeds.
 
 Consumers may select a Zeron library class directory or JAR with `--library`; compiled standard
 library mode uses `--stdlib compiled --library <artifact>`. JAR contents are used both for compile-time
 API-index loading and, when needed, as a normal runtime classpath entry. A consumer rejects an index
 whose schema version is unsupported or whose required standard-library API version does not exactly
-match its compiler. Increment `StandardLibrary.API_VERSION` when the bundled source contract changes
-incompatibly; do not use it as a substitute for the binary index schema version. The index schema is
-independent of its JAR packaging. The current schema is version 24; it includes extension exports,
+match its compiler. Update the corresponding value in `ZeronVersions` when the bundled source
+contract changes incompatibly or the binary index format changes; the two versions remain separate.
+The index schema is independent of its JAR packaging. It includes extension exports,
 extension-property markers, effect markers, raised-effect signatures, witness and pattern metadata,
-applied contract requirements, ordered nominal product components, and newtype representation and
-validation markers alongside callable and value exports.
+applied contract requirements, ordered nominal product components, newtype representation and
+validation markers, and external-facade checked-exception mappings alongside callable and value
+exports.
 
 `ZeronLibraryIndexDump` accepts an index file, a class directory, or a Zeron library JAR.
 
@@ -188,14 +193,18 @@ class metadata without loading or initializing classes, and only accepts classes
 unqualified module exports (accessible to the generated unnamed module). JDK packages are not
 scanned, do not enter the default import scope, and are not implicitly imported; use a single-type
 import or a qualified type/member name. JDK star-import package discovery is not supported.
-Configured classpath roots retain their ordered lookup behavior; the curated `System` and
-`PrintStream` metadata comes from the JDK. Independently, the bundled standard library declares a
-curated external-class facade for `java.lang.System` and `java.io.PrintStream`; only `System.out`,
-`PrintStream.print(Object)`, and `PrintStream.println(Object)` are exposed through that facade.
-The facade is checked against the same public field and method metadata as Java interop.
+Configured classpath roots retain their ordered lookup behavior. Independently, the bundled standard
+library declares external-class facades whose Java binary names must match their qualified source
+names. Each facade is an allowlist: constructors, instance methods, and static properties must be
+declared explicitly and their descriptors are checked against public Java class-file metadata.
+Facade calls cannot use other Java constructors or methods, and undeclared instance fields are not
+available through a facade. The bundled facades currently expose `System.out`,
+`PrintStream.print(Object)` / `println(Object)`, and the `File(String)` constructor plus
+`exists`, `isFile`, `isDirectory`, `getName`, `getPath`, `getParent`, `mkdir`, `mkdirs`, and `delete`.
 `System.out` is typed as nullable `&PrintStream?`, and calls therefore require safe navigation or
-non-null flow refinement. The static field is read-only. The same narrowly curated bindings remain
-available when using the compiled standard library; no extra Java classpath root is needed for them.
+non-null flow refinement. The static field is read-only. Public facade metadata is included in the
+versioned library API index, so the same member allowlists apply when consuming a compiled standard
+library or another compiled library that exports a facade.
 The `zeron.io.print` and `println` convenience functions skip output when `System.out` is null.
 
 Public declared Java fields with supported descriptors may be read through a class qualifier when
@@ -226,7 +235,10 @@ The supported source mappings are intentionally narrow:
   element type; element objects themselves remain shared. Java `Object[]` results map to nullable
   `Array<Any?>` without adaptation. Typed reference arrays and primitive arrays are rejected during
   resolution; Java array fields remain unsupported.
-- Java exceptions propagate to the host.
+- Java exceptions from direct Java interop propagate to the host, except that direct calls to
+  methods declaring checked exceptions are rejected. An external-class method may explicitly map
+  checked exceptions to declared Zeron effects; unchecked exceptions and `Error`s always propagate
+  unchanged.
 
 Java generics, typed reference/primitive Java array signatures, callbacks/SAM conversion, inherited members,
 static field writes, and JPMS module-path/readability configuration are deferred. JDK module exports

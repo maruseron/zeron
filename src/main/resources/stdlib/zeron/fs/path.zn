@@ -1,0 +1,67 @@
+package zeron.fs;
+
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path as JavaPath;
+import zeron.io.IoFailure;
+import zeron.lang.Display;
+import zeron.lang.Eq;
+import zeron.lang.Option;
+
+public class Path is Eq<Path>, Display<Path> {
+    value: String;
+
+    private constructor new;
+
+    public constructor from(value: String) = Path.new(value);
+
+    private toJavaPath(): &JavaPath = File.new(this.value).toPath();
+
+    public toString(): String = this.value;
+
+    public eq(other: Path): Boolean =
+        this.toJavaPath().equals(other.toJavaPath());
+
+    public isAbsolute(): Boolean = this.toJavaPath().isAbsolute();
+
+    public normalize(): Path =
+        Path.from(this.toJavaPath().normalize().toString());
+
+    public toAbsolute(): Path =
+        Path.from(this.toJavaPath().toAbsolutePath().toString());
+
+    public resolve(child: String): Path =
+        Path.from(this.toJavaPath().resolve(child).toString());
+
+    public resolvePath(child: Path): Path =
+        Path.from(this.toJavaPath().resolve(child.toJavaPath()).toString());
+
+    public fileName(): Option<String> {
+        let name = this.toJavaPath().getFileName();
+        if (name == null) return Option<String>.None();
+        return Option.Some(name.toString());
+    }
+
+    public parent(): Option<Path> {
+        let parent = this.toJavaPath().getParent();
+        if (parent == null) return Option<Path>.None();
+        return Option.Some(Path.from(parent.toString()));
+    }
+
+    public exists(): Boolean = File.new(this.value).exists();
+
+    public isFile(): Boolean = File.new(this.value).isFile();
+
+    public isDirectory(): Boolean = File.new(this.value).isDirectory();
+
+    public createDirectory(): Unit raises IoFailure {
+        Files.createDirectory(this.toJavaPath());
+    }
+
+    public createDirectories(): Unit raises IoFailure {
+        Files.createDirectories(this.toJavaPath());
+    }
+
+    public deleteIfExists(): Boolean raises IoFailure =
+        Files.deleteIfExists(this.toJavaPath());
+}

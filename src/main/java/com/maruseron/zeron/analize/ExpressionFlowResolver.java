@@ -162,7 +162,7 @@ final class ExpressionFlowResolver {
             case Expr.Property property -> MemberInteropResolver.resolveProperty(context, property);
             case Expr.ArrayLiteral literal -> {
                 if (literal.elements.isEmpty()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_INFERENCE_FAILURE,
                             SYNTHETIC_IDENTIFIER,
                             "Cannot infer an empty array's element type without an expected Array<T> type."));
                 }
@@ -187,7 +187,7 @@ final class ExpressionFlowResolver {
                     }
                 }
                 if (elementType == null) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_INFERENCE_FAILURE,
                             SYNTHETIC_IDENTIFIER,
                             "Cannot infer an array element type from null values."));
                 }
@@ -487,7 +487,7 @@ final class ExpressionFlowResolver {
                 final TypeDescriptor resultType;
                 if (leftType instanceof NullDescriptor) {
                     if (fallbackType instanceof NullDescriptor) {
-                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_INFERENCE_FAILURE,
                                 coalesce.operator,
                                 "The result type of 'null ?? null' cannot be inferred."));
                     }
@@ -598,7 +598,7 @@ final class ExpressionFlowResolver {
                     final var fieldType = MemberInteropResolver.resolveImplicitFieldRead(context, variable);
                     if (fieldType == null) {
                         Zeron.resolutionError(new ResolutionError(
-                                DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, name,
+                                DiagnosticCatalog.INVALID_INITIALIZER, name,
                                 "A field initializer may read only fields declared earlier."));
                     }
                     yield fieldType;
@@ -627,7 +627,7 @@ final class ExpressionFlowResolver {
                 if (!context.symbols.getSymbol(resolvedSymbol).isInit()
                         && context.symbols.getSymbol(resolvedSymbol).lvt() != SymbolTable.GLOBAL) {
                     Zeron.resolutionError(new ResolutionError(
-                            DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, name,
+                            DiagnosticCatalog.INVALID_INITIALIZER, name,
                             "Can't read local variable in its own initializer."));
                 }
 
@@ -802,7 +802,7 @@ final class ExpressionFlowResolver {
         }
         final var expectedOrdering = TypeDescriptor.ofName(ordering.name().lexeme());
         if (!expectedOrdering.equals(returnType)) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_INFERENCE_FAILURE,
                     binary.operator, "Comparable.compareTo must return zeron.lang.Ordering."));
         }
         binary.setComparisonCall(call);
@@ -821,7 +821,7 @@ final class ExpressionFlowResolver {
                 final var effect = TypeResolver.requireEffectType(context, arm.effectType(), arm.keyword());
                 arm.setResolvedEffectType(effect);
                 final var pattern = resolveMatchPattern(context, arm.pattern(), effect, false,
-                        Set.of(), List.of());
+                        Set.of(), List.of(), MatchRootKind.SEALED);
                 armPatterns.add(pattern);
                 if (arm.guard() == null && pattern.irrefutable()) fullyHandledEffects.add(effect);
             }
@@ -843,6 +843,12 @@ final class ExpressionFlowResolver {
                     context.symbols.declareSymbol(SYNTHETIC_VAR, binding.name(),
                             binding.type(), BindingMutability.IMMUTABLE);
                     context.symbols.define(binding.name());
+                }
+                if (arm.suppressedBinding() != null) {
+                    final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());
+                    context.symbols.declareSymbol(SYNTHETIC_VAR, arm.suppressedBinding(),
+                            suppressedType, BindingMutability.IMMUTABLE);
+                    context.symbols.define(arm.suppressedBinding());
                 }
                 if (arm.guard() != null) {
                     final var guardType = resolve(context, arm.guard());
@@ -875,7 +881,7 @@ final class ExpressionFlowResolver {
         if (expectedType instanceof NullableDescriptor nullable) expectedType = nullable.baseType();
         if (expectedType instanceof ReferenceDescriptor reference) expectedType = reference.baseType();
         if (!(expectedType instanceof ArrayDescriptor arrayType)) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_INFERENCE_FAILURE,
                     SYNTHETIC_IDENTIFIER,
                     "An empty array literal requires an expected Array<T> type."));
             throw new IllegalStateException("unreachable");
@@ -987,7 +993,7 @@ final class ExpressionFlowResolver {
                     c.setType(sinkType);
                     if (!(sinkType instanceof ReferenceDescriptor)) {
                         Zeron.resolutionError(new ResolutionError(
-                                DiagnosticCatalog.INVALID_PIPELINE_OPERATION, c.keyword(),
+                                DiagnosticCatalog.INVALID_COLLECTOR, c.keyword(),
                                 "The collect stage requires a mutable reference to a type conforming to Sink<T>."));
                     }
                     sinkElementType = Resolver.ensureSink(context, sinkType, c.keyword());
@@ -1014,38 +1020,61 @@ final class ExpressionFlowResolver {
                     match.keyword,
                     "Matching nullable values is not supported; prove the value non-null first."));
         }
-        if (!(scrutineeType instanceof NominalDescriptor || scrutineeType instanceof GenericDescriptor)) {
+        final var sealedBound = scrutineeType instanceof TypeParameterDescriptor parameter
+                ? parameter.bounds().stream()
+                .filter(bound -> {
+                    final var contract = context.contracts.get(bound.name());
+                    return contract != null && contract.isSealed();
+                }).findFirst().orElse(null)
+                : null;
+        final var matchDomainType = sealedBound == null ? scrutineeType : sealedBound;
+        final var sealedContract = context.contracts.get(matchDomainType.name());
+        final boolean sealedRoot = sealedContract != null && sealedContract.isSealed();
+        final boolean productRoot = context.products.containsKey(scrutineeType.name());
+        final boolean literalRoot = isLiteralPatternType(scrutineeType);
+        final boolean concreteLiteralRoot = isConcretePatternType(context, scrutineeType)
+                && match.arms.stream().anyMatch(arm -> containsLiteralPattern(arm.pattern()));
+        final MatchRootKind rootKind;
+        if (sealedRoot) {
+            rootKind = MatchRootKind.SEALED;
+        } else if (productRoot) {
+            rootKind = MatchRootKind.PRODUCT;
+        } else if (literalRoot && match.arms.stream().anyMatch(arm -> containsLiteralPattern(arm.pattern()))) {
+            rootKind = MatchRootKind.LITERAL;
+        } else if (concreteLiteralRoot) {
+            rootKind = MatchRootKind.CONCRETE_LITERAL;
+        } else {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     match.keyword,
-                    "Match expressions require a sealed contract value."));
+                    "Match expressions require a sealed contract, product type, or literal match on a concrete non-open type."));
+            throw new IllegalStateException("Resolution errors must abort match resolution.");
         }
-
-        final var sealedContract = context.contracts.get(scrutineeType.name());
-        if (sealedContract == null || !sealedContract.isSealed()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                    match.keyword,
-                    "Match expressions require a sealed contract value."));
-        }
-        final var contractArguments = scrutineeType instanceof GenericDescriptor generic
+        final var contractArguments = matchDomainType instanceof GenericDescriptor generic
                 ? generic.typeParameters()
                 : List.<TypeDescriptor>of();
-        if (contractArguments.size() != sealedContract.typeParameters().size()) {
+        if (sealedRoot && contractArguments.size() != sealedContract.typeParameters().size()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     match.keyword,
                     "The sealed contract type arguments could not be resolved."));
         }
 
-        final var permittedNames = sealedContract.permittedClasses().stream()
+        final var permittedNames = sealedRoot
+                ? sealedContract.permittedClasses().stream()
                 .map(permitted -> permitted.name().lexeme())
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
+                : rootKind == MatchRootKind.PRODUCT || rootKind == MatchRootKind.CONCRETE_LITERAL
+                ? new LinkedHashSet<>(Set.of(scrutineeType.name()))
+                : new LinkedHashSet<String>();
         final var matchedNames = new LinkedHashSet<String>();
+        final var matchedLiterals = new LinkedHashSet<LiteralPatternKey>();
         boolean wildcardSeen = false;
+        boolean rootCovered = false;
         final var incomingFlow = context.frame.flowState.copy();
         final var armFlows = new ArrayList<FlowState>();
         TypeDescriptor resultType = null;
 
         for (final var arm : match.arms) {
-            if (matchedNames.containsAll(permittedNames)) {
+            if (rootCovered) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         arm.keyword(), "A match case follows an irrefutable case and is unreachable."));
             }
@@ -1055,24 +1084,24 @@ final class ExpressionFlowResolver {
                         "A match case after '_' is unreachable."));
             }
             final var pattern = resolveMatchPattern(context, arm.pattern(), scrutineeType, true,
-                    permittedNames, contractArguments);
+                    permittedNames, contractArguments, rootKind);
             if (!arm.pattern().wildcard() && pattern.matchedType() != null
                     && matchedNames.contains(pattern.matchedType().name())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         arm.keyword(), "A match case for '" + pattern.matchedType().name()
                                 + "' follows an unguarded case and is unreachable."));
             }
+            if (!java.util.Collections.disjoint(matchedLiterals, pattern.coveredLiterals())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        arm.keyword(), "A literal match case is duplicated and unreachable."));
+            }
             if (arm.pattern().wildcard()) {
                 if (arm.guard() != null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                             arm.keyword(), "A wildcard match case cannot have a guard."));
                 }
-                if (matchedNames.containsAll(permittedNames)) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                            arm.keyword(),
-                            "A wildcard case is unreachable because every permitted case is covered."));
-                }
                 wildcardSeen = true;
+                rootCovered = true;
             }
 
             context.frame.flowState = incomingFlow.copy();
@@ -1098,16 +1127,29 @@ final class ExpressionFlowResolver {
             } finally {
                 endScope(context);
             }
-            if (arm.guard() == null && pattern.irrefutable() && !arm.pattern().wildcard()) {
+            if (arm.guard() == null) {
                 matchedNames.addAll(pattern.coveredClasses());
+                matchedLiterals.addAll(pattern.coveredLiterals());
+                if (rootKind == MatchRootKind.SEALED && matchedNames.containsAll(permittedNames)
+                        || (rootKind == MatchRootKind.PRODUCT || rootKind == MatchRootKind.CONCRETE_LITERAL)
+                        && matchedNames.contains(scrutineeType.name())
+                        || rootKind == MatchRootKind.LITERAL
+                        && TypeDescriptor.ofBoolean().equals(scrutineeType)
+                        && matchedLiterals.containsAll(Set.of(
+                        new LiteralPatternKey(TypeDescriptor.ofBoolean(), true),
+                        new LiteralPatternKey(TypeDescriptor.ofBoolean(), false)))) {
+                    rootCovered = true;
+                }
             }
         }
 
-        if (!wildcardSeen && !matchedNames.containsAll(permittedNames)) {
-            final var missing = permittedNames.stream()
-                    .filter(name -> !matchedNames.contains(name))
-                    .map(Resolver::simpleName)
-                    .collect(java.util.stream.Collectors.joining(", "));
+        if (!rootCovered) {
+            final var missing = rootKind == MatchRootKind.SEALED
+                    ? permittedNames.stream().filter(name -> !matchedNames.contains(name))
+                    .map(Resolver::simpleName).collect(java.util.stream.Collectors.joining(", "))
+                    : rootKind == MatchRootKind.LITERAL && TypeDescriptor.ofBoolean().equals(scrutineeType)
+                    ? "true, false"
+                    : "a wildcard or total pattern";
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     match.keyword,
                     "Non-exhaustive match; missing cases: " + missing + "."));
@@ -1120,10 +1162,39 @@ final class ExpressionFlowResolver {
         return resultType;
     }
 
+    private enum MatchRootKind {
+        SEALED,
+        PRODUCT,
+        LITERAL,
+        CONCRETE_LITERAL
+    }
+
+    private record LiteralPatternKey(TypeDescriptor type, Object value) {}
+
+    private static boolean isLiteralPatternType(final TypeDescriptor type) {
+        return type instanceof IntDescriptor
+                || type instanceof BooleanDescriptor
+                || type instanceof StringDescriptor;
+    }
+
+    private static boolean isConcretePatternType(final ResolutionContext context,
+                                                 final TypeDescriptor type) {
+        if (!(type instanceof NominalDescriptor || type instanceof GenericDescriptor)) return false;
+        final var declaration = context.classes.get(type.name());
+        return declaration != null && !declaration.isEffect();
+    }
+
+    private static boolean containsLiteralPattern(final Expr.MatchPattern pattern) {
+        if (pattern.literal() != null) return true;
+        return pattern.alternatives().stream().anyMatch(ExpressionFlowResolver::containsLiteralPattern)
+                || pattern.arguments().stream().anyMatch(ExpressionFlowResolver::containsLiteralPattern);
+    }
+
     private record MatchBinding(Token name, TypeDescriptor type) {}
 
     private record MatchPatternResolution(Map<String, MatchBinding> bindings,
                                           Set<String> coveredClasses,
+                                          Set<LiteralPatternKey> coveredLiterals,
                                           boolean irrefutable,
                                           TypeDescriptor matchedType) {}
 
@@ -1133,16 +1204,18 @@ final class ExpressionFlowResolver {
             final TypeDescriptor inputType,
             final boolean root,
             final Set<String> permittedNames,
-            final List<TypeDescriptor> contractArguments) {
+            final List<TypeDescriptor> contractArguments,
+            final MatchRootKind rootKind) {
         if (!pattern.alternatives().isEmpty()) {
             pattern.resolve(null, inputType, false);
             final var alternatives = pattern.alternatives().stream()
                     .map(alternative -> resolveMatchPattern(context, alternative, inputType, root,
-                            permittedNames, contractArguments))
+                            permittedNames, contractArguments, rootKind))
                     .toList();
             final var first = alternatives.getFirst();
             final var names = first.bindings().keySet();
             final var covered = new LinkedHashSet<String>();
+            final var coveredLiterals = new LinkedHashSet<LiteralPatternKey>();
             boolean irrefutable = false;
             for (int i = 0; i < alternatives.size(); i++) {
                 final var alternative = alternatives.get(i);
@@ -1161,29 +1234,58 @@ final class ExpressionFlowResolver {
                     }
                 }
                 covered.addAll(alternative.coveredClasses());
+                coveredLiterals.addAll(alternative.coveredLiterals());
                 irrefutable |= alternative.irrefutable();
             }
-            return new MatchPatternResolution(first.bindings(), covered, irrefutable, inputType);
+            return new MatchPatternResolution(first.bindings(), covered, coveredLiterals, irrefutable, inputType);
+        }
+
+        if (pattern.literal() != null) {
+            final var literalType = pattern.literal().getType();
+            if (!isLiteralPatternType(literalType)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.keyword(), "Literal patterns currently support only Int, Boolean, and String."));
+            }
+            final var valueType = inputType instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : inputType;
+            if (valueType instanceof NullableDescriptor || !literalType.equals(valueType)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.keyword(), "A literal pattern must have the same non-null type as the matched value."));
+            }
+            pattern.resolve(null, valueType, false);
+            final var bindings = new LinkedHashMap<String, MatchBinding>();
+            if (pattern.alias() != null) addPatternBinding(context, bindings, pattern.alias(), valueType);
+            final var literal = pattern.literal();
+            return new MatchPatternResolution(bindings, Set.of(),
+                    Set.of(new LiteralPatternKey(literalType, literal.value)), false, valueType);
         }
 
         if (pattern.wildcard()) {
             pattern.resolve(null, inputType, false);
-            return new MatchPatternResolution(Map.of(), root ? permittedNames : Set.of(), true, inputType);
+            return new MatchPatternResolution(Map.of(), root ? permittedNames : Set.of(),
+                    Set.of(), true, inputType);
         }
         if (pattern.binding() != null) {
             pattern.resolve(null, inputType, false);
             final var bindings = new LinkedHashMap<String, MatchBinding>();
             addPatternBinding(context, bindings, pattern.binding(), inputType);
-            return new MatchPatternResolution(bindings, Set.of(), true, inputType);
+            return new MatchPatternResolution(bindings, Set.of(), Set.of(), true, inputType);
         }
         final TypeDescriptor patternType;
         if (pattern.type() == null && pattern.extractor() != null) {
-            if (!root || context.sums.get(inputType.name()) == null) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                        pattern.keyword(),
-                        "Unqualified sum case patterns require a sum-typed match scrutinee."));
+            final var sumType = findUnqualifiedPatternSum(context, inputType, root,
+                    permittedNames, pattern.extractor());
+            if (sumType != null) {
+                patternType = sumType;
+            } else {
+                final var resolvedName = MemberInteropResolver.resolveClassName(
+                        context, pattern.extractor().lexeme(), pattern.extractor());
+                if (resolvedName == null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND,
+                            pattern.extractor(), "Unknown product type '" + pattern.extractor().lexeme() + "'."));
+                }
+                patternType = TypeDescriptor.ofName(resolvedName);
             }
-            patternType = inputType;
         } else if (pattern.type() == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     pattern.keyword(), "Expected a type, binding, or wildcard pattern."));
@@ -1192,13 +1294,32 @@ final class ExpressionFlowResolver {
             patternType = resolveStarImportedPatternType(context, pattern);
         }
 
-        final var sum = root ? context.sums.get(patternType.name()) : null;
-        if (sum == null) TypeResolver.validateType(context, patternType, pattern.keyword());
-        if (patternType instanceof NullableDescriptor || patternType instanceof ReferenceDescriptor) {
+        final var effectiveInputType = inputType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : inputType;
+        final var resolvedPatternType = patternType;
+        final var productPatternType = pattern.productPattern()
+                && context.products.containsKey(resolvedPatternType.name())
+                && resolvedPatternType instanceof NominalDescriptor
+                && effectiveInputType instanceof GenericDescriptor applied
+                && applied.name().equals(resolvedPatternType.name())
+                ? effectiveInputType
+                : resolvedPatternType;
+        final var patternTypeForResolution = productPatternType;
+        final var sum = pattern.extractor() == null ? null : context.sums.get(patternTypeForResolution.name());
+        if (sum == null) TypeResolver.validateType(context, patternTypeForResolution, pattern.keyword());
+        if (patternTypeForResolution instanceof NullableDescriptor
+                || patternTypeForResolution instanceof ReferenceDescriptor) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     pattern.keyword(), "Match case types must be non-null class types."));
         }
         if (sum != null && pattern.extractor() != null) {
+            if (!root && !patternTypeForResolution.name().equals(inputType.name())
+                    || patternTypeForResolution instanceof GenericDescriptor applied
+                    && inputType instanceof GenericDescriptor input
+                    && !applied.typeParameters().equals(input.typeParameters())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.keyword(), "Nested sum patterns must match the extracted sum type."));
+            }
             final var sumCase = sum.cases().stream()
                     .filter(candidate -> candidate.name().lexeme().equals(pattern.extractor().lexeme()))
                     .findFirst().orElse(null);
@@ -1207,9 +1328,22 @@ final class ExpressionFlowResolver {
                         pattern.extractor(), "Unknown case '" + pattern.extractor().lexeme()
                                 + "' for sum '" + sum.name().lexeme() + "'."));
             }
-            final var sumArguments = patternType instanceof GenericDescriptor generic
+            final var caseName = sum.generatedCaseName(sumCase);
+            if (root && !permittedNames.contains(caseName)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.keyword(), "Sum case '" + pattern.extractor().lexeme()
+                                + "' is not permitted by the matched sealed contract."));
+            }
+            final var patternArguments = patternTypeForResolution instanceof GenericDescriptor generic
                     ? generic.typeParameters() : List.<TypeDescriptor>of();
-            if (!sumArguments.isEmpty() && !sumArguments.equals(contractArguments)) {
+            final var inputArguments = inputType instanceof GenericDescriptor generic
+                    && inputType.name().equals(sum.name().lexeme())
+                    ? generic.typeParameters()
+                    : List.<TypeDescriptor>of();
+            final var expectedSumArguments = !inputArguments.isEmpty() ? inputArguments
+                    : root && !contractArguments.isEmpty() ? contractArguments
+                    : patternArguments;
+            if (!patternArguments.isEmpty() && !patternArguments.equals(expectedSumArguments)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         pattern.keyword(), "Case type arguments must match the scrutinee sum arguments."));
             }
@@ -1218,30 +1352,72 @@ final class ExpressionFlowResolver {
                         pattern.extractor(), "Sum case expects " + sumCase.payloads().size()
                                 + " payload patterns and does not support an alias."));
             }
-            final TypeDescriptor appliedSumType = contractArguments.isEmpty()
+            final TypeDescriptor appliedSumType = expectedSumArguments.isEmpty()
                     ? TypeDescriptor.ofName(sum.name().lexeme())
-                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(sum.name().lexeme()), contractArguments);
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(sum.name().lexeme()), expectedSumArguments);
             final var substitutions = TypeResolver.substitutionsFor(context, sum.typeParameters(), appliedSumType);
             final var bindings = new LinkedHashMap<String, MatchBinding>();
+            boolean refutable = false;
             for (int index = 0; index < sumCase.payloads().size(); index++) {
                 final var argument = pattern.arguments().get(index);
-                if (!argument.alternatives().isEmpty() || argument.extractor() != null
-                        || argument.alias() != null || argument.binding() == null && !argument.wildcard()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                            argument.keyword(), "Sum payload patterns may only bind a name or use '_'."));
-                }
                 final var payloadType = TypeSubstitution.substitute(
                         sumCase.payloads().get(index).type(), substitutions);
-                argument.resolve(null, payloadType, false);
-                if (argument.binding() != null) {
-                    addPatternBinding(context, bindings, argument.binding(), payloadType);
-                }
+                final var nested = resolveMatchPattern(context, argument, payloadType, false,
+                        permittedNames, contractArguments, rootKind);
+                mergePatternBindings(context, bindings, nested.bindings(), argument.keyword());
+                refutable |= !nested.irrefutable();
             }
-            final var caseName = sum.generatedCaseName(sumCase);
-            pattern.resolve(null, TypeDescriptor.ofName(caseName), false);
+            final var caseType = expectedSumArguments.isEmpty()
+                    ? TypeDescriptor.ofName(caseName)
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(caseName), expectedSumArguments);
+            pattern.resolve(null, caseType, false);
             pattern.markSumCase();
-            return new MatchPatternResolution(bindings, Set.of(caseName), true,
-                    TypeDescriptor.ofName(caseName));
+            return new MatchPatternResolution(bindings, root && !refutable ? Set.of(caseName) : Set.of(),
+                    Set.of(), !refutable, caseType);
+        }
+        final var product = context.products.get(patternTypeForResolution.name());
+        if (pattern.productPattern() && product != null) {
+            if (pattern.type() != null && pattern.extractor() != null
+                    || pattern.arguments().size() != product.components().size()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                        pattern.keyword(), "Product pattern expects " + product.components().size()
+                                + " component patterns."));
+            }
+            TypeResolver.validateType(context, patternTypeForResolution, pattern.keyword());
+            final var classArguments = patternTypeForResolution instanceof GenericDescriptor generic
+                    ? generic.typeParameters() : List.<TypeDescriptor>of();
+            if (root) {
+                if (!permittedNames.contains(patternTypeForResolution.name())
+                        || !classArguments.equals(contractArguments)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                            pattern.keyword(), "Product pattern type must match the product scrutinee."));
+                }
+            } else if (!context.typeCompatibility.canTypeTest(inputType, patternTypeForResolution)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                        pattern.keyword(), "Nested product pattern is incompatible with its extracted value."));
+            }
+            pattern.resolve(null, patternTypeForResolution, false);
+            final var bindings = new LinkedHashMap<String, MatchBinding>();
+            if (pattern.alias() != null) addPatternBinding(context, bindings, pattern.alias(), patternType);
+            final var substitutions = TypeResolver.substitutionsFor(
+                    context, product.typeParameters(), patternTypeForResolution);
+            boolean refutable = false;
+            for (int index = 0; index < product.components().size(); index++) {
+                final var argument = pattern.arguments().get(index);
+                final var componentType = TypeSubstitution.substitute(
+                        product.components().get(index).type(), substitutions);
+                final var nested = resolveMatchPattern(context, argument, componentType, false,
+                        permittedNames, contractArguments, rootKind);
+                mergePatternBindings(context, bindings, nested.bindings(), argument.keyword());
+                refutable |= !nested.irrefutable();
+            }
+            return new MatchPatternResolution(bindings,
+                    root && !refutable ? Set.of(patternType.name()) : Set.of(),
+                    Set.of(), !refutable, patternType);
+        }
+        if (pattern.productPattern()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                    pattern.keyword(), "Positional destructuring patterns require a product type."));
         }
         final var classDeclaration = context.classes.get(patternType.name());
         if (classDeclaration == null) {
@@ -1294,7 +1470,7 @@ final class ExpressionFlowResolver {
                     final var outputType = TypeSubstitution.substitute(
                             declaration.outputs().get(i).type(), substitutions);
                     final var nested = resolveMatchPattern(context, pattern.arguments().get(i), outputType,
-                            false, permittedNames, contractArguments);
+                            false, permittedNames, contractArguments, rootKind);
                     mergePatternBindings(context, bindings, nested.bindings(), pattern.arguments().get(i).keyword());
                     refutable |= !nested.irrefutable();
                 }
@@ -1319,14 +1495,32 @@ final class ExpressionFlowResolver {
                 pattern.resolve(null, patternType, true);
                 pattern.setResolvedPatternTypes(property.type(), resolvedOutput);
                 final var nested = resolveMatchPattern(context, pattern.arguments().getFirst(), resolvedOutput,
-                        false, permittedNames, contractArguments);
+                        false, permittedNames, contractArguments, rootKind);
                 mergePatternBindings(context, bindings, nested.bindings(), pattern.arguments().getFirst().keyword());
                 refutable = !nested.irrefutable();
             }
         }
         return new MatchPatternResolution(bindings,
                 root && !refutable ? Set.of(patternType.name()) : Set.of(),
-                !refutable, patternType);
+                Set.of(), !refutable, patternType);
+    }
+
+    private static TypeDescriptor findUnqualifiedPatternSum(final ResolutionContext context,
+                                                            final TypeDescriptor inputType,
+                                                            final boolean root,
+                                                            final Set<String> permittedNames,
+                                                            final Token caseName) {
+        final var inputSum = context.sums.get(inputType.name());
+        if (inputSum != null) return inputType;
+        if (!root) return null;
+        for (final var sum : context.sums.values()) {
+            final var permittedCase = sum.cases().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(caseName.lexeme()))
+                    .map(sum::generatedCaseName)
+                    .anyMatch(permittedNames::contains);
+            if (permittedCase) return TypeDescriptor.ofName(sum.name().lexeme());
+        }
+        return null;
     }
 
     private static TypeDescriptor resolveStarImportedPatternType(final ResolutionContext context,
@@ -1469,7 +1663,7 @@ final class ExpressionFlowResolver {
         final var caseArguments = sumType instanceof GenericDescriptor generic
                 ? generic.typeParameters() : List.<TypeDescriptor>of();
         final var resolvedPattern = resolveMatchPattern(context, pattern, sumType, true,
-                permittedCases, caseArguments);
+                permittedCases, caseArguments, MatchRootKind.SEALED);
         final var matchedType = resolvedPattern.matchedType();
         final var resolvedCaseType = matchedType == null || caseArguments.isEmpty()
                 ? matchedType

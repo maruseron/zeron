@@ -26,11 +26,26 @@ public final class DiagnosticCatalogTest {
             }
             assertEquals(entry, DiagnosticCatalog.find(entry.code()).orElseThrow());
         }
-        assertEquals(34, DiagnosticCatalog.entries().size());
+        assertEquals(46, DiagnosticCatalog.entries().size());
     }
 
     @Test
     public void doesNotResolveUnknownCodes() {
         assertFalse(DiagnosticCatalog.find(new DiagnosticCode("ZR9999")).isPresent());
+    }
+
+    @Test
+    public void formatsAllBundledExplanationResourcesAsTerminalText() throws IOException {
+        for (final var entry : DiagnosticCatalog.entries()) {
+            try (var stream = getClass().getClassLoader().getResourceAsStream(entry.explanationResource())) {
+                assertTrue("Missing explanation resource " + entry.explanationResource(), stream != null);
+                final var markdown = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+                final var formatted = ExplanationFormatter.format(markdown);
+
+                assertTrue(formatted.startsWith(entry.code() + ": " + entry.title()));
+                assertFalse(formatted.contains("```"));
+                assertFalse(formatted.lines().anyMatch(line -> line.startsWith("#")));
+            }
+        }
     }
 }

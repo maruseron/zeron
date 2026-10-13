@@ -43,6 +43,21 @@ public final class DiagnosticFormatterTest {
         assertTrue(formatted.contains("    |     ^"));
     }
 
+    @Test
+    public void addsAnsiStylesToDiagnosticHeaderAndSourceExcerptWhenRequested() {
+        final var span = span("src/example.zn", 1, 5, 4, 1, 10, 9);
+        final var diagnostic = new Diagnostic(DiagnosticCatalog.NAME_NOT_FOUND.code(), Severity.ERROR,
+                "Name 'value' was not found.", span, List.of(), List.of(), List.of());
+
+        final var formatted = DiagnosticFormatter.format(diagnostic,
+                (path, line) -> "let value = 1;", true);
+
+        assertTrue(formatted.startsWith("\u001b[36msrc/example.zn:1:5\u001b[0m: "
+                + "\u001b[31merror\u001b[0m\u001b[35m[ZR2001]\u001b[0m:"));
+        assertTrue(formatted.contains("\u001b[35mlet\u001b[0m value"));
+        assertTrue(formatted.contains("\u001b[31m^~~~~\u001b[0m"));
+    }
+
     private static SourceSpan span(final String path,
                                    final int startLine,
                                    final int startColumn,

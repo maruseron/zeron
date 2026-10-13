@@ -146,6 +146,18 @@ public final class Resolver {
             context.currentImports = importsByUnit.get(unit);
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                if (!(entry.declaration() instanceof Stmt.ExternalClass externalClass)) continue;
+                for (final var method : externalClass.methods()) {
+                    attempt(context, () -> MemberInteropResolver.validateExternalExceptionMappings(context, method));
+                }
+            }
+        }
+        for (final var unit : units) {
+            context.packageName = unit.packageName();
+            context.currentSourcePath = unit.sourcePath();
+            context.currentImports = importsByUnit.get(unit);
+            context.invalidImportAliases = invalidAliasesByUnit.get(unit);
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = entry.declaration();
                 final var contractUses = declaration instanceof Stmt.ClassDecl classDeclaration
                         ? classDeclaration.contractUses()
@@ -228,7 +240,7 @@ public final class Resolver {
         for (final var lambda : context.resolvedLambdas) {
             if (LambdaResolver.containsInfer(context, lambda.getType())) {
                 context.diagnostics.record(ResolutionError.withHelp(
-                        DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                        DiagnosticCatalog.TYPE_INFERENCE_FAILURE,
                         lambda.arrow,
                         "Cannot infer the lambda's function type.",
                         new DiagnosticHelp("Add an explicit function type annotation to the binding.")),
@@ -513,7 +525,7 @@ public final class Resolver {
                 return TypeSubstitution.substitute(contractUse.typeArguments().getFirst(), substitutions);
             }
         }
-        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, where,
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_ITERABLE, where,
                 "Iterative control flow requires Array<T>, an integer range literal, or a type conforming to Iterable<T>."));
         return TypeDescriptor.ofInfer();
     }
@@ -539,7 +551,7 @@ public final class Resolver {
                 return TypeSubstitution.substitute(contractUse.typeArguments().getFirst(), substitutions);
             }
         }
-        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, where,
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_COLLECTOR, where,
                 "For expression collection requires a type conforming to Sink<T>."));
         return TypeDescriptor.ofInfer();
     }

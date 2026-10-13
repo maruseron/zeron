@@ -1,0 +1,14 @@
+package java.nio.file;
+
+public external class Path = "java.nio.file.Path" {
+    public equals(other: Any?): Boolean;
+    public getFileName(): &Path?;
+    public getParent(): &Path?;
+    public hashCode(): Int;
+    public isAbsolute(): Boolean;
+    public normalize(): &Path;
+    public resolve(other: &Path): &Path;
+    public resolve(other: String): &Path;
+    public toAbsolutePath(): &Path;
+    public toString(): String;
+}

@@ -57,7 +57,7 @@ against inferred or explicit type arguments. Class bounds, bounds on generic cla
 mutating bound methods remain unsupported. Generic functions and methods may also call class-side
 factory requirements through bounds; the compiler selects a compatible public named constructor,
 honoring explicit witness remapping, and passes its method handle as hidden evidence. Witness
-metadata is preserved in the current API-index schema (`api-v24.bin`) for separately compiled
+metadata is preserved in the versioned API index for separately compiled
 libraries. Full generic-pattern overlap analysis remains future work. See
 [design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
 Type parameters may appear recursively in parameters, results, function signatures, nullable and
@@ -193,8 +193,10 @@ shape matrix and broader adapter reuse still need coverage.
 5. **Multiple contract bounds on generic functions and methods: first slice implemented.** Each
   function or method type parameter may have multiple contract bounds. Call sites validate inferred
   and explicit type arguments against every bound; generic bodies may call a bound's non-mutating
-  methods through a cast and interface dispatch. Bounds on generic classes/contracts, class bounds,
-  mutating methods, operator constraints, variance, and broader inference remain deferred.
+  methods through a cast and interface dispatch. Generic class and contract type parameters may also
+  be bounded; instances retain evidence for class methods and contract defaults. Mutating methods,
+  operator constraints, variance, and broader inference remain deferred. See
+  [design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
 6. **Let-bound polymorphic lambdas: implemented first slice.** Immutable identity and constant-result
     lambdas generalize unresolved parameters into rank-1 schemes; each use instantiates independently.
     Mutable bindings, nested schemes, and operator constraints remain deferred.

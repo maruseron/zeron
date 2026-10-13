@@ -13,11 +13,12 @@
 - [Ranges and Iterables](#ranges-and-iterables)
 - [Classes](#classes)
 - [Typed raised effects](#typed-raised-effects)
+- [Resource management](#resource-management)
 - [Names, Packages, and Imports](#names-packages-and-imports)
 
-## Languages to review for alternatives
+## Languages to review for alternatives (from should influence most to least)
 
-Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript (see until!), F#
+Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, F#, Zig, Haxe, Julia, CoffeeScript (see until!)
 
 ### Wishlist
 
@@ -39,6 +40,8 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Nominal non-generic effect payload classes, declared `raises` sets, `raise` expressions, and
     typed expression handlers. Calls propagate effects until handled or declared; `Result` remains
     an ordinary value type. See [typed raised effects](design-document-13_typed-raised-effects.md).
+- Synchronous lexical `using` scopes over `zeron.resource.Disposable`, with reverse-order cleanup,
+    primary-failure preservation, and observable suppressed outcomes.
 - Explicitly imported extension methods for Zeron classes, contracts, and nominal sums. Extensions resolve
     statically, lower to receiver-first static functions, and cannot access private members.
     Ordinary callable names are unique rather than overloaded; extensions may share a name for
@@ -56,6 +59,9 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
 - Callable `zeron.io.print` and `zeron.io.println` standard-library functions, implemented as
     ordinary Zeron functions through the curated Java external-class facade. The former print
     statement syntax has been removed.
+- A lexical `zeron.fs.Path` value with path composition, filesystem queries and mutations, plus
+    whole-file UTF-8 text reading and writing through `zeron.io.text`. I/O failures are typed effects;
+    writer cleanup uses `Disposable`.
 - `zeron.lang.Option<T>` as the nominal sum `Some(value: T) | None`. Cases are constructed and
     matched through `Option.Some(value)` and `Option<T>.None()`. Public extension operations provide
     `isSome`, `getOrElse`, `fold`, `map`, and `filter`. `Iterator<T>.next()` returns this type,
@@ -79,6 +85,10 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     descriptors; static writes and final-field writes are rejected. Java methods support `Object[]`
     parameters/results; Zeron array arguments are shallow-copied at the boundary, while typed
     reference and primitive array signatures remain unsupported.
+- Checked exceptions declared by Java methods are rejected for direct interop calls. External
+    facades may opt into explicit checked-exception-to-effect mappings; unchecked exceptions and
+    `Error`s continue to propagate unchanged, and Java constructors with checked exceptions are not
+    yet supported.
 - Binding reassignment as a declaration property: `let` bindings are immutable and `let mut`
     bindings may be reassigned.
 - Reference mutation capability (`&T`) is distinct from binding reassignment and is enforced for
@@ -159,7 +169,7 @@ Java, Kotlin, Scala, Haskell, OCaml, Swift, Rust, Zig, Haxe, Julia, CoffeeScript
     implemented. Direct-carrier newtype lowering and discriminated unions beyond native sums and
     sealed contracts remain deferred; see
     [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
-- Immutable collection types, list comprehensions, and explicit resource management.
+- Immutable collection types and list comprehensions.
 - Safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`), and explicit
     reference identity (`===`) are implemented. Value equality uses `Eq<T>` evidence, and custom
     relational comparisons use `Comparable<T>` and `Ordering`. See the
@@ -459,9 +469,9 @@ erase to `Object`; direct callback parameters/results and specialized function r
 between erased and concrete function shapes use generated bridge helpers. Nested callbacks, nullable
 callback values, and mutable function views are adapted recursively; broader primitive/reference
 combinations and bridge-reuse coverage remain. Invariant generic classes/contracts and callback
-adaptation across their erased member boundaries are implemented. Multiple contract bounds on
-generic functions and methods are implemented; variance and generic class/contract bounds remain
-deferred.
+adaptation across their erased member boundaries are implemented. Contract bounds are supported on
+generic functions, methods, classes, and contracts. Class and contract evidence is carried through
+instances for member and default-method dispatch; variance and broader inference remain deferred.
 
 ---
 
@@ -589,8 +599,9 @@ loop {
 `zeron.lang.Result<T, E>` represents recoverable failures as ordinary values. Its sealed `Ok` and
 `Err` cases can be consumed with exhaustive matching or `fold`, and composed explicitly with
 `map`, `mapError`, and `andThen`. Propagation syntax remains deferred while its interaction with
-nullability and other sequencing notation is explored. Source-level exception handlers and cleanup
-semantics are separate deferred features. `Ok.value` and `Err.error` are read-only properties on
+nullability and other sequencing notation is explored. `using` provides synchronous lexical resource
+cleanup; it does not catch arbitrary Java exceptions or make `Result` interoperate with raised effects.
+`Ok.value` and `Err.error` are read-only properties on
 their respective variants, not members of the common `Result` contract; narrow or match the result
 before accessing a payload.
 
@@ -661,6 +672,19 @@ mutations (`add`, `insert`, `replaceAt`, `removeAt`, and `clear`) require `&List
 mutable list reference to a `List<T>` variable gives a read-only view of the same list.
 The backing array stores elements directly; unused capacity is tracked by the list size, so nullable
 elements remain valid without allocating a wrapper object per element.
+
+`Map<K, V>` and `Set<T>` are mutable hash-based collections in `zeron.collections`. Their key types
+must satisfy `Hashable<K>`/`Hashable<T>`; `Hashable<T>` entails `Eq<T>`. The map API provides
+`empty`, `of`, `size`, `isEmpty`, `containsKey`, `lookup`, `put`, `remove`, `clear`, and iteration
+over `Pair<K, V>` values. `lookup` and `remove` return `Option<V>`; `put` returns the previous value
+as an `Option<V>`, so a stored nullable value is distinct from an absent key. The set API provides
+`empty`, `of`, `size`, `isEmpty`, `contains`, `add`, `remove`, `clear`, and iteration over its
+elements; `add` and `remove` report whether the collection changed.
+
+Both collections support nullable keys/elements through nullable `Hashable` evidence. Iteration order
+is unspecified. Lookup and updates are expected constant time on average, with linear worst-case
+behavior under heavy collisions. Keys must retain equality- and hash-relevant state while stored;
+mutating such state can make a key unreachable.
 
 ```zeron
 package geometry;
@@ -770,3 +794,12 @@ the arm results. `raise` has type `Never`. `Result<T, E>` remains an ordinary va
 implicitly translated to or from raised effects. See
 [design-document-13](design-document-13_typed-raised-effects.md) for compatibility, runtime, and
 roadmap details.
+
+### Resource management
+
+Statement-style `using` scopes acquire one or more `&T` values conforming to
+`zeron.resource.Disposable`, dispose them in reverse order, and preserve a primary failure while
+attempting every cleanup. `DisposeFailure` is a typed raised effect, and handlers may bind
+suppressed cleanup outcomes with `with suppressed as name`. The construct is synchronous and does
+not implicitly return a block's final expression. See the
+[resource-management guide](../guide/26-resource-management.md).

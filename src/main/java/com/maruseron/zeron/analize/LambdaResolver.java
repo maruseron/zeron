@@ -85,7 +85,7 @@ final class LambdaResolver {
 
         for (final var parameter : sourceType.typeParameters()) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
                         reference.name,
                         "Cannot infer type parameter '" + parameter.name()
                                 + "' for function value; provide an explicit type argument."));

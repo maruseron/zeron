@@ -1,6 +1,8 @@
 module ZeronGrammar;
 
 # IDENTIFIER, INT, DOUBLE, and STRING denote scanner token kinds.
+# // and /* */ comments are retained as ranged scanner tokens and exposed by ParseResult,
+# but are excluded from the grammar and the compilation unit.
 # `type` below is source syntax; design-document-02 describes encoded descriptors.
 # soft("word") denotes a soft keyword: it is scanned as IDENTIFIER and recognized by exact spelling
 # only at the indicated grammatical position. Other quoted words are hard keywords.
@@ -94,6 +96,7 @@ statement                  : exprStmt
                            | forStmt
                            | ifStmt
                            | returnStmt
+                           | usingStmt
                            | loopStmt
                            | whileStmt
                            | untilStmt
@@ -102,6 +105,8 @@ exprStmt                   : expression ";" ;
 breakStmt                  : "break" ";" ;
 continueStmt               : "continue" ";" ;
 forStmt                    : "for" "(" "let" IDENTIFIER "in" expression ")" statement ;
+usingStmt                  : "using" "(" usingBinding {"," usingBinding} ")" block ;
+usingBinding               : "let" IDENTIFIER [":" type] "=" expression ;
 ifStmt                     : "if" "(" expression ")" statement ["else" statement] ;
 returnStmt                 : "return" [expression] ";" ;
 loopStmt                   : "loop" statement ;
@@ -159,7 +164,9 @@ primary                    : INT
                            | "(" expression ")"
                            | range ;
 handleExpr                 : "handle" "(" expression ")" soft("with") "{" handleArm+ "}" ;
-handleArm                  : "case" matchPattern ["if" expression] "->" expression ";" ;
+handleArm                  : "case" matchPattern ["if" expression]
+                             [soft("with") soft("suppressed") "as" IDENTIFIER]
+                             "->" expression ";" ;
 arrayLiteral               : "[" expression {"," expression} "]" ;
 ifExpr                     : "if" "(" expression ")" "then" expression "else" expression ;
 matchExpr                  : "match" "(" expression ")" "{" matchArm+ "}" ;
@@ -303,8 +310,9 @@ range                      : INT ".." INT ;
 #   initializers. A raised effect must be declared by the enclosing callable or handled by a typed
 #   `handle` case. Handler cases reuse nested and OR `matchPattern` syntax, allow Boolean guards,
 #   and require their OR alternatives to name the same effect type. Only an unguarded, irrefutable
-#   pattern establishes effect coverage; unmatched effects propagate at runtime. Java exceptions
-#   are not caught or translated. There are no catch-all cases or effect subtyping in this slice.
+#   pattern establishes effect coverage; unmatched effects propagate at runtime. Java checked
+#   exceptions can be mapped only by explicit external-class method declarations; there is no
+#   automatic translation. There are no catch-all cases or effect subtyping in this slice.
 #   `Result` remains an ordinary value type.
 # - Sum declarations introduce closed nominal types. Cases are constructed and matched through
 #   qualified calls/patterns; payload positions are positional, and generic case patterns inherit

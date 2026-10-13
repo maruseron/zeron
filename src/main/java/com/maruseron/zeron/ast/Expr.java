@@ -522,6 +522,8 @@ public sealed interface Expr {
         private final Token alias;
         private final boolean wildcard;
         private final List<MatchPattern> alternatives;
+        private final Expr.Literal literal;
+        private final boolean productPattern;
         private Stmt.Pattern declaration;
         private TypeDescriptor resolvedType;
         private TypeDescriptor declaredPatternType;
@@ -532,6 +534,13 @@ public sealed interface Expr {
         public MatchPattern(final Token keyword, final TypeDescriptor type, final Token extractor,
                             final List<MatchPattern> arguments, final Token binding, final Token alias,
                             final boolean wildcard, final List<MatchPattern> alternatives) {
+            this(keyword, type, extractor, arguments, binding, alias, wildcard, alternatives, null, false);
+        }
+
+        public MatchPattern(final Token keyword, final TypeDescriptor type, final Token extractor,
+                            final List<MatchPattern> arguments, final Token binding, final Token alias,
+                            final boolean wildcard, final List<MatchPattern> alternatives,
+                            final Expr.Literal literal, final boolean productPattern) {
             this.keyword = keyword;
             this.type = type;
             this.extractor = extractor;
@@ -540,6 +549,8 @@ public sealed interface Expr {
             this.alias = alias;
             this.wildcard = wildcard;
             this.alternatives = List.copyOf(alternatives);
+            this.literal = literal;
+            this.productPattern = productPattern;
         }
 
         public Token keyword() { return keyword; }
@@ -550,6 +561,8 @@ public sealed interface Expr {
         public Token alias() { return alias; }
         public boolean wildcard() { return wildcard; }
         public List<MatchPattern> alternatives() { return alternatives; }
+        public Expr.Literal literal() { return literal; }
+        public boolean productPattern() { return productPattern; }
         public Stmt.Pattern declaration() { return declaration; }
         public TypeDescriptor resolvedType() { return resolvedType; }
         public TypeDescriptor declaredPatternType() { return declaredPatternType; }
@@ -653,14 +666,22 @@ public sealed interface Expr {
         private final MatchPattern pattern;
         private final Expr guard;
         private final Expr expression;
+        private final Token suppressedBinding;
         private TypeDescriptor resolvedEffectType;
 
         public HandleArm(final Token keyword, final TypeDescriptor effectType,
                          final MatchPattern pattern, final Expr guard, final Expr expression) {
+            this(keyword, effectType, pattern, guard, null, expression);
+        }
+
+        public HandleArm(final Token keyword, final TypeDescriptor effectType,
+                         final MatchPattern pattern, final Expr guard,
+                         final Token suppressedBinding, final Expr expression) {
             this.keyword = keyword;
             this.effectType = effectType;
             this.pattern = pattern;
             this.guard = guard;
+            this.suppressedBinding = suppressedBinding;
             this.expression = expression;
         }
 
@@ -668,6 +689,7 @@ public sealed interface Expr {
         public TypeDescriptor effectType() { return effectType; }
         public MatchPattern pattern() { return pattern; }
         public Expr guard() { return guard; }
+        public Token suppressedBinding() { return suppressedBinding; }
         public Expr expression() { return expression; }
         public TypeDescriptor resolvedEffectType() { return resolvedEffectType; }
         public void setResolvedEffectType(final TypeDescriptor type) { resolvedEffectType = type; }

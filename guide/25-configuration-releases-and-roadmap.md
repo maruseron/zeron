@@ -29,11 +29,28 @@ Manifest paths are resolved relative to the manifest file, not to an assumed rep
 unit whose `main` is launched, and `output` names the generated-program directory. Keep that
 directory separate from Maven's compiler output.
 
+Command options are checked for the selected command. Invalid arguments produce a concise error on
+stderr and exit with status 64. Unknown dash-prefixed arguments are reported as options rather than
+treated as source filenames; for a filename beginning with `-`, provide a path with a directory
+prefix such as `./-example.zn`.
+Input paths are checked before the command runs: manifests must be existing TOML files, source
+inputs must be existing `.zn` files, and library/classpath inputs must be readable JARs or
+directories of the appropriate kind. Project-manifest source, dependency, and output paths are
+checked before dispatch as well. Output directories and JARs may be new, but their nearest existing
+parent must be a writable directory; an existing JAR output must be writable.
+
 ## Build, run, and diagnostics
 
 `zeron build` reads the manifest in the current directory, and `zeron run` builds and launches its
 entry point with the configured runtime classpath. Use `--manifest path/to/zeron.toml` to select a
-different file. `zeron explain ZR0000` displays the bundled explanation for a diagnostic code.
+different file. `zeron help` lists commands and flags; `zeron help run` or `zeron help --manifest`
+shows focused help. `zeron explain ZR0000` displays a terminal-formatted bundled explanation for a
+diagnostic code. `zeron dump <api-index|class-directory|library.jar>` prints the public API index
+for a library artifact.
+Compiler diagnostics and explanations use ANSI colors when an interactive terminal is detected.
+Zeron-language examples in explanations are syntax-highlighted. Output falls back to plain text
+when non-interactive, when `NO_COLOR` has a non-empty value, or when `TERM` is `dumb`. REPL
+sessions remain plain.
 Single-file compilation remains available for scripts; project commands centralize the common
 source, output, standard-library, and dependency options.
 

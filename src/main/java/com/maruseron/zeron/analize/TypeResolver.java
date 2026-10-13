@@ -101,8 +101,8 @@ final class TypeResolver {
                                 "Unknown type '" + nominal.name() + "'."));
                     }
 
-                    if (javaClass.hasGenericSignature()) {
-                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    if (javaClass.hasTypeParameters()) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                                 where,
                                 "Generic Java classes are not supported by the current interop slice."));
                     }
@@ -137,7 +137,7 @@ final class TypeResolver {
                 final var contractDeclaration = context.contracts.get(name);
                 if (classDeclaration == null && contractDeclaration == null) {
                     if (context.javaClassPath.find(name) != null) {
-                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                                 where,
                                 "Generic Java classes are not supported by the current interop slice."));
                     }
@@ -159,6 +159,24 @@ final class TypeResolver {
                                     + generic.typeParameters().size() + "."));
                 }
                 generic.typeParameters().forEach(parameter -> validateType(context, parameter, where));
+                final var genericParameters = classDeclaration != null
+                        ? classDeclaration.typeParameters() : contractDeclaration.typeParameters();
+                if (!genericParameters.isEmpty()) {
+                    final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+                    for (int index = 0; index < genericParameters.size(); index++) {
+                        substitutions.put(genericParameters.get(index),
+                                generic.typeParameters().get(index));
+                    }
+                    for (int index = 0; index < genericParameters.size(); index++) {
+                        final var argument = generic.typeParameters().get(index);
+                        for (final var bound : genericParameters.get(index).bounds()) {
+                            final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
+                            if (!TypeClassEvidence.hasEvidence(context, requiredBound, argument, where)) {
+                                Resolver.ensureAssignable(context, requiredBound, argument, where);
+                            }
+                        }
+                    }
+                }
             }
             default -> {}
         }

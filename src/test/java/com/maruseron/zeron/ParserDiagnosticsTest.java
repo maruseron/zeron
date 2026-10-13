@@ -79,6 +79,20 @@ public final class ParserDiagnosticsTest {
     }
 
     @Test
+    public void preservesCommentsInParseResultButExcludesThemFromDeclarations() {
+        final var result = Parser.of(Scanner.from("""
+                // leading comment
+                let value = 1; /* trailing comment */
+                """, "comments.zn").scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("comments.zn");
+
+        assertEquals(result.diagnostics().toString(), 0, result.diagnostics().size());
+        assertEquals(1, result.compilationUnit().declarations().size());
+        assertEquals(2, result.comments().size());
+        assertEquals("comments.zn", result.comments().getFirst().span().sourcePath());
+    }
+
+    @Test
     public void parsesPatternDeclarationsAndRecursiveOrPatterns() {
         final var result = Parser.of(Scanner.from("""
                 class Box {

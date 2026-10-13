@@ -17,7 +17,7 @@ From a Zeron source checkout, build with JDK 26 and Maven:
 
 ```powershell
 mvn package
-java --enable-preview -jar target/zeron-1.0-SNAPSHOT.jar init
+java --enable-preview -jar target/zeron-0.1-alpha.jar init
 ```
 
 Use the versioned JAR name produced in `target/` if it differs from the example.

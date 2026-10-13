@@ -114,8 +114,8 @@ final class ImportResolver {
                         (valueDeclaration == null ? "Type '" : "Value '") + target + "' is not public."));
             }
             if (classDeclaration != null || contractDeclaration != null || javaClass != null) {
-                if (javaClass != null && javaClass.hasGenericSignature()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                if (javaClass != null && javaClass.hasTypeParameters()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                             importDeclaration.location(),
                             "Generic Java classes are not supported by the current interop slice."));
                 }

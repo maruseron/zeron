@@ -1,20 +1,24 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.ZeronLibraryIndexDump;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.FunctionBindingRegistry;
 import com.maruseron.zeron.domain.JavaTypeMapping;
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.PrintStream;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.ConstantDescs;
 import java.lang.constant.MethodTypeDesc;
 import java.net.URLClassLoader;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -23,6 +27,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -31,14 +36,276 @@ public final class JavaInteropTest {
     private static final Path JAVA_FIXTURE_ROOT = Path.of("target", "test-classes");
 
     @Test
-    public void rejectsExternalClassesOutsideTheCuratedJdkSet() {
-        final var source = parse("UncuratedExternalClass.zn", """
-                package externalFacade;
+    public void resolvesExternalClassesByExplicitJavaBinaryName() {
+        final var source = parse("RuntimeFacade.zn", """
+                package java.lang;
                 public external class Runtime = "java.lang.Runtime" {}
                 """);
-        final var compiler = CompilationService.forCompilationUnits(List.of(source),
-                "externalFacade.UncuratedExternalClass", "externalFacade");
+        new ResolutionService().resolveUnits(List.of(source));
+    }
+
+    @Test
+    public void rejectsExternalMembersWhoseSignaturesDoNotMatchJavaMetadata() {
+        final var source = parse("InvalidFileFacade.zn", """
+                package java.io;
+                public external class File = "java.io.File" {
+                    public exists(): Int;
+                }
+                """);
+        assertThrows(ResolutionError.class,
+                () -> new ResolutionService().resolveUnits(List.of(source)));
+    }
+
+    @Test
+    public void usesTheFileFacadeForConstructorsAndDeclaredMethods() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var clientPackage = "fileinterop" + suffix;
+        final var programName = clientPackage + ".FileFacadeClient";
+        final var source = parse("FileFacadeClient.zn", """
+                package %s;
+                import java.io.File;
+                fn exists(file: File): Boolean = file.exists();
+                fn isDirectory(path: String): Boolean = File.new(path).isDirectory();
+                fn name(path: String): String? = File.new(path).getName();
+                fn delete(path: String): Boolean = File.new(path).delete();
+                """.formatted(clientPackage));
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(source), programName, clientPackage);
+        final var file = Files.createTempFile("zeron-file-facade-", ".tmp");
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertTrue((Boolean) program.getMethod("exists", java.io.File.class)
+                        .invoke(null, new java.io.File(file.toString())));
+                assertTrue((Boolean) program.getMethod("isDirectory", String.class)
+                        .invoke(null, file.getParent().toString()));
+                assertEquals(file.getFileName().toString(),
+                        program.getMethod("name", String.class).invoke(null, file.toString()));
+                assertTrue((Boolean) program.getMethod("delete", String.class).invoke(null, file.toString()));
+                assertFalse(Files.exists(file));
+            }
+        } finally {
+            Files.deleteIfExists(file);
+            deleteTree(Path.of("dist", clientPackage));
+        }
+    }
+
+    @Test
+    public void rejectsJavaMethodsNotDeclaredByAnExternalFacade() {
+        final var source = parse("UndeclaredFileMethod.zn", """
+                package fileinterop;
+                import java.io.File;
+                fn invalid(file: File): String? = file.getCanonicalPath();
+                """);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(source), "fileinterop.UndeclaredFileMethod", "fileinterop");
         assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
+    @Test
+    public void mapsCheckedJavaExceptionsToTypedEffects() throws Exception {
+        final var packageName = "com.maruseron.zeron.analize";
+        final var programName = packageName + ".CheckedExceptionMappingClient";
+        final var source = parse("CheckedExceptionMappingClient.zn", """
+                package %s;
+                public effect FileFailure {
+                    public property cause: java.io.IOException;
+                    public constructor fromIOException(cause: java.io.IOException) =
+                        FileFailure.new(cause);
+                }
+                public effect BroadFailure {
+                    public property cause: java.lang.Exception;
+                    public constructor fromException(cause: java.lang.Exception) =
+                        BroadFailure.new(cause);
+                }
+                public external class CheckedExceptionHost =
+                        "com.maruseron.zeron.analize.CheckedExceptionHost" {
+                    public constructor new();
+                    public checked(): String?
+                        throws java.io.IOException -> FileFailure::fromIOException;
+                    public overlapping(): String?
+                        throws java.lang.Exception -> BroadFailure::fromException,
+                            java.io.IOException -> FileFailure::fromIOException;
+                    public broad(): String?
+                        throws java.lang.Exception -> BroadFailure::fromException;
+                }
+                fn catchChecked(host: CheckedExceptionHost): String? =
+                    handle (host.checked()) with {
+                        case FileFailure.cause(_) -> "mapped";
+                    };
+                fn propagateBroad(host: CheckedExceptionHost): String? raises BroadFailure =
+                    host.broad();
+                fn catchMostSpecific(host: CheckedExceptionHost): String? raises BroadFailure =
+                    handle (host.overlapping()) with {
+                        case FileFailure.cause(_) -> "specific";
+                    };
+                """.formatted(packageName));
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-checked-exceptions-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-checked-exceptions-client-");
+        try {
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(source), programName, packageName, List.of(), false,
+                    List.of(JAVA_FIXTURE_ROOT), output);
+            compiler.resolve();
+            compiler.compile();
+            final var libraryIndex = ZeronLibraryIndex.readFromDirectory(output);
+            final var externalClass = libraryIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.ExternalClassExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ExternalClassExport.class::cast)
+                    .findFirst().orElseThrow();
+            final var checkedMapping = externalClass.methods().stream()
+                    .filter(method -> method.signature().name().equals("checked"))
+                    .findFirst().orElseThrow().exceptionMappings().getFirst();
+            assertEquals("java.io.IOException", checkedMapping.exceptionType());
+            assertEquals(packageName + ".FileFailure", checkedMapping.effectType());
+            assertEquals("fromIOException", checkedMapping.constructorName());
+            final var originalOutput = System.out;
+            final var dumpOutput = new ByteArrayOutputStream();
+            try {
+                try (final var redirectedOutput = new PrintStream(dumpOutput)) {
+                    System.setOut(redirectedOutput);
+                    ZeronLibraryIndexDump.main(output.toString());
+                }
+            } finally {
+                System.setOut(originalOutput);
+            }
+            assertTrue(dumpOutput.toString().contains("throws java.io.IOException -> "
+                    + packageName + ".FileFailure::fromIOException"));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                final var host = new CheckedExceptionHost();
+                assertEquals("mapped", program.getMethod("catchChecked", CheckedExceptionHost.class)
+                        .invoke(null, host));
+                final var failure = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                        () -> program.getMethod("propagateBroad", CheckedExceptionHost.class)
+                                .invoke(null, host));
+                assertTrue(failure.getCause() instanceof IllegalStateException);
+                assertEquals("unchecked", failure.getCause().getMessage());
+                assertEquals("specific", program.getMethod("catchMostSpecific", CheckedExceptionHost.class)
+                        .invoke(null, host));
+            }
+
+            final var clientPackage = packageName + ".compiledclient";
+            final var clientName = clientPackage + ".CheckedExceptionLibraryClient";
+            final var client = parse("CheckedExceptionLibraryClient.zn", """
+                    package %s;
+                    import %s.CheckedExceptionHost;
+                    import %s.FileFailure;
+                    fn mapped(host: &CheckedExceptionHost): String? =
+                        handle (host.checked()) with {
+                            case FileFailure.cause(_) -> "mapped from library";
+                        };
+                    """.formatted(clientPackage, packageName, packageName));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), clientName, clientPackage, List.of(libraryIndex), false,
+                    List.of(JAVA_FIXTURE_ROOT), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    clientOutput.toUri().toURL(), output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var clientProgram = loader.loadClass(clientName);
+                assertEquals("mapped from library",
+                        clientProgram.getMethod("mapped", CheckedExceptionHost.class)
+                                .invoke(null, new CheckedExceptionHost()));
+            }
+        } finally {
+            deleteTree(clientOutput);
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void rejectsDirectJavaCallsWithUnmappedCheckedExceptions() {
+        final var packageName = "com.maruseron.zeron.analize";
+        final var source = parse("UnmappedCheckedException.zn", """
+                package %s;
+                import com.maruseron.zeron.analize.CheckedExceptionHost;
+                fn invalid(host: &CheckedExceptionHost): String? = host.checked();
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(source), packageName + ".UnmappedCheckedException", packageName,
+                List.of(), false, List.of(JAVA_FIXTURE_ROOT));
+        assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
+    @Test
+    public void rejectsFacadeMethodsWithUnmappedCheckedExceptions() {
+        final var packageName = "com.maruseron.zeron.analize";
+        final var source = parse("UnmappedCheckedFacade.zn", """
+                package %s;
+                public external class CheckedExceptionHost =
+                        "com.maruseron.zeron.analize.CheckedExceptionHost" {
+                    public checked(): String?;
+                }
+                fn invalid(host: &CheckedExceptionHost): String? = host.checked();
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(source), packageName + ".UnmappedCheckedFacade", packageName,
+                List.of(), false, List.of(JAVA_FIXTURE_ROOT));
+        assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
+    @Test
+    public void rejectsJavaConstructorsNotDeclaredByAnExternalFacade() {
+        final var source = parse("UndeclaredFileConstructor.zn", """
+                package fileinterop;
+                import java.io.File;
+                fn invalid(path: String, child: String): File = File.new(path, child);
+                """);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(source), "fileinterop.UndeclaredFileConstructor", "fileinterop");
+        assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
+    @Test
+    public void compiledStandardLibraryPreservesTheFileFacadeAllowlist() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var clientPackage = "compiledfileinterop" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-stdlib-file-facade-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-file-client-");
+        final var source = parse("FileFacadeClient.zn", """
+                package %s;
+                import java.io.File;
+                fn exists(file: File): Boolean = file.exists();
+                fn fromPath(path: String): Boolean = File.new(path).exists();
+                """.formatted(clientPackage));
+        try {
+            final var libraryCompiler = CompilationService.forStandardLibrary(libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var library = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+            final var fileFacade = library.declarations().stream()
+                    .filter(ZeronLibraryIndex.ExternalClassExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ExternalClassExport.class::cast)
+                    .filter(export -> export.qualifiedName().equals("java.io.File"))
+                    .findFirst().orElseThrow();
+            assertEquals("java.io.File", fileFacade.javaBinaryName());
+            assertTrue(fileFacade.methods().stream()
+                    .anyMatch(method -> method.signature().name().equals("exists")));
+
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(source), clientPackage + ".FileFacadeClient", clientPackage,
+                    List.of(library), false, List.of(), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+
+            final var undeclaredMethod = parse("UndeclaredFileMethod.zn", """
+                    package %s;
+                    import java.io.File;
+                    fn invalid(file: &File): String? = file.getCanonicalPath();
+                    """.formatted(clientPackage));
+            final var invalidCompiler = CompilationService.forCompilationUnits(
+                    List.of(undeclaredMethod), clientPackage + ".UndeclaredFileMethod", clientPackage,
+                    List.of(library), false, List.of(), clientOutput);
+            assertThrows(ResolutionError.class, invalidCompiler::resolve);
+        } finally {
+            deleteTree(libraryOutput);
+            deleteTree(clientOutput);
+        }
     }
 
     @Test

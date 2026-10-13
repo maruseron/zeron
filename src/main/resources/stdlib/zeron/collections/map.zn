@@ -1,0 +1,256 @@
+package zeron.collections;
+
+import zeron.lang.Hashable;
+import zeron.lang.Eq;
+import zeron.lang.Option;
+import zeron.lang.Pair;
+import zeron.internal.generateArray;
+
+fn hashKey<T: Hashable<T>>(key: T): Int = key.hash();
+fn equalKeys<T: Eq<T>>(left: T, right: T): Boolean = left == right;
+
+class MapEntry<K, V> {
+    keyValue: K;
+    cachedHash: Int;
+    storedValue: V;
+    nextEntry: MapEntry<K, V>?;
+
+    private constructor new;
+
+    public constructor of(key: K, value: V, hash: Int, next: MapEntry<K, V>?) =
+        MapEntry<K, V>.new(key, hash, value, next);
+
+    public key(): K = this.keyValue;
+
+    public hash(): Int = this.cachedHash;
+
+    public value(): V = this.storedValue;
+
+    public next(): MapEntry<K, V>? = this.nextEntry;
+}
+
+class MapIterator<K, V> is Iterator<Pair<K, V>> {
+    buckets: &Array<MapEntry<K, V>?>;
+    bucketIndex: Int;
+    current: MapEntry<K, V>?;
+
+    private constructor new;
+
+    public constructor from(buckets: &Array<MapEntry<K, V>?>) =
+        MapIterator<K, V>.new(buckets, 0, null);
+
+    public mut next(): Option<Pair<K, V>> {
+        while (this.current === null) {
+            if (this.bucketIndex >= this.buckets.length) return Option<Pair<K, V>>.None();
+            let entry = this.buckets[this.bucketIndex];
+            this.bucketIndex = this.bucketIndex + 1;
+            if (entry === null) {
+                this.current = null;
+            } else {
+                this.current = entry;
+            }
+        }
+
+        let entry = this.current;
+        if (entry === null) return Option<Pair<K, V>>.None();
+        this.current = entry.next();
+        return Option.Some(Pair<K, V>.new(entry.key(), entry.value()));
+    }
+}
+
+class MapKeyIterator<K, V> is Iterator<K> {
+    buckets: &Array<MapEntry<K, V>?>;
+    bucketIndex: Int;
+    current: MapEntry<K, V>?;
+
+    private constructor new;
+
+    public constructor from(buckets: &Array<MapEntry<K, V>?>) =
+        MapKeyIterator<K, V>.new(buckets, 0, null);
+
+    public mut next(): Option<K> {
+        while (this.current === null) {
+            if (this.bucketIndex >= this.buckets.length) return Option<K>.None();
+            let entry = this.buckets[this.bucketIndex];
+            this.bucketIndex = this.bucketIndex + 1;
+            if (entry === null) {
+                this.current = null;
+            } else {
+                this.current = entry;
+            }
+        }
+
+        let entry = this.current;
+        if (entry === null) return Option<K>.None();
+        this.current = entry.next();
+        return Option.Some(entry.key());
+    }
+}
+
+public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
+    buckets: &Array<MapEntry<K, V>?>;
+    count: Int;
+    hashFunction: (K) -> Int;
+    equalityFunction: (K, K) -> Boolean;
+
+    private constructor new;
+
+    public constructor withOperations(hashFunction: (K) -> Int,
+                                      equalityFunction: (K, K) -> Boolean) =
+        Map<K, V>.new(generateArray<MapEntry<K, V>?>(8, (_) -> null),
+                0, hashFunction, equalityFunction);
+
+    private bucketIndex(hash: Int, capacity: Int): Int {
+        let mut index = hash % capacity;
+        if (index < 0) index = index + capacity;
+        return index;
+    }
+
+    private findEntry(key: K, hash: Int): MapEntry<K, V>? {
+        let equalityFunction = this.equalityFunction;
+        let mut entry = this.buckets[this.bucketIndex(hash, this.buckets.length)];
+        while (not (entry === null)) {
+            if (entry.hash() == hash and equalityFunction(entry.key(), key)) return entry;
+            entry = entry.next();
+        }
+        return null;
+    }
+
+    private mut replaceEntry(index: Int, key: K, value: V, hash: Int): Option<V> {
+        let equalityFunction = this.equalityFunction;
+        let mut prefix: MapEntry<K, V>? = null;
+        let mut entry = this.buckets[index];
+        while (not (entry === null)) {
+            if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
+                let previousValue = entry.value();
+                let mut rebuilt = MapEntry<K, V>.of(
+                        entry.key(), value, hash, entry.next());
+                while (not (prefix === null)) {
+                    let previous = prefix;
+                    rebuilt = MapEntry<K, V>.of(
+                            previous.key(), previous.value(), previous.hash(), rebuilt);
+                    prefix = previous.next();
+                }
+                this.buckets[index] = rebuilt;
+                return Option.Some(previousValue);
+            }
+            prefix = MapEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), prefix);
+            entry = entry.next();
+        }
+        return Option<V>.None();
+    }
+
+    private mut removeEntry(index: Int, key: K, hash: Int): Option<V> {
+        let equalityFunction = this.equalityFunction;
+        let mut prefix: MapEntry<K, V>? = null;
+        let mut entry = this.buckets[index];
+        while (not (entry === null)) {
+            if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
+                let removedValue = entry.value();
+                let mut rebuilt = entry.next();
+                while (not (prefix === null)) {
+                    let previous = prefix;
+                    rebuilt = MapEntry<K, V>.of(
+                            previous.key(), previous.value(), previous.hash(), rebuilt);
+                    prefix = previous.next();
+                }
+                this.buckets[index] = rebuilt;
+                return Option.Some(removedValue);
+            }
+            prefix = MapEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), prefix);
+            entry = entry.next();
+        }
+        return Option<V>.None();
+    }
+
+    private mut resize(): Unit {
+        let capacity = this.buckets.length * 2;
+        let expanded = generateArray<MapEntry<K, V>?>(capacity, (_) -> null);
+        let mut bucket = 0;
+        while (bucket < this.buckets.length) {
+            let mut entry = this.buckets[bucket];
+            while (true) {
+                if (entry === null) break;
+                let next = entry.next();
+                let index = this.bucketIndex(entry.hash(), capacity);
+                expanded[index] = MapEntry<K, V>.of(
+                        entry.key(), entry.value(), entry.hash(), expanded[index]);
+                entry = next;
+            }
+            bucket = bucket + 1;
+        }
+        this.buckets = expanded;
+    }
+
+    public property size: Int {
+        get = this.count;
+    }
+
+    public isEmpty(): Boolean = this.count == 0;
+
+    public containsKey(key: K): Boolean {
+        let hashFunction = this.hashFunction;
+        return not (this.findEntry(key, hashFunction(key)) === null);
+    }
+
+    public lookup(key: K): Option<V> {
+        let hashFunction = this.hashFunction;
+        let entry = this.findEntry(key, hashFunction(key));
+        if (entry === null) return Option<V>.None();
+        return Option.Some(entry.value());
+    }
+
+    public mut put(key: K, value: V): Option<V> {
+        let hashFunction = this.hashFunction;
+        let hash = hashFunction(key);
+        let entry = this.findEntry(key, hash);
+        if (not (entry === null)) {
+            let index = this.bucketIndex(hash, this.buckets.length);
+            return this.replaceEntry(index, key, value, hash);
+        }
+
+        if (this.count + 1 > this.buckets.length - this.buckets.length / 4) this.resize();
+
+        let index = this.bucketIndex(hash, this.buckets.length);
+        this.buckets[index] = MapEntry<K, V>.of(key, value, hash, this.buckets[index]);
+        this.count = this.count + 1;
+        return Option<V>.None();
+    }
+
+    public mut remove(key: K): Option<V> {
+        let hashFunction = this.hashFunction;
+        let hash = hashFunction(key);
+        let index = this.bucketIndex(hash, this.buckets.length);
+        let existing = this.findEntry(key, hash);
+        if (existing === null) return Option<V>.None();
+        let removed = this.removeEntry(index, key, hash);
+        if (removed.isSome()) {
+            this.count = this.count - 1;
+        }
+        return removed;
+    }
+
+    public mut clear(): Unit {
+        let mut index = 0;
+        while (index < this.buckets.length) {
+            this.buckets[index] = null;
+            index = index + 1;
+        }
+        this.count = 0;
+    }
+
+    public iterator(): &Iterator<Pair<K, V>> = MapIterator<K, V>.from(this.buckets);
+
+    public keyIterator(): &Iterator<K> = MapKeyIterator<K, V>.from(this.buckets);
+}
+
+namespace Map {
+    public fn empty<K: Hashable<K>, V>(): &Map<K, V> =
+        Map<K, V>.withOperations(hashKey::<K>, equalKeys::<K>);
+
+    public fn of<K: Hashable<K>, V>(entries: &Pair<K, V>...): &Map<K, V> {
+        let mut result = Map.empty<K, V>();
+        for (let entry in entries) result.put(entry.fst, entry.snd);
+        return result;
+    }
+}

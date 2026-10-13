@@ -7,10 +7,10 @@ This document records the agreed direction and implementation status for value e
 nominal conformances, and explicit witnesses. Nullable values lift custom `Eq<T>` evidence, and sums
 and nominal products use compiler-generated structural equality with generic component evidence.
 Direct self-recursive sums and products are supported; mutually recursive declarations are not yet
-synthesized as a recursive evidence group. Contract composition with `requires` is implemented. A
-`Hashable<T>` contract skeleton exists
-in the bundled source, but hash-evidence selection, implementations, hash laws, and hash-based
-collections remain future work; explicit derivation is also deferred.
+synthesized as a recursive evidence group. Contract composition with `requires` is implemented.
+`Hashable<T>` now requires `Eq<T>`; compiler-provided evidence for built-in scalar types and nullable
+lifting are implemented, as are generic `Hashable<T>` bounds and the `Map`/`Set` collections.
+Structural hashing and explicit derivation remain future work.
 
 The direction is to make `==` and `!=` evidence-driven value comparisons, keep `===` as explicit
 reference identity, provide equality for sums by comparing their case and payloads, and let other
@@ -27,10 +27,14 @@ The work is staged:
 2. **Contract composition implemented.** `requires` composes applied contracts transitively,
    including members, declaration-site conformance, generic-bound evidence, constructors, and
    separate-compilation metadata.
-3. **Complete `Hashable<T>` requiring `Eq<T>`.** The bundled declaration is a skeleton; define its
-   hash result type, evidence selection, and implementation contract before hash-based collections
-   require the bound. Equality-only operations continue to require only `Eq<T>`.
-4. **Explore explicit contract derivation.** Decide whether and how a type declaration or witness
+3. **Implemented: complete `Hashable<T>` requiring `Eq<T>`.** The hash operation returns `Int`;
+   compiler-provided evidence covers `Int`, `Float`, `Boolean`, `String`, and `Unit`, nullable
+   evidence lifts these semantics, and generic code must state a `Hashable<T>` bound. Equality-only
+   operations continue to require only `Eq<T>`.
+4. **Implemented: add hash-based `Map<K, V>` and `Set<T>`.** Their type parameters carry
+   class-level `Hashable` bounds, and nullable keys/elements use the established nullable evidence.
+   Keys must not change their equality- or hash-relevant state while stored.
+5. **Explore explicit contract derivation.** Decide whether and how a type declaration or witness
    declaration can request generated `Eq` and `Hashable` evidence. Derivation is opt-in for ordinary
    nominal types and must not be invented silently at a use site.
 
@@ -147,7 +151,7 @@ equality for arbitrary class fields.
 
 ## Hashing
 
-Hashing is not required for equality. `Hashable<T>` is a later, stronger capability that requires
+Hashing is not required for equality. `Hashable<T>` is a stronger capability that requires
 `Eq<T>` and supplies a hash operation. Its central law is:
 
 > If `a == b`, then `hash(a) == hash(b)`.
@@ -160,10 +164,26 @@ Hash-based collections should require `Hashable<T>`, not merely `Eq<T>`. Generic
 compares values should require `Eq<T>` and should not require hashing. Contract composition lets
 clients use one `Hashable<T>` bound that entails `Eq<T>`, without conflating the capabilities.
 
-For sums, generated hashing should include a stable distinction for the declared case and combine
-the hashes of that case's payloads. A sum is hashable only when the payload types satisfy the
-required `Hashable` evidence. Hash values are not a serialized representation or a stable
-cross-process identifier unless a separate guarantee is designed.
+Built-in `Hashable` evidence is compiler-provided for `Int`, `Float`, `Boolean`, `String`, and
+`Unit`. The implementations use the corresponding JVM value hashes; `Unit` uses a constant hash.
+`Float` uses `Double.hashCode`, which canonicalizes NaN payloads and distinguishes signed zero in
+agreement with Zeron's `Eq<Float>` semantics. These hash values are not promised stable across
+processes or suitable as serialized identifiers.
+
+Generic code can hash a type parameter only when its bounds explicitly provide `Hashable<T>`.
+`Eq<T>` alone is not enough, and there is no universal `Hashable<Any>` evidence. Structural hashing
+for generic sums/products and automatic hashing of generic nominal classes are not implied by this
+rule; they require explicit evidence or a separately specified derivation.
+
+Nullable evidence lifts `Hashable<T>` to `Hashable<T?>`: null has the fixed hash `0`, while
+non-null values delegate to the base evidence. This applies equally when `T` is a type parameter
+with an explicit `Hashable<T>` bound. Collisions between null and non-null values are permitted.
+The lifting is conditional; it does not make an otherwise-unhashable base type hashable.
+
+If structural sum hashing is added later, it should include a distinction for the declared case and
+combine the hashes of that case's payloads. A sum would then be hashable only when its payload types
+satisfy the required `Hashable` evidence. Hash values are not a serialized representation or a
+stable cross-process identifier unless a separate guarantee is designed.
 
 Mutable values are a key concern: changing equality-relevant state after insertion into a hash-based
 collection can make an entry unfindable. The type system may not be able to prevent this generally.

@@ -66,6 +66,7 @@ public final class Scanner {
             entry("private",     PRIVATE),
             entry("raise",       RAISE),
             entry("raises",      RAISES),
+            entry("throws",      THROWS),
             entry("return",      RETURN),
             entry("sealed",      SEALED),
             entry("set",         SET),
@@ -76,6 +77,7 @@ public final class Scanner {
             entry("type",        TYPE),
             entry("typeof",      TYPEOF),
             entry("until",       UNTIL),
+            entry("using",       USING),
             entry("witness",     WITNESS),
             entry("while",       WHILE));
 
@@ -143,15 +145,21 @@ public final class Scanner {
             case '/' -> {
                 // single line comment
                 if (match('/')) {
-                    // matched a //
-                    while (peek() != '\n' && !isAtEnd()) advance();
+                    while (peek() != '\n' && peek() != '\r' && !isAtEnd()) advance();
+                    addToken(LINE_COMMENT);
                 } else if (match('*')) {
-                    // matched a /*
-                    while (peek() != '*' && peekNext() != '/' && !isAtEnd()) {
+                    while (!isAtEnd() && !(peek() == '*' && peekNext() == '/')) {
                         advance();
                     }
-                    advance();
-                    advance();
+                    if (isAtEnd()) {
+                        addToken(BLOCK_COMMENT);
+                        recordDiagnostic(DiagnosticCatalog.UNTERMINATED_BLOCK_COMMENT,
+                                span(tokenStart, position()), "Unterminated block comment.");
+                    } else {
+                        advance();
+                        advance();
+                        addToken(BLOCK_COMMENT);
+                    }
                 } else {
                     // matched /= ? if not just /
                     addToken(match('=') ? SLASH_EQUAL : SLASH);
@@ -209,6 +217,7 @@ public final class Scanner {
         if (isAtEnd()) {
             recordDiagnostic(DiagnosticCatalog.UNTERMINATED_STRING,
                     span(tokenStart, position()), "Unterminated string.");
+            addToken(STRING, source.substring(start + 1, current));
             return;
         }
 
@@ -232,7 +241,14 @@ public final class Scanner {
         if (isDecimal) {
             addToken(DOUBLE, Double.parseDouble(source.substring(start, current)));
         } else {
-            addToken(INT, Integer.parseInt(source.substring(start, current)));
+            try {
+                addToken(INT, Integer.parseInt(source.substring(start, current)));
+            } catch (NumberFormatException _) {
+                addToken(INT, 0);
+                recordDiagnostic(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                        span(tokenStart, position()),
+                        "Integer literal is outside the supported Int range.");
+            }
         }
     }
 

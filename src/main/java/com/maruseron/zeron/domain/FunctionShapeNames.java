@@ -7,7 +7,7 @@ import java.util.HexFormat;
 
 public final class FunctionShapeNames {
     private static final String INTERFACE_PREFIX =
-            "Lambda$V1_";
+            "zeron.runtime.Lambda$V2$";
 
     private FunctionShapeNames() {}
 
@@ -15,7 +15,8 @@ public final class FunctionShapeNames {
         try {
             final var digest = MessageDigest.getInstance("SHA-256").digest(
                     key.canonicalEncoding().getBytes(StandardCharsets.UTF_8));
-            return INTERFACE_PREFIX + HexFormat.of().formatHex(digest);
+            return INTERFACE_PREFIX + key.readableSignature() + "$"
+                    + HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
             throw new AssertionError("SHA-256 is required by the Java platform", e);
         }

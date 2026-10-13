@@ -1,0 +1,18 @@
+package java.io;
+
+import java.nio.file.Path;
+
+public external class File = "java.io.File" {
+    public constructor new(path: String);
+
+    public toPath(): &Path;
+    public exists(): Boolean;
+    public isFile(): Boolean;
+    public isDirectory(): Boolean;
+    public getName(): String?;
+    public getPath(): String?;
+    public getParent(): String?;
+    public mkdir(): Boolean;
+    public mkdirs(): Boolean;
+    public delete(): Boolean;
+}

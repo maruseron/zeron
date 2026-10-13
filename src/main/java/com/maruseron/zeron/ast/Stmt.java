@@ -100,6 +100,26 @@ public sealed interface Stmt {
 
     record Block(List<Stmt> statements) implements Stmt {}
 
+    record Using(Token keyword, List<UsingResource> resources, List<Stmt> body) implements Stmt {
+        public Using {
+            resources = List.copyOf(resources);
+            body = List.copyOf(body);
+        }
+    }
+
+    final class UsingResource {
+        private final Var declaration;
+        private Expr.MemberCall disposerCall;
+
+        public UsingResource(final Var declaration) {
+            this.declaration = declaration;
+        }
+
+        public Var declaration() { return declaration; }
+        public Expr.MemberCall disposerCall() { return disposerCall; }
+        public void setDisposerCall(final Expr.MemberCall call) { disposerCall = call; }
+    }
+
     record Namespace(Token name, List<Stmt> members) implements Stmt {
         public Namespace {
             members = List.copyOf(members);
@@ -519,26 +539,46 @@ public sealed interface Stmt {
     }
 
     record ExternalClass(Token name, String javaBinaryName, boolean isPublic,
-                         List<ExternalMethod> methods, List<ExternalStaticProperty> staticProperties)
+                         List<ExternalConstructor> constructors,
+                         List<ExternalMethod> methods,
+                         List<ExternalStaticProperty> staticProperties)
             implements Stmt, Decl {
         public ExternalClass {
+            constructors = List.copyOf(constructors);
             methods = List.copyOf(methods);
             staticProperties = List.copyOf(staticProperties);
         }
     }
 
+    record ExternalConstructor(Token name, List<Token> parameters, List<TypeDescriptor> parameterTypes,
+                               boolean isPublic) {
+        public ExternalConstructor {
+            parameters = List.copyOf(parameters);
+            parameterTypes = List.copyOf(parameterTypes);
+            if (parameters.size() != parameterTypes.size()) {
+                throw new IllegalArgumentException("External constructor parameter names and types must align.");
+            }
+        }
+    }
+
     record ExternalMethod(Token name, List<Token> parameters, FunctionDescriptor typeDescriptor,
-                          boolean isPublic, boolean isMutating, List<Expr> defaultValues) {
+                          boolean isPublic, boolean isStatic, boolean isMutating, List<Expr> defaultValues,
+                          List<ExternalExceptionMapping> exceptionMappings) {
         public ExternalMethod {
             parameters = List.copyOf(parameters);
             defaultValues = List.copyOf(defaultValues);
+            exceptionMappings = List.copyOf(exceptionMappings);
         }
 
         public ExternalMethod(Token name, List<Token> parameters, FunctionDescriptor typeDescriptor,
                               boolean isPublic, boolean isMutating) {
-            this(name, parameters, typeDescriptor, isPublic, isMutating, List.of());
+            this(name, parameters, typeDescriptor, isPublic, false, isMutating, List.of(), List.of());
         }
     }
+
+    record ExternalExceptionMapping(TypeDescriptor javaExceptionType,
+                                    TypeDescriptor effectType,
+                                    Token constructorName) {}
 
     record ExternalStaticProperty(Token name, TypeDescriptor type, boolean isPublic) {}
 

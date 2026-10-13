@@ -75,8 +75,21 @@ propagating. If no case matches, the same effect propagates to the surrounding h
 Effects raised by a handler arm also propagate unless that handler is itself inside another handler
 or the enclosing callable declares them.
 
+When a `using` scope raises an effect and disposal also fails, the original effect stays primary and
+the cleanup failures are attached as suppressed outcomes. A handler arm can inspect them explicitly:
+
+```zeron
+case OperationFailure with suppressed as cleanupFailures -> cleanupFailures.length;
+```
+
+`cleanupFailures` is an immutable `Array<Any?>` binding containing the suppressed effect values or
+unchecked throwable objects. It is empty when the primary effect had no cleanup failures. See the
+[resource-management guide](26-resource-management.md) for cleanup order and failure precedence.
+
 Handlers are expressions, not statement-level `try`/`catch`. The current syntax has no wildcard
-catch-all case. Java exceptions are not caught or converted into Zeron effects.
+catch-all case. Java exceptions are not converted automatically; external-class methods can
+explicitly map declared checked exceptions to Zeron effects, as described in the
+[Java interoperability guide](23-java-interoperability.md).
 
 ## Effects and `Result`
 
@@ -94,7 +107,9 @@ Zeron does not automatically convert a `Result` into an effect or vice versa.
 The compiler represents a raised effect at runtime as a JVM exception of type
 `zeron.runtime.RaisedEffect`, carrying the effect payload. A handler catches this carrier around
 its protected expression, tests cases in order, and rethrows the same carrier if none matches.
-Ordinary Java exceptions are not caught by effect handlers and keep their usual JVM behavior.
+Ordinary Java exceptions are not caught by effect handlers and keep their usual JVM behavior, except
+when an external-class method explicitly maps a declared checked exception to an effect at its call
+boundary.
 
 Effects are synchronous, nominal, and non-generic in the current implementation. There is no
 effect inheritance, wildcard handler, asynchronous effect propagation, or automatic Java-exception

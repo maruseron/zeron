@@ -564,8 +564,12 @@ final class ExpressionFlowEmitter {
         storePipelineValue(context, composer, scrutinee, match.scrutinee.getType());
         final var done = composer.newLabel();
         final var noMatch = composer.newLabel();
-        loadPipelineValue(context, composer, scrutinee, match.scrutinee.getType());
-        composer.ifnull(noMatch);
+        final var scrutineeDescriptor = TypeDescriptor.toJavaClassDesc(match.scrutinee.getType())
+                .descriptorString();
+        if (scrutineeDescriptor.startsWith("L") || scrutineeDescriptor.startsWith("[")) {
+            loadPipelineValue(context, composer, scrutinee, match.scrutinee.getType());
+            composer.ifnull(noMatch);
+        }
         for (final var arm : match.arms) {
             final var next = composer.newLabel();
             beginScope(context);
@@ -642,6 +646,10 @@ final class ExpressionFlowEmitter {
             composer.labelBinding(matched);
             return;
         }
+        if (pattern.literal() != null) {
+            emitLiteralPattern(context, composer, pattern, value, failure);
+            return;
+        }
         if (pattern.wildcard()) return;
         if (pattern.binding() != null) {
             storeMatchBinding(context, composer, pattern.binding(), pattern.resolvedType(), value);
@@ -676,7 +684,28 @@ final class ExpressionFlowEmitter {
                         MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedPayloadType)));
                 emitConversion(context, composer, erasedPayloadType, payloadType);
                 storePipelineValue(context, composer, output, payloadType);
-                storeMatchBinding(context, composer, argument.binding(), payloadType, output);
+                emitMatchPattern(context, composer, argument, output, failure);
+            }
+            return;
+        }
+        if (pattern.productPattern()) {
+            final var productDeclaration = context.resolution.classes().get(matchType.name());
+            if (productDeclaration == null) {
+                throw new IllegalStateException("Resolved product class not found.");
+            }
+            for (int index = 0; index < pattern.arguments().size(); index++) {
+                final var argument = pattern.arguments().get(index);
+                if (argument.wildcard()) continue;
+                final var component = productDeclaration.properties().get(index);
+                final var erasedComponentType = TypeSubstitution.erase(component.type());
+                final var componentType = argument.resolvedType();
+                final var output = emitMatchTemporary(context, "productComponent", componentType);
+                loadPipelineValue(context, composer, matchedValue, matchType);
+                composer.invokevirtual(targetClass, Stmt.propertyGetterName(component.name().lexeme()),
+                        MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedComponentType)));
+                emitConversion(context, composer, erasedComponentType, componentType);
+                storePipelineValue(context, composer, output, componentType);
+                emitMatchPattern(context, composer, argument, output, failure);
             }
             return;
         }
@@ -740,6 +769,36 @@ final class ExpressionFlowEmitter {
                 binding.lvt() + context.localSlotOffset);
     }
 
+    private static void emitLiteralPattern(final CompilationContext context,
+                                           final CodeBuilder composer,
+                                           final Expr.MatchPattern pattern,
+                                           final Bind value,
+                                           final Label failure) {
+        final var literal = pattern.literal();
+        loadPipelineValue(context, composer, value, value.type());
+        switch (literal.getType()) {
+            case IntDescriptor _ -> {
+                composer.ldc((Integer) literal.value);
+                composer.if_icmpne(failure);
+            }
+            case BooleanDescriptor _ -> {
+                if ((Boolean) literal.value) composer.iconst_1();
+                else composer.iconst_0();
+                composer.if_icmpne(failure);
+            }
+            case StringDescriptor _ -> {
+                composer.ldc((String) literal.value);
+                composer.invokevirtual(ConstantDescs.CD_String, "equals",
+                        MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
+                composer.ifeq(failure);
+            }
+            default -> throw new IllegalStateException("Unsupported resolved literal pattern type.");
+        }
+        if (pattern.alias() != null) {
+            storeMatchBinding(context, composer, pattern.alias(), pattern.resolvedType(), value);
+        }
+    }
+
     static void emitRaise(final CompilationContext context, final CodeBuilder composer, final Expr.Raise raise) {
         final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
         composer.new_(carrier);
@@ -782,6 +841,16 @@ final class ExpressionFlowEmitter {
             try {
                 declareMatchBindings(context, arm.pattern());
                 emitMatchPattern(context, composer, arm.pattern(), payload, next);
+                if (arm.suppressedBinding() != null) {
+                    final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());
+                    final var suppressed = declareLoopLocal(
+                            context, arm.suppressedBinding(), suppressedType);
+                    loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+                    composer.checkcast(carrier);
+                    composer.invokevirtual(carrier, "suppressedOutcomes",
+                            MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+                    composer.astore(suppressed.lvt() + context.localSlotOffset);
+                }
                 if (arm.guard() != null) {
                     emitExpr(context, composer, arm.guard());
                     composer.ifeq(next);

@@ -21,6 +21,10 @@ public final class DiagnosticCatalog {
             entry("ZR1001", "Unexpected character");
     public static final Entry UNTERMINATED_STRING =
             entry("ZR1002", "Unterminated string literal");
+    public static final Entry UNTERMINATED_BLOCK_COMMENT =
+            entry("ZR1003", "Unterminated block comment");
+    public static final Entry INTEGER_LITERAL_OUT_OF_RANGE =
+            entry("ZR1004", "Integer literal out of range");
 
     public static final Entry EXPECTED_SYNTAX =
             entry("ZR1101", "Expected syntax");
@@ -64,11 +68,11 @@ public final class DiagnosticCatalog {
     public static final Entry INACCESSIBLE_DECLARATION =
             entry("ZR2004", "Inaccessible declaration");
     public static final Entry INVALID_GENERIC_USE_OR_INFERENCE =
-            entry("ZR2005", "Invalid generic use or inference");
+            entry("ZR2005", "Invalid generic use");
     public static final Entry ARGUMENT_OR_PARAMETER_COUNT_MISMATCH =
             entry("ZR2006", "Argument or parameter count mismatch");
     public static final Entry UNSUPPORTED_OR_INVALID_JAVA_INTEROP =
-            entry("ZR2007", "Unsupported or invalid Java interop");
+            entry("ZR2007", "Invalid Java interop binding");
     public static final Entry INVALID_SEALED_CONTRACT_OR_MATCH =
             entry("ZR2008", "Invalid sealed contract or match");
     public static final Entry INVALID_MEMBER_ACCESS =
@@ -82,11 +86,27 @@ public final class DiagnosticCatalog {
     public static final Entry NULLABLE_VALUE_REQUIRES_HANDLING =
             entry("ZR2013", "Nullable value requires handling");
     public static final Entry TYPE_MISMATCH_OR_FAILED_INFERENCE =
-            entry("ZR2014", "Type mismatch or failed inference");
+            entry("ZR2014", "Type mismatch");
     public static final Entry INVALID_DECLARATION_OR_PROGRAM_STRUCTURE =
             entry("ZR2015", "Invalid declaration or program structure");
     public static final Entry TOP_LEVEL_INITIALIZATION_CYCLE =
             entry("ZR2016", "Top-level initialization cycle");
+    public static final Entry INVALID_INITIALIZER =
+            entry("ZR2017", "Invalid initializer");
+    public static final Entry INVALID_PATTERN_OUTPUT_ASSIGNMENT =
+            entry("ZR2018", "Invalid pattern output assignment");
+    public static final Entry INCOMPLETE_NAMED_CONSTRUCTOR =
+            entry("ZR2019", "Named constructor does not return an instance");
+    public static final Entry INVALID_ITERABLE =
+            entry("ZR2020", "Invalid iteration source");
+    public static final Entry INVALID_COLLECTOR =
+            entry("ZR2021", "Invalid collection sink");
+    public static final Entry GENERIC_INFERENCE_FAILURE =
+            entry("ZR2022", "Generic type inference failed");
+    public static final Entry TYPE_INFERENCE_FAILURE =
+            entry("ZR2023", "Type inference failed");
+    public static final Entry UNSUPPORTED_JAVA_INTEROP_FEATURE =
+            entry("ZR2024", "Unsupported Java interop feature");
 
     public static final Entry GENERATED_PROGRAM_NAME_CONFLICT =
             entry("ZR3001", "Generated program name conflicts with a declared type");
@@ -96,6 +116,8 @@ public final class DiagnosticCatalog {
     private static final List<Entry> ENTRIES = List.of(
             UNEXPECTED_CHARACTER,
             UNTERMINATED_STRING,
+            UNTERMINATED_BLOCK_COMMENT,
+            INTEGER_LITERAL_OUT_OF_RANGE,
             EXPECTED_SYNTAX,
             INVALID_DECLARATION,
             INVALID_VISIBILITY,
@@ -110,6 +132,8 @@ public final class DiagnosticCatalog {
             CONTROL_STATEMENT_OUTSIDE_CONTEXT,
             INVALID_ASSIGNMENT_FORM,
             INVALID_MATCH_EXPRESSION,
+            INVALID_PIPELINE_OPERATION,
+            INVALID_CONTRACT_MEMBER,
             NAME_NOT_FOUND,
             DUPLICATE_OR_CONFLICTING_NAME,
             INVALID_OR_CONFLICTING_IMPORT,
@@ -126,6 +150,14 @@ public final class DiagnosticCatalog {
             TYPE_MISMATCH_OR_FAILED_INFERENCE,
             INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
             TOP_LEVEL_INITIALIZATION_CYCLE,
+            INVALID_INITIALIZER,
+            INVALID_PATTERN_OUTPUT_ASSIGNMENT,
+            INCOMPLETE_NAMED_CONSTRUCTOR,
+            INVALID_ITERABLE,
+            INVALID_COLLECTOR,
+            GENERIC_INFERENCE_FAILURE,
+            TYPE_INFERENCE_FAILURE,
+            UNSUPPORTED_JAVA_INTEROP_FEATURE,
             GENERATED_PROGRAM_NAME_CONFLICT,
             PACKAGE_SOURCE_DIRECTORY_MISMATCH);
 

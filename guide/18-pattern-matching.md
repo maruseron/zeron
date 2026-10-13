@@ -34,21 +34,59 @@ A `match` expression lists the cases to consider. It checks them from top to bot
 first one that matches, and produces that case's result:
 
 ```zeron
-fn describe(value: Any): String = match (value) {
-    case Int as number -> "number: " + number;
-    case _ -> "another shape";
+fn describe(value: Int): String = match (value) {
+    case 0 -> "zero";
+    case _ -> "number";
 };
 ```
 
-`case Int` tests the value's type. `as number` gives the whole matched value the local name
-`number` in that case's result. The final `case _` is a wildcard: it matches anything not matched
-earlier. A match expression is useful when several cases should produce one result, which can then
-be returned, assigned, or used in a larger expression.
+The first case matches an integer literal; the final `case _` is a wildcard for the rest of the
+integer values. The `Any` type is useful with `is`, but it is not a valid `match` root. Likewise,
+a wildcard does not make a non-sealed contract or an open class type a valid root.
+An ordinary concrete class root currently requires a supported literal test; the planned public-
+pattern opt-in for direct class roots is described below.
 
 The value being matched is evaluated once, and only the selected result is evaluated. Every case
-must produce a compatible result type. A wildcard is needed for open types, where other classes
-could also be supplied. Sealed contracts and sum types have a known set of alternatives and can be
-checked for complete coverage.
+must produce a compatible result type. Sealed contracts and sum types have a known set of
+alternatives; products have one constructor; and literal matching is available for supported
+concrete types. These root rules let the compiler check that a match is complete.
+
+## Matching literals and products
+
+Integer, Boolean, and String literals can be matched directly. Integer and String matches need a
+wildcard or total pattern because their value domains are unbounded. Both Boolean literals can
+cover the Boolean domain:
+
+```zeron
+fn describeFlag(value: Boolean): String = match (value) {
+    case true -> "enabled";
+    case false -> "disabled";
+};
+
+fn describeWord(value: String): String = match (value) {
+    case "map" -> "transform";
+    case _ -> "another operation";
+};
+```
+
+Floating-point literal patterns are not supported. Literal patterns compare values directly; they
+do not evaluate arbitrary expressions or call an `Eq<T>` witness.
+
+Product types can be destructured positionally in declaration order. A component can itself be a
+binding, `_`, a literal, or another supported nested pattern:
+
+```zeron
+type Point = (x: Int, y: Int);
+
+fn location(point: Point): String = match (point) {
+    case Point(0, 0) -> "origin";
+    case Point(x, y) -> "another point";
+};
+```
+
+A product case covers the root only if all its component patterns are total. Thus `Point(0, 0)`
+alone is not exhaustive; a total pattern such as `Point(x, y)` or a wildcard is needed. Product
+patterns can also be nested inside sum payloads and class-pattern outputs.
 
 ## Ignoring a part of a value
 
@@ -56,13 +94,14 @@ When a pattern can extract part of a value, use `_` for a part that does not mat
 this part, but do not give it a name.” For example, a disk match can ignore its radius:
 
 ```zeron
-class Disk {
+sealed contract DiskLike permits Disk {}
+
+class Disk is DiskLike {
     public property radius: Float;
 }
 
-fn ignoreRadius(disk: Disk): Float = match (disk) {
+fn ignoreRadius(disk: DiskLike): Float = match (disk) {
     case Disk.radius(_) -> 0.0;
-    case _ -> 0.0;
 };
 ```
 
@@ -77,10 +116,9 @@ Sometimes the value's shape is not enough to choose a result. Add an `if` guard 
 check an additional condition:
 
 ```zeron
-fn positiveRadius(disk: Disk): Float = match (disk) {
+fn positiveRadius(disk: DiskLike): Float = match (disk) {
     case Disk.radius(radius) if radius > 0.0 -> radius;
     case Disk.radius(_) -> 0.0;
-    case _ -> 0.0;
 };
 ```
 
@@ -94,16 +132,16 @@ Classes can be matched through their public properties. The property name identi
 and the pattern in parentheses describes the value to match or bind:
 
 ```zeron
-fn radius(disk: Disk): Float = match (disk) {
+fn radius(disk: DiskLike): Float = match (disk) {
     case Disk.radius(value) -> value;
-    case _ -> 0.0;
 };
 ```
 
 The property must be public, and this form extracts one property at a time. A binding reads its
 value without changing it; a nested pattern can describe a more specific shape. Property matching
-uses the class's public interface rather than exposing its private fields. If a class declares a
-custom pattern with the same name, that named pattern is used instead.
+uses the class's public interface rather than exposing its private fields. Pattern names and
+property names must be distinct; a collision is rejected. Otherwise, a declared named pattern is
+used when present, with the legacy single-property form retained as a compatibility fallback.
 
 ## Sealed contracts and permitted classes
 
@@ -129,8 +167,8 @@ fn size(shape: Drawable): Float = match (shape) {
 ```
 
 For this check, a case counts only when it is unguarded and its pattern cannot fail. A final
-unguarded wildcard can cover all remaining classes. With a non-sealed contract or an open class
-type, use a wildcard because the compiler cannot know every possible class.
+unguarded wildcard can cover all remaining classes. A non-sealed contract, `Any`, or open class
+type is not a valid match root, even with a wildcard.
 
 ## Matching sum types
 
@@ -157,7 +195,9 @@ property, it can declare a named pattern. Its outputs specify the names and type
 bind:
 
 ```zeron
-class Pair {
+sealed contract PairLike permits Pair {}
+
+class Pair is PairLike {
     left: Int;
     right: Int;
 
@@ -167,9 +207,8 @@ class Pair {
     }
 }
 
-fn total(pair: Pair): Int = match (pair) {
+fn total(pair: PairLike): Int = match (pair) {
     case Pair.values(first, second) -> first + second;
-    case _ -> 0;
 };
 ```
 
@@ -179,8 +218,28 @@ tried. Outputs, like other pattern bindings, are immutable in the matching case.
 
 Patterns can be nested to describe values inside extracted outputs. Use a public-property pattern
 when a property already expresses the data to inspect; define a custom pattern when the class
-should provide a named, possibly multi-value or conditional way to expose its structure. Nullable
-scrutinees and general exhaustive matching of open classes are not currently supported.
+should provide a named, possibly multi-value or conditional way to expose its structure.
+
+## Opting a class into root matching
+
+Direct matching on a concrete class is planned as an opt-in. A class will opt in by declaring at
+least one `public pattern`; no separate `matchable` modifier is planned. This enables matching on
+that class's static type without requiring a literal test:
+
+```zeron
+fn total(pair: Pair): Int = match (pair) {
+    case Pair.values(first, second) -> first + second;
+};
+```
+
+This direct-class-root form is not yet supported by the compiler. Until it is implemented, match
+class values through a sealed contract or use the currently supported literal-matching rules.
+When implemented, only an unguarded total pattern or wildcard will establish complete coverage.
+A pattern with `when`, a nested refutable pattern, or an arm guard will not count as total.
+Declaring a public pattern will not make `Any`, non-sealed contracts, or open class roots valid;
+classes are not treated as closed families of runtime alternatives.
+
+Nullable scrutinees are not currently supported.
 
 Use `is` for a single type check, `matches` for a simple sum-case test with payloads in an `if` or
 `while` condition, and `match` when several alternatives need clear, ordered handling. See the

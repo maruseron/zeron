@@ -1,6 +1,7 @@
 package com.maruseron.zeron.domain;
 
 import com.maruseron.zeron.StandardLibrary;
+import com.maruseron.zeron.ZeronVersions;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
@@ -28,7 +29,7 @@ import java.util.jar.JarFile;
 public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
-    public static final int VERSION = 24;
+    public static final int VERSION = ZeronVersions.API_INDEX_SCHEMA_VERSION;
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -79,6 +80,31 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                             BindingMutability.IMMUTABLE, true);
                     if (value.namespaceName() == null) statements.add(declaration);
                     else addNamespaceMember(statements, value.namespaceName(), declaration);
+                }
+                case ExternalClassExport externalClass -> {
+                    final var className = token(simpleName(externalClass.qualifiedName()));
+                    final var constructors = externalClass.constructors().stream()
+                            .map(constructor -> new Stmt.ExternalConstructor(token("new"),
+                                    parameterNames(constructor.parameterTypes().size(), className.line()),
+                                    constructor.parameterTypes(), true))
+                            .toList();
+                    final var methods = externalClass.methods().stream()
+                            .map(method -> new Stmt.ExternalMethod(token(method.signature().name()),
+                                    parameterNames(method.signature(), className.line()),
+                                    method.signature(), true, method.isStatic(), method.mutating(), List.of(),
+                                    method.exceptionMappings().stream()
+                                            .map(mapping -> new Stmt.ExternalExceptionMapping(
+                                                    TypeDescriptor.ofName(mapping.exceptionType()),
+                                                    TypeDescriptor.ofName(mapping.effectType()),
+                                                    token(mapping.constructorName())))
+                                            .toList()))
+                            .toList();
+                    final var properties = externalClass.staticProperties().stream()
+                            .map(property -> new Stmt.ExternalStaticProperty(
+                                    token(property.name()), property.type(), true))
+                            .toList();
+                    statements.add(new Stmt.ExternalClass(className, externalClass.javaBinaryName(),
+                            true, constructors, methods, properties));
                 }
                 case ClassExport classExport -> {
                     final var className = token(classExport.qualifiedName());
@@ -203,7 +229,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
 
     public sealed interface ExportedDeclaration permits NamespacedDeclaration, ClassExport, ContractExport,
-            SumExport, ProductExport, NewtypeExport, WitnessExport {
+            SumExport, ProductExport, NewtypeExport, WitnessExport, ExternalClassExport {
         String qualifiedName();
     }
 
@@ -221,6 +247,49 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(jvmOwner);
             Objects.requireNonNull(initializationOwner);
+            Objects.requireNonNull(type);
+        }
+    }
+
+    public record ExternalClassExport(String qualifiedName,
+                                      String javaBinaryName,
+                                      List<ExternalConstructorExport> constructors,
+                                      List<ExternalMethodExport> methods,
+                                      List<ExternalStaticPropertyExport> staticProperties)
+            implements ExportedDeclaration {
+        public ExternalClassExport {
+            Objects.requireNonNull(qualifiedName);
+            Objects.requireNonNull(javaBinaryName);
+            constructors = List.copyOf(constructors);
+            methods = List.copyOf(methods);
+            staticProperties = List.copyOf(staticProperties);
+            if (qualifiedName.isEmpty() || !qualifiedName.equals(javaBinaryName)) {
+                throw new IllegalArgumentException(
+                        "External class exports must use their Java binary name as the qualified name.");
+            }
+        }
+    }
+
+    public record ExternalConstructorExport(List<TypeDescriptor> parameterTypes) {
+        public ExternalConstructorExport {
+            parameterTypes = List.copyOf(parameterTypes);
+        }
+    }
+
+    public record ExternalMethodExport(FunctionDescriptor signature, boolean isStatic, boolean mutating,
+                                       List<ExternalExceptionMappingExport> exceptionMappings) {
+        public ExternalMethodExport {
+            Objects.requireNonNull(signature);
+            exceptionMappings = List.copyOf(exceptionMappings);
+        }
+    }
+
+    public record ExternalExceptionMappingExport(String exceptionType, String effectType,
+                                                 String constructorName) {}
+
+    public record ExternalStaticPropertyExport(String name, TypeDescriptor type) {
+        public ExternalStaticPropertyExport {
+            Objects.requireNonNull(name);
             Objects.requireNonNull(type);
         }
     }
@@ -617,6 +686,32 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                 pattern.refutable()))
                                         .toList()));
                     }
+                    case Stmt.ExternalClass externalClass when externalClass.isPublic() -> {
+                        exports.add(new ExternalClassExport(
+                                qualify(unit.packageName(), externalClass.name().lexeme()),
+                                externalClass.javaBinaryName(),
+                                externalClass.constructors().stream()
+                                        .filter(Stmt.ExternalConstructor::isPublic)
+                                        .map(constructor -> new ExternalConstructorExport(
+                                                constructor.parameterTypes()))
+                                        .toList(),
+                                externalClass.methods().stream()
+                                        .filter(Stmt.ExternalMethod::isPublic)
+                                        .map(method -> new ExternalMethodExport(
+                                                method.typeDescriptor(), method.isStatic(), method.isMutating(),
+                                                method.exceptionMappings().stream()
+                                                        .map(mapping -> new ExternalExceptionMappingExport(
+                                                                mapping.javaExceptionType().name(),
+                                                                mapping.effectType().name(),
+                                                                mapping.constructorName().lexeme()))
+                                                        .toList()))
+                                        .toList(),
+                                externalClass.staticProperties().stream()
+                                        .filter(Stmt.ExternalStaticProperty::isPublic)
+                                        .map(property -> new ExternalStaticPropertyExport(
+                                                property.name().lexeme(), property.type()))
+                                        .toList()));
+                    }
                     case Stmt.SumDecl sum when sum.isPublic() -> {
                         exports.add(new SumExport(sum.name().lexeme(), sum.typeParameters(),
                                 sum.cases().stream()
@@ -726,7 +821,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry("META-INF/zeron/api-v24.bin");
+            final var indexEntry = jar.getJarEntry(ZeronVersions.API_INDEX_JAR_ENTRY);
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -752,7 +847,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(Path.of("META-INF", "zeron", "api-v24.bin"));
+        final var indexPath = root.resolve(ZeronVersions.API_INDEX_RELATIVE_PATH);
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -895,6 +990,34 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeUTF(newtype.qualifiedName());
                 writeType(output, newtype.underlyingType(), new WriteContext());
                 output.writeBoolean(newtype.validated());
+            }
+            case ExternalClassExport externalClass -> {
+                output.writeByte(10);
+                output.writeUTF(externalClass.qualifiedName());
+                output.writeUTF(externalClass.javaBinaryName());
+                final var context = new WriteContext();
+                output.writeInt(externalClass.constructors().size());
+                for (final var constructor : externalClass.constructors()) {
+                    output.writeInt(constructor.parameterTypes().size());
+                    for (final var type : constructor.parameterTypes()) writeType(output, type, context);
+                }
+                output.writeInt(externalClass.methods().size());
+                for (final var method : externalClass.methods()) {
+                    writeFunction(output, method.signature(), context);
+                    output.writeBoolean(method.isStatic());
+                    output.writeBoolean(method.mutating());
+                    output.writeInt(method.exceptionMappings().size());
+                    for (final var mapping : method.exceptionMappings()) {
+                        output.writeUTF(mapping.exceptionType());
+                        output.writeUTF(mapping.effectType());
+                        output.writeUTF(mapping.constructorName());
+                    }
+                }
+                output.writeInt(externalClass.staticProperties().size());
+                for (final var property : externalClass.staticProperties()) {
+                    output.writeUTF(property.name());
+                    writeType(output, property.type(), context);
+                }
             }
             case WitnessExport witness -> {
                 output.writeByte(6);
@@ -1044,6 +1167,36 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             }
             case 9 -> new NewtypeExport(input.readUTF(), readType(input, new ReadContext()),
                     input.readBoolean());
+            case 10 -> {
+                final var name = input.readUTF();
+                final var javaBinaryName = input.readUTF();
+                final var context = new ReadContext();
+                final var constructors = new ArrayList<ExternalConstructorExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var parameterTypes = new ArrayList<TypeDescriptor>();
+                    for (int j = 0, parameterCount = readCount(input); j < parameterCount; j++) {
+                        parameterTypes.add(readType(input, context));
+                    }
+                    constructors.add(new ExternalConstructorExport(parameterTypes));
+                }
+                final var methods = new ArrayList<ExternalMethodExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var signature = readFunction(input, context);
+                    final var isStatic = input.readBoolean();
+                    final var mutating = input.readBoolean();
+                    final var exceptionMappings = new ArrayList<ExternalExceptionMappingExport>();
+                    for (int j = 0, mappingCount = readCount(input); j < mappingCount; j++) {
+                        exceptionMappings.add(new ExternalExceptionMappingExport(
+                                input.readUTF(), input.readUTF(), input.readUTF()));
+                    }
+                    methods.add(new ExternalMethodExport(signature, isStatic, mutating, exceptionMappings));
+                }
+                final var properties = new ArrayList<ExternalStaticPropertyExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    properties.add(new ExternalStaticPropertyExport(input.readUTF(), readType(input, context)));
+                }
+                yield new ExternalClassExport(name, javaBinaryName, constructors, methods, properties);
+            }
             case 6 -> {
                 final var name = input.readUTF();
                 final var context = new ReadContext();
@@ -1286,8 +1439,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     }
 
     private static List<Token> parameterNames(final FunctionDescriptor function, final int line) {
-        final var names = new ArrayList<Token>(function.arity());
-        for (int i = 0; i < function.arity(); i++) names.add(token("arg" + i, line));
+        return parameterNames(function.arity(), line);
+    }
+
+    private static List<Token> parameterNames(final int arity, final int line) {
+        final var names = new ArrayList<Token>(arity);
+        for (int i = 0; i < arity; i++) names.add(token("arg" + i, line));
         return List.copyOf(names);
     }
 

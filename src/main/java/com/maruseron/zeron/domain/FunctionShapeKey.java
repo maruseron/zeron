@@ -5,22 +5,74 @@ import java.util.Objects;
 
 public final class FunctionShapeKey {
     private static final String ENCODING_VERSION = "zeron-function-shape-v1;";
+    private static final int MAX_READABLE_SIGNATURE_LENGTH = 64;
 
     private final String canonicalEncoding;
+    private final String readableSignature;
 
-    private FunctionShapeKey(final String canonicalEncoding) {
+    private FunctionShapeKey(final String canonicalEncoding, final String readableSignature) {
         this.canonicalEncoding = canonicalEncoding;
+        this.readableSignature = readableSignature;
     }
 
     public static FunctionShapeKey of(final FunctionDescriptor functionType) {
         Objects.requireNonNull(functionType);
         final var encoding = new StringBuilder(ENCODING_VERSION);
         appendFunction(encoding, functionType);
-        return new FunctionShapeKey(encoding.toString());
+        return new FunctionShapeKey(encoding.toString(), readableSignature(functionType));
     }
 
     public String canonicalEncoding() {
         return canonicalEncoding;
+    }
+
+    public String readableSignature() {
+        return readableSignature;
+    }
+
+    private static String readableSignature(final FunctionDescriptor functionType) {
+        final var signature = new StringBuilder().append(functionType.arity());
+        for (final var parameter : functionType.parameters()) {
+            signature.append('$').append(readableType(parameter));
+        }
+        signature.append("$To$").append(readableType(functionType.returnType()));
+        return signature.length() <= MAX_READABLE_SIGNATURE_LENGTH
+                ? signature.toString()
+                : signature.substring(0, MAX_READABLE_SIGNATURE_LENGTH);
+    }
+
+    private static String readableType(final TypeDescriptor type) {
+        final var readable = switch (type) {
+            case AnyDescriptor _ -> "Any";
+            case IntDescriptor _ -> "Int";
+            case FloatDescriptor _ -> "Float";
+            case BooleanDescriptor _ -> "Boolean";
+            case StringDescriptor _ -> "String";
+            case UnitDescriptor _ -> "Unit";
+            case NeverDescriptor _ -> "Never";
+            case NullDescriptor _ -> "Null";
+            case TypeParameterDescriptor parameter -> parameter.name();
+            case NominalDescriptor nominal -> simpleName(nominal.name());
+            case NullableDescriptor nullable -> "Nullable$" + readableType(nullable.baseType());
+            case FunctionDescriptor function -> "Function" + function.arity();
+            case ArrayDescriptor array -> "Array$" + readableType(array.elementType());
+            case ReferenceDescriptor reference -> "Ref$" + readableType(reference.baseType());
+            case GenericDescriptor generic -> {
+                final var name = new StringBuilder(simpleName(generic.baseType().name()));
+                for (final var parameter : generic.typeParameters()) {
+                    name.append('$').append(readableType(parameter));
+                }
+                yield name.toString();
+            }
+            case InferDescriptor _ ->
+                    throw new IllegalArgumentException("Cannot name an inferred function shape");
+        };
+        return readable.replaceAll("[^A-Za-z0-9_$]", "_");
+    }
+
+    private static String simpleName(final String name) {
+        final var separator = name.lastIndexOf('.');
+        return separator < 0 ? name : name.substring(separator + 1);
     }
 
     private static void appendFunction(final StringBuilder encoding,

@@ -1,0 +1,18 @@
+package java.nio.file;
+
+import java.io.BufferedWriter;
+import java.nio.file.Path;
+import zeron.io.IoFailure;
+
+public external class Files = "java.nio.file.Files" {
+    public static createDirectory(path: &Path): &Path
+        throws java.io.IOException -> IoFailure::fromIOException;
+    public static createDirectories(path: &Path): &Path
+        throws java.io.IOException -> IoFailure::fromIOException;
+    public static deleteIfExists(path: &Path): Boolean
+        throws java.io.IOException -> IoFailure::fromIOException;
+    public static newBufferedWriter(path: &Path): &BufferedWriter
+        throws java.io.IOException -> IoFailure::fromIOException;
+    public static readString(path: &Path): String
+        throws java.io.IOException -> IoFailure::fromIOException;
+}

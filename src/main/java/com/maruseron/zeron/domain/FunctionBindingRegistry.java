@@ -117,36 +117,47 @@ public final class FunctionBindingRegistry {
                 TypeDescriptor.ofBoolean(), string, string);
         final var stringEndsWith = TypeDescriptor.functionOf("stringEndsWith",
                 TypeDescriptor.ofBoolean(), string, string);
+        final var floatPredicate = TypeDescriptor.functionOf("floatPredicate",
+                TypeDescriptor.ofBoolean(), TypeDescriptor.ofFloat());
         final var stringLength = TypeDescriptor.functionOf("stringLength", TypeDescriptor.ofInt(), string);
         final var stringIsEmpty = TypeDescriptor.functionOf("stringIsEmpty", TypeDescriptor.ofBoolean(), string);
         final var stringSubstring = TypeDescriptor.functionOf("stringSubstring",
                 string, string, TypeDescriptor.ofInt(), TypeDescriptor.ofInt());
         final var stringClass = ClassDesc.of("java.lang.String");
-        return new FunctionBindingRegistry(Map.of(
-                "zeron.lang.intToFloat",
-                new Binding(numericConversion, new IntrinsicBinding(IntrinsicId.INT_TO_FLOAT)),
-                "zeron.lang.floatToInt",
-                new Binding(checkedNumericConversion, new IntrinsicBinding(IntrinsicId.FLOAT_TO_INT_OPTION)),
-                "zeron.lang.stringLength",
-                new Binding(stringLength, new InstanceMethod(stringClass, "length",
-                        MethodTypeDesc.of(ConstantDescs.CD_int))),
-                "zeron.lang.stringIsEmpty",
-                new Binding(stringIsEmpty, new InstanceMethod(stringClass, "isEmpty",
-                        MethodTypeDesc.of(ConstantDescs.CD_boolean))),
-                "zeron.lang.stringIndexOf",
-                new Binding(stringSearch, new InstanceMethod(stringClass, "indexOf",
-                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_String))),
-                "zeron.lang.stringLastIndexOf",
-                new Binding(stringLastSearch, new InstanceMethod(stringClass, "lastIndexOf",
-                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_String))),
-                "zeron.lang.stringStartsWith",
-                new Binding(stringStartsWith, new InstanceMethod(stringClass, "startsWith",
-                        MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_String))),
-                "zeron.lang.stringEndsWith",
-                new Binding(stringEndsWith, new InstanceMethod(stringClass, "endsWith",
-                        MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_String))),
-                "zeron.lang.stringSubstring",
-                new Binding(stringSubstring, new InstanceMethod(stringClass, "substring",
-                        MethodTypeDesc.of(ConstantDescs.CD_String, ConstantDescs.CD_int, ConstantDescs.CD_int)))));
+        final var doubleClass = ClassDesc.of("java.lang.Double");
+        return new FunctionBindingRegistry(Map.ofEntries(
+                Map.entry("zeron.lang.intToFloat",
+                        new Binding(numericConversion, new IntrinsicBinding(IntrinsicId.INT_TO_FLOAT))),
+                Map.entry("zeron.lang.floatToInt",
+                        new Binding(checkedNumericConversion,
+                                new IntrinsicBinding(IntrinsicId.FLOAT_TO_INT_OPTION))),
+                Map.entry("zeron.lang.floatIsNaN",
+                        new Binding(floatPredicate, new StaticMethod(doubleClass, "isNaN",
+                                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_double)))),
+                Map.entry("zeron.lang.floatIsFinite",
+                        new Binding(floatPredicate, new StaticMethod(doubleClass, "isFinite",
+                                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_double)))),
+                Map.entry("zeron.lang.stringLength",
+                        new Binding(stringLength, new InstanceMethod(stringClass, "length",
+                                MethodTypeDesc.of(ConstantDescs.CD_int)))),
+                Map.entry("zeron.lang.stringIsEmpty",
+                        new Binding(stringIsEmpty, new InstanceMethod(stringClass, "isEmpty",
+                                MethodTypeDesc.of(ConstantDescs.CD_boolean)))),
+                Map.entry("zeron.lang.stringIndexOf",
+                        new Binding(stringSearch, new InstanceMethod(stringClass, "indexOf",
+                                MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_String)))),
+                Map.entry("zeron.lang.stringLastIndexOf",
+                        new Binding(stringLastSearch, new InstanceMethod(stringClass, "lastIndexOf",
+                                MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_String)))),
+                Map.entry("zeron.lang.stringStartsWith",
+                        new Binding(stringStartsWith, new InstanceMethod(stringClass, "startsWith",
+                                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_String)))),
+                Map.entry("zeron.lang.stringEndsWith",
+                        new Binding(stringEndsWith, new InstanceMethod(stringClass, "endsWith",
+                                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_String)))),
+                Map.entry("zeron.lang.stringSubstring",
+                        new Binding(stringSubstring, new InstanceMethod(stringClass, "substring",
+                                MethodTypeDesc.of(ConstantDescs.CD_String, ConstantDescs.CD_int,
+                                        ConstantDescs.CD_int))))));
     }
 }

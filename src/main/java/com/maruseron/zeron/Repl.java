@@ -110,8 +110,10 @@ final class Repl {
         }
         if (inString || inBlockComment || !delimiters.isEmpty()) return false;
         final var scan = Scanner.from(source).scanWithDiagnostics();
-        if (scan.tokens().size() <= 1) return true;
-        final var lastToken = scan.tokens().get(scan.tokens().size() - 2).type();
+        final var tokens = scan.tokens().stream()
+                .filter(token -> !token.type().isComment()).toList();
+        if (tokens.size() <= 1) return true;
+        final var lastToken = tokens.get(tokens.size() - 2).type();
         return !isContinuationToken(lastToken);
     }
 
@@ -141,7 +143,10 @@ final class Repl {
         final var submissionId = SUBMISSION_ID.incrementAndGet();
         final var className = "ZeronRepl" + submissionId;
         final var sourcePath = className + ".zn";
-        final var firstToken = Scanner.from(input).scanWithDiagnostics().tokens().getFirst();
+        final var firstToken = Scanner.from(input).scanWithDiagnostics().tokens().stream()
+                .filter(token -> !token.type().isComment())
+                .findFirst()
+                .orElseThrow();
         if (firstToken.type() == TokenType.IMPORT) {
             rememberImports(input, sourcePath, imports);
             return;
@@ -323,7 +328,8 @@ final class Repl {
     }
 
     private static String declarationName(final String input) {
-        final var tokens = Scanner.from(input).scanWithDiagnostics().tokens();
+        final var tokens = Scanner.from(input).scanWithDiagnostics().tokens().stream()
+                .filter(token -> !token.type().isComment()).toList();
         var tokenIndex = 1;
         if (tokens.get(tokenIndex).type() == TokenType.MUT) tokenIndex++;
         return tokens.get(tokenIndex).type() == TokenType.IDENTIFIER

@@ -37,6 +37,8 @@ final class DeclarationResolver {
     }
 
     static void resolveContract(final ResolutionContext context, final Stmt.ContractDecl contract) {
+        contract.typeParameters().forEach(parameter ->
+                TypeResolver.validateTypeParameterBound(context, parameter, contract.name()));
         validateRequiredContracts(context, contract);
         validateSealedContract(context, contract);
         for (final var constructor : contract.namedConstructors()) {
@@ -88,7 +90,7 @@ final class DeclarationResolver {
                                 + " required contract type arguments, found "
                                 + required.typeArguments().size() + "."));
             }
-            required.typeArguments().forEach(type -> TypeResolver.validateType(context, type, requiredName));
+            validateContractUse(context, required);
             if (canReachContract(context, requiredName.lexeme(), contract.name().lexeme(), new HashSet<>())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         requiredName, "Contract requirements cannot contain a cycle."));
@@ -308,7 +310,18 @@ final class DeclarationResolver {
         }
     }
 
+    private static void validateContractUse(final ResolutionContext context,
+                                            final Stmt.ContractUse use) {
+        final TypeDescriptor appliedType = use.typeArguments().isEmpty()
+                ? TypeDescriptor.ofName(use.name().lexeme())
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(use.name().lexeme()),
+                        use.typeArguments());
+        TypeResolver.validateType(context, appliedType, use.name());
+    }
+
     static void resolveClass(final ResolutionContext context, final Stmt.ClassDecl declaration) {
+        declaration.typeParameters().forEach(parameter ->
+                TypeResolver.validateTypeParameterBound(context, parameter, declaration.name()));
         if (declaration.isEffect() && (!declaration.typeParameters().isEmpty()
                 || !declaration.contractUses().isEmpty() || !declaration.methods().isEmpty()
                 || declaration.properties().stream().anyMatch(property -> !property.isPublic()))) {
@@ -398,13 +411,14 @@ final class DeclarationResolver {
                         "Expected " + contract.typeParameters().size() + " contract type arguments, found "
                                 + contractUse.typeArguments().size() + "."));
             }
-            contractUse.typeArguments().forEach(type -> TypeResolver.validateType(context, type, contractName));
+            validateContractUse(context, contractUse);
             if (contract.isSealed() && contract.permittedClasses().stream()
                     .noneMatch(permitted -> permitted.name().lexeme().equals(declaration.name().lexeme()))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         contractName,
                         "Class is not listed in the sealed contract's permits clause."));
             }
+
         }
 
         final var previousClass = context.frame.currentClassName;
@@ -471,7 +485,7 @@ final class DeclarationResolver {
                     final var writes = context.frame.flowState.writeCount(context.symbols.getSymbol(output.name()).name());
                     if (writes != 1) {
                         Zeron.resolutionError(new ResolutionError(
-                                DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW,
+                                DiagnosticCatalog.INVALID_PATTERN_OUTPUT_ASSIGNMENT,
                                 output.name(), writes == 0
                                         ? "Pattern output must be assigned on every completing path."
                                         : "Pattern output must be assigned exactly once on every completing path."));
@@ -535,13 +549,13 @@ final class DeclarationResolver {
                 if (earlierFields.stream().noneMatch(candidate ->
                         candidate.name().lexeme().equals(variable.name.lexeme()))
                         || !variable.explicitFunctionTypeArguments.isEmpty()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_INITIALIZER,
                             variable.name,
                             "A field initializer may read only fields declared earlier."));
                 }
             }
             default -> Zeron.resolutionError(new ResolutionError(
-                    DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, where,
+                    DiagnosticCatalog.INVALID_INITIALIZER, where,
                     "Field initializers currently allow only literals, operators, and reads of earlier fields."));
         }
     }
@@ -623,7 +637,7 @@ final class DeclarationResolver {
             resolveStmts(context, constructor.body());
             if (context.frame.flowState.isReachable()) {
                 Zeron.resolutionError(new ResolutionError(
-                        DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, constructor.name(),
+                        DiagnosticCatalog.INCOMPLETE_NAMED_CONSTRUCTOR, constructor.name(),
                         "Named constructor must return an instance on every normal path."));
             }
             RaisedEffectFlow.verifyCallable(context, constructor.typeDescriptor().raisedEffects(), constructor.name());

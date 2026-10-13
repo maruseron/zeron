@@ -56,6 +56,16 @@ final class MemberInteropResolver {
 
     static TypeDescriptor resolveProperty(final ResolutionContext context, final Expr.Property property) {
         final var receiverPath = expressionPath(property.receiver);
+        if ("Float".equals(receiverPath) && property.name.lexeme().equals("NaN")) {
+            if (property.safeNavigation()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        property.name, "Safe navigation cannot be used for a static property."));
+            }
+            property.setJavaFieldTarget(new JavaFieldTarget(
+                    "java.lang.Double", "NaN", "D", true, true));
+            property.setType(TypeDescriptor.ofFloat());
+            return TypeDescriptor.ofFloat();
+        }
         if (receiverPath != null) {
             final var where = property.receiver instanceof Expr.Variable typeName
                     ? typeName.name : property.name;
@@ -87,7 +97,7 @@ final class MemberInteropResolver {
                             property.name, "Unknown or unsupported external static property."));
                 }
                 if (javaField.hasGenericSignature()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                             property.name, "Generic Java fields are not supported."));
                 }
                 property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
@@ -214,17 +224,21 @@ final class MemberInteropResolver {
                     .filter(candidate -> candidate.name().equals(property.name.lexeme()))
                     .findFirst().orElse(null);
             if (javaField != null) {
+                if (context.externalClasses.containsKey(ownerName)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                            property.name, "Java fields must be declared in the external-class facade."));
+                }
                 if (javaField.isStatic()) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             property.name, "Static Java fields must be accessed through their class."));
                 }
                 if (javaField.hasGenericSignature()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                             property.name, "Generic Java fields are not supported."));
                 }
                 final var fieldType = JavaTypeMapping.toZeronType(javaField.descriptor());
                 if (fieldType == null) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                             property.name, "Java field descriptor is not supported."));
                 }
                 property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
@@ -752,7 +766,7 @@ final class MemberInteropResolver {
         }
         for (final var parameter : signature.typeParameters()) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
                         call.name, "Cannot infer type parameter '" + parameter.name()
                                 + "' for imported extension method '" + call.name.lexeme()
                                 + "'; provide an explicit type argument."));
@@ -1038,7 +1052,7 @@ final class MemberInteropResolver {
 
         for (final var parameter : typeParameters) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
                         call.name, "Cannot infer class type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument or an expected type."));
             }
@@ -1059,6 +1073,8 @@ final class MemberInteropResolver {
                 ? TypeDescriptor.of(declaration.name().lexeme())
                 : TypeDescriptor.genericOf(TypeDescriptor.ofName(declaration.name().lexeme()),
                         typeParameters.stream().map(substitutions::get).toList());
+        call.setEvidenceArguments(TypeClassEvidence.selectClassArguments(
+                context, declaration, substitutions, call.name));
         final TypeDescriptor result;
         if (factory.canonical()) {
             result = new ReferenceDescriptor(constructedType);
@@ -1217,7 +1233,7 @@ final class MemberInteropResolver {
 
         for (final var parameter : typeParameters) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
                         call.name,
                         "Cannot infer type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument."));
@@ -1253,7 +1269,7 @@ final class MemberInteropResolver {
     private static TypeDescriptor resolveJavaTypeCall(final ResolutionContext context, final Expr.MemberCall call,
                                                final JavaClassPath.JavaClass javaClass) {
         if (!call.explicitTypeArguments.isEmpty()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                     call.name,
                     "Java generic type arguments are not supported by the current interop slice."));
         }
@@ -1264,32 +1280,58 @@ final class MemberInteropResolver {
                     "Cannot construct an abstract Java class or interface."));
         }
         final var methodName = constructor ? "<init>" : call.name.lexeme();
-        return resolveJavaCall(context, call, javaClass, methodName, constructor, !constructor);
+        return resolveJavaCall(context, call, javaClass, methodName, constructor, !constructor, null);
     }
 
     private static TypeDescriptor resolveJavaInstanceCall(final ResolutionContext context, final Expr.MemberCall call,
                                                    final TypeDescriptor receiverType,
                                                    final JavaClassPath.JavaClass javaClass) {
-        if (!(receiverType instanceof ReferenceDescriptor)) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+        final var externalClass = context.externalClasses.get(javaClass.binaryName());
+        if (!(receiverType instanceof ReferenceDescriptor) && externalClass == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                     call.name,
                     "Java instance method calls require a mutable & receiver."));
         }
         if (!call.explicitTypeArguments.isEmpty()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                     call.name,
                     "Java generic method type arguments are not supported by the current interop slice."));
         }
-        return resolveJavaCall(context, call, javaClass, call.name.lexeme(), false, false);
+        return resolveJavaCall(context, call, javaClass, call.name.lexeme(), false, false,
+                receiverType instanceof ReferenceDescriptor);
+    }
+
+    private static boolean externalFacadeAllows(final ResolutionContext context,
+                                                final JavaClassPath.JavaClass javaClass,
+                                                final JavaClassPath.JavaMethod method,
+                                                final boolean constructor,
+                                                final Boolean mutableReceiver,
+                                                final int argumentCount) {
+        final var facade = context.externalClasses.get(javaClass.binaryName());
+        if (facade == null) return true;
+        if (constructor) {
+            return facade.constructors().stream()
+                    .anyMatch(declaration -> DeclarationRegistry.matchesExternalConstructor(declaration, method));
+        }
+        return facade.methods().stream()
+                .filter(declaration -> declaration.isStatic() == (mutableReceiver == null))
+                .filter(declaration -> declaration.isStatic()
+                        || !declaration.isMutating() || Boolean.TRUE.equals(mutableReceiver))
+                .filter(declaration -> !method.isVarArgs()
+                        || declaration.typeDescriptor().parameters().size()
+                                != method.descriptor().parameterCount() - 1
+                        || argumentCount == method.descriptor().parameterCount() - 1)
+                .anyMatch(declaration -> DeclarationRegistry.matchesExternalMethod(declaration, method));
     }
 
     private static TypeDescriptor resolveJavaCall(final ResolutionContext context, final Expr.MemberCall call,
                                            final JavaClassPath.JavaClass javaClass,
                                            final String methodName,
                                            final boolean constructor,
-                                           final boolean staticCall) {
+                                           final boolean staticCall,
+                                           final Boolean mutableReceiver) {
         if (call.arguments.stream().anyMatch(Expr.Lambda.class::isInstance)) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                     call.name,
                     "Java functional-interface callback conversion is not supported by this interop slice."));
         }
@@ -1298,11 +1340,15 @@ final class MemberInteropResolver {
                 .filter(method -> method.name().equals(methodName))
                 .filter(method -> method.isConstructor() == constructor)
                 .filter(method -> constructor || method.isStatic() == staticCall)
+                .filter(method -> externalFacadeAllows(context, javaClass, method, constructor,
+                        mutableReceiver, call.arguments.size()))
                 .toList();
         final var candidates = new ArrayList<JavaCandidate>();
         var hasUnsupportedShape = false;
         for (final var method : namedCandidates) {
-            if (method.hasGenericSignature()) {
+            if (method.hasGenericSignature()
+                    && (!method.isVarArgs()
+                    || call.arguments.size() != method.descriptor().parameterCount() - 1)) {
                 hasUnsupportedShape = true;
                 continue;
             }
@@ -1360,8 +1406,9 @@ final class MemberInteropResolver {
             final var reason = hasUnsupportedShape
                     ? "Matching Java generic, varargs, or unsupported type signatures are not supported."
                     : "No applicable public Java overload was found.";
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
-                    call.name, reason));
+            Zeron.resolutionError(new ResolutionError(hasUnsupportedShape
+                    ? DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE
+                    : DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, call.name, reason));
         }
         final var fixedArityCandidates = candidates.stream().filter(candidate -> !candidate.varArgs()).toList();
         final var applicableCandidates = fixedArityCandidates.isEmpty()
@@ -1391,12 +1438,120 @@ final class MemberInteropResolver {
                 : staticCall ? JavaCallTarget.InvocationKind.STATIC
                 : javaClass.isInterface() ? JavaCallTarget.InvocationKind.INTERFACE
                 : JavaCallTarget.InvocationKind.VIRTUAL;
+        final var facade = context.externalClasses.get(javaClass.binaryName());
+        final var facadeMethod = facade == null || constructor ? null : facade.methods().stream()
+                .filter(method -> DeclarationRegistry.matchesExternalMethod(method, selected.method()))
+                .findFirst().orElse(null);
+        final var returnType = facadeMethod == null
+                ? selected.returnType()
+                : facadeMethod.typeDescriptor().returnType();
+        final var checkedExceptions = selected.method().exceptionTypes().stream()
+                .filter(exceptionType -> isCheckedJavaException(context, exceptionType))
+                .toList();
+        if (!checkedExceptions.isEmpty() && (constructor || facadeMethod == null)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    call.name, "Java calls declaring checked exceptions require an external facade mapping."));
+        }
+        final var exceptionMappings = facadeMethod == null ? List.<JavaCallTarget.ExceptionMapping>of()
+                : resolveExceptionMappings(context, facadeMethod);
         call.setJavaCallTarget(new JavaCallTarget(javaClass.binaryName(), methodName,
-            selected.method().descriptor().descriptorString(), invocationKind, selected.varArgs()));
-        call.setResolvedDescriptor(TypeDescriptor.functionOf(methodName, selected.returnType(),
-                selected.parameterTypes().toArray(TypeDescriptor[]::new)));
-        call.setType(selected.returnType());
-        return selected.returnType();
+            selected.method().descriptor().descriptorString(), invocationKind, selected.varArgs(),
+                exceptionMappings));
+        final var raisedEffects = facadeMethod == null ? List.<TypeDescriptor>of()
+                : facadeMethod.typeDescriptor().raisedEffects();
+        call.setResolvedDescriptor(TypeDescriptor.functionWithEffectsOf(methodName, returnType,
+                selected.parameterTypes(), List.of(), raisedEffects));
+        call.setType(returnType);
+        return returnType;
+    }
+
+    static void validateExternalExceptionMappings(final ResolutionContext context,
+                                                  final Stmt.ExternalMethod method) {
+        resolveExceptionMappings(context, method);
+    }
+
+    private static List<JavaCallTarget.ExceptionMapping> resolveExceptionMappings(
+            final ResolutionContext context, final Stmt.ExternalMethod method) {
+        TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
+        final var mappings = new ArrayList<JavaCallTarget.ExceptionMapping>();
+        for (final var mapping : method.exceptionMappings()) {
+            TypeResolver.validateType(context, mapping.javaExceptionType(), mapping.constructorName());
+            TypeResolver.validateType(context, mapping.effectType(), mapping.constructorName());
+            final var exceptionName = mapping.javaExceptionType().name();
+            final var effectName = mapping.effectType().name();
+            final var effectClass = context.classes.get(effectName);
+            if (effectClass == null || !effectClass.isEffect()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        mapping.constructorName(), "A Java exception mapping must target a declared effect type."));
+            }
+
+            final boolean canonicalConstructor = mapping.constructorName().lexeme().equals("new");
+            final FunctionDescriptor constructorType;
+            if (canonicalConstructor) {
+                if (!effectClass.constructor().isPublic()
+                        || effectClass.canonicalConstructorTypes().size() != 1) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                            mapping.constructorName(),
+                            "Mapped effect constructor must be public and accept exactly one Java exception."));
+                }
+                final var parameterType = effectClass.canonicalConstructorTypes().getFirst();
+                if (!TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(parameterType))
+                        .equals(java.lang.constant.ClassDesc.of(exceptionName))) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                            mapping.constructorName(),
+                            "Mapped effect constructor parameter must exactly match Java exception type '"
+                                    + exceptionName + "'."));
+                }
+                constructorType = TypeDescriptor.functionOf("new",
+                        new ReferenceDescriptor(TypeDescriptor.ofName(effectName)), parameterType);
+            } else {
+                final var constructor = effectClass.namedConstructors().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(mapping.constructorName().lexeme()))
+                        .findFirst().orElse(null);
+                if (constructor == null || !constructor.isPublic()
+                        || constructor.typeDescriptor().parameters().size() != 1) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                            mapping.constructorName(),
+                            "Mapped effect constructor must be public and accept exactly one Java exception."));
+                }
+                TypeResolver.validateFunctionTypes(context, constructor.typeDescriptor(), constructor.name());
+                final var parameterType = constructor.typeDescriptor().parameters().getFirst();
+                if (!TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(parameterType))
+                        .equals(java.lang.constant.ClassDesc.of(exceptionName))) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                            mapping.constructorName(),
+                            "Mapped effect constructor parameter must exactly match Java exception type '"
+                                    + exceptionName + "'."));
+                }
+                constructorType = constructor.typeDescriptor();
+            }
+            final var constructorDescriptor = canonicalConstructor
+                    ? java.lang.constant.MethodTypeDesc.of(java.lang.constant.ConstantDescs.CD_void,
+                            java.lang.constant.ClassDesc.of(exceptionName))
+                    : java.lang.constant.MethodTypeDesc.of(
+                            TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(constructorType.returnType())),
+                            TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(
+                                    constructorType.parameters().getFirst())));
+            mappings.add(new JavaCallTarget.ExceptionMapping(exceptionName, effectName,
+                    mapping.constructorName().lexeme(), constructorDescriptor.descriptorString(),
+                    canonicalConstructor));
+        }
+        mappings.sort((left, right) -> {
+            if (context.javaClassPath.isSubtypeOf(left.exceptionType(), right.exceptionType())) return -1;
+            if (context.javaClassPath.isSubtypeOf(right.exceptionType(), left.exceptionType())) return 1;
+            return left.exceptionType().compareTo(right.exceptionType());
+        });
+        return List.copyOf(mappings);
+    }
+
+    private static boolean isCheckedJavaException(final ResolutionContext context, final String exceptionType) {
+        return context.javaClassPath.isSubtypeOf(exceptionType, "java.lang.Throwable")
+                && !context.javaClassPath.isSubtypeOf(exceptionType, "java.lang.RuntimeException")
+                && !context.javaClassPath.isSubtypeOf(exceptionType, "java.lang.Error");
     }
 
     private static int javaConversionCost(final ResolutionContext context, final TypeDescriptor expected, final TypeDescriptor actual) {

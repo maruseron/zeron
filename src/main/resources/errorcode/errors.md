@@ -4,6 +4,8 @@
 
 - `Unexpected character: {character}`
 - `Unterminated string.`
+- `Unterminated block comment.`
+- `Integer literal is outside the supported Int range.`
 
 ## Parsing
 

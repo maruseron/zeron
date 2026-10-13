@@ -2,6 +2,7 @@ package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.UnitLiteral;
 import com.maruseron.zeron.Zeron;
+import com.maruseron.zeron.ZeronVersions;
 import com.maruseron.zeron.analize.Bind;
 import com.maruseron.zeron.analize.ContractComposition;
 import com.maruseron.zeron.analize.Resolver;
@@ -30,7 +31,9 @@ final class BytecodeEmitter {
         Files.createDirectories(context.outputDirectory);
         RuntimeSupportEmitter.emitUnitClass(context.outputDirectory);
         RuntimeSupportEmitter.emitRaisedEffectClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitResourceSupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitEqualitySupportClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitHashSupportClass(context.outputDirectory);
         final var signatureDeclarations = context.compilationUnits.stream()
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
                 .map(NamespaceMembers.Member::declaration).toList();
@@ -107,7 +110,7 @@ final class BytecodeEmitter {
                 context.metadata::valueOwner,
                 context.mainClassName,
                 context.includeBundledSourcesInIndex);
-        libraryIndex.writeTo(context.outputDirectory.resolve(Path.of("META-INF", "zeron", "api-v24.bin")));
+        libraryIndex.writeTo(context.outputDirectory.resolve(ZeronVersions.API_INDEX_RELATIVE_PATH));
     }
 
     static Path outputPath(CompilationContext context, final String binaryName ){
@@ -805,9 +808,26 @@ final class BytecodeEmitter {
         }
     }
 
+    record EvidenceField(Token token, String fieldName) {}
+
     static List<Token> witnessSlots(final CompilationContext context, final FunctionDescriptor functionType) {
-        final var slots = new ArrayList<Token>();
-        for (final var parameter : functionType.typeParameters()) {
+        return witnessSlots(context, functionType.typeParameters());
+    }
+
+    static List<Token> witnessSlots(final CompilationContext context,
+                                    final List<TypeParameterDescriptor> typeParameters) {
+        return evidenceFields(context, typeParameters, "generic", "")
+                .stream().map(EvidenceField::token).toList();
+    }
+
+    static List<EvidenceField> evidenceFields(final CompilationContext context,
+                                             final List<TypeParameterDescriptor> typeParameters,
+                                             final String namespace,
+                                             final String ownerName) {
+        final var fields = new ArrayList<EvidenceField>();
+        final var ownerKey = ownerName.replace('.', '$');
+        for (int parameterIndex = 0; parameterIndex < typeParameters.size(); parameterIndex++) {
+            final var parameter = typeParameters.get(parameterIndex);
             for (int boundIndex = 0; boundIndex < parameter.bounds().size(); boundIndex++) {
                 final var bound = parameter.bounds().get(boundIndex);
                 final var contractName = bound instanceof GenericDescriptor generic
@@ -820,15 +840,38 @@ final class BytecodeEmitter {
                 if (contractUse == null) continue;
                 for (final var constructor : ContractComposition.constructors(
                         context.resolution.contracts(), contractUse)) {
-                    slots.add(Expr.evidenceToken(parameter, boundIndex, constructor.index()));
+                    final var token = Expr.evidenceToken(parameter, boundIndex, constructor.index());
+                    fields.add(new EvidenceField(token, evidenceFieldName(namespace, ownerKey,
+                            parameterIndex, boundIndex, "constructor", constructor.index())));
                 }
                 for (final var method : ContractComposition.methods(
                         context.resolution.contracts(), contractUse)) {
-                    slots.add(Expr.methodEvidenceToken(parameter, boundIndex, method.index()));
+                    final var token = Expr.methodEvidenceToken(parameter, boundIndex, method.index());
+                    fields.add(new EvidenceField(token, evidenceFieldName(namespace, ownerKey,
+                            parameterIndex, boundIndex, "method", method.index())));
                 }
             }
         }
-        return List.copyOf(slots);
+        return List.copyOf(fields);
+    }
+
+    private static String evidenceFieldName(final String namespace, final String ownerKey,
+                                            final int parameterIndex, final int boundIndex,
+                                            final String kind, final int slotIndex) {
+        return "$zeron$evidence$" + namespace + "$" + ownerKey + "$" + parameterIndex
+                + "$" + boundIndex + "$" + kind + "$" + slotIndex;
+    }
+
+    static List<EvidenceField> classEvidenceFields(final CompilationContext context,
+                                                  final Stmt.ClassDecl declaration) {
+        final var fields = new ArrayList<EvidenceField>(evidenceFields(
+                context, declaration.typeParameters(), "class", declaration.name().lexeme()));
+        for (final var applied : ContractComposition.forClass(
+                context.resolution.contracts(), declaration)) {
+            fields.addAll(evidenceFields(context, applied.declaration().typeParameters(),
+                    "contract", applied.declaration().name().lexeme()));
+        }
+        return List.copyOf(fields);
     }
 
     static MethodTypeDesc withEvidenceParameters(final MethodTypeDesc methodType, final int count) {
@@ -1163,7 +1206,10 @@ final class BytecodeEmitter {
                 emitConversion(context, composer, context.lastEmittedType,
                         TypeSubstitution.erase(constructorTypes.get(i)));
             }
-            composer.invokespecial(classDesc, "<init>", MethodTypeDesc.of(ConstantDescs.CD_void, parameters));
+            emitEvidenceArguments(context, composer, call.evidenceArguments());
+            composer.invokespecial(classDesc, "<init>",
+                    withEvidenceParameters(MethodTypeDesc.of(ConstantDescs.CD_void, parameters),
+                            call.evidenceArguments().size()));
             context.lastEmittedType = call.getType();
             return;
         }
@@ -1192,8 +1238,10 @@ final class BytecodeEmitter {
                             TypeSubstitution.erase(namedConstructor.typeDescriptor().parameters().get(i)));
                     }
                 }
+                emitEvidenceArguments(context, composer, call.evidenceArguments());
                 composer.invokestatic(ClassDesc.of(call.resolvedClassName()), call.name.lexeme(),
-                    toJavaMethodDescriptor(erasedFactory));
+                    withEvidenceParameters(toJavaMethodDescriptor(erasedFactory),
+                            call.evidenceArguments().size()));
                 final var erasedReturnType = TypeSubstitution.erase(namedConstructor.typeDescriptor().returnType());
                 emitConversion(context, composer, erasedReturnType, call.getType());
                 context.lastEmittedType = call.getType();
@@ -1378,19 +1426,74 @@ final class BytecodeEmitter {
             emitJavaVarargsArray(context, composer, call, fixedParameterCount,
                     descriptor.parameterType(fixedParameterCount).componentType());
         }
+        if (!target.exceptionMappings().isEmpty()) {
+            final var start = composer.newLabel();
+            final var end = composer.newLabel();
+            final var done = composer.newLabel();
+            composer.labelBinding(start);
+            emitJavaInvocation(composer, target, owner, descriptor);
+            composer.labelBinding(end);
+            if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
+                    && descriptor.returnType().equals(ConstantDescs.CD_void)) {
+                emitUnitValue(context, composer);
+            }
+            composer.goto_(done);
+            for (final var mapping : target.exceptionMappings()) {
+                final var handler = composer.newLabel();
+                final var rethrow = composer.newLabel();
+                composer.labelBinding(handler);
+                composer.dup();
+                composer.instanceOf(ClassDesc.of("java.lang.RuntimeException"));
+                composer.ifne(rethrow);
+                composer.dup();
+                composer.instanceOf(ClassDesc.of("java.lang.Error"));
+                composer.ifne(rethrow);
+                final var exceptionType = ClassDesc.of(mapping.exceptionType());
+                final var effectType = ClassDesc.of(mapping.effectType());
+                if (mapping.canonicalConstructor()) {
+                    composer.new_(effectType);
+                    composer.dup_x1();
+                    composer.swap();
+                    composer.invokespecial(effectType, "<init>",
+                            MethodTypeDesc.of(ConstantDescs.CD_void, exceptionType));
+                } else {
+                    composer.invokestatic(effectType, mapping.constructorName(),
+                            MethodTypeDesc.of(effectType, exceptionType));
+                }
+                final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+                composer.new_(carrier);
+                composer.dup_x1();
+                composer.swap();
+                composer.invokespecial(carrier, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
+                composer.athrow();
+                composer.labelBinding(rethrow);
+                composer.athrow();
+                composer.exceptionCatch(start, end, handler, exceptionType);
+            }
+            composer.labelBinding(done);
+        } else {
+            emitJavaInvocation(composer, target, owner, descriptor);
+            if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
+                    && descriptor.returnType().equals(ConstantDescs.CD_void)) {
+                emitUnitValue(context, composer);
+            }
+        }
+        context.lastEmittedType = call.safeNavigation() && call.resolvedDescriptor() != null
+                ? call.resolvedDescriptor().returnType()
+                : call.getType();
+    }
+
+    private static void emitJavaInvocation(final CodeBuilder composer,
+                                           final JavaCallTarget target,
+                                           final ClassDesc owner,
+                                           final MethodTypeDesc descriptor) {
         switch (target.kind()) {
             case CONSTRUCTOR -> composer.invokespecial(owner, "<init>", descriptor);
             case STATIC -> composer.invokestatic(owner, target.name(), descriptor);
             case INTERFACE -> composer.invokeinterface(owner, target.name(), descriptor);
             case VIRTUAL -> composer.invokevirtual(owner, target.name(), descriptor);
         }
-        if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
-            && descriptor.returnType().equals(ConstantDescs.CD_void)) {
-            emitUnitValue(context, composer);
-        }
-        context.lastEmittedType = call.safeNavigation() && call.resolvedDescriptor() != null
-                ? call.resolvedDescriptor().returnType()
-                : call.getType();
     }
 
     private static void emitJavaObjectArrayCopy(final CompilationContext context,

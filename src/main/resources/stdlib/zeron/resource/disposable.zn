@@ -1,0 +1,9 @@
+package zeron.resource;
+
+public effect DisposeFailure {
+    public property cause: Any?;
+}
+
+public contract Disposable {
+    mut dispose(): Unit raises DisposeFailure;
+}

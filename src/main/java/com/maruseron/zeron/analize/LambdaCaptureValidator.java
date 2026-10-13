@@ -42,6 +42,17 @@ final class LambdaCaptureValidator {
     private void walkCaptureUsage(final Stmt statement, final Set<String> localNames) {
         switch (statement) {
             case Stmt.Block(List<Stmt> block) -> walkCaptureUsage(block, localNames);
+            case Stmt.Using using -> {
+                final var nestedNames = new HashSet<>(localNames);
+                for (final var resource : using.resources()) {
+                    final var declaration = resource.declaration();
+                    if (declaration.initializer() != null) {
+                        walkCaptureUsage(declaration.initializer(), nestedNames);
+                    }
+                    nestedNames.add(declaration.name().lexeme());
+                }
+                walkCaptureUsage(using.body(), nestedNames);
+            }
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 walkCaptureUsage(condition, localNames);
                 if (thenBranch != null) walkCaptureUsage(thenBranch, namesWithConditionBindings(condition, localNames));

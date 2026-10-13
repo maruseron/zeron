@@ -2,11 +2,14 @@
 
 ## Status
 
-Class-defined extractor patterns, nested patterns, and OR-patterns are implemented on top of
-exhaustive matching of non-null sealed-contract values. Pattern declarations have typed outputs,
-optional Boolean refutation conditions, and immutable receivers. Nested patterns short-circuit;
-OR-patterns require equivalent binding sets. The implementation retains the legacy single-public-
-property extraction spelling as a compatibility fallback when it does not resolve to a class pattern.
+Class-defined extractor patterns, nested patterns, OR-patterns, literal patterns, and built-in
+product destructuring are implemented. Match roots must be non-null sealed-contract values,
+products, supported literal types, or concrete non-open classes matched with a literal somewhere
+in the patterns. Direct class roots without a literal test are not yet implemented; the accepted
+opt-in design is described below. Pattern declarations have typed outputs, optional Boolean
+refutation conditions, and immutable receivers. Nested patterns short-circuit; OR-patterns require
+equivalent binding sets. The implementation retains the legacy single-public-property extraction
+spelling as a compatibility fallback when it does not resolve to a class pattern.
 
 The direction is to let class designers name and implement deconstruction patterns. A pattern is an
 explicit public class member with declared output names and types; callers match through that API
@@ -40,7 +43,106 @@ names resolve to declared class patterns, not implicitly to arbitrary properties
 can remain as a compatibility spelling only where it is unambiguous; a declared pattern may not
 share a name with a property on its class.
 
+## Root eligibility and literal matching
+
+Native sum types participate through their generated sealed-contract representation. A match root
+must be justified by one of these modes:
+
+1. **Closed-type matching.** A sealed contract or algebraic data type has a compiler-known set of
+   alternatives. Type and case patterns may handle those alternatives, and coverage is checked
+   against the closed set. A type parameter is eligible for this mode only when its applicable
+   bound itself proves the same closed set; an unbounded or non-sealed bound is insufficient.
+2. **Product matching.** A product type has exactly one constructor and a compiler-known ordered
+   component list. A total product pattern or wildcard establishes coverage.
+3. **Literal matching.** A root with a concrete, non-open static type may be matched by literal
+   values, either directly or at leaves reached through a destructuring pattern. This is an explicit
+   value test, not general matching over the root's runtime type. `Any`, non-sealed contracts, and
+   type variables whose bounds do not establish a closed type are not eligible for this mode.
+
+Literal patterns are restricted to integer, Boolean, and String literals of the statically known
+type. They do not include arbitrary expressions, variable references, or implicit calls to `Eq<T>`
+witnesses. Integer and Boolean comparisons use primitive value equality; String comparisons use
+`String.equals`. Floating-point literals remain deferred until cases such as `NaN` have explicit
+semantics. A wildcard or total destructuring pattern is required to complete a literal match over
+an unbounded domain such as integers or strings. Both Boolean literals may establish coverage of
+the finite Boolean domain, provided neither arm is guarded.
+
+This model does not admit open roots merely because a wildcard is present: a wildcard completes a
+literal match over an eligible concrete root, while it cannot make `Any` or a non-sealed contract a
+valid root.
+
+## Built-in product destructuring
+
+Product types have one statically known constructor and may be destructured positionally using the
+product type name:
+
+```zeron
+type Point = (x: Int, y: Int);
+
+match (point) {
+    case Point(0, 0) -> "origin";
+    case Point(x, y) -> "other point";
+}
+```
+
+The argument count and types must match the product components in declaration order. Each argument
+may be a binding, `_`, a literal, or another supported nested pattern. Component getters are
+evaluated left to right, and a failed nested pattern proceeds to the next arm. A product case
+contributes root coverage only when every nested component pattern is total; a refutable literal
+component does not cover the product by itself. The product root nevertheless permits a final
+wildcard. Product patterns are also available recursively in sum payloads and class-pattern
+outputs.
+
+Concrete class roots use class-defined patterns for destructuring; at least one literal test must
+occur in the match to opt into literal mode. Refutable patterns, including those containing a
+literal, do not count as total class coverage. These rules keep destructuring distinct from an
+open-ended runtime type test.
+
+## Opting classes into root matching
+
+**Accepted design; implementation pending.** A concrete class opts into direct root matching by
+declaring at least one public named pattern. This declaration is the opt-in; no additional
+`matchable` modifier is needed. The class remains a single concrete type, not a closed family of
+runtime alternatives. `Any`, non-sealed contracts, and unconstrained type variables remain invalid
+roots, even when a wildcard is present.
+
+For an opted-in class root, cases invoke public named patterns declared by that class:
+
+```zeron
+class Point {
+    x: Int;
+    y: Int;
+
+    public pattern coordinates(horizontal: Int, vertical: Int) {
+        horizontal = this.x;
+        vertical = this.y;
+    }
+}
+
+match (point) {
+    case Point.coordinates(0, vertical) -> "on the y-axis";
+    case Point.coordinates(horizontal, vertical) -> "somewhere else";
+}
+```
+
+The root is exhaustive only when covered by an unguarded wildcard or an unguarded total pattern.
+A declared pattern without `when` is total at the extraction step, but nested patterns can still
+make a case refutable: `Point.coordinates(0, vertical)` does not cover every `Point`. A pattern with
+a `when` condition, a refutable nested pattern, or an arm guard does not contribute total coverage.
+The compiler does not infer that multiple refutable patterns form a complete partition; users need
+a total pattern or wildcard as the fallback.
+
+This direct-root mode is separate from the existing literal mode, which admits a concrete class
+root only when a supported literal is tested. It is also separate from sealed-contract matching:
+the class opt-in does not establish a set of subclasses or permit matching an open contract. The
+design assumes a concrete class root denotes that exact class; if class inheritance is introduced,
+the root eligibility rule must be revisited to account for subclasses.
+
 ## Class-defined named patterns
+
+Named patterns are currently usable in closed-root matches. The direct class-root examples in
+this section illustrate the accepted opt-in design above and will become valid when that pending
+root mode is implemented.
 
 A class may declare a named pattern with typed outputs and an optional refutation condition:
 
@@ -120,10 +222,10 @@ patterns can cover the root class. In particular, merely binding or ignoring out
 additional condition.
 
 For a sealed-contract scrutinee, every permitted class must be covered by an unguarded, irrefutable
-case, unless a final unguarded `_` covers all remaining values. For open classes and non-sealed
-contracts there is no closed-world proof of exhaustiveness; require a final unguarded `_`. This
-preserves the expression-match guarantee without pretending a refutable extractor covers values it
-can reject.
+case, unless a final unguarded `_` covers all remaining values. An open class or non-sealed contract
+is not an eligible root, even with a final `_`; wildcard coverage does not make an open root valid.
+Concrete non-open class roots require either a supported literal test under the current literal mode
+or the class opt-in described above.
 
 OR-pattern alternatives are tried left to right. They contribute the union of their coverage only
 when the entire arm is unguarded. Every alternative must bind the same set of names, and corresponding
@@ -151,16 +253,22 @@ matchCaseAlternative ::= IDENTIFIER "(" [patternArgument {"," patternArgument}] 
                        | patternAlternative
 matchPattern       ::= patternAlternative {"|" patternAlternative}
 patternAlternative ::= "_"
+                     | literalPattern ["as" IDENTIFIER]
                      | type ["." IDENTIFIER "(" [patternArgument
+                         {"," patternArgument}] ")" | "(" [patternArgument
                          {"," patternArgument}] ")"] ["as" IDENTIFIER]
-patternArgument    ::= "_" | IDENTIFIER | matchPattern
+patternArgument    ::= "_" | IDENTIFIER | literalPattern ["as" IDENTIFIER] | matchPattern
+literalPattern     ::= INT | "-" INT | STRING | "true" | "false"
 ```
 
 The type-qualified call form keeps class-pattern selection explicit and fits the current
-`PermittedType.pattern(...)` match notation. A type-only case tests and covers the class without
-extracting outputs. A named pattern invocation must resolve to a public pattern declared by that
-class; it must not silently resolve to a property getter. The parser and resolver normalize the
-legacy one-property spelling only as a compatibility path, subject to the no-collision rule.
+`PermittedType.pattern(...)` match notation. A call-shaped product pattern uses
+`ProductType(component, ...)`; at the match root, an unqualified `Name(...)` is resolved against the
+scrutinee as either a sum case or product type, never through global name lookup. A type-only case
+tests and covers the class without extracting outputs. A named pattern invocation must resolve to a
+public pattern declared by that class; it must not silently resolve to a property getter. The parser
+and resolver normalize the legacy one-property spelling only as a compatibility path, subject to
+the no-collision rule.
 
 Root cases of a nominal sum may use the case name without the sum type:
 
@@ -175,6 +283,9 @@ These names are resolved only against the scrutinee's sum declaration; they are 
 globally. The qualified form, such as `List.Cons(head, tail)`, remains valid. This shorthand is
 currently limited to root cases in `match` expressions, not nested patterns, `matches` conditions,
 or effect handlers.
+
+Literal patterns and built-in product patterns are likewise limited to `match` expressions;
+`matches` conditions and effect handlers retain their existing pattern syntax.
 
 Pattern bodies use ordinary block syntax and assignments to the declared output names. Output names
 are local to the pattern body and are not class properties or mutable out-parameters. Definite
@@ -194,8 +305,9 @@ non-mutating methods are allowed without a promise that they are pure.
 At each match use, resolution:
 
 1. Resolves the scrutinee once and establishes its static nominal/applied type.
-2. Verifies each class case is permitted for a sealed-contract scrutinee and that generic arguments
-   agree with the matched type.
+2. Verifies each class case is permitted for a sealed-contract scrutinee, or that a direct class
+   root has opted in through a public named pattern; generic arguments must agree with the matched
+   type.
 3. Resolves named patterns on the matched class, substitutes their output types, and checks argument
    count and nested-pattern compatibility.
 4. Creates arm-local immutable bindings, checks aliases and guards, and verifies that every OR
@@ -254,9 +366,14 @@ matches.
 4. Completed: refutable `when` patterns and null-result failure lowering.
 5. Completed: nested patterns, short-circuiting, OR bindings, and conservative coverage propagation.
 6. Completed: public-pattern metadata (introduced in schema v19) and separately compiled consumers.
-7. Remaining: broaden negative tests for output assignment, visibility, mutability, and invalid OR
+7. Completed: supported literal patterns and built-in product destructuring with conservative
+   coverage.
+8. Remaining: broaden negative tests for output assignment, visibility, mutability, and invalid OR
    bindings; decide when to migrate standard-library property patterns and remove the compatibility
    fallback.
+9. Planned: allow a concrete class with at least one public named pattern to opt into direct
+   class-root matching, with coverage limited to total patterns and wildcards.
 
-Purity analysis, literal/value patterns, nullable matching, user-defined coverage proofs, general
-algebraic data types, and source-level tuple outputs are outside this initial design.
+Purity analysis, arbitrary value patterns, nullable matching, user-defined coverage proofs, general
+algebraic data types beyond the closed cases described above, and source-level tuple outputs are
+outside this initial design.

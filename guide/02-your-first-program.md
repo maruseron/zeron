@@ -4,8 +4,6 @@ The project created in [subject 1](01-install-and-create-a-project.md) contains 
 `src/main.zn`. A Zeron program starts from a zero-argument `main` function in that entry unit:
 
 ```zeron
-import zeron.io.println;
-
 fn main(): Unit {
     println("Hello, Zeron!");
 }

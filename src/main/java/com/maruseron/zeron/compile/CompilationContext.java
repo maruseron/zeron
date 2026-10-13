@@ -1,6 +1,7 @@
 package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.analize.ResolutionResult;
+import com.maruseron.zeron.analize.Bind;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
@@ -24,6 +25,8 @@ import java.util.Map;
 import java.util.Objects;
 
 final class CompilationContext {
+    record ActiveUsing(Bind resources, Bind acquiredCount) {}
+
     final ClassFile classFile;
     List<Stmt> topLevelDeclarations;
     final List<CompilationUnit> compilationUnits;
@@ -50,6 +53,8 @@ final class CompilationContext {
     int propertyTemporaryCount;
     final Deque<Label> loopExitLabels = new ArrayDeque<>();
     final Deque<Label> loopContinueLabels = new ArrayDeque<>();
+    final Deque<Integer> loopUsingDepths = new ArrayDeque<>();
+    final Deque<ActiveUsing> activeUsingScopes = new ArrayDeque<>();
 
     CompilationContext(final List<CompilationUnit> units,
                        final String mainClassName,

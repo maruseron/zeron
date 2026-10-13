@@ -177,6 +177,14 @@ final class LambdaCompilationPlan {
                 collectFunctionShapes(external.typeDescriptor().returnType());
             }
             case Stmt.Block(List<Stmt> statements) -> collectLambdaShapes(statements);
+            case Stmt.Using using -> {
+                for (final var resource : using.resources()) {
+                    final var declaration = resource.declaration();
+                    collectFunctionShapes(declaration.type());
+                    if (declaration.initializer() != null) collectLambdaShapes(declaration.initializer());
+                }
+                collectLambdaShapes(using.body());
+            }
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 collectLambdaShapes(condition);
                 if (thenBranch != null) collectLambdaShapes(thenBranch);
@@ -423,6 +431,17 @@ final class LambdaCompilationPlan {
             case Stmt.Block(List<Stmt> block) -> {
                 final var nestedNames = new HashSet<>(localNames);
                 collectCapturedVariables(block, nestedNames, captured, seen);
+            }
+            case Stmt.Using using -> {
+                final var nestedNames = new HashSet<>(localNames);
+                for (final var resource : using.resources()) {
+                    final var declaration = resource.declaration();
+                    if (declaration.initializer() != null) {
+                        collectCapturedVariables(declaration.initializer(), nestedNames, captured, seen);
+                    }
+                    nestedNames.add(declaration.name().lexeme());
+                }
+                collectCapturedVariables(using.body(), nestedNames, captured, seen);
             }
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 collectCapturedVariables(condition, localNames, captured, seen);

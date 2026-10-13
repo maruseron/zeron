@@ -6,7 +6,7 @@ This document records the current JVM lowering for Zeron lambdas, the limits of 
 
 ## Current Lowering
 
-For each distinct function signature used by a lambda, the compiler emits a public functional interface in the default package. Its name is `Lambda$V1_` followed by the SHA-256 digest of the canonical `FunctionShapeKey` encoding; the generated name is not the language-level type identity. Its single abstract method is named `invoke` and has the JVM parameter and return descriptors for that signature.
+For each distinct function signature used by a lambda, the compiler emits a public functional interface in `zeron.runtime`. Its name begins with `Lambda$V2$`, includes a shortened, sanitized summary of the arity and parameter/result types, and ends with the SHA-256 digest of the canonical `FunctionShapeKey` encoding. The digest remains the identity; the readable portion is diagnostic only and may be truncated. The generated name is not the language-level type identity. Its single abstract method is named `invoke` and has the JVM parameter and return descriptors for that signature.
 
 Each lambda expression gets a separate public static synthetic helper in the generated main class, such as `$lambda$0`. For file compilation, the class name comes from the source filename without its extension. At the expression's call site, `invokedynamic` links that helper to the signature interface through `java.lang.invoke.LambdaMetafactory`. Calls through function-valued parameters use `invokeinterface`.
 

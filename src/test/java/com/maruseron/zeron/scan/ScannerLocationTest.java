@@ -7,6 +7,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class ScannerLocationTest {
@@ -72,6 +73,57 @@ public final class ScannerLocationTest {
         } finally {
             System.setOut(previousOutput);
         }
+    }
+
+    @Test
+    public void retainsCommentTokensWithTheirSourceRanges() {
+        final var source = "// first\r\nlet value /* *x / still a comment */ = 1;";
+        final var result = Scanner.from(source, "src/comments.zn").scanWithDiagnostics();
+
+        assertEquals(TokenType.LINE_COMMENT, result.tokens().getFirst().type());
+        assertEquals("// first", result.tokens().getFirst().lexeme());
+        assertPosition(result.tokens().getFirst().span().start(), 1, 1, 0);
+        assertPosition(result.tokens().getFirst().span().end(), 1, 9, 8);
+        final var blockComment = result.tokens().stream()
+                .filter(token -> token.type() == TokenType.BLOCK_COMMENT)
+                .findFirst().orElseThrow();
+        assertEquals("/* *x / still a comment */", blockComment.lexeme());
+        assertEquals(0, result.diagnostics().size());
+        assertTrue(result.tokens().stream().anyMatch(token -> token.type() == TokenType.EOF));
+    }
+
+    @Test
+    public void returnsPartialTokensAndDiagnosticsForIncompleteInput() {
+        final var stringResult = Scanner.from("\"unfinished", "src/string.zn").scanWithDiagnostics();
+        assertEquals(TokenType.STRING, stringResult.tokens().getFirst().type());
+        assertEquals("unfinished", stringResult.tokens().getFirst().literal());
+        assertEquals("ZR1002", stringResult.diagnostics().getFirst().code().toString());
+        assertEquals(1, stringResult.diagnostics().size());
+
+        final var commentResult = Scanner.from("let value = 1; /* unfinished", "src/comment.zn")
+                .scanWithDiagnostics();
+        assertEquals(TokenType.BLOCK_COMMENT, commentResult.tokens().get(commentResult.tokens().size() - 2).type());
+        assertEquals("ZR1003", commentResult.diagnostics().getFirst().code().toString());
+        assertEquals(1, commentResult.diagnostics().size());
+    }
+
+    @Test
+    public void reportsIntegerOverflowInsteadOfThrowing() {
+        final var result = Scanner.from("2147483648", "src/integer.zn").scanWithDiagnostics();
+
+        assertEquals(TokenType.INT, result.tokens().getFirst().type());
+        assertEquals(0, result.tokens().getFirst().literal());
+        assertEquals("ZR1004", result.diagnostics().getFirst().code().toString());
+        assertEquals(1, result.diagnostics().size());
+    }
+
+    @Test
+    public void scannerContinuesAfterInvalidCharactersAndPreservesFollowingTokens() {
+        final var result = Scanner.from("let x = 1; @ let y = 2;").scanWithDiagnostics();
+
+        assertFalse(result.diagnostics().isEmpty());
+        assertTrue(result.tokens().stream().anyMatch(token -> token.type() == TokenType.IDENTIFIER
+                && token.lexeme().equals("y")));
     }
 
     private static void assertPosition(final com.maruseron.zeron.diagnostic.SourcePosition position,

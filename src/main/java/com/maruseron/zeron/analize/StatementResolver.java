@@ -7,6 +7,7 @@ import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.diagnostic.DiagnosticHelp;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 
 import java.util.*;
 
@@ -39,14 +40,15 @@ final class StatementResolver {
                 resolveStatements(statements);
                 context.symbols.endScope();
             }
+            case Stmt.Using using -> resolveUsing(using);
             case Stmt.Break(Token keyword) -> {
                 if (context.frame.resolvingPattern) {
                     Zeron.resolutionError(new ResolutionError(
-                            DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, keyword,
+                            DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT, keyword,
                             "Pattern bodies cannot break out of control flow."));
                 }
                 if (context.frame.loopDepth == 0) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT,
                             keyword,
                             "Can only break inside of a loop."));
                 }
@@ -58,11 +60,11 @@ final class StatementResolver {
             case Stmt.Continue(Token keyword) -> {
                 if (context.frame.resolvingPattern) {
                     Zeron.resolutionError(new ResolutionError(
-                            DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, keyword,
+                            DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT, keyword,
                             "Pattern bodies cannot continue control flow."));
                 }
                 if (context.frame.loopDepth == 0) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW,
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT,
                             keyword,
                             "Can only continue inside of a loop."));
                 }
@@ -179,7 +181,7 @@ final class StatementResolver {
             case Stmt.Return(Expr value, Token location) -> {
                 if (context.frame.resolvingPattern) {
                     Zeron.resolutionError(new ResolutionError(
-                            DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, location,
+                            DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT, location,
                             "Pattern bodies cannot return before assigning their outputs."));
                 }
                 final var expectedReturnType = context.frame.expectedReturnTypes.peek();
@@ -244,7 +246,7 @@ final class StatementResolver {
             resolvedType = Resolver.ensureAssignable(context, var.type(), resolvedType, var.name());
             if (var.type() instanceof InferDescriptor && resolvedType instanceof NullDescriptor) {
                 Zeron.resolutionError(ResolutionError.withHelp(
-                        DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                        DiagnosticCatalog.TYPE_INFERENCE_FAILURE,
                         var.name(),
                         "Cannot infer a type from a null value.",
                         new DiagnosticHelp("Add an explicit nullable type annotation.")));
@@ -253,7 +255,7 @@ final class StatementResolver {
         }
 
         if (resolvedType instanceof InferDescriptor) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_INFERENCE_FAILURE,
                     var.name(),
                     "Cannot infer type from declaration."));
         }
@@ -266,6 +268,39 @@ final class StatementResolver {
                     + resolvedType + " from initializer");
         }
         context.symbols.define(symbolName);
+    }
+
+    private void resolveUsing(final Stmt.Using using) {
+        context.symbols.beginScope();
+        try {
+            final var disposableType = new ReferenceDescriptor(
+                    TypeDescriptor.ofName("zeron.resource.Disposable"));
+            for (final var resource : using.resources()) {
+                final var declaration = resource.declaration();
+                resolveVariable(declaration);
+                final var resourceType = context.symbols.getSymbol(declaration.name()).type();
+                if (!(resourceType instanceof ReferenceDescriptor)
+                        || !context.typeCompatibility.canAssign(disposableType, resourceType)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                            declaration.name(),
+                            "A using resource must have a mutable reference type conforming to "
+                                    + "zeron.resource.Disposable."));
+                    continue;
+                }
+
+                final var method = new Token(TokenType.IDENTIFIER, "dispose", null, declaration.name().span());
+                final var receiver = new Expr.Variable(declaration.name(), resourceType);
+                final var call = new Expr.MemberCall(receiver, method, method, List.of(), List.of(),
+                        TypeDescriptor.ofInfer());
+                final var resultType = resolve(call);
+                context.typeCompatibility.ensureAssignable(TypeDescriptor.ofUnit(), resultType, method);
+                resource.setDisposerCall(call);
+            }
+            resolveStatements(using.body());
+        } finally {
+            context.symbols.endScope();
+        }
     }
 
     private void resolveWhile(final Token keyword, final Expr condition, final Stmt body) {

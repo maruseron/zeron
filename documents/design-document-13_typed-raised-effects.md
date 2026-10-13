@@ -14,9 +14,16 @@ compiled-library API metadata. Handler cases use the existing named-pattern synt
 whole payload with `as`, and can include Boolean guards.
 
 The implementation does not add effect inheritance, effect generics, effect rows, catch-all or
-wildcard cases, asynchronous effects, or Java exception translation. Declared effects may escape
-from the entry-point `main`; top-level initializers remain effect-free. The implementation is limited
-to expression handlers; no statement-level `try`/`catch` form is introduced.
+wildcard cases, or asynchronous effects. Java checked exceptions can be mapped only through the
+explicit external-class method mapping described below; there is no automatic translation. Declared
+effects may escape from the entry-point `main`; top-level initializers remain effect-free. The
+implementation is limited to expression handlers; no statement-level `try`/`catch` form is
+introduced.
+
+Synchronous resource cleanup is provided separately by statement-style `using` scopes and the
+`zeron.resource.Disposable` contract. Such scopes contribute body and disposal effects to the
+enclosing callable. Handler cases may bind suppressed cleanup outcomes with
+`with suppressed as name`; see the [resource-management guide](../guide/26-resource-management.md).
 
 ## Surface syntax
 
@@ -99,8 +106,30 @@ identity.
 The entry-point `main` function may declare raised effects like any other callable. Effects not
 handled within `main` must appear in its `raises` clause. Top-level value initializers cannot raise
 effects because there is no enclosing callable or entry-point boundary to receive them. Java
-exceptions are not translated into Zeron effects, and external Java functions have no raised effects
-in their signatures.
+exceptions are not translated by default. External-class methods can explicitly map declared Java
+checked exceptions to ordinary Zeron effects:
+
+```zeron
+public external class Reader = "java.io.Reader" {
+    public read(): Int
+        throws java.io.IOException -> FileFailure::fromIOException;
+}
+```
+
+Every checked exception declared by the Java method must be covered by a mapping. Each mapped
+exception type must be a Java subtype of `Throwable`, and the named public effect constructor must
+accept exactly one payload whose Java-facing type matches that exception type. If multiple mappings
+apply, the most-specific exception type takes precedence; ambiguous mappings are rejected. Mapping
+validation uses class-file metadata, so it does not load or initialize the Java class. Checked
+exceptions are not inferred for direct Java interop calls: those calls are rejected when the selected
+method declares checked exceptions. Java constructors declaring checked exceptions are currently
+unsupported, including constructors exposed by an external facade.
+
+The method's Zeron `raises` set is derived from its mappings. At runtime, only the Java invocation is
+covered by the translation handler: receiver and argument evaluation failures are not remapped.
+`RuntimeException` descendants and `Error`s bypass translation even when a broad mapping names
+`Exception` or `Throwable`; they continue to the host unchanged. The original Java exception is
+passed as the payload to the selected Zeron effect constructor.
 
 ### Handler scope and result type
 
@@ -129,11 +158,13 @@ accepts a value whose effect set is a subset of the expected effect set. Erased 
 names and SAM descriptors do not include raised effects because JVM invocation types are unchanged.
 Runtime effect checking is preserved inside generated lambda bodies.
 
-Effect metadata was first added in compiled-library index schema version 15. The current schema is
-version 24. The index serializes both the effect marker on exported nominal classes and raised sets on
-exported callable signatures. The standard-library API version remains independent of this binary
-schema version. Consumers of schemas that predate effect metadata must rebuild or use a compatible
-compiler; such an index cannot communicate effect markers or raised signatures safely.
+Effect metadata was first added in compiled-library index schema version 15. The current schema
+serializes both the effect marker on exported nominal classes and raised sets on exported callable
+signatures, as well as external-facade exception mappings needed to revalidate and emit those bridges
+in separately compiled clients. The standard-library API version remains
+independent of this binary schema version. Consumers of schemas that predate effect metadata must
+rebuild or use a compatible compiler; such an index cannot communicate effect markers, raised
+signatures, or exception mappings safely.
 
 ## Runtime model
 
@@ -144,8 +175,9 @@ support class is emitted alongside compiled classes.
 A handler compiles its protected expression into a JVM exception-table region catching only
 `RaisedEffect`. It tries the patterns in source order, evaluates a guard only after its pattern
 matches, and evaluates the arm only when both pattern and guard succeed. If no case matches, it
-rethrows the same carrier. Ordinary Java exceptions are not caught or rewritten. An unhandled
-carrier escaping the generated `main` method likewise propagates unchanged across the host boundary;
+rethrows the same carrier. Ordinary Java exceptions are not caught by effect handlers; only an explicit external-facade mapping
+translates the declared checked exception at its Java call site. An unhandled carrier escaping the
+generated `main` method likewise propagates unchanged across the host boundary;
 the current compiler does not add a launcher that catches and formats it. A future launcher may
 report an uncaught Zeron effect by catching only `RaisedEffect`, without translating Java exceptions
 or implicitly stringifying the payload. Effect payload classes and carriers are emitted as normal
@@ -157,8 +189,8 @@ Other follow-up areas:
 
 1. Design effect subtyping and generic payloads, if needed, without conflating effect identity with
    nominal value-type inheritance.
-2. Add an explicit Java exception bridge only as an opt-in boundary construct; ordinary external
-   functions should remain effect-free and Java exceptions should continue to propagate unchanged.
+2. Extend explicit checked-exception mappings only as concrete interop needs arise; they remain an
+   opt-in boundary and do not alter ordinary Java exception propagation.
 3. Explore effect-set polymorphism only after concrete callable and function-type compatibility has
    stabilized.
 4. Decide whether observable I/O belongs in the raised-effect system. `raises` currently describes

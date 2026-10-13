@@ -36,9 +36,12 @@ separate interop facilities.
   returning `Option<Int>.None()` for NaN, infinities, or values whose truncated result is outside the 32-bit
   `Int` range; fractional values in the fringe around either endpoint are accepted when truncation
   yields a representable `Int`.
+- `Float.NaN`, `Float.isNaN()`, and `Float.isFinite()` expose IEEE floating-point classification.
+  `Float.sign` returns `Option<Int>`: NaN has no sign, while finite values and infinities produce
+  `Some(-1)`, `Some(0)`, or `Some(1)`.
 - Intrinsic IDs and function bindings are internal. There is no source-level `intrinsic` keyword or
-  expected-class declaration. A narrowly curated external-class form is implemented for the
-  `System.out` printing facade only.
+  expected-class declaration. Public `external class` declarations provide an explicit, metadata-
+  checked allowlist for selected Java constructors, instance and static methods, and static properties.
 
 ## Binding Model
 
@@ -90,11 +93,28 @@ public external class PrintStream = "java.io.PrintStream" {
     public mut print(value: Any?): Unit;
     public mut println(value: Any?): Unit;
 }
+
+public external class File = "java.io.File" {
+    public constructor new(path: String);
+    public exists(): Boolean;
+    public isFile(): Boolean;
+    public isDirectory(): Boolean;
+    public getName(): String?;
+    public getPath(): String?;
+    public getParent(): String?;
+    public mkdir(): Boolean;
+    public mkdirs(): Boolean;
+    public delete(): Boolean;
+}
 ```
 
-Only those exact owners and members are available through the built-in JDK provider. `System.out`
-remains nullable and callers use flow refinement or safe navigation. No JDK package scanning or
-general module discovery is enabled.
+Each declaration's qualified source name must equal its Java binary name. Constructors, instance
+methods, and static properties must match public class-file metadata exactly; members not declared by
+the facade are unavailable through that source-level facade. `System.out` remains nullable and
+callers use flow refinement or safe navigation. JDK classes are looked up by explicit binary name
+from exported module metadata; package scanning and wildcard discovery are not enabled. Public
+external-class facades are preserved in compiled-library API indexes and revalidated against the
+consumer's Java metadata.
 
 ## Current Registry
 
@@ -133,9 +153,8 @@ An intrinsic operation and an external Java function binding are different mecha
   [design-document-11_compilation-libraries-and-host-integration.md](design-document-11_compilation-libraries-and-host-integration.md).
 - A signature-only top-level external function binds through `FunctionBindingRegistry`. A direct
   static-method target is verified against classpath metadata.
-- The curated external-class syntax exposes only exact Java member declarations validated against
-  the two supported JDK facades. It does not provide general JDK class discovery or let source
-  declarations broaden the approved member set.
+- External-class syntax exposes only exact Java member declarations validated against each facade's
+  named Java class. It is an explicit member allowlist, not a JDK package-discovery mechanism.
 
 Do not use intrinsic IDs as a substitute for general Java symbol discovery. Conversely, do not make
 all compiler-provided behavior depend on a class-file owner. A deliberately curated facade such as
@@ -151,16 +170,19 @@ all compiler-provided behavior depend on a class-file owner. A deliberately cura
   the curated external-class facade; the standard function-binding registry has no output bindings.
 3. **Keep feature-specific semantics local.** Array typing stays in doc 06; library artifacts and
    Java method discovery stay in doc 11. This document owns only the shared binding model.
-4. **Curated external class facade: initial slice implemented.** `java.lang.System.out` and
-   `java.io.PrintStream.print(Object)` / `println(Object)` validate against the JDK runtime metadata
-   and lower as direct field/method instructions. Public classes in exported JDK packages are
-   independently discoverable from module class-file metadata. Public declared Java fields with
-   supported descriptors are validated and lowered as field instructions; mutable instance writes
-   are allowed only for non-final fields. Static writes, inheritance, and Java generics remain
-   deferred.
-5. **Broaden external declarations only for a concrete need.** Specify each additional type identity,
-   visibility/import behavior, descriptor ownership, initialization, and interaction with contracts
-   before expanding the supported facade set.
+4. **External class facades: initial generalized slice implemented.** `System.out`,
+   `PrintStream.print(Object)` / `println(Object)`, and the selected `java.io.File` constructor and
+   instance methods, plus the NIO members used by the standard filesystem and text APIs, validate
+   against JDK metadata and lower through ordinary Java interop. Facades are explicit member
+   allowlists, and receiver mutability is enforced by the declared method
+   modifier. Public classes in exported JDK packages are independently discoverable from module
+   class-file metadata. Public declared Java fields with supported descriptors are validated and
+   lowered as field instructions; mutable instance writes are allowed only for non-final fields.
+   Static writes, inheritance, and Java generics remain deferred. Public facade metadata, including
+   checked-exception-to-effect mappings, is carried in the API-index schema; consumers
+   revalidate it against their available Java classes.
+5. **Broaden external declarations only for a concrete need.** Preserve explicit owner identities and
+   descriptor checking as the allowlist evolves.
 
 ## Acceptance Boundaries
 

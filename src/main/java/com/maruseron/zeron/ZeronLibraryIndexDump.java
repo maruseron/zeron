@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -33,13 +34,14 @@ public final class ZeronLibraryIndexDump {
 
     public static void main(final String... args) throws IOException {
         if (args.length != 1) {
-            System.err.println("Usage: ZeronLibraryIndexDump <api-v24.bin|class-directory|library.jar>");
+            System.err.println("Usage: ZeronLibraryIndexDump <" + ZeronVersions.API_INDEX_FILE_NAME
+                    + "|class-directory|library.jar>");
             return;
         }
         final var path = Path.of(args[0]);
         final var index = Files.isDirectory(path)
                 ? ZeronLibraryIndex.readFromDirectory(path)
-                : path.getFileName().toString().endsWith(".jar")
+                : path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar")
                     ? ZeronLibraryIndex.readFromJar(path)
                     : ZeronLibraryIndex.readFrom(path);
         print(index);
@@ -77,6 +79,31 @@ public final class ZeronLibraryIndexDump {
                     // System.out.println("  Namespace: " + namespaceLabel(value.namespaceName()));
                     System.out.println("  JVM owner: " + value.jvmOwner());
                     System.out.println("  Initialization owner: " + value.initializationOwner());
+                }
+                case ZeronLibraryIndex.ExternalClassExport externalClass -> {
+                    System.out.println("external class " + externalClass.qualifiedName()
+                            + " = " + externalClass.javaBinaryName());
+                    for (final var constructor : externalClass.constructors()) {
+                        System.out.println("  public constructor new("
+                                + constructor.parameterTypes().stream()
+                                        .map(ZeronLibraryIndexDump::formatType)
+                                        .collect(Collectors.joining(", "))
+                                + ")");
+                    }
+                    for (final var method : externalClass.methods()) {
+                        System.out.println("  public " + (method.mutating() ? "mut " : "")
+                                + method.signature().name()
+                                + formatParameters(method.signature(), false) + ": "
+                                + formatType(method.signature().returnType()));
+                        for (final var mapping : method.exceptionMappings()) {
+                            System.out.println("    throws " + mapping.exceptionType() + " -> "
+                                    + mapping.effectType() + "::" + mapping.constructorName());
+                        }
+                    }
+                    for (final var property : externalClass.staticProperties()) {
+                        System.out.println("  public static property "
+                                + property.name() + ": " + formatType(property.type()));
+                    }
                 }
                 case ZeronLibraryIndex.ClassExport classExport -> {
                     System.out.println("class " + classExport.qualifiedName()

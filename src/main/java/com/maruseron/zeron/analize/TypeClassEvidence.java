@@ -400,6 +400,26 @@ final class TypeClassEvidence {
         return List.copyOf(evidence);
     }
 
+    static List<Expr.EvidenceArgument> selectClassArguments(
+            final ResolutionContext context, final Stmt.ClassDecl declaration,
+            final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+            final com.maruseron.zeron.scan.Token where) {
+        final var evidence = new ArrayList<Expr.EvidenceArgument>(
+                selectArguments(context, declaration.typeParameters(), substitutions, where));
+        for (final var applied : ContractComposition.forClass(context, declaration)) {
+            final var contractSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            for (final var parameter : applied.declaration().typeParameters()) {
+                final var argument = applied.substitutions().get(parameter);
+                if (argument != null) {
+                    contractSubstitutions.put(parameter, TypeSubstitution.substitute(argument, substitutions));
+                }
+            }
+            evidence.addAll(selectArguments(context, applied.declaration().typeParameters(),
+                    contractSubstitutions, where));
+        }
+        return List.copyOf(evidence);
+    }
+
     static boolean hasEvidence(final ResolutionContext context, final TypeDescriptor contractType,
                                final TypeDescriptor actualType,
                                final com.maruseron.zeron.scan.Token where) {
@@ -423,6 +443,11 @@ final class TypeClassEvidence {
                             where, resolving)) {
                 return true;
             }
+            if (isHashableContract(contractType) && actual instanceof NullableDescriptor nullable
+                    && hasEvidence(context, hashableType(context, nullable.baseType()), nullable.baseType(),
+                            where, resolving)) {
+                return true;
+            }
             if (hasStructuralProductEquality(context, contractType, actual, where, resolving)) return true;
             if (hasStructuralSumEquality(context, contractType, actual, where, resolving)) return true;
             var matchingWitnesses = 0;
@@ -441,7 +466,7 @@ final class TypeClassEvidence {
                         "Ambiguous witness for contract '" + contractType + "' and type '" + actualType + "'."));
             }
             return matchingWitnesses == 1 || isBuiltInDisplay(contractType, actual)
-                    || isBuiltInEq(contractType, actual);
+                    || isBuiltInEq(contractType, actual) || isBuiltInHashable(contractType, actual);
         } finally {
             resolving.remove(evidenceKey);
         }
@@ -491,6 +516,17 @@ final class TypeClassEvidence {
                     TypeDescriptor.ofAny(), TypeDescriptor.ofAny());
             return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
                     "zeron.runtime.EqSupport", "eqNullableWithHandle", signature, null, true,
+                    Expr.EvidenceHandleKind.STATIC, List.of(baseEvidence));
+        }
+        if (isHashableContract(requiredBound) && actualType instanceof NullableDescriptor nullable
+                && !isBuiltInHashable(requiredBound, actualType)) {
+            final var baseEvidence = selectMethodEvidence(context, targetParameter, targetBoundIndex,
+                    targetMethodIndex, hashableType(context, nullable.baseType()), nullable.baseType(),
+                    hashMethod(context), where);
+            final var signature = TypeDescriptor.functionOf("hash", TypeDescriptor.ofInt(),
+                    TypeDescriptor.ofAny());
+            return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
+                    "zeron.runtime.HashSupport", "hashNullableWithHandle", signature, null, true,
                     Expr.EvidenceHandleKind.STATIC, List.of(baseEvidence));
         }
         if (actualType instanceof TypeParameterDescriptor actualParameter) {
@@ -551,6 +587,9 @@ final class TypeClassEvidence {
         final var builtinEquality = builtinEqualityHandle(requiredBound, concrete, requirement,
                 targetParameter, targetBoundIndex, targetMethodIndex);
         if (builtinEquality != null) return builtinEquality;
+        final var builtinHashing = builtinHashingHandle(requiredBound, concrete, requirement,
+                targetParameter, targetBoundIndex, targetMethodIndex);
+        if (builtinHashing != null) return builtinHashing;
         final var sumEquality = structuralSumEqualityHandle(context, requiredBound, concrete, requirement,
                 targetParameter, targetBoundIndex, targetMethodIndex, where);
         if (sumEquality != null) return sumEquality;
@@ -717,6 +756,59 @@ final class TypeClassEvidence {
         return nominalName(contractType).equals("zeron.lang.Eq")
                 && arguments.size() == 1 && target.equals(concrete)
                 && isBuiltInType;
+    }
+
+    private static Expr.EvidenceArgument builtinHashingHandle(
+            final TypeDescriptor requiredBound, final TypeDescriptor concrete,
+            final Stmt.ContractMethod requirement, final TypeParameterDescriptor parameter,
+            final int boundIndex, final int methodIndex) {
+        if (!isBuiltInHashable(requiredBound, concrete)
+                || !requirement.name().lexeme().equals("hash")
+                || !(requirement.typeDescriptor().returnType() instanceof IntDescriptor)
+                || !requirement.typeDescriptor().parameters().isEmpty()) return null;
+        final var method = concrete instanceof IntDescriptor ? "hashInt"
+                : concrete instanceof FloatDescriptor ? "hashFloat"
+                : concrete instanceof BooleanDescriptor ? "hashBoolean"
+                : concrete instanceof StringDescriptor ? "hashString"
+                : "hashUnit";
+        final var signature = TypeDescriptor.functionOf("hash", TypeDescriptor.ofInt(), concrete);
+        return new Expr.EvidenceArgument(parameter, boundIndex, methodIndex,
+                "zeron.runtime.HashSupport", method, signature, null,
+                true, Expr.EvidenceHandleKind.STATIC);
+    }
+
+    private static boolean isBuiltInHashable(final TypeDescriptor contractType,
+                                             final TypeDescriptor concreteType) {
+        final var concrete = concreteType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : concreteType;
+        final var arguments = typeArguments(contractType);
+        final var target = arguments.isEmpty() ? null
+                : arguments.getFirst() instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : arguments.getFirst();
+        return nominalName(contractType).equals("zeron.lang.Hashable")
+                && arguments.size() == 1 && target.equals(concrete)
+                && (concrete instanceof IntDescriptor || concrete instanceof FloatDescriptor
+                    || concrete instanceof BooleanDescriptor || concrete instanceof StringDescriptor
+                    || concrete instanceof UnitDescriptor);
+    }
+
+    private static TypeDescriptor hashableType(final ResolutionContext context,
+                                               final TypeDescriptor target) {
+        final var contract = context.contracts.get("zeron.lang.Hashable");
+        if (contract == null) throw new IllegalStateException("Hashable<T> contract is unavailable.");
+        return TypeDescriptor.genericOf(TypeDescriptor.ofName(contract.name().lexeme()), target);
+    }
+
+    private static Stmt.ContractMethod hashMethod(final ResolutionContext context) {
+        final var contract = context.contracts.get("zeron.lang.Hashable");
+        if (contract == null) throw new IllegalStateException("Hashable<T> contract is unavailable.");
+        return contract.methods().stream().filter(method -> method.name().lexeme().equals("hash"))
+                .findFirst().orElseThrow(() -> new IllegalStateException("Hashable.hash method is unavailable."));
+    }
+
+    private static boolean isHashableContract(final TypeDescriptor contractType) {
+        return nominalName(contractType).equals("zeron.lang.Hashable")
+                && typeArguments(contractType).size() == 1;
     }
 
     static Expr.EvidenceArgument selectEqualityMethod(final ResolutionContext context,

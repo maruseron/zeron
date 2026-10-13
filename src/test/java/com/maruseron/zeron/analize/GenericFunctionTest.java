@@ -351,15 +351,16 @@ public final class GenericFunctionTest {
     }
 
     @Test
-    public void rejectsBoundsOnClassAndContractDeclarationTypeParameters() {
-        for (final var source : List.of(
-                "contract Named { name(): String; } class Box<T: Named> {}",
-                "contract Named { name(): String; } contract Box<T: Named> {}")) {
-            final var result = Parser.of(Scanner.from(source).scanTokens())
-                    .parseCompilationUnitWithDiagnostics("bounds.zn");
-            assertTrue(result.diagnostics().stream()
-                    .anyMatch(diagnostic -> diagnostic.code().toString().equals("ZR1105")));
-        }
+    public void supportsClassAndContractDeclarationBounds() {
+        final var classResult = Parser.of(Scanner.from(
+                "contract Named { name(): String; } class Box<T: Named> {}").scanTokens())
+                .parseCompilationUnitWithDiagnostics("class-bounds.zn");
+        assertTrue(classResult.diagnostics().isEmpty());
+
+        final var contractResult = Parser.of(Scanner.from(
+                "contract Named { name(): String; } contract Box<T: Named> {}").scanTokens())
+                .parseCompilationUnitWithDiagnostics("contract-bounds.zn");
+        assertTrue(contractResult.diagnostics().isEmpty());
     }
 
     @Test
@@ -698,7 +699,7 @@ public final class GenericFunctionTest {
                 final var adapterCount = java.util.Arrays.stream(program.getDeclaredMethods())
                         .filter(method -> method.getName().startsWith("$adapter$"))
                         .count();
-                assertEquals(4, adapterCount);
+                assertEquals(5, adapterCount);
             }
         } finally {
             Files.deleteIfExists(classFile);
@@ -1013,11 +1014,11 @@ public final class GenericFunctionTest {
 
     private static Map<String, byte[]> generatedLambdaClasses() throws IOException {
         final var lambdaClasses = new HashMap<String, byte[]>();
-        try (final var files = Files.list(Path.of("dist"))) {
+        try (final var files = Files.walk(Path.of("dist"))) {
             for (final var file : files
-                    .filter(path -> path.getFileName().toString().startsWith("Lambda$V1_"))
+                    .filter(path -> path.getFileName().toString().startsWith("Lambda$V2$"))
                     .toList()) {
-                lambdaClasses.put(file.getFileName().toString(), Files.readAllBytes(file));
+                lambdaClasses.put(Path.of("dist").relativize(file).toString(), Files.readAllBytes(file));
             }
         }
         return lambdaClasses;

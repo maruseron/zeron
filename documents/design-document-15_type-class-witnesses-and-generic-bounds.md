@@ -39,6 +39,23 @@ checking, even though those arguments erase in JVM descriptors. Bounds expose no
 operations under the current mutability rules; class-side operations use hidden factory evidence.
 Generic methods, like generic functions, can invoke class-side factories through bounds.
 
+Generic class parameters may also declare applied contract bounds. A class application must satisfy
+each bound after substituting all class arguments. Evidence for class parameter bounds is selected
+at construction and retained in private final `MethodHandle` fields on the instance; instance
+methods load evidence from the receiver. Construction through Zeron uses a hidden evidence-bearing
+descriptor. The ordinary erased Java constructor or named-factory entry point throws
+`UnsupportedOperationException` when evidence is required, while Java may call instance methods on
+objects constructed by Zeron.
+
+Contract type parameters may declare the same bounds. Every generic contract application, required
+contract, witness contract, and nominal conformance validates the substituted bounds. A generic
+implementer must explicitly bound its type parameters sufficiently to meet those requirements.
+Generated contract interfaces expose synthetic evidence accessors for their bounded parameters;
+default methods use those accessors, and implementing instances retain the selected handles. This
+lets bounded contract defaults work through ordinary interface dispatch without runtime witness
+lookup. The library index already records bounds on contract type parameters, so this feature does
+not change its binary schema.
+
 ## Conformance and witness declarations
 
 An existing class declaration remains the source of nominal instance conformance:
@@ -178,6 +195,21 @@ Stringification uses the `Display` contract and its `toString` method. `String +
 must declare an explicit `Display<T>` bound; the compiler does not infer hidden bounds from an
 operator use.
 
+`Display<T>` is for user-facing text, not debugging output or serialization. Implementations should
+present a useful textual form, avoid runtime representation details such as object addresses, and be
+stable for a given value. There is no round-trip or escaping guarantee. Built-in `String` display is
+the string itself, without quotes; consequently a derived enclosing value may not be unambiguously
+parseable.
+
+The canonical style for a derived nominal value uses source-level names and declaration order:
+products include their type name and labeled fields, while sums include their type and case names
+and labeled payloads. For example, a point may display as `Point(x=3, y=4)`, while an option may
+display as `Option.Some(value=hello)` or `Option.None`. Generic type arguments and generated JVM
+class names are omitted. Nested fields use their own `Display` implementation. Derivation is
+opt-in: compiler-known products and sums are suitable candidates, while ordinary classes should
+define a presentation intentionally because their internal state need not be their public display.
+Types whose fields lack `Display` evidence cannot receive a derived implementation.
+
 For nullable `T?`, stringification is built-in nullable lifting: null renders as `"null"` and a
 non-null value uses `Display<T>`. No `Display<T?>` witness is needed. Compiler-provided built-in
 `Display` evidence covers `Int`, `Float`, `Boolean`, `String`, and `Unit`. `Array<T>` and `Any` are
@@ -199,10 +231,13 @@ Witness methods are emitted as static helpers rather than generated dictionary c
 signatures and method results use erased JVM descriptors, with casts where required. Applied types
 remain available for compile-time resolution and separate compilation.
 
-For reflection compatibility, bounded generic declarations also expose their ordinary erased
-descriptor. That overload has no witness context and therefore throws
-`UnsupportedOperationException` when invoked directly from Java. Zeron-generated calls and
-specialized function references use the evidence-bearing descriptor.
+For reflection compatibility, bounded generic functions and methods with method-level bounds expose
+their ordinary erased descriptor; calling it directly from Java throws
+`UnsupportedOperationException` because it has no witness context. Bounded class constructors and
+named factories follow the same rule when construction requires evidence. Class instance methods
+retain ordinary descriptors and can be called from Java on instances constructed by Zeron because
+they load evidence from the receiver. Zeron-generated generic calls and specialized function
+references use evidence-bearing descriptors where required.
 
 ## Decisions and remaining work
 
@@ -226,6 +261,6 @@ Agreed direction:
     structural evidence from their payload requirements.
 
 Implementation must include generic and default witness methods, recursive evidence, import-scoped
-ambiguity, built-in display, API-index round trips, separately compiled consumers, erased JVM
-signature checks, and negative diagnostics. A complete overlap solver for every possible distinct
-generic-pattern pair remains future hardening.
+ambiguity, built-in display, class-instance and bounded-contract-default evidence, API-index round
+trips, separately compiled consumers, erased JVM signature checks, and negative diagnostics. A
+complete overlap solver for every possible distinct generic-pattern pair remains future hardening.

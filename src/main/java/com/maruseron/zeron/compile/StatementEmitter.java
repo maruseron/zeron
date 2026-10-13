@@ -26,12 +26,14 @@ final class StatementEmitter {
                 if (context.loopExitLabels.isEmpty()) {
                     throw new IllegalStateException("Resolved break has no enclosing loop.");
                 }
+                emitUsingCleanupsToDepth(context, composer, context.loopUsingDepths.peek());
                 composer.goto_(context.loopExitLabels.peek());
             }
             case Stmt.Continue _ -> {
                 if (context.loopContinueLabels.isEmpty()) {
                     throw new IllegalStateException("Resolved continue has no enclosing loop.");
                 }
+                emitUsingCleanupsToDepth(context, composer, context.loopUsingDepths.peek());
                 composer.goto_(context.loopContinueLabels.peek());
             }
             case Stmt.Block(List<Stmt> statements) -> {
@@ -39,6 +41,7 @@ final class StatementEmitter {
                 emitStmts(context, composer, statements);
                 endScope(context);
             }
+            case Stmt.Using using -> emitUsing(context, composer, using);
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 final var value = (Integer) ConstantFolder.fold(condition);
                 if (value != null) {
@@ -73,9 +76,11 @@ final class StatementEmitter {
                     composer.ifeq(loopExit);
                     context.loopExitLabels.push(loopExit);
                     context.loopContinueLabels.push(loopStart);
+                    context.loopUsingDepths.push(context.activeUsingScopes.size());
                     try {
                         emitStmt(context, composer, body);
                     } finally {
+                        context.loopUsingDepths.pop();
                         context.loopExitLabels.pop();
                         context.loopContinueLabels.pop();
                     }
@@ -98,6 +103,24 @@ final class StatementEmitter {
                 }
             }
             case Stmt.Return(Expr expression, Token _) -> {
+                if (!context.activeUsingScopes.isEmpty()) {
+                    if (expression == null) {
+                        emitUnitValue(context, composer);
+                        context.lastEmittedType = TypeDescriptor.ofUnit();
+                    } else {
+                        emitExpr(context, composer, expression);
+                    }
+                    emitConversion(context, composer, context.lastEmittedType, context.currentReturnType);
+                    final var returnKind = TypeKind.fromDescriptor(
+                            TypeDescriptor.toJavaClassDesc(context.currentReturnType).descriptorString());
+                    final var returnValue = declareLoopLocal(context,
+                            nextLoopTemporary(context, "usingReturn"), context.currentReturnType);
+                    composer.storeLocal(returnKind, returnValue.lvt() + context.localSlotOffset);
+                    emitUsingCleanupsToDepth(context, composer, 0);
+                    composer.loadLocal(returnKind, returnValue.lvt() + context.localSlotOffset);
+                    composer.return_(returnKind);
+                    break;
+                }
                 if (expression == null) {
                     emitUnitValue(context, composer);
                     context.lastEmittedType = TypeDescriptor.ofUnit();
@@ -133,6 +156,133 @@ final class StatementEmitter {
             }
             default -> throw new UnsupportedOperationException();
         }
+    }
+
+    private static void emitUsing(final CompilationContext context, final CodeBuilder composer,
+                                  final Stmt.Using using) {
+        beginScope(context);
+        final var resourcesType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny());
+        final var resources = declareLoopLocal(context,
+                nextLoopTemporary(context, "usingResources"), resourcesType);
+        composer.ldc(using.resources().size());
+        composer.anewarray(ClassDesc.of("java.lang.Object"));
+        composer.astore(resources.lvt() + context.localSlotOffset);
+
+        final var acquiredCount = declareLoopLocal(
+                context, nextLoopTemporary(context, "usingAcquired"), TypeDescriptor.ofInt());
+        composer.iconst_0();
+        composer.istore(acquiredCount.lvt() + context.localSlotOffset);
+        final var primary = declareLoopLocal(context, nextLoopTemporary(context, "usingFailure"),
+                TypeDescriptor.ofAny().toNullable());
+        composer.aconst_null();
+        composer.astore(primary.lvt() + context.localSlotOffset);
+
+        context.activeUsingScopes.push(new CompilationContext.ActiveUsing(resources, acquiredCount));
+        final var start = composer.newLabel();
+        final var end = composer.newLabel();
+        final var handler = composer.newLabel();
+        final var normalCompletion = composer.newLabel();
+        composer.labelBinding(start);
+
+        for (int i = 0; i < using.resources().size(); i++) {
+            final var declaration = using.resources().get(i).declaration();
+            emitStmt(context, composer, declaration);
+            final var binding = context.symbols.getSymbol(declaration.name());
+            composer.aload(resources.lvt() + context.localSlotOffset);
+            composer.ldc(i);
+            composer.loadLocal(TypeKind.fromDescriptor(
+                    TypeDescriptor.toJavaClassDesc(binding.type()).descriptorString()),
+                    binding.lvt() + context.localSlotOffset);
+            composer.aastore();
+            composer.iload(acquiredCount.lvt() + context.localSlotOffset);
+            composer.iconst_1();
+            composer.iadd();
+            composer.istore(acquiredCount.lvt() + context.localSlotOffset);
+        }
+        emitStmts(context, composer, using.body());
+        composer.labelBinding(end);
+
+        if (canCompleteNormally(using.body())) {
+            final var normalFailure = emitResourceDisposal(context, composer, resources, acquiredCount, null);
+            composer.aload(normalFailure.lvt() + context.localSlotOffset);
+            composer.ifnull(normalCompletion);
+            composer.aload(normalFailure.lvt() + context.localSlotOffset);
+            composer.checkcast(ClassDesc.of("java.lang.Throwable"));
+            composer.athrow();
+        } else {
+            composer.aconst_null();
+            composer.athrow();
+        }
+
+        composer.labelBinding(handler);
+        composer.astore(primary.lvt() + context.localSlotOffset);
+        final var exceptionalFailure =
+                emitResourceDisposal(context, composer, resources, acquiredCount, primary);
+        composer.aload(exceptionalFailure.lvt() + context.localSlotOffset);
+        composer.checkcast(ClassDesc.of("java.lang.Throwable"));
+        composer.athrow();
+        composer.labelBinding(normalCompletion);
+        composer.exceptionCatch(start, end, handler, ClassDesc.of("java.lang.Throwable"));
+        context.activeUsingScopes.pop();
+        endScope(context);
+    }
+
+    private static boolean canCompleteNormally(final List<Stmt> statements) {
+        for (final var statement : statements) {
+            if (!canCompleteNormally(statement)) return false;
+        }
+        return true;
+    }
+
+    private static boolean canCompleteNormally(final Stmt statement) {
+        return switch (statement) {
+            case Stmt.Return _, Stmt.Break _, Stmt.Continue _ -> false;
+            case Stmt.Block(List<Stmt> statements) -> canCompleteNormally(statements);
+            case Stmt.Using using -> canCompleteNormally(using.body());
+            case Stmt.If(Token _, Expr _, Stmt thenBranch, Stmt elseBranch) ->
+                    elseBranch == null || canCompleteNormally(thenBranch) || canCompleteNormally(elseBranch);
+            case Stmt.Expression(Expr expression) -> !(expression.getType() instanceof NeverDescriptor);
+            default -> true;
+        };
+    }
+
+    private static void emitUsingCleanupsToDepth(final CompilationContext context,
+                                                  final CodeBuilder composer,
+                                                  final int depth) {
+        var remaining = context.activeUsingScopes.size() - depth;
+        for (final var active : context.activeUsingScopes) {
+            if (remaining-- <= 0) break;
+            final var failure = emitResourceDisposal(
+                    context, composer, active.resources(), active.acquiredCount(), null);
+            final var noFailure = composer.newLabel();
+            composer.aload(failure.lvt() + context.localSlotOffset);
+            composer.ifnull(noFailure);
+            composer.aload(failure.lvt() + context.localSlotOffset);
+            composer.checkcast(ClassDesc.of("java.lang.Throwable"));
+            composer.athrow();
+            composer.labelBinding(noFailure);
+        }
+    }
+
+    private static Bind emitResourceDisposal(final CompilationContext context,
+                                             final CodeBuilder composer,
+                                             final Bind resources,
+                                             final Bind acquiredCount,
+                                             final Bind primary) {
+        composer.aload(resources.lvt() + context.localSlotOffset);
+        composer.iload(acquiredCount.lvt() + context.localSlotOffset);
+        if (primary == null) composer.aconst_null();
+        else composer.aload(primary.lvt() + context.localSlotOffset);
+        composer.invokestatic(ClassDesc.of("zeron.runtime.ResourceSupport"), "dispose",
+                MethodTypeDesc.of(ClassDesc.of("java.lang.Throwable"),
+                        ConstantDescs.CD_Object.arrayType(), ConstantDescs.CD_int,
+                        ClassDesc.of("java.lang.Throwable")));
+        final var failure = declareLoopLocal(context, nextLoopTemporary(context, "usingDisposalFailure"),
+                TypeDescriptor.ofAny().toNullable());
+        composer.astore(failure.lvt() + context.localSlotOffset);
+        composer.iconst_0();
+        composer.istore(acquiredCount.lvt() + context.localSlotOffset);
+        return failure;
     }
 
     private static void emitFor(CompilationContext context, final CodeBuilder composer,
@@ -203,9 +353,11 @@ final class StatementEmitter {
 
         context.loopExitLabels.push(loopExit);
         context.loopContinueLabels.push(loopStart);
+        context.loopUsingDepths.push(context.activeUsingScopes.size());
         try {
             emitStmt(context, composer, body);
         } finally {
+            context.loopUsingDepths.pop();
             context.loopContinueLabels.pop();
             context.loopExitLabels.pop();
         }
@@ -253,9 +405,11 @@ final class StatementEmitter {
         final var loopContinue = composer.newLabel();
         context.loopExitLabels.push(loopExit);
         context.loopContinueLabels.push(loopContinue);
+        context.loopUsingDepths.push(context.activeUsingScopes.size());
         try {
             emitStmt(context, composer, body);
         } finally {
+            context.loopUsingDepths.pop();
             context.loopContinueLabels.pop();
             context.loopExitLabels.pop();
         }

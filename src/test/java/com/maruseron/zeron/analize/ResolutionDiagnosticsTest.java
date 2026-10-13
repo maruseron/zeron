@@ -33,7 +33,7 @@ public final class ResolutionDiagnosticsTest {
         assertEquals(2, result.errors().size());
         assertTrue(result.errors().get(0).message().contains("Unknown import target"));
         assertTrue(result.errors().get(1).message().contains("Cannot infer a type from a null value"));
-        assertEquals("ZR2014", result.errors().get(1).code().toString());
+        assertEquals("ZR2023", result.errors().get(1).code().toString());
         assertEquals(List.of(new DiagnosticHelp("Add an explicit nullable type annotation.")),
                 result.errors().get(1).helps());
     }
@@ -113,10 +113,44 @@ public final class ResolutionDiagnosticsTest {
         assertEquals(1, result.errors().size());
         assertEquals("Cannot infer the lambda's function type.", result.errors().getFirst().message());
         assertEquals("src/main.zn", result.errors().getFirst().primarySpan().sourcePath());
-        assertEquals("ZR2014", result.errors().getFirst().code().toString());
+        assertEquals("ZR2023", result.errors().getFirst().code().toString());
         assertEquals(List.of(new DiagnosticHelp(
                         "Add an explicit function type annotation to the binding.")),
                 result.errors().getFirst().helps());
+    }
+
+    @Test
+    public void reportsGenericInferenceSeparatelyFromGeneralTypeInference() {
+        final var unit = Parser.of(Scanner.from("""
+                fn deferred<T>(): T? = null;
+                fn useDeferred(): Unit {
+                    let value = deferred();
+                }
+                """).scanTokens()).parseCompilationUnit("generic-inference.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(1, result.errors().size());
+        assertEquals("ZR2022", result.errors().getFirst().code().toString());
+        assertTrue(result.errors().getFirst().message().contains("Cannot infer type parameter"));
+    }
+
+    @Test
+    public void distinguishesInvalidIterationSourceFromInvalidCollectionSink() {
+        final var unit = Parser.of(Scanner.from("""
+                fn badIterable(): Unit {
+                    for (let item in 42) { }
+                }
+                fn badSink(): Unit {
+                    let values = for [1] collect 0;
+                }
+                """).scanTokens()).parseCompilationUnit("iteration-protocols.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(2, result.errors().size());
+        assertEquals("ZR2020", result.errors().get(0).code().toString());
+        assertEquals("ZR2021", result.errors().get(1).code().toString());
     }
 
     @Test

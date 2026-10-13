@@ -11,6 +11,11 @@ For other types, Zeron uses contracts to make comparison behavior explicit. The 
 defines `Eq<T>` for equality and `Comparable<T>` for ordering. These capabilities are separate:
 equality does not imply an ordering, and ordering does not imply equality.
 
+`Float.NaN` names the IEEE not-a-number value. `Float.isNaN()` and `Float.isFinite()` classify
+floating-point values. NaN compares equal to NaN under Zeron's value-equality rule, but every
+relational comparison involving NaN is false. `Float.sign` returns `Option<Int>` and is `None` for
+NaN; positive and negative zero both have sign `Some(0)`.
+
 ## Equality with `Eq<T>`
 
 `Eq<T>` describes how to compare two values of the same type for value equality. Its single method

@@ -1,0 +1,161 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Zeron",
+  "scopeName": "source.zeron",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#declarations"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#function-calls"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.zeron",
+          "begin": "//",
+          "end": "$"
+        },
+        {
+          "name": "comment.block.zeron",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.zeron",
+      "begin": "\"",
+      "end": "\""
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.function.zeron"
+            },
+            "2": {
+              "name": "entity.name.function.zeron"
+            }
+          }
+        },
+        {
+          "match": "\\b(class|contract|effect|extension|type|witness)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.type.zeron"
+            },
+            "2": {
+              "name": "entity.name.type.zeron"
+            }
+          }
+        },
+        {
+          "match": "\\b(let)\\s+(?:(mut)\\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.variable.zeron"
+            },
+            "2": {
+              "name": "storage.modifier.mutability.zeron"
+            },
+            "3": {
+              "name": "variable.other.zeron"
+            }
+          }
+        },
+        {
+          "match": "\\b(newtype)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.type.zeron"
+            },
+            "2": {
+              "name": "entity.name.type.zeron"
+            }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "name": "keyword.control.zeron",
+      "match": "\\b(?:and|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|get|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|or|package|pattern|private|property|public|raise|raises|return|sealed|set|static|then|this|type|typeof|until|using|witness|while)\\b"
+    },
+    "constants": {
+      "name": "constant.language.zeron",
+      "match": "\\b(?:false|null|true)\\b"
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.zeron",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.zeron",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.builtin.zeron",
+          "match": "\\b(?:Any|Boolean|Float|Int|String|Unit)\\b"
+        },
+        {
+          "name": "entity.name.type.zeron",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "function-calls": {
+      "name": "entity.name.function.zeron",
+      "match": "\\b[a-z_][A-Za-z0-9_]*(?=\\s*\\()"
+    },
+    "operators": {
+      "name": "keyword.operator.zeron",
+      "match": "(?:===|==|!=|<=|>=|>>>=|>>>|>>=|>>|<<=|<<|\\.\\.\\.|\\.\\.|->|\\?\\?=|\\?\\?|\\?\\.|::|[+*/%&|^~!<>=?:-])"
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.group.zeron",
+          "match": "[(){}\\[\\]]"
+        },
+        {
+          "name": "punctuation.separator.zeron",
+          "match": "[,;.]"
+        }
+      ]
+    }
+  }
+}

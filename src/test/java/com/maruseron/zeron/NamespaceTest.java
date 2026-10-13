@@ -99,7 +99,7 @@ public final class NamespaceTest {
             libraryCompiler.resolve();
             libraryCompiler.compile();
             final var index = ZeronLibraryIndex.readFrom(
-                    Path.of("dist", "META-INF", "zeron", "api-v24.bin"));
+                    Path.of("dist").resolve(ZeronVersions.API_INDEX_RELATIVE_PATH));
             final var computeExport = index.declarations().stream()
                     .filter(ZeronLibraryIndex.FunctionExport.class::isInstance)
                     .map(ZeronLibraryIndex.FunctionExport.class::cast)
@@ -120,7 +120,7 @@ public final class NamespaceTest {
                 try (var redirectedOutput = new PrintStream(dumpOutput)) {
                     System.setOut(redirectedOutput);
                     ZeronLibraryIndexDump.main(
-                            Path.of("dist", "META-INF", "zeron", "api-v24.bin").toString());
+                            Path.of("dist").resolve(ZeronVersions.API_INDEX_RELATIVE_PATH).toString());
                 }
             } finally {
                 System.setOut(originalOutput);

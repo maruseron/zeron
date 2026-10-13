@@ -33,9 +33,11 @@
 1. [Generic bounds and witnesses](20-generic-bounds-and-witnesses.md)
 1. [Equality and ordering](21-equality-and-ordering.md)
 1. [Raised effects](22-raised-effects.md)
+1. [Resource management](26-resource-management.md)
 
 ## Part V — Use Zeron with the wider platform
 
+1. [File system and text I/O](27-file-system-and-text-io.md)
 1. [Java interoperability](23-java-interoperability.md)
 1. [Libraries and separate compilation](24-libraries-and-separate-compilation.md)
 1. [Configuration, releases, and the roadmap](25-configuration-releases-and-roadmap.md)

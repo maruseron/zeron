@@ -1,5 +1,6 @@
 package com.maruseron.zeron.analize;
 
+import com.maruseron.zeron.ZeronVersions;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.compile.CompilationService;
@@ -106,7 +107,7 @@ public final class NewtypeTest {
             libraryCompiler.resolve();
             libraryCompiler.compile();
             final var index = ZeronLibraryIndex.readFrom(libraryOutput.resolve(
-                    Path.of("META-INF", "zeron", "api-v24.bin")));
+                    ZeronVersions.API_INDEX_RELATIVE_PATH));
             final var exportedType = index.declarations().stream()
                     .filter(ZeronLibraryIndex.NewtypeExport.class::isInstance)
                     .map(ZeronLibraryIndex.NewtypeExport.class::cast)

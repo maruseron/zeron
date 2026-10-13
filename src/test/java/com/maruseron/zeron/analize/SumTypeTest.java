@@ -59,6 +59,58 @@ public final class SumTypeTest {
     }
 
     @Test
+    public void matchesLiteralsAndProductPatternsInsideSumPayloads() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "NestedPattern" + suffix;
+        final var sumName = "MaybePattern" + suffix;
+        final var productName = "PointPattern" + suffix;
+        final var source = """
+                public type %s<T> = Some(value: T) | Empty;
+                public type %s = (x: Int, y: Int);
+                fn classify(value: %s<Int>): Int = match (value) {
+                    case Some(1) -> 1;
+                    case Some(_) -> 2;
+                    case Empty() -> 0;
+                };
+                fn classifyPoint(value: %s<%s>): Int = match (value) {
+                    case Some(%s(0, _)) -> 10;
+                    case Some(%s(_, _)) -> 20;
+                    case Empty() -> 0;
+                };
+                fn one(): %s<Int> = %s.Some(1);
+                fn other(): %s<Int> = %s.Some(7);
+                fn origin(): %s<%s> = %s.Some(%s.new(0, 5));
+                fn point(): %s<%s> = %s.Some(%s.new(3, 5));
+                """.formatted(sumName, productName, sumName, sumName, productName, productName,
+                productName, sumName, sumName, sumName, sumName, sumName, productName, sumName,
+                productName, sumName, productName, sumName, productName);
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                final var maybe = loader.loadClass(sumName);
+                assertEquals(1, program.getMethod("classify", maybe).invoke(null,
+                        program.getMethod("one").invoke(null)));
+                assertEquals(2, program.getMethod("classify", maybe).invoke(null,
+                        program.getMethod("other").invoke(null)));
+                assertEquals(10, program.getMethod("classifyPoint", maybe).invoke(null,
+                        program.getMethod("origin").invoke(null)));
+                assertEquals(20, program.getMethod("classifyPoint", maybe).invoke(null,
+                        program.getMethod("point").invoke(null)));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", sumName + ".class"));
+            Files.deleteIfExists(Path.of("dist", sumName + "$$sum$Some.class"));
+            Files.deleteIfExists(Path.of("dist", sumName + "$$sum$Empty.class"));
+            Files.deleteIfExists(Path.of("dist", productName + ".class"));
+        }
+    }
+
+    @Test
     public void comparesGenericRecursiveSumsStructurally() throws Exception {
         final var programName = "SumEquality" + UUID.randomUUID().toString().replace("-", "");
         final var source = """

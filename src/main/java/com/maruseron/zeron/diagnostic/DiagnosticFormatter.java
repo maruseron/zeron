@@ -11,31 +11,51 @@ public final class DiagnosticFormatter {
     private DiagnosticFormatter() {}
 
     public static String format(final Diagnostic diagnostic, final SourceText sourceText) {
+        return format(diagnostic, sourceText, false);
+    }
+
+    public static String format(final Diagnostic diagnostic,
+                                final SourceText sourceText,
+                                final boolean colorize) {
         Objects.requireNonNull(diagnostic);
         Objects.requireNonNull(sourceText);
 
         final var span = diagnostic.primarySpan();
         final var location = location(span.sourcePath(), span.start());
         final var severity = diagnostic.severity().name().toLowerCase(java.util.Locale.ROOT);
-        final var output = new StringBuilder(location).append(": ").append(severity)
-                .append('[').append(diagnostic.code()).append("]: ")
+        final var severityColor = switch (diagnostic.severity()) {
+            case ERROR -> "31";
+            case WARNING -> "33";
+            case INFO -> "36";
+        };
+        final var output = new StringBuilder(colorize ? AnsiColor.apply(location, "36") : location)
+                .append(": ").append(colorize ? AnsiColor.apply(severity, severityColor) : severity)
+                .append(colorize ? AnsiColor.apply("[" + diagnostic.code() + "]", "35")
+                        : "[" + diagnostic.code() + "]")
+                .append(": ")
                 .append(diagnostic.message());
 
         final var sourceLine = span.start().column() == null
                 ? null
                 : sourceText.line(span.sourcePath(), span.start().line());
-        if (sourceLine != null) appendExcerpt(output, span, sourceLine);
+        if (sourceLine != null) appendExcerpt(output, span, sourceLine, colorize);
 
         for (final var label : diagnostic.labels()) {
             if (label.span().equals(span) && label.message().startsWith("at ")) continue;
-            output.append(System.lineSeparator()).append("  = label: ").append(label.message())
+            output.append(System.lineSeparator()).append("  = ")
+                    .append(colorize ? AnsiColor.apply("label", "33") : "label")
+                    .append(": ").append(label.message())
                     .append(" (").append(location(label.span().sourcePath(), label.span().start())).append(')');
         }
         for (final var note : diagnostic.notes()) {
-            output.append(System.lineSeparator()).append("  = note: ").append(note.message());
+            output.append(System.lineSeparator()).append("  = ")
+                    .append(colorize ? AnsiColor.apply("note", "36") : "note")
+                    .append(": ").append(note.message());
         }
         for (final var help : diagnostic.helps()) {
-            output.append(System.lineSeparator()).append("  = help: ").append(help.message());
+            output.append(System.lineSeparator()).append("  = ")
+                    .append(colorize ? AnsiColor.apply("help", "32") : "help")
+                    .append(": ").append(help.message());
             if (help.replacement() != null) {
                 output.append(System.lineSeparator()).append("    replacement: ").append(help.replacement());
             }
@@ -49,7 +69,8 @@ public final class DiagnosticFormatter {
 
     private static void appendExcerpt(final StringBuilder output,
                                       final SourceSpan span,
-                                      final String sourceLine) {
+                                      final String sourceLine,
+                                      final boolean colorize) {
         final var lineNumber = span.start().line();
         final var lineNumberWidth = Integer.toString(lineNumber).length();
         final var expandedLine = expandTabs(sourceLine);
@@ -63,9 +84,11 @@ public final class DiagnosticFormatter {
                 .append(System.lineSeparator()).append(" ".repeat(lineNumberWidth + 3)).append('|')
                 .append(System.lineSeparator()).append("  ")
                 .append(String.format(java.util.Locale.ROOT, "%" + lineNumberWidth + "d", lineNumber))
-                .append(" | ").append(expandedLine)
+                .append(" | ").append(colorize ? AnsiSyntaxHighlighter.highlight(expandedLine) : expandedLine)
                 .append(System.lineSeparator()).append(" ".repeat(lineNumberWidth + 3)).append("| ")
-                .append(" ".repeat(startColumn)).append('^').append("~".repeat(markerWidth - 1));
+                .append(" ".repeat(startColumn))
+                .append(colorize ? AnsiColor.apply("^" + "~".repeat(markerWidth - 1), "31")
+                        : "^" + "~".repeat(markerWidth - 1));
     }
 
     private static String location(final String sourcePath, final SourcePosition position) {

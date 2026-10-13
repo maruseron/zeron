@@ -1,15 +1,20 @@
 package zeron.lang;
 
 public extension Float {
-    public property sign: Int {
+    public property sign: Option<Int> {
         get {
-                 if (this == 0.0) return  0;
-            else if (this  < 0.0) return -1;
-            else                  return  1;
+            if (this.isNaN()) return Option<Int>.None();
+            if (this == 0.0 or this == -0.0) return Option.Some(0);
+            if (this < 0.0) return Option.Some(-1);
+            return Option.Some(1);
         }
     }
 
+    public fn isNaN(): Boolean = floatIsNaN(this);
+    public fn isFinite(): Boolean = floatIsFinite(this);
     public fn toInt(): Option<Int> = floatToInt(this);
 }
 
 external fn floatToInt(value: Float): Option<Int>;
+external fn floatIsNaN(value: Float): Boolean;
+external fn floatIsFinite(value: Float): Boolean;

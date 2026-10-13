@@ -28,15 +28,21 @@ public final class JavaClassPath {
                              boolean isStatic,
                              boolean isVarArgs,
                              boolean hasGenericSignature,
-                             boolean isConstructor) {}
+                             boolean isConstructor,
+                             List<String> exceptionTypes) {
+        public JavaMethod {
+            exceptionTypes = List.copyOf(exceptionTypes);
+        }
+    }
 
     public record JavaField(String name, java.lang.constant.ClassDesc descriptor,
                             boolean isStatic, boolean isFinal, boolean hasGenericSignature) {}
 
     public record JavaClass(String binaryName,
+                            String superclassName,
                             boolean isInterface,
                             boolean isAbstract,
-                            boolean hasGenericSignature,
+                            boolean hasTypeParameters,
                             List<JavaMethod> methods,
                             List<JavaField> fields) {
         public JavaClass {
@@ -93,6 +99,18 @@ public final class JavaClassPath {
         return null;
     }
 
+    public boolean isSubtypeOf(final String binaryName, final String supertypeName) {
+        var currentName = binaryName;
+        final var visited = new java.util.HashSet<String>();
+        while (currentName != null && visited.add(currentName)) {
+            if (currentName.equals(supertypeName)) return true;
+            final var current = find(currentName);
+            if (current == null) return false;
+            currentName = current.superclassName();
+        }
+        return false;
+    }
+
     private static JavaClass toJavaClass(final String binaryName, final Path root, final String classEntry,
                                          final ClassModel model) {
         final var expectedInternalName = classEntry.substring(0, classEntry.length() - ".class".length());
@@ -116,7 +134,12 @@ public final class JavaClassPath {
                         method.methodTypeSymbol(), method.flags().has(AccessFlag.STATIC),
                         method.flags().has(AccessFlag.VARARGS),
                         method.findAttribute(Attributes.signature()).isPresent(),
-                        method.methodName().equalsString("<init>")))
+                        method.methodName().equalsString("<init>"),
+                        method.findAttribute(Attributes.exceptions())
+                                .map(attribute -> attribute.exceptions().stream()
+                                        .map(entry -> entry.asInternalName().replace('/', '.'))
+                                        .toList())
+                                .orElse(List.of())))
                 .toList();
         final var fields = model.fields().stream()
                 .filter(field -> field.flags().has(AccessFlag.PUBLIC))
@@ -124,8 +147,13 @@ public final class JavaClassPath {
                         field.flags().has(AccessFlag.STATIC), field.flags().has(AccessFlag.FINAL),
                         field.findAttribute(Attributes.signature()).isPresent()))
                 .toList();
-        return new JavaClass(binaryName, flags.has(AccessFlag.INTERFACE),
-                flags.has(AccessFlag.ABSTRACT), model.findAttribute(Attributes.signature()).isPresent(),
+        final var hasTypeParameters = model.findAttribute(Attributes.signature())
+                .map(signature -> signature.signature().stringValue().startsWith("<"))
+                .orElse(false);
+        return new JavaClass(binaryName,
+                model.superclass().map(entry -> entry.asInternalName().replace('/', '.')).orElse(null),
+                flags.has(AccessFlag.INTERFACE),
+                flags.has(AccessFlag.ABSTRACT), hasTypeParameters,
                 methods, fields);
     }
 

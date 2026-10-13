@@ -40,11 +40,15 @@ final class LambdaSupportEmitter {
             DirectMethodHandleDesc.Kind.STATIC,
             ClassDesc.of(context.mainClassName),
             helper.helperName(),
-            toJavaMethodDescriptor(helper.targetType()).descriptorString());
+            functionReferenceMethodType(helper).descriptorString());
+        emitEvidenceArguments(context, composer, helper.evidenceArguments());
+        final var capturedEvidence = java.util.Collections.nCopies(
+                helper.evidenceArguments().size(), ClassDesc.of("java.lang.invoke.MethodHandle"))
+                .toArray(ClassDesc[]::new);
         composer.invokedynamic(DynamicCallSiteDesc.of(
             metafactory,
             "invoke",
-            MethodTypeDesc.of(generatedInterface),
+            MethodTypeDesc.of(generatedInterface, capturedEvidence),
             samMethodType,
             implementation,
             samMethodType));
@@ -56,7 +60,7 @@ final class LambdaSupportEmitter {
                                                              final LambdaCompilationPlan.FunctionReference reference) {
         final var sourceType = reference.sourceType();
         final var targetType = reference.targetType();
-        var slot = 0;
+        var slot = reference.evidenceArguments().size();
         for (int i = 0; i < targetType.arity(); i++) {
             final var parameterType = targetType.parameters().get(i);
             NominalTypeEmitter.loadLocal(context, composer, slot, parameterType);
@@ -69,7 +73,9 @@ final class LambdaSupportEmitter {
         if (owner == null) {
             throw new IllegalStateException("Missing JVM owner for " + reference.functionName());
         }
-        emitEvidenceArguments(context, composer, reference.evidenceArguments());
+        for (int index = 0; index < reference.evidenceArguments().size(); index++) {
+            composer.aload(index);
+        }
         composer.invokestatic(ClassDesc.of(owner),
             reference.functionName().substring(reference.functionName().lastIndexOf('.') + 1),
             withEvidenceParameters(toJavaMethodDescriptor(sourceType),
@@ -78,6 +84,16 @@ final class LambdaSupportEmitter {
         composer.return_(TypeKind.fromDescriptor(
             TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));
         }
+
+    static MethodTypeDesc functionReferenceMethodType(
+            final LambdaCompilationPlan.FunctionReference reference) {
+        final var parameters = new ArrayList<TypeDescriptor>();
+        for (int index = 0; index < reference.evidenceArguments().size(); index++) {
+            parameters.add(TypeDescriptor.ofName("java.lang.invoke.MethodHandle"));
+        }
+        parameters.addAll(reference.targetType().parameters());
+        return toJavaMethodDescriptor(reference.targetType(), parameters);
+    }
 
 
     static void emitLambdaImplementation(CompilationContext context, final CodeBuilder composer, final Expr.Lambda lambda ){

@@ -222,7 +222,7 @@ final class CallResolver {
 
         for (final var parameter : typeParameters) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
                         call.callee,
                         "Cannot infer type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument."));

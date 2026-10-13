@@ -33,10 +33,10 @@ dependencies when launching the entry class. Compiled-standard-library mode requ
 standard-library artifact to be listed as a Zeron library. Java dependencies use the separate
 `java-classpath` key.
 
-For API inspection, `ZeronLibraryIndexDump` can read the index file, class directory, or JAR. This
-is useful when checking which public declarations a library exports. The index is not a substitute
-for runtime classes: an index alone may allow resolution but will not provide implementation
-classes when the program launches.
+For API inspection, run `zeron dump <api-index|class-directory|library.jar>`. This prints the
+declarations exported by that library index. The index is not a substitute for runtime classes: an
+index alone may allow resolution but will not provide implementation classes when the program
+launches.
 
 Dependency fetching, lockfiles, incremental compilation, and configurable packaging are not
 provided by the current project model; dependencies are local paths. See

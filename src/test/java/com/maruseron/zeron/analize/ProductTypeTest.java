@@ -53,6 +53,128 @@ public final class ProductTypeTest {
     }
 
     @Test
+    public void matchesLiteralsAndDestructuresProducts() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "ProductMatch" + suffix;
+        final var productName = "PatternPair" + suffix;
+        final var source = """
+                public type %s<A, B> = (left: A, right: B);
+                fn zeroPair(): %s<Int, String> = %s<Int, String>.new(0, "zero");
+                fn answerPair(): %s<Int, String> = %s<Int, String>.new(42, "answer");
+                fn pairMatch(pair: %s<Int, String>): Int = match (pair) {
+                    case %s(0, "zero") -> 0;
+                    case %s(left, _) -> left;
+                };
+                fn integerMatch(value: Int): String = match (value) {
+                    case 1 -> "one";
+                    case _ -> "other";
+                };
+                fn stringMatch(value: String): Int = match (value) {
+                    case "map" -> 1;
+                    case _ -> 0;
+                };
+                fn booleanMatch(value: Boolean): Int = match (value) {
+                    case true -> 1;
+                    case false -> 0;
+                };
+                """.formatted(productName, productName, productName, productName, productName,
+                productName, productName, productName);
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                final var product = loader.loadClass(productName);
+                assertEquals(0, program.getMethod("pairMatch", product).invoke(null,
+                        program.getMethod("zeroPair").invoke(null)));
+                assertEquals(42, program.getMethod("pairMatch", product).invoke(null,
+                        program.getMethod("answerPair").invoke(null)));
+                assertEquals("one", program.getMethod("integerMatch", int.class).invoke(null, 1));
+                assertEquals("other", program.getMethod("integerMatch", int.class).invoke(null, 3));
+                assertEquals(1, program.getMethod("stringMatch", String.class).invoke(null, "map"));
+                assertEquals(0, program.getMethod("stringMatch", String.class).invoke(null, "filter"));
+                assertEquals(1, program.getMethod("booleanMatch", boolean.class).invoke(null, true));
+                assertEquals(0, program.getMethod("booleanMatch", boolean.class).invoke(null, false));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", productName + ".class"));
+        }
+    }
+
+    @Test
+    public void requiresExhaustiveLiteralAndProductMatches() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn invalid(value: Int): Int = match (value) {
+                    case 1 -> 1;
+                };
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn invalid(value: Boolean): Int = match (value) {
+                    case true -> 1;
+                };
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Pair = (left: Int, right: Int);
+                fn invalid(value: Pair): Int = match (value) {
+                    case Pair(0, _) -> 1;
+                };
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn invalid(value: Boolean): Int = match (value) {
+                    case true -> 1;
+                    case true -> 2;
+                    case false -> 0;
+                };
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn invalid(value: Any): Int = match (value) {
+                    case _ -> 0;
+                };
+                """)));
+    }
+
+    @Test
+    public void matchesConcreteClassesOnlyThroughLiteralPatterns() throws Exception {
+                final var suffix = UUID.randomUUID().toString().replace("-", "");
+                final var programName = "ConcreteMatch" + suffix;
+                final var className = "PatternBox" + suffix;
+                final var source = """
+                        class %s {
+                            public property value: Int;
+                            public constructor new;
+                            public pattern unbox(result: Int) { result = this.value; }
+                        }
+                        fn classify(box: %s): Int = match (box) {
+                            case %s.unbox(0) -> 0;
+                            case %s.unbox(value) -> value;
+                        };
+                        fn zero(): %s = %s.new(0);
+                        fn other(): %s = %s.new(42);
+                        """.formatted(className, className, className, className,
+                        className, className, className, className);
+                final var compiler = new CompilationService(parse(source), programName);
+                try {
+                    compiler.resolve();
+                    compiler.compile();
+                    try (final var loader = new URLClassLoader(
+                            new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                        final var program = loader.loadClass(programName);
+                        final var box = loader.loadClass(className);
+                        assertEquals(0, program.getMethod("classify", box).invoke(null,
+                                program.getMethod("zero").invoke(null)));
+                        assertEquals(42, program.getMethod("classify", box).invoke(null,
+                                program.getMethod("other").invoke(null)));
+                    }
+                } finally {
+                    Files.deleteIfExists(Path.of("dist", programName + ".class"));
+                    Files.deleteIfExists(Path.of("dist", className + ".class"));
+                }
+    }
+
+    @Test
     public void rejectsOneComponentAndDuplicateNames() {
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 type One = (value: Int);

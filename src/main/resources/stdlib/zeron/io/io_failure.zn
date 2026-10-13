@@ -1,0 +1,7 @@
+package zeron.io;
+
+public effect IoFailure {
+    public property cause: java.io.IOException;
+    public constructor fromIOException(cause: java.io.IOException) =
+        IoFailure.new(cause);
+}

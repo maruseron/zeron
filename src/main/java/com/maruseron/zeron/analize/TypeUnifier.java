@@ -21,7 +21,7 @@ final class TypeUnifier {
                 && !acceptsAny(previous, actual)
                 && !(actual instanceof ReferenceDescriptor reference
                     && previous.equals(reference.baseType()))) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE, where,
                         "Conflicting type inferences for '" + parameter.name() + "': "
                                 + previous + " and " + actual + "."));
             }
@@ -78,7 +78,7 @@ final class TypeUnifier {
         if (pattern.equals(actual)) return;
         if (!pattern.equals(actual)
                 && !(actual instanceof ReferenceDescriptor reference && pattern.equals(reference.baseType()))) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, where,
                     "Expected " + pattern + ", found " + actual + "."));
         }
     }

@@ -55,7 +55,7 @@ public final class ExplanationFormatter {
 
         appendParagraph(output, paragraph);
         if (inCodeBlock) appendCodeBlock(output, codeBlock, codeLanguage, colorizeZeronCode);
-        return output.toString() + "\n";
+        return output.toString();
     }
 
     private static void appendParagraph(final StringBuilder output, final StringBuilder paragraph) {

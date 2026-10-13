@@ -56,6 +56,14 @@
 
 ## Design References
 
+- For changes covered by the proposal process, follow `documents/zeps/ZEP-0000.md` and use the
+  template in `documents/zeps/ZEP-0001.md`. Check `documents/zeps/ZEP.md` for the next available
+  number; assign sequential zero-padded IDs, never reuse an ID, and add every new ZEP to the tracker.
+  Keep the tracker in numerical order with links, titles, and current statuses, and update it whenever
+  a ZEP's status or title changes. Routine fixes and contained changes do not need a ZEP.
+- `documents/zeps/ZEP.md`: numerical tracker of Zeron Enhancement Proposals.
+- `documents/zeps/ZEP-0000.md`: ZEP scope, numbering, lifecycle, and decision process.
+- `documents/zeps/ZEP-0001.md`: ZEP authoring template.
 - `documents/design-document-01_grammar.cfgr`: implemented source grammar.
 - Retired, archive only: `documents/design-document-02_type-grammar.cfgr`. Its encoded descriptor grammar is not authoritative for current source syntax or type representation.
 - `documents/design-document-00.md`: language overview and intended features.
@@ -74,3 +82,4 @@
 - `documents/design-document-15_type-class-witnesses-and-generic-bounds.md`: type-class witnesses, applied contract bounds, and generic bounds.
 - `documents/design-document-16_patterns-and-pattern-matching.md`: pattern syntax, resolution, exhaustiveness, and compilation.
 - `documents/design-document-17_structural-equality-and-hashing.md`: structural equality, hashing, `Eq<T>`, and contract composition.
+- `documents/design-document-18_member-discovery-and-stabilization.md`: proposed public member-discovery API and bounded stabilization milestone.

@@ -3,14 +3,15 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $pom = [xml](Get-Content -LiteralPath (Join-Path $repositoryRoot "pom.xml") -Raw)
 $projectVersion = $pom.SelectSingleNode("/*[local-name()='project']/*[local-name()='version']").InnerText
-$libraryIndexSource = Get-Content -LiteralPath (Join-Path $repositoryRoot "src\main\java\com\maruseron\zeron\domain\ZeronLibraryIndex.java") -Raw
-$standardLibrarySource = Get-Content -LiteralPath (Join-Path $repositoryRoot "src\main\java\com\maruseron\zeron\StandardLibrary.java") -Raw
-$libraryIndexMatch = [regex]::Match($libraryIndexSource, 'public static final int VERSION = (\d+);')
+$versionsSource = Get-Content -LiteralPath (Join-Path $repositoryRoot "src\main\java\com\maruseron\zeron\ZeronVersions.java") -Raw
+$libraryIndexMatch = [regex]::Match(
+    $versionsSource, '(?m)^\s*public\s+static\s+final\s+int\s+API_INDEX_SCHEMA_VERSION\s*=\s*(\d+)\s*;')
 if (-not $libraryIndexMatch.Success) {
     throw "Could not read the Zeron library-index version."
 }
 $libraryIndexVersion = $libraryIndexMatch.Groups[1].Value
-$standardLibraryMatch = [regex]::Match($standardLibrarySource, 'public static final int API_VERSION = (\d+);')
+$standardLibraryMatch = [regex]::Match(
+    $versionsSource, '(?m)^\s*public\s+static\s+final\s+int\s+STANDARD_LIBRARY_API_VERSION\s*=\s*(\d+)\s*;')
 if (-not $standardLibraryMatch.Success) {
     throw "Could not read the Zeron standard-library API version."
 }
@@ -58,7 +59,7 @@ try {
 
     $launcher = Join-Path $stageRoot "bin\zeron.cmd"
     $explanation = & $launcher explain ZR2014
-    if ($LASTEXITCODE -ne 0 -or ($explanation -join "`n") -notmatch "Type mismatch or failed inference") {
+    if ($LASTEXITCODE -ne 0 -or ($explanation -join "`n") -notmatch "ZR2014: Type mismatch") {
         throw "Packaged compiler failed the diagnostic explanation smoke test."
     }
 
@@ -88,7 +89,21 @@ zeron-libraries = ["../lib/$standardLibraryJarName"]
         $smokeManifest, (New-Object System.Text.UTF8Encoding($false)))
     $smokeOutput = & $launcher run --manifest (Join-Path $smokeRoot "zeron.toml") 2>&1
     if ($LASTEXITCODE -ne 0 -or ($smokeOutput -join "`n") -notmatch "zeron-release-smoke-ok") {
-        throw "Packaged build/run smoke test failed: $($smokeOutput -join "`n")"
+        throw "Packaged compiled-standard-library smoke test failed: $($smokeOutput -join "`n")"
+    }
+
+    $sourceSmokeManifest = @"
+[project]
+entry = "src/Main.zn"
+source-roots = ["src"]
+output = "output-source"
+"@
+    $sourceSmokeManifestPath = Join-Path $smokeRoot "zeron-source.toml"
+    [System.IO.File]::WriteAllText($sourceSmokeManifestPath,
+        $sourceSmokeManifest, (New-Object System.Text.UTF8Encoding($false)))
+    $sourceSmokeOutput = & $launcher run --manifest $sourceSmokeManifestPath 2>&1
+    if ($LASTEXITCODE -ne 0 -or ($sourceSmokeOutput -join "`n") -notmatch "zeron-release-smoke-ok") {
+        throw "Packaged bundled-source smoke test failed: $($sourceSmokeOutput -join "`n")"
     }
     Remove-Item -LiteralPath $smokeRoot -Recurse -Force
 

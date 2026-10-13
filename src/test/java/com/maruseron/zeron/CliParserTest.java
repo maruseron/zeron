@@ -224,7 +224,9 @@ public final class CliParserTest {
         }
         final var dump = output.toString(StandardCharsets.UTF_8);
         assertTrue(dump, dump.contains("Zeron public API index"));
-        assertTrue(dump, dump.contains("Format version: 26"));
+        assertTrue(dump, dump.contains("Format version: " + ZeronVersions.API_INDEX_SCHEMA_VERSION));
+        assertTrue(dump, dump.contains("Standard-library API version: "
+                + ZeronVersions.STANDARD_LIBRARY_API_VERSION));
     }
 
     private static CliParser.Invocation parse(final String... args) {

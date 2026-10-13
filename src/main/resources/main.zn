@@ -1,5 +1,0 @@
-public let value: Int = 1;
-
-fn main(): Unit {
-    println("hello");
-}

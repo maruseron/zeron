@@ -60,10 +60,14 @@
   template in `documents/zeps/ZEP-0001.md`. Check `documents/zeps/ZEP.md` for the next available
   number; assign sequential zero-padded IDs, never reuse an ID, and add every new ZEP to the tracker.
   Keep the tracker in numerical order with links, titles, and current statuses, and update it whenever
-  a ZEP's status or title changes. Routine fixes and contained changes do not need a ZEP.
-- `documents/zeps/ZEP.md`: numerical tracker of Zeron Enhancement Proposals.
+  a ZEP's status or title changes. Maintain release state and release/bundle reference only in that tracker,
+  separately from proposal status; update them as a ZEP becomes a candidate, is planned, deferred, or
+  shipped. Routine fixes and contained changes do not need a ZEP.
+- `documents/zeps/ZEP.md`: numerical tracker of Zeron Enhancement Proposals and canonical release
+  candidacy/bundle state.
 - `documents/zeps/ZEP-0000.md`: ZEP scope, numbering, lifecycle, and decision process.
 - `documents/zeps/ZEP-0001.md`: ZEP authoring template.
+- `documents/zeps/ZEP-0012.md`: canonical artifact and public release-series versioning policy.
 - `documents/design-document-01_grammar.cfgr`: implemented source grammar.
 - Retired, archive only: `documents/design-document-02_type-grammar.cfgr`. Its encoded descriptor grammar is not authoritative for current source syntax or type representation.
 - `documents/design-document-00.md`: language overview and intended features.

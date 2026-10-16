@@ -14,13 +14,13 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0001](./ZEP-0001.md) | ZEP Template | Accepted | Not applicable | — |
 | [ZEP-0002](./ZEP-0002.md) | Explicit Shared Mutable State in Lambdas | Accepted | Deferred | — |
 | [ZEP-0003](./ZEP-0003.md) | Constraint-Aware Let-Bound Lambda Generalization | Accepted | Deferred | — |
-| [ZEP-0004](./ZEP-0004.md) | Complete Generic Witness Overlap Checking | Accepted | Candidate | 0.2.0 (proposed) |
+| [ZEP-0004](./ZEP-0004.md) | Complete Generic Witness Overlap Checking | Accepted | Shipped | 0.2.0 |
 | [ZEP-0005](./ZEP-0005.md) | Generic Effect Payloads | Deferred | Unscheduled | — |
 | [ZEP-0006](./ZEP-0006.md) | First-Class Reusable Typed-Effect Handlers | Deferred | Unscheduled | — |
 | [ZEP-0007](./ZEP-0007.md) | Resumable Algebraic Effects Exploration | Deferred | Unscheduled | — |
 | [ZEP-0008](./ZEP-0008.md) | Explicit Contract Derivation | Accepted | Unscheduled | — |
 | [ZEP-0009](./ZEP-0009.md) | Public Member Discovery API | Accepted | Unscheduled | — |
-| [ZEP-0010](./ZEP-0010.md) | NonNull and Numeric Generic Admissibility Constraints | Accepted | Unscheduled | — |
+| [ZEP-0010](./ZEP-0010.md) | Generic Nullability and Numeric Requirements | Draft | Unscheduled | — |
 | [ZEP-0011](./ZEP-0011.md) | Standard Library Phase 1: I/O, Environment, and Time | Accepted | Unscheduled | — |
 | [ZEP-0012](./ZEP-0012.md) | Pre-1.0 and Major-Series Versioning | Accepted | Not applicable | — |
 | [ZEP-0013](./ZEP-0013.md) | Typed Effect Subtyping | Draft | Unscheduled | — |

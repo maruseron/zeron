@@ -184,6 +184,16 @@ public final class Resolver {
                 }
             }
         }
+        final var reportedWitnessPairs = new HashSet<Long>();
+        for (final var unit : units) {
+            context.packageName = unit.packageName();
+            context.currentSourcePath = unit.sourcePath();
+            context.currentImports = importsByUnit.get(unit);
+            context.invalidImportAliases = invalidAliasesByUnit.get(unit);
+            for (final var error : TypeClassEvidence.activeOverlapErrors(context, reportedWitnessPairs)) {
+                attempt(context, () -> { throw error; });
+            }
+        }
         for (final var unit : units) {
             context.packageName = unit.packageName();
             context.currentSourcePath = unit.sourcePath();

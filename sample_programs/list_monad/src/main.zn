@@ -1,0 +1,7 @@
+import List.fmap;
+
+fn main() {
+    let list = List.from(1, 2, 3, 4, 5);
+    println(list.fmap(i -> i * 2).toString());
+    println(List.from(1, 2, 3) == List.from(1, 2, 3));
+}

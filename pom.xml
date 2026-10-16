@@ -6,7 +6,7 @@
 
     <groupId>com.maruseron</groupId>
     <artifactId>zeron</artifactId>
-    <version>0.2-alpha</version>
+    <version>0.2.0</version>
 
     <licenses>
         <license>

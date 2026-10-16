@@ -143,16 +143,33 @@ final class TypeClassEvidence {
             }
         }
 
-        for (final var previous : context.typeClassWitnesses) {
-            if ((previous.packageName().equals(packageName) || isActive(context, previous))
-                    && nominalName(previous.declaration().contractType()).equals(contract.name().lexeme())
-                    && nominalName(previous.declaration().targetType())
-                            .equals(nominalName(witness.targetType()))) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        witness.name(), "Overlapping witnesses for the same class and contract are not allowed."));
+        context.typeClassWitnesses.add(new WitnessEntry(witness, packageName));
+    }
+
+    static List<ResolutionError> activeOverlapErrors(
+            final ResolutionContext context, final Set<Long> previouslyReportedPairs) {
+        final var errors = new ArrayList<ResolutionError>();
+        for (int firstIndex = 0; firstIndex < context.typeClassWitnesses.size(); firstIndex++) {
+            final var first = context.typeClassWitnesses.get(firstIndex);
+            if (!isActive(context, first)) continue;
+            for (int secondIndex = firstIndex + 1;
+                 secondIndex < context.typeClassWitnesses.size(); secondIndex++) {
+                final var second = context.typeClassWitnesses.get(secondIndex);
+                if (!isActive(context, second)) continue;
+                final long pairKey = ((long) firstIndex << Integer.SIZE) | secondIndex;
+                if (!previouslyReportedPairs.add(pairKey)
+                        || !WitnessPatternUnifier.overlaps(first.declaration(), second.declaration())) continue;
+                final var firstDeclaration = first.declaration();
+                final var secondDeclaration = second.declaration();
+                errors.add(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        secondDeclaration.name(),
+                        "Witness patterns overlap in the active scope: '"
+                                + firstDeclaration.contractType() + " for " + firstDeclaration.targetType()
+                                + "' and '" + secondDeclaration.contractType() + " for "
+                                + secondDeclaration.targetType() + "'."));
             }
         }
-        context.typeClassWitnesses.add(new WitnessEntry(witness, packageName));
+        return errors;
     }
 
     private static void validateType(final ResolutionContext context, final TypeDescriptor type,

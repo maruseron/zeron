@@ -27,3 +27,4 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0014](./ZEP-0014.md) | Stable Generic Type Admissibility | Draft | Unscheduled | — |
 | [ZEP-0015](./ZEP-0015.md) | Runtime Reification of Generic Type Witnesses | Draft | Unscheduled | — |
 | [ZEP-0016](./ZEP-0016.md) | Standard Library Phase 2: Math, Characters, and Networking | Draft | Unscheduled | — |
+| [ZEP-0017](./ZEP-0017.md) | Anonymous contract implementations | Draft | Unscheduled | — |

@@ -2,6 +2,9 @@ package com.maruseron.zeron;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.ParseResult;
+import com.maruseron.zeron.diagnostic.Diagnostic;
+import com.maruseron.zeron.scan.ScanResult;
 import com.maruseron.zeron.scan.Scanner;
 
 import java.io.BufferedReader;
@@ -13,6 +16,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class StandardLibrary {
+    public record LoadResult(List<CompilationUnit> units, List<Diagnostic> diagnostics) {
+        public LoadResult {
+            units = List.copyOf(units);
+            diagnostics = List.copyOf(diagnostics);
+        }
+    }
+
     public static final int API_VERSION = ZeronVersions.STANDARD_LIBRARY_API_VERSION;
     private static final String SOURCE_INDEX = "/stdlib/sources.index";
     public static final List<String> BUNDLED_SOURCE_PATHS = readSourceIndex();
@@ -40,6 +50,18 @@ public final class StandardLibrary {
         return List.copyOf(combined);
     }
 
+    public static LoadResult withBundledUnitsWithDiagnostics(final List<CompilationUnit> sourceUnits) {
+        final var combined = new ArrayList<>(sourceUnits);
+        final var diagnostics = new ArrayList<Diagnostic>();
+        for (final var sourcePath : BUNDLED_SOURCE_PATHS) {
+            if (containsSource(combined, sourcePath)) continue;
+            final var loaded = loadUnitWithDiagnostics(sourcePath);
+            combined.add(loaded.compilationUnit());
+            diagnostics.addAll(loaded.diagnostics());
+        }
+        return new LoadResult(combined, diagnostics);
+    }
+
     public static boolean isBundledSourcePath(final String sourcePath) {
         if (sourcePath == null) return false;
         final var normalized = sourcePath.replace('\\', '/');
@@ -54,13 +76,28 @@ public final class StandardLibrary {
     }
 
     private static CompilationUnit loadUnit(final String resourcePath) {
+        final var loaded = loadUnitWithDiagnostics(resourcePath);
+        Zeron.reportParseDiagnostics(loaded.diagnostics());
+        return loaded.compilationUnit();
+    }
+
+    private static UnitLoadResult loadUnitWithDiagnostics(final String resourcePath) {
         try (final var stream = StandardLibrary.class.getResourceAsStream(resourcePath)) {
             if (stream == null) throw new IllegalStateException("Missing standard library source " + resourcePath);
             final var source = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-            return Parser.of(Scanner.from(source, resourcePath).scanWithDiagnostics())
-                    .parseCompilationUnit(resourcePath);
+            final ScanResult scan = Scanner.from(source, resourcePath).scanWithDiagnostics();
+            final ParseResult parsed = Parser.of(scan).parseCompilationUnitWithDiagnostics(resourcePath);
+            final var diagnostics = new ArrayList<>(scan.diagnostics());
+            diagnostics.addAll(parsed.diagnostics());
+            return new UnitLoadResult(parsed.compilationUnit(), diagnostics);
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);
+        }
+    }
+
+    private record UnitLoadResult(CompilationUnit compilationUnit, List<Diagnostic> diagnostics) {
+        private UnitLoadResult {
+            diagnostics = List.copyOf(diagnostics);
         }
     }
 

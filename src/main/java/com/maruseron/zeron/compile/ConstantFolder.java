@@ -12,7 +12,7 @@ final class ConstantFolder {
     static boolean isConstantFieldValue(final TypeDescriptor type, final ConstantDesc value) {
         if (value == null) return false;
         return switch (TypeDescriptor.toJavaClassDesc(type).descriptorString()) {
-            case "I", "Z", "D", "Ljava/lang/String;" -> true;
+            case "I", "J", "Z", "D", "Ljava/lang/String;" -> true;
             default -> false;
         };
     }
@@ -31,6 +31,7 @@ final class ConstantFolder {
                 if (unary.operator.type() != com.maruseron.zeron.scan.TokenType.MINUS) yield null;
                 yield switch (operand) {
                     case Integer integer -> -integer;
+                    case Long integer -> -integer;
                     case Double floating -> -floating;
                     default -> null;
                 };
@@ -44,6 +45,8 @@ final class ConstantFolder {
                     final var equal = switch (left) {
                         case Integer leftInteger -> right instanceof Integer rightInteger
                                 && leftInteger.intValue() == rightInteger.intValue();
+                        case Long leftLong -> right instanceof Long rightLong
+                                && leftLong.longValue() == rightLong.longValue();
                         case Double leftFloat -> right instanceof Double rightFloat
                                 && Double.compare(leftFloat, rightFloat) == 0;
                         case String leftString -> right instanceof String rightString
@@ -74,6 +77,22 @@ final class ConstantFolder {
                             default -> throw new IllegalStateException();
                         };
                     }
+                    case Long ll -> {
+                        yield switch (bin.operator.type()) {
+                            case PLUS -> ll + (Long) right;
+                            case MINUS -> ll - (Long) right;
+                            case STAR -> ll * (Long) right;
+                            case SLASH -> ll / (Long) right;
+                            case PERCENT -> ll % (Long) right;
+                            case AMPERSAND -> ll & (Long) right;
+                            case PIPE -> ll | (Long) right;
+                            case CARET -> ll ^ (Long) right;
+                            case SHIFT_LEFT -> ll << ((Long) right).intValue();
+                            case SHIFT_RIGHT -> ll >> ((Long) right).intValue();
+                            case UNSIGNED_SHIFT_RIGHT -> ll >>> ((Long) right).intValue();
+                            default -> throw new IllegalStateException();
+                        };
+                    }
                     case String ls -> {
                         yield switch (bin.operator.type()) {
                             case PLUS -> ls + right;
@@ -91,6 +110,7 @@ final class ConstantFolder {
     static TypeDescriptor typeForConstant(final ConstantDesc value) {
         return switch (value) {
             case Integer _ -> TypeDescriptor.ofInt();
+            case Long _ -> TypeDescriptor.ofLong();
             case Double _ -> TypeDescriptor.ofFloat();
             case String _ -> TypeDescriptor.ofString();
             default -> throw new IllegalStateException();

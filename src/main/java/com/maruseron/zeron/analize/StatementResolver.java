@@ -115,6 +115,7 @@ final class StatementResolver {
                 final var iterableType = resolve(iterable);
                 final var elementType = Resolver.ensureIterable(context, iterableType, iterationBind);
                 context.iterationElementTypes.put(iterationBind, elementType);
+                context.recordDeclarationType(iterationBind, elementType);
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, iterationBind,
                         elementType, BindingMutability.IMMUTABLE);
                 context.symbols.define(iterationBind);
@@ -201,8 +202,11 @@ final class StatementResolver {
 
     private static boolean isSupportedBuiltinExtensionReceiver(final TypeDescriptor receiverType) {
         return receiverType instanceof ArrayDescriptor
+                || receiverType instanceof ByteDescriptor
+                || receiverType instanceof ByteArrayDescriptor
                 || receiverType instanceof UnitDescriptor
                 || receiverType instanceof IntDescriptor
+                || receiverType instanceof LongDescriptor
                 || receiverType instanceof FloatDescriptor
                 || receiverType instanceof BooleanDescriptor
                 || receiverType instanceof StringDescriptor;
@@ -259,6 +263,7 @@ final class StatementResolver {
                     var.name(),
                     "Cannot infer type from declaration."));
         }
+        context.recordDeclarationType(var.name(), resolvedType);
 
         if (!(var.type() instanceof InferDescriptor)) {
             Zeron.debug(" resolved variable " + var.name().lexeme() + " "

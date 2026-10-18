@@ -26,8 +26,17 @@ public final class FileSystemTextIoTest {
                 package %s;
                 import zeron.fs.Path;
                 import zeron.io.IoFailure;
+                import zeron.io.Reader;
+                import zeron.io.Writer;
+                import zeron.io.openReader;
+                import zeron.io.openWriter;
                 import zeron.io.text.readText;
+                import zeron.io.text.TextReader;
+                import zeron.io.text.TextWriter;
+                import zeron.io.text.openTextReader;
+                import zeron.io.text.openTextWriter;
                 import zeron.io.text.writeText;
+                import zeron.lang.Option;
                 import zeron.resource.DisposeFailure;
                 public fn normalized(value: String): String =
                     Path.from(value).normalize().toString();
@@ -49,9 +58,55 @@ public final class FileSystemTextIoTest {
                     Path.from(value).deleteIfExists();
                 public fn read(value: String): String raises IoFailure =
                     readText(Path.from(value));
+                public fn writeBytes(value: String, bytes: ByteArray): Unit
+                        raises IoFailure, DisposeFailure {
+                    using (let writer: &Writer = openWriter(Path.from(value))) {
+                        writer.write(bytes, 0, bytes.length);
+                    }
+                }
+                public fn readCount(value: String, bytes: &ByteArray): Int
+                        raises IoFailure, DisposeFailure {
+                    using (let reader: &Reader = openReader(Path.from(value))) {
+                        let count = reader.read(bytes, 0, bytes.length);
+                        return count.getOrElse(-1);
+                    }
+                }
+                public fn readPartialCounts(value: String, bytes: &ByteArray): Int
+                        raises IoFailure, DisposeFailure {
+                    using (let reader: &Reader = openReader(Path.from(value))) {
+                        let first = reader.read(bytes, 0, bytes.length);
+                        let second = reader.read(bytes, 0, bytes.length);
+                        let end = reader.read(bytes, 0, bytes.length);
+                        return first.getOrElse(-1) * 100
+                            + second.getOrElse(-1) * 10
+                            + end.getOrElse(-1);
+                    }
+                }
+                public fn readEof(value: String, bytes: &ByteArray): Boolean
+                        raises IoFailure, DisposeFailure {
+                    using (let reader: &Reader = openReader(Path.from(value))) {
+                        let first = reader.read(bytes, 0, bytes.length);
+                        if (not first.isSome()) return true;
+                        return not reader.read(bytes, 0, bytes.length).isSome();
+                    }
+                }
+                public fn strictReadOrInvalid(value: String): String raises IoFailure, DisposeFailure {
+                    using (let reader: &TextReader = openTextReader(Path.from(value))) {
+                        return handle (reader.readAll()) with {
+                            case IoFailure.cause(_) -> "invalid";
+                        };
+                    }
+                }
                 public fn write(value: String, text: String): Unit
                         raises IoFailure, DisposeFailure {
                     writeText(Path.from(value), text);
+                }
+                public fn writeTextChunks(value: String): Unit
+                        raises IoFailure, DisposeFailure {
+                    using (let writer: &TextWriter = openTextWriter(Path.from(value))) {
+                        writer.write("first ");
+                        writer.write("café");
+                    }
                 }
                 public fn readOrMissing(value: String): String =
                     handle (readText(Path.from(value))) with {
@@ -99,6 +154,30 @@ public final class FileSystemTextIoTest {
                         .invoke(null, textFile.toString()));
                 assertEquals(content, Files.readString(textFile));
                 assertEquals(content, main.getMethod("read", String.class).invoke(null, textFile.toString()));
+                assertEquals(content, main.getMethod("strictReadOrInvalid", String.class)
+                        .invoke(null, textFile.toString()));
+                final var bytesFile = nested.resolve("bytes.bin");
+                final byte[] payload = {(byte) 0x00, (byte) 0x80, (byte) 0xFF};
+                main.getMethod("writeBytes", String.class, byte[].class)
+                        .invoke(null, bytesFile.toString(), payload);
+                assertTrue(java.util.Arrays.equals(payload, Files.readAllBytes(bytesFile)));
+                final byte[] buffer = new byte[3];
+                assertEquals(3, main.getMethod("readCount", String.class, byte[].class)
+                        .invoke(null, bytesFile.toString(), buffer));
+                assertTrue(java.util.Arrays.equals(payload, buffer));
+                assertTrue((Boolean) main.getMethod("readEof", String.class, byte[].class)
+                        .invoke(null, bytesFile.toString(), buffer));
+                final var partialFile = nested.resolve("partial.bin");
+                Files.write(partialFile, new byte[]{1, 2, 3, 4, 5});
+                assertEquals(319, main.getMethod("readPartialCounts", String.class, byte[].class)
+                        .invoke(null, partialFile.toString(), buffer));
+                final var chunkedText = nested.resolve("chunked.txt");
+                main.getMethod("writeTextChunks", String.class).invoke(null, chunkedText.toString());
+                assertEquals("first café", Files.readString(chunkedText));
+                final var malformedFile = nested.resolve("malformed.txt");
+                Files.write(malformedFile, new byte[]{(byte) 0xC3, 0x28});
+                assertEquals("invalid", main.getMethod("strictReadOrInvalid", String.class)
+                        .invoke(null, malformedFile.toString()));
                 assertTrue((Boolean) main.getMethod("deleteIfExists", String.class)
                         .invoke(null, textFile.toString()));
                 assertFalse((Boolean) main.getMethod("deleteIfExists", String.class)

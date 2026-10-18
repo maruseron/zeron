@@ -4,4 +4,10 @@ public effect IoFailure {
     public property cause: java.io.IOException;
     public constructor fromIOException(cause: java.io.IOException) =
         IoFailure.new(cause);
+    public constructor fromCharacterCodingException(
+            cause: java.nio.charset.CharacterCodingException) =
+        IoFailure.new(characterCodingExceptionAsIOException(cause));
 }
+
+external fn characterCodingExceptionAsIOException(
+        cause: java.nio.charset.CharacterCodingException): java.io.IOException;

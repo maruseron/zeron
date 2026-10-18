@@ -19,7 +19,8 @@ final class ImportResolver {
                              List<String> onDemandPackages) {}
 
     private static final Set<String> BUILTIN_TYPES = Set.of(
-            "Never", "Any", "Infer", "Unit", "Int", "Float", "Boolean", "String", "Array");
+            "Never", "Any", "Infer", "Unit", "Int", "Byte", "ByteArray",
+            "Float", "Boolean", "String", "Array");
 
     private final Map<String, Stmt.ClassDecl> classes;
     private final Map<String, Stmt.ContractDecl> contracts;

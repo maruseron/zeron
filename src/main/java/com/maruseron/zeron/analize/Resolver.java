@@ -56,6 +56,14 @@ public final class Resolver {
         for (final var unit : units) {
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = entry.declaration();
+                if (declaration instanceof Stmt.ClassDecl || declaration instanceof Stmt.ContractDecl
+                        || declaration instanceof Stmt.SumDecl || declaration instanceof Stmt.ProductDecl
+                        || declaration instanceof Stmt.NewtypeDecl) {
+                    final var declarationName = declarationName(declaration);
+                    if (declarationName != null) {
+                        context.typePackages.put(declarationName.lexeme(), unit.packageName());
+                    }
+                }
                 if (declarationName(declaration) != null
                         && (declaration instanceof Stmt.FunctionDeclaration || declaration instanceof Stmt.Var)) {
                     final var qualifiedName = entry.namespaceName() == null
@@ -183,6 +191,14 @@ public final class Resolver {
                             context, witness, unit.packageName()));
                 }
             }
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                if (!(entry.declaration() instanceof Stmt.ClassDecl
+                        || entry.declaration() instanceof Stmt.SumDecl
+                        || entry.declaration() instanceof Stmt.ProductDecl
+                        || entry.declaration() instanceof Stmt.NewtypeDecl)) continue;
+                attempt(context, () -> TypeClassEvidence.registerDerived(
+                        context, entry.declaration(), unit.packageName()));
+            }
         }
         final var reportedWitnessPairs = new HashSet<Long>();
         for (final var unit : units) {
@@ -264,13 +280,21 @@ public final class Resolver {
                 context.diagnostics.snapshot(),
                 context.classes,
                 context.contracts,
+                context.sums,
+                context.products,
+                context.newtypes,
                 context.topLevelTokensByDeclaration,
                 context.externalFunctionBindings,
+                context.typePackages,
                 context.functionSymbolTokens,
                 context.functionNamesByDeclaration,
                 context.iterationElementTypes,
                 context.iterationProtocols,
-                context.packageName);
+                context.packageName,
+                context.extensionMethods.values().stream().flatMap(List::stream).toList(),
+                context.referenceTargets,
+                context.referenceTypes,
+                context.callSiteFunctionTypes);
     }
 
     private static boolean attempt(final ResolutionContext context, final Runnable operation) {
@@ -436,6 +460,7 @@ public final class Resolver {
                          final TypeDescriptor type,
                          final BindingMutability mutability) {
         context.symbols.declareSymbol(declaration, name, type, mutability);
+        context.recordDeclarationType(name, type);
     }
 
     static void define(final ResolutionContext context, final Token name) {

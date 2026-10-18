@@ -97,8 +97,10 @@ runtime, that output directory, and every declared Zeron library and Java classp
 standard-library mode requires a compatible standard-library artifact in `zeron-libraries`. Unknown
 keys and incorrect value types are rejected. Dependency fetching, lockfiles, incremental compilation,
 and configurable artifact packaging remain open. When the entry source unit declares
-zero-argument `fn main(): Unit`, the generated entry class also includes the standard
-`public static void main(String[] args)` launcher method, which delegates to the Zeron function.
+zero-argument `fn main(): Unit` or `fn main(args: Array<String>): Unit`, the generated entry class
+also includes the standard `public static void main(String[] args)` launcher method. The
+argument-taking form receives the Java launcher arguments in order; when both Zeron forms are
+declared, the argument-taking form is used by the launcher.
 `zeron explain <ZR0000>` prints the bundled Markdown explanation for a diagnostic code, and compiler
 diagnostics direct users to that command. The legacy `--run-class` and `--stdlib-jar` flags are
 unsupported; launching a built project uses its manifest so compile-time and runtime dependencies
@@ -124,6 +126,9 @@ capabilities are recorded alongside
 class and contract signatures. Contract exports retain transitive-composition roots as applied
 `requires` types. Effect classes carry an effect marker, and callable signatures retain their declared
 raised-effect types. Sealed contracts additionally export their permitted class templates.
+Nominal type identities include their package-qualified source names. Member, extension, and
+constructor records retain parameter names as well as their type signatures; this metadata is part of
+the version-2 index schema.
 Method type parameters and references to enclosing class or contract parameters use the same scoped
 type encoding as generic function signatures. Function and value exports carry an explicit namespace
 name when declared inside a namespace; ordinary top-level value exports have no namespace. Callable

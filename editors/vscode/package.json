@@ -1,9 +1,19 @@
 {
   "name": "zeron-language-support",
   "displayName": "Zeron Language Support",
-  "description": "Syntax highlighting for the Zeron programming language.",
+  "description": "Language support for the Zeron programming language.",
   "version": "0.1.0",
   "publisher": "maruseron",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maruseron/zeron.git",
+    "directory": "editors/vscode"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:zeron"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -30,11 +40,27 @@
         "scopeName": "source.zeron",
         "path": "./syntaxes/zeron.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Zeron",
+      "properties": {
+        "zeron.server.path": {
+          "type": "string",
+          "default": "zeron",
+          "scope": "machine",
+          "description": "Path or command used to launch Zeron. The extension appends the fixed 'lsp' subcommand."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   },
   "files": [
     "README.md",
+    "extension.js",
     "language-configuration.json",
+    "node_modules/**",
     "syntaxes/**"
   ]
 }

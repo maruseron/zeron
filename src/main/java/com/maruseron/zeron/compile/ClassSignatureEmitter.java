@@ -56,18 +56,22 @@ final class ClassSignatureEmitter {
         return switch (type) {
             case TypeParameterDescriptor parameter -> "T" + parameter.name() + ";";
             case NullableDescriptor nullable -> switch (nullable.baseType()) {
-                case IntDescriptor _, FloatDescriptor _, BooleanDescriptor _, UnitDescriptor _ ->
+                case IntDescriptor _, LongDescriptor _, ByteDescriptor _, FloatDescriptor _, BooleanDescriptor _,
+                        UnitDescriptor _ ->
                         referenceSignature(nullable);
                 default -> typeSignature(nullable.baseType(), typeArgument);
             };
             case ReferenceDescriptor reference -> typeSignature(reference.baseType(), typeArgument);
             case ArrayDescriptor _ -> "[Ljava/lang/Object;";
+            case ByteArrayDescriptor _ -> "[B";
             case GenericDescriptor generic -> classTypeSignature(
                     generic.baseType().name(), generic.typeParameters());
             case FunctionDescriptor function -> referenceDescriptorSignature(
                     TypeDescriptor.toJavaClassDesc((FunctionDescriptor) TypeSubstitution.erase(function))
                             .descriptorString());
             case IntDescriptor _ -> typeArgument ? "Ljava/lang/Integer;" : "I";
+            case LongDescriptor _ -> typeArgument ? "Ljava/lang/Long;" : "J";
+            case ByteDescriptor _ -> typeArgument ? "Ljava/lang/Byte;" : "B";
             case FloatDescriptor _ -> typeArgument ? "Ljava/lang/Double;" : "D";
             case BooleanDescriptor _ -> typeArgument ? "Ljava/lang/Boolean;" : "Z";
             case NeverDescriptor _ -> "V";

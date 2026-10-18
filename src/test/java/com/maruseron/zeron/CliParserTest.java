@@ -39,6 +39,19 @@ public final class CliParserTest {
     }
 
     @Test
+    public void parsesLspStdioTransportOption() throws Exception {
+        final var manifest = createProjectManifest("lsp-project.toml", "lsp-src");
+        final var command = (CliParser.LspCommand) parse(
+                "lsp", "--stdio", "--manifest", manifest.toString());
+
+        assertEquals(manifest, command.manifest());
+        assertEquals(manifest.getParent().resolve(Path.of("lsp-src", "Main.zn")),
+                command.project().entry());
+        assertTrue(invalid("lsp", "--stdio", "--stdio").message().contains("only be specified once"));
+        assertTrue(invalid("lsp", "--unknown").message().contains("Unknown build option"));
+    }
+
+    @Test
     public void parsesStandaloneFileAndProjectCompilations() throws Exception {
         final var source = createFile("Main.zn");
         final var library = createFile("library.jar");

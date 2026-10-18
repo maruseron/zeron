@@ -71,6 +71,7 @@ public class Zeron {
         return switch (invocation) {
             case CliParser.Initialize _ -> initializeProject(Paths.get("."));
             case CliParser.ProjectCommand command -> runProjectCommand(command);
+            case CliParser.LspCommand command -> com.maruseron.zeron.lsp.LspServer.run(command.manifest());
             case CliParser.Explain explain -> explainDiagnostic(explain.code());
             case CliParser.Help help -> {
                 CliHelp.print(help.topic());
@@ -375,7 +376,7 @@ public class Zeron {
         compilation.diagnostics().forEach(Zeron::reportCompilationDiagnostic);
     }
 
-    private static List<ZeronLibraryIndex> loadLibraries(final List<Path> libraryRoots) throws IOException {
+    static List<ZeronLibraryIndex> loadLibraries(final List<Path> libraryRoots) throws IOException {
         final var libraries = new ArrayList<ZeronLibraryIndex>();
         for (final var root : libraryRoots) {
             libraries.add(Files.isDirectory(root)
@@ -385,8 +386,8 @@ public class Zeron {
         return List.copyOf(libraries);
     }
 
-    private static void validateStandardLibraryMode(final List<ZeronLibraryIndex> libraries,
-                                                    final boolean bundleStandardLibrarySources) {
+    static void validateStandardLibraryMode(final List<ZeronLibraryIndex> libraries,
+                                            final boolean bundleStandardLibrarySources) {
         if (bundleStandardLibrarySources) return;
         final var availableTypes = libraries.stream()
                 .flatMap(library -> library.declarations().stream())
@@ -417,7 +418,7 @@ public class Zeron {
         }
     }
 
-    private static void validateJavaClassPathRoots(final List<Path> roots) {
+    static void validateJavaClassPathRoots(final List<Path> roots) {
         for (final var root : roots) {
             if (Files.isDirectory(root)) continue;
             if (Files.isRegularFile(root)

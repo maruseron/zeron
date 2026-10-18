@@ -33,6 +33,9 @@ final class CliParser {
                 case "build", "run" -> {
                     return parseProjectCommand(args);
                 }
+                case "lsp" -> {
+                    return parseLspCommand(args);
+                }
                 case "explain" -> {
                     if (args.length != 2) return invalid("Usage: zeron explain <ZR0000>");
                     if (!args[1].matches("ZR[0-9]{4}")) {
@@ -101,6 +104,25 @@ final class CliParser {
         final var projectPathError = projectPathError(project);
         if (projectPathError.isPresent()) return invalid(projectPathError.get());
         return parsed(new ProjectCommand(launch, manifest, debug, project));
+    }
+
+    private static ParseResult parseLspCommand(final String[] args) {
+        final var projectArguments = new ArrayList<String>();
+        projectArguments.add("build");
+        var stdioSpecified = false;
+        for (var index = 1; index < args.length; index++) {
+            if (args[index].equals("--stdio")) {
+                if (stdioSpecified) return invalid("The lsp --stdio option may only be specified once.");
+                stdioSpecified = true;
+            } else {
+                projectArguments.add(args[index]);
+            }
+        }
+        final var projectArgs = projectArguments.toArray(String[]::new);
+        final var result = parseProjectCommand(projectArgs);
+        if (result instanceof InvalidArguments invalidArguments) return invalidArguments;
+        final var project = (ProjectCommand) ((Parsed) result).invocation();
+        return parsed(new LspCommand(project.manifest(), project.project()));
     }
 
     private static Optional<String> projectPathError(final ProjectManifest project) {
@@ -407,7 +429,7 @@ final class CliParser {
 
     record InvalidArguments(String message) implements ParseResult {}
 
-    sealed interface Invocation permits Initialize, ProjectCommand, Explain, Help, Dump,
+    sealed interface Invocation permits Initialize, ProjectCommand, LspCommand, Explain, Help, Dump,
             BuildStandardLibrary, Repl, Compile {
         boolean debug();
     }
@@ -419,6 +441,11 @@ final class CliParser {
 
     record ProjectCommand(boolean launch, Path manifest, boolean debug, ProjectManifest project)
             implements Invocation {}
+
+    record LspCommand(Path manifest, ProjectManifest project) implements Invocation {
+        @Override
+        public boolean debug() { return false; }
+    }
 
     record Explain(String code) implements Invocation {
         @Override

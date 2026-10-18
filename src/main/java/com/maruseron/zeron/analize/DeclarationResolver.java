@@ -575,6 +575,13 @@ final class DeclarationResolver {
             : ownerType;
         declare(context, SYNTHETIC_VAR, thisToken, thisType, BindingMutability.IMMUTABLE);
         define(context, thisToken);
+        for (final var field : owner.fields()) {
+            if (!Stmt.isAnonymousCaptureField(field)) continue;
+            final var captureName = new Token(TokenType.IDENTIFIER,
+                    Stmt.anonymousCaptureSourceName(field), null, field.name().span());
+            declare(context, SYNTHETIC_VAR, captureName, field.type(), BindingMutability.IMMUTABLE);
+            define(context, captureName);
+        }
         for (int i = 0; i < method.parameters().size(); i++) {
             final var parameter = method.parameters().get(i);
             if (i < Stmt.fixedArity(method.parameters(), method.variadic())

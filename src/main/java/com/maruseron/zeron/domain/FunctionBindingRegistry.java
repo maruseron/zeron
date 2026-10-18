@@ -105,6 +105,26 @@ public final class FunctionBindingRegistry {
     private static FunctionBindingRegistry createStandard() {
         final var numericConversion = TypeDescriptor.functionOf("intToFloat",
                 TypeDescriptor.ofFloat(), TypeDescriptor.ofInt());
+        final var intToLongConversion = TypeDescriptor.functionOf("intToLong",
+                TypeDescriptor.ofLong(), TypeDescriptor.ofInt());
+        final var longToIntConversion = TypeDescriptor.functionOf("longToInt",
+                TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), TypeDescriptor.ofInt()),
+                TypeDescriptor.ofLong());
+        final var intToByteConversion = TypeDescriptor.functionOf("intToByte",
+                TypeDescriptor.ofByte(), TypeDescriptor.ofInt());
+        final var byteToIntConversion = TypeDescriptor.functionOf("byteToInt",
+                TypeDescriptor.ofInt(), TypeDescriptor.ofByte());
+        final var stringGetBytes = TypeDescriptor.functionOf("stringGetBytes",
+                TypeDescriptor.ofByteArray(), TypeDescriptor.ofString().toNullable(),
+                new NullableDescriptor(new ReferenceDescriptor(
+                        TypeDescriptor.ofName("java.nio.charset.Charset"))));
+        final var codingExceptionConversion = TypeDescriptor.functionOf(
+                "characterCodingExceptionAsIOException",
+                TypeDescriptor.ofName("java.io.IOException"),
+                TypeDescriptor.ofName("java.nio.charset.CharacterCodingException"));
+        final var utf8Decoder = TypeDescriptor.functionOf("utf8Decoder",
+                new NullableDescriptor(new ReferenceDescriptor(
+                        TypeDescriptor.ofName("java.nio.charset.CharsetDecoder"))));
         final var checkedNumericConversion = TypeDescriptor.functionOf("floatToInt",
                 TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), TypeDescriptor.ofInt()),
                 TypeDescriptor.ofFloat());
@@ -128,6 +148,27 @@ public final class FunctionBindingRegistry {
         return new FunctionBindingRegistry(Map.ofEntries(
                 Map.entry("zeron.lang.intToFloat",
                         new Binding(numericConversion, new IntrinsicBinding(IntrinsicId.INT_TO_FLOAT))),
+                Map.entry("zeron.lang.intToLong",
+                        new Binding(intToLongConversion, new IntrinsicBinding(IntrinsicId.INT_TO_LONG))),
+                Map.entry("zeron.lang.longToInt",
+                        new Binding(longToIntConversion, new IntrinsicBinding(IntrinsicId.LONG_TO_INT_OPTION))),
+                Map.entry("zeron.lang.intToByteUnchecked",
+                        new Binding(intToByteConversion, new IntrinsicBinding(IntrinsicId.INT_TO_BYTE))),
+                Map.entry("zeron.lang.byteToInt",
+                        new Binding(byteToIntConversion, new IntrinsicBinding(IntrinsicId.BYTE_TO_INT))),
+                Map.entry("zeron.io.text.stringGetBytes",
+                        new Binding(stringGetBytes, new InstanceMethod(ClassDesc.of("java.lang.String"),
+                                "getBytes", MethodTypeDesc.of(ClassDesc.ofDescriptor("[B"),
+                                        ClassDesc.of("java.nio.charset.Charset"))))),
+                Map.entry("zeron.io.text.utf8Decoder",
+                        new Binding(utf8Decoder, new StaticFieldInstanceMethod(
+                                ClassDesc.of("java.nio.charset.StandardCharsets"), "UTF_8",
+                                ClassDesc.of("java.nio.charset.Charset"),
+                                ClassDesc.of("java.nio.charset.Charset"), "newDecoder",
+                                MethodTypeDesc.of(ClassDesc.of("java.nio.charset.CharsetDecoder"))))),
+                Map.entry("zeron.io.characterCodingExceptionAsIOException",
+                        new Binding(codingExceptionConversion, new IntrinsicBinding(
+                                IntrinsicId.CHARACTER_CODING_EXCEPTION_TO_IO_EXCEPTION))),
                 Map.entry("zeron.lang.floatToInt",
                         new Binding(checkedNumericConversion,
                                 new IntrinsicBinding(IntrinsicId.FLOAT_TO_INT_OPTION))),

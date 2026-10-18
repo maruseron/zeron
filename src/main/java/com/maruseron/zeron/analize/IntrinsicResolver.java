@@ -22,6 +22,7 @@ final class IntrinsicResolver {
         TypeDescriptor arrayType = resultType;
         if (arrayType instanceof ReferenceDescriptor reference) arrayType = reference.baseType();
         if (arrayType instanceof ArrayDescriptor array) return array.elementType();
+        if (arrayType instanceof ByteArrayDescriptor) return TypeDescriptor.ofByte();
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
                 "The internal array operation requires an array value."));
         throw new IllegalStateException("unreachable");

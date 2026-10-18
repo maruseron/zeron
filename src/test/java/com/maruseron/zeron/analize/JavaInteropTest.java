@@ -490,13 +490,13 @@ public final class JavaInteropTest {
                 }
                 fn instanceWrite(): Int {
                     let fixture: &Fixture = Fixture.new(1);
-                    fixture.publicValue = 31;
-                    return fixture.publicValue;
+                    let assigned = fixture.publicValue = 31;
+                    return assigned * 100 + fixture.publicValue;
                 }
                 fn instanceCompoundWrite(): Int {
                     let fixture: &Fixture = Fixture.new(1);
-                    fixture.publicValue += 5;
-                    return fixture.publicValue;
+                    let assigned = fixture.publicValue += 5;
+                    return assigned * 10 + fixture.publicValue;
                 }
                 """);
         final var compiler = CompilationService.forCompilationUnits(List.of(source), className, "interop",
@@ -511,8 +511,8 @@ public final class JavaInteropTest {
                 assertEquals(23, client.getMethod("staticRead").invoke(null));
                 assertEquals(29, client.getMethod("finalStaticRead").invoke(null));
                 assertEquals(17, client.getMethod("instanceRead").invoke(null));
-                assertEquals(31, client.getMethod("instanceWrite").invoke(null));
-                assertEquals(5, client.getMethod("instanceCompoundWrite").invoke(null));
+                assertEquals(3131, client.getMethod("instanceWrite").invoke(null));
+                assertEquals(55, client.getMethod("instanceCompoundWrite").invoke(null));
             }
         } finally {
             Files.deleteIfExists(classFile);

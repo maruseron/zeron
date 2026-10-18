@@ -281,6 +281,7 @@ final class LambdaCompilationPlan {
                     collectLambdaShapes(lambda.body);
                 }
             }
+            case Expr.AnonymousObject object -> object.initializers().forEach(this::collectLambdaShapes);
             case Expr.Binary binary -> {
                 collectLambdaShapes(binary.left);
                 collectLambdaShapes(binary.right);
@@ -589,6 +590,8 @@ final class LambdaCompilationPlan {
                 for (final var param : lambda.params) nestedNames.add(param.lexeme());
                 collectCapturedVariables(lambda.body, nestedNames, captured, seen);
             }
+            case Expr.AnonymousObject object -> object.initializers().forEach(initializer ->
+                    collectCapturedVariables(initializer, localNames, captured, seen));
             case Expr.Literal _ -> {}
             case Expr.Logical logical -> {
                 collectCapturedVariables(logical.left, localNames, captured, seen);

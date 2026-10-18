@@ -65,7 +65,8 @@ final class LambdaSupportEmitter {
             final var parameterType = targetType.parameters().get(i);
             NominalTypeEmitter.loadLocal(context, composer, slot, parameterType);
             emitConversion(context, composer, parameterType, sourceType.parameters().get(i));
-            slot += TypeDescriptor.toJavaClassDesc(parameterType).descriptorString().equals("D") ? 2 : 1;
+            final var descriptor = TypeDescriptor.toJavaClassDesc(parameterType).descriptorString();
+            slot += descriptor.equals("D") || descriptor.equals("J") ? 2 : 1;
         }
         final var owner = reference.declaration() == null
                 ? context.metadata.functionOwner(reference.functionName())
@@ -221,7 +222,8 @@ final class LambdaSupportEmitter {
             final var targetParameter = targetType.parameters().get(i);
             NominalTypeEmitter.loadLocal(context, composer, slot, targetParameter);
             emitConversion(context, composer, targetParameter, sourceType.parameters().get(i));
-            slot += TypeDescriptor.toJavaClassDesc(targetParameter).descriptorString().equals("D") ? 2 : 1;
+            final var descriptor = TypeDescriptor.toJavaClassDesc(targetParameter).descriptorString();
+            slot += descriptor.equals("D") || descriptor.equals("J") ? 2 : 1;
         }
         composer.invokeinterface(TypeDescriptor.toJavaClassDesc(sourceType), "invoke",
             toJavaMethodDescriptor(sourceType));

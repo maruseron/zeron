@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.Expr;
+import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.*;
@@ -21,6 +22,16 @@ final class ExpressionFlowResolver {
         return switch (expr) {
             case Expr.MemberCall call -> {
                 final var resolved = MemberInteropResolver.resolveMemberCall(context, call);
+                final var descriptor = call.resolvedDescriptor();
+                if (descriptor != null) {
+                    final var parameters = call.resolvedExtensionMethod() != null
+                            && !descriptor.parameters().isEmpty()
+                            ? descriptor.parameters().subList(1, descriptor.parameters().size())
+                            : descriptor.parameters();
+                    context.recordCallSiteFunctionType(call.name, TypeDescriptor.functionWithEffectsOf(
+                            descriptor.name(), descriptor.returnType(), parameters, descriptor.typeParameters(),
+                            descriptor.raisedEffects()));
+                }
                 if (call.resolvedDescriptor() != null) {
                     RaisedEffectFlow.add(context, new LinkedHashSet<>(call.resolvedDescriptor().raisedEffects()),
                             call.name);
@@ -62,8 +73,8 @@ final class ExpressionFlowResolver {
                     ensureAssignable(context, assignment.property.getType(),
                             MemberInteropResolver.resolveArgument(context, assignment.value,
                                     assignment.property.getType()), assignment.property.name);
-                    assignment.setType(TypeDescriptor.ofUnit());
-                    yield TypeDescriptor.ofUnit();
+                    assignment.setType(assignment.property.getType());
+                    yield assignment.property.getType();
                 }
                 if (assignment.property.extensionCall() != null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -99,8 +110,8 @@ final class ExpressionFlowResolver {
                 ensureAssignable(context, expectedType,
                     MemberInteropResolver.resolveArgument(context, assignment.value, expectedType),
                     assignment.property.name);
-                assignment.setType(TypeDescriptor.ofUnit());
-                yield TypeDescriptor.ofUnit();
+                assignment.setType(expectedType);
+                yield expectedType;
             }
             case Expr.PropertyCompoundAssignment assignment -> {
                 MemberInteropResolver.resolveProperty(context, assignment.property);
@@ -128,8 +139,8 @@ final class ExpressionFlowResolver {
                     assignment.setResolvedOperation(operation);
                     ensureAssignable(context, assignment.property.getType(), valueType,
                             assignment.property.name);
-                    assignment.setType(TypeDescriptor.ofUnit());
-                    yield TypeDescriptor.ofUnit();
+                    assignment.setType(assignment.property.getType());
+                    yield assignment.property.getType();
                 }
                 if (assignment.property.extensionCall() != null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -156,8 +167,8 @@ final class ExpressionFlowResolver {
                 final var valueType = resolve(context, operation);
                 assignment.setResolvedOperation(operation);
                 ensureAssignable(context, assignment.property.getType(), valueType, assignment.property.name);
-                assignment.setType(TypeDescriptor.ofUnit());
-                yield TypeDescriptor.ofUnit();
+                assignment.setType(assignment.property.getType());
+                yield assignment.property.getType();
             }
             case Expr.Property property -> MemberInteropResolver.resolveProperty(context, property);
             case Expr.ArrayLiteral literal -> {
@@ -200,11 +211,15 @@ final class ExpressionFlowResolver {
             }
             case Expr.Index index -> {
                 final var receiverType = resolve(context, index.array);
-                final var arrayType = IntrinsicResolver.resolveArrayType(
-                        context, receiverType, SYNTHETIC_IDENTIFIER);
                 final var indexType = resolve(context, index.index);
-                final var operation = IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.ARRAY_READ,
-                        List.of(arrayType.elementType()), List.of(receiverType, indexType), SYNTHETIC_IDENTIFIER);
+                final var arrayType = receiverType instanceof ReferenceDescriptor reference
+                        ? reference.baseType() : receiverType;
+                final var id = arrayType instanceof ByteArrayDescriptor
+                        ? IntrinsicId.BYTE_ARRAY_READ : IntrinsicId.ARRAY_READ;
+                final var typeArguments = arrayType instanceof ArrayDescriptor genericArray
+                        ? List.of(genericArray.elementType()) : List.<TypeDescriptor>of();
+                final var operation = IntrinsicResolver.resolveIntrinsic(context, id,
+                        typeArguments, List.of(receiverType, indexType), SYNTHETIC_IDENTIFIER);
                 index.setIntrinsicOperation(operation);
                 index.setType(operation.resultType());
                 yield operation.resultType();
@@ -212,7 +227,8 @@ final class ExpressionFlowResolver {
             case Expr.IndexAssignment assignment -> {
                 final var receiverType = resolve(context, assignment.array);
                 if (!(receiverType instanceof ReferenceDescriptor reference)
-                        || !(reference.baseType() instanceof ArrayDescriptor arrayType)) {
+                        || !(reference.baseType() instanceof ArrayDescriptor
+                            || reference.baseType() instanceof ByteArrayDescriptor)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                             SYNTHETIC_IDENTIFIER,
                             "Array slot assignment requires a mutable &Array<T> view."));
@@ -220,12 +236,17 @@ final class ExpressionFlowResolver {
                 }
                     final var indexType = resolve(context, assignment.index);
                     final var valueType = resolve(context, assignment.value);
-                    final var operation = IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.ARRAY_WRITE,
-                        List.of(arrayType.elementType()), List.of(receiverType, indexType, valueType),
-                        SYNTHETIC_IDENTIFIER);
+                    final var arrayType = reference.baseType();
+                    final var id = arrayType instanceof ByteArrayDescriptor
+                            ? IntrinsicId.BYTE_ARRAY_WRITE : IntrinsicId.ARRAY_WRITE;
+                    final var typeArguments = arrayType instanceof ArrayDescriptor genericArray
+                            ? List.of(genericArray.elementType()) : List.<TypeDescriptor>of();
+                    final var operation = IntrinsicResolver.resolveIntrinsic(context, id,
+                        typeArguments, List.of(receiverType, indexType, valueType), SYNTHETIC_IDENTIFIER);
                     assignment.setIntrinsicOperation(operation);
-                    assignment.setType(operation.resultType());
-                    yield operation.resultType();
+                    final var resultType = operation.parameterTypes().get(2);
+                    assignment.setType(resultType);
+                    yield resultType;
             }
             case Expr.Assignment assignment -> {
                 final var symbolName = context.symbols.containsSymbol(assignment.name)
@@ -337,7 +358,14 @@ final class ExpressionFlowResolver {
                             binary.operator,
                         "Nullable operands require a null check before using this operator."));
                 }
-                ensureExact(context, binary.operator, refinedLeftType, refinedRightType);
+                final var shiftOperator = binary.operator.type() == TokenType.SHIFT_LEFT
+                        || binary.operator.type() == TokenType.SHIFT_RIGHT
+                        || binary.operator.type() == TokenType.UNSIGNED_SHIFT_RIGHT;
+                if (shiftOperator && refinedLeftType instanceof LongDescriptor) {
+                    Resolver.ensureAssignable(context, TypeDescriptor.ofInt(), refinedRightType, binary.operator);
+                } else {
+                    ensureExact(context, binary.operator, refinedLeftType, refinedRightType);
+                }
                 if (equalityOperator) {
                     resolveEquality(context, binary, refinedLeftType);
                     binary.setType(TypeDescriptor.ofBoolean());
@@ -353,6 +381,7 @@ final class ExpressionFlowResolver {
                     }
                     ensureExact(context, binary.operator, refinedLeftType, refinedRightType);
                     if (!(refinedLeftType instanceof IntDescriptor)
+                            && !(refinedLeftType instanceof LongDescriptor)
                             && !(refinedLeftType instanceof FloatDescriptor)) {
                         resolveComparableComparison(context, binary, refinedLeftType);
                     }
@@ -363,12 +392,14 @@ final class ExpressionFlowResolver {
                     && !(refinedRightType instanceof InferDescriptor)) {
                     final var validOperands = switch (binary.operator.type()) {
                     case PLUS -> refinedLeftType instanceof IntDescriptor
+                        || refinedLeftType instanceof LongDescriptor
                         || refinedLeftType instanceof FloatDescriptor
                         || refinedLeftType instanceof StringDescriptor;
                     case MINUS, STAR, SLASH, PERCENT -> refinedLeftType instanceof IntDescriptor
+                        || refinedLeftType instanceof LongDescriptor
                         || refinedLeftType instanceof FloatDescriptor;
                     case AMPERSAND, PIPE, CARET, SHIFT_LEFT, SHIFT_RIGHT, UNSIGNED_SHIFT_RIGHT ->
-                        refinedLeftType instanceof IntDescriptor;
+                        refinedLeftType instanceof IntDescriptor || refinedLeftType instanceof LongDescriptor;
                     default -> false;
                     };
                     if (!validOperands) {
@@ -376,7 +407,7 @@ final class ExpressionFlowResolver {
                             binary.operator,
                         switch (binary.operator.type()) {
                             case AMPERSAND, PIPE, CARET, SHIFT_LEFT, SHIFT_RIGHT, UNSIGNED_SHIFT_RIGHT ->
-                                "Bitwise operators require Int operands.";
+                                "Bitwise operators require Int or Long operands.";
                             default -> "Arithmetic operators require numeric operands, except String concatenation with '+'.";
                         }));
                     }
@@ -498,6 +529,7 @@ final class ExpressionFlowResolver {
                 lambda.setType(resolvedType);
                 yield resolvedType;
             }
+            case Expr.AnonymousObject object -> resolveAnonymousObject(context, object);
             case Expr.Literal literal ->
                     literal.getType();
             case Expr.TypeTest test -> {
@@ -547,13 +579,13 @@ final class ExpressionFlowResolver {
                     yield TypeDescriptor.ofBoolean();
                 }
                 if (unary.operator.type() == TokenType.TILDE) {
-                    if (!(operandType instanceof IntDescriptor)) {
+                    if (!(operandType instanceof IntDescriptor) && !(operandType instanceof LongDescriptor)) {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                                 unary.operator,
-                                "Bitwise complement requires an Int operand."));
+                                "Bitwise complement requires an Int or Long operand."));
                     }
-                    unary.setType(TypeDescriptor.ofInt());
-                    yield TypeDescriptor.ofInt();
+                    unary.setType(operandType);
+                    yield operandType;
                 }
                 if (unary.operator.type() != TokenType.MINUS
                         && unary.operator.type() != TokenType.PLUS) {
@@ -561,13 +593,14 @@ final class ExpressionFlowResolver {
                             unary.operator,
                             "The 'typeof' operator is not implemented."));
                 }
-                if (operandType instanceof IntDescriptor || operandType instanceof FloatDescriptor) {
+                if (operandType instanceof IntDescriptor || operandType instanceof LongDescriptor
+                        || operandType instanceof FloatDescriptor) {
                     unary.setType(operandType);
                     yield operandType;
                 }
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                         unary.operator,
-                        "Unary '+' and '-' require a non-null Int or Float operand."));
+                        "Unary '+' and '-' require a non-null Int, Long, or Float operand."));
                 yield TypeDescriptor.ofInfer();
             }
             case Expr.Variable variable -> {
@@ -575,10 +608,18 @@ final class ExpressionFlowResolver {
                     yield parameter;
                 }
                 if (variable.resolvedFunctionName() != null) {
-                    yield variable.specializedFunctionType();
+                    final var resolvedType = variable.specializedFunctionType();
+                    context.recordReference(variable.name,
+                            context.functionSymbolTokens.get(variable.resolvedFunctionName()), resolvedType);
+                    yield resolvedType;
                 }
                 if (!variable.explicitFunctionTypeArguments.isEmpty()) {
-                    yield LambdaResolver.resolveFunctionReference(context, variable, null);
+                    final var resolvedType = LambdaResolver.resolveFunctionReference(context, variable, null);
+                    if (variable.resolvedFunctionName() != null) {
+                        context.recordReference(variable.name,
+                                context.functionSymbolTokens.get(variable.resolvedFunctionName()), resolvedType);
+                    }
+                    yield resolvedType;
                 }
                 final var name = variable.name;
                 if (context.frame.initializerVisibleFields != null && name.type() != TokenType.THIS) {
@@ -595,14 +636,17 @@ final class ExpressionFlowResolver {
                 if (resolvedSymbol == null) {
                     final var functionName = MemberInteropResolver.resolveFunctionName(context, name.lexeme(), name);
                     if (functionName != null) {
+                        final var functionToken = context.functionSymbolTokens.get(functionName);
                         final var functionType = (FunctionDescriptor) context.symbols
-                                .getFunction(context.functionSymbolTokens.get(functionName)).type();
+                                .getFunction(functionToken).type();
                         if (functionType.isGeneric()) {
                             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                                     name,
                                     "A generic function value needs explicit type arguments or an expected function type."));
                         }
-                        yield LambdaResolver.resolveFunctionReference(context, variable, null);
+                        final var resolvedType = LambdaResolver.resolveFunctionReference(context, variable, null);
+                        context.recordReference(name, functionToken, resolvedType);
+                        yield resolvedType;
                     }
                     final var implicitFieldType = MemberInteropResolver.resolveImplicitFieldRead(context, variable);
                     if (implicitFieldType != null) yield implicitFieldType;
@@ -620,6 +664,7 @@ final class ExpressionFlowResolver {
 
                 final var binding = context.symbols.getSymbol(resolvedSymbol);
                 final var resolvedType = effectiveType(context, binding);
+                context.recordReference(name, binding.name(), resolvedType);
                 if (binding.declaration() instanceof Stmt.Var value
                         && context.topLevelTokensByDeclaration.containsKey(value)) {
                     variable.setResolvedValue(resolvedSymbol, value);
@@ -631,6 +676,85 @@ final class ExpressionFlowResolver {
         };
     }
 
+    private static TypeDescriptor resolveAnonymousObject(final ResolutionContext context,
+                                                         final Expr.AnonymousObject object) {
+        if (object.generatedClassName() == null) {
+            final var declaration = object.declaration();
+            final var captureValidator = new LambdaCaptureValidator(context.symbols, "an anonymous object");
+            final var captures = captureValidator.validateAnonymousObject(declaration);
+            object.initializers().forEach(captureValidator::validateAnonymousInitializer);
+
+            final var fields = new ArrayList<>(declaration.fields());
+            final var captureArguments = new ArrayList<Expr>();
+            for (final var capture : captures) {
+                final var binding = context.symbols.getSymbol(capture);
+                final var captureFieldName = Stmt.anonymousCaptureFieldName(capture.lexeme());
+                final var captureField = new Token(TokenType.IDENTIFIER, captureFieldName, null, capture.span());
+                fields.add(new Stmt.Field(captureField, binding.type()));
+                captureArguments.add(new Expr.Variable(capture, TypeDescriptor.ofInfer()));
+            }
+
+            final var explicitFieldCount = declaration.fields().size();
+            final var propertyArgumentCount = (int) declaration.properties().stream()
+                    .filter(Stmt.Property::canonicalConstructorParameter).count();
+            final var constructorArguments = new ArrayList<Expr>();
+            constructorArguments.addAll(object.initializers().subList(0, explicitFieldCount));
+            constructorArguments.addAll(captureArguments);
+            constructorArguments.addAll(object.initializers().subList(explicitFieldCount,
+                    explicitFieldCount + propertyArgumentCount));
+
+            final var simpleName = declaration.name().lexeme();
+            final var namespaceName = context.currentNamespaceName;
+            final var generatedName = context.packageName.isEmpty()
+                    ? namespaceName == null || namespaceName.isEmpty()
+                            ? simpleName : namespaceName + "." + simpleName
+                    : namespaceName == null || namespaceName.isEmpty()
+                            ? context.packageName + "." + simpleName
+                            : NamespaceMembers.qualifiedName(context.packageName, namespaceName, simpleName);
+            final var name = new Token(TokenType.IDENTIFIER, generatedName, null, object.keyword().span());
+            final var generatedDeclaration = new Stmt.ClassDecl(name, declaration.typeParameters(),
+                    object.contracts(), fields, declaration.properties(), declaration.constructor(),
+                    declaration.namedConstructors(), declaration.methods(), declaration.patterns(),
+                    false, false, declaration.derivedContracts(), declaration.storedStateOrder());
+            object.setDeclaration(generatedDeclaration);
+            object.setInitializers(constructorArguments);
+            object.setGeneratedClassName(generatedName);
+            context.types.add(generatedName);
+            context.classes.put(generatedName, generatedDeclaration);
+            context.typePackages.put(generatedName, context.packageName);
+            context.declarationPackages.put(generatedName, context.packageName);
+            context.sourcePathsByToken.put(name, context.currentSourcePath);
+        }
+
+        if (!object.declarationResolved()) {
+            for (final var contractUse : object.contracts()) {
+                for (final var applied : ContractComposition.closure(context, contractUse)) {
+                    if (!applied.declaration().namedConstructors().isEmpty()) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                                object.keyword(),
+                                "Anonymous objects cannot implement contracts whose requirements include "
+                                        + "named contract constructors."));
+                    }
+                }
+            }
+            DeclarationResolver.resolveClass(context, object.declaration());
+            object.markDeclarationResolved();
+        }
+
+        final var constructorTypes = object.declaration().canonicalConstructorTypes();
+        if (constructorTypes.size() != object.initializers().size()) {
+            throw new IllegalStateException("Anonymous object constructor arguments do not match its fields.");
+        }
+        for (int index = 0; index < constructorTypes.size(); index++) {
+            final var initializerType = resolve(context, object.initializers().get(index));
+            ensureAssignable(context, constructorTypes.get(index), initializerType, object.keyword());
+        }
+        final var type = new ReferenceDescriptor(TypeDescriptor.ofName(object.generatedClassName()));
+        object.setType(type);
+        return type;
+    }
+
     private static TypeDescriptor resolveStringConcatenation(final ResolutionContext context,
                                                              final Expr.Binary binary,
                                                              final TypeDescriptor rightType) {
@@ -639,7 +763,8 @@ final class ExpressionFlowResolver {
         if (valueType instanceof ReferenceDescriptor reference) valueType = reference.baseType();
         binary.setNullableStringification(nullable || valueType instanceof NullDescriptor);
         if (valueType instanceof NullDescriptor || valueType instanceof StringDescriptor
-                || valueType instanceof IntDescriptor || valueType instanceof FloatDescriptor
+                || valueType instanceof IntDescriptor || valueType instanceof LongDescriptor
+                || valueType instanceof FloatDescriptor
                 || valueType instanceof BooleanDescriptor || valueType instanceof UnitDescriptor) {
             binary.setBuiltInStringification(true);
             return TypeDescriptor.ofString();
@@ -706,7 +831,8 @@ final class ExpressionFlowResolver {
                 ? nullable.baseType() : operandBaseType;
         final var comparableType = nullableBaseType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : nullableBaseType;
-        if (comparableType instanceof IntDescriptor || comparableType instanceof FloatDescriptor
+        if (comparableType instanceof IntDescriptor || comparableType instanceof LongDescriptor
+                || comparableType instanceof FloatDescriptor
                 || comparableType instanceof BooleanDescriptor || comparableType instanceof StringDescriptor
                 || comparableType instanceof UnitDescriptor) {
             return;
@@ -1160,6 +1286,7 @@ final class ExpressionFlowResolver {
 
     private static boolean isLiteralPatternType(final TypeDescriptor type) {
         return type instanceof IntDescriptor
+                || type instanceof LongDescriptor
                 || type instanceof BooleanDescriptor
                 || type instanceof StringDescriptor;
     }
@@ -1963,7 +2090,8 @@ final class ExpressionFlowResolver {
         final var baseType = type instanceof NullableDescriptor nullable
                 ? nullable.baseType()
                 : type;
-        return baseType instanceof IntDescriptor || baseType instanceof FloatDescriptor
+        return baseType instanceof IntDescriptor || baseType instanceof LongDescriptor
+                || baseType instanceof FloatDescriptor
                 || baseType instanceof BooleanDescriptor;
     }
 

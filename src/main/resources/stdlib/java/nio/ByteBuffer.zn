@@ -1,0 +1,5 @@
+package java.nio;
+
+public external class ByteBuffer = "java.nio.ByteBuffer" {
+    public static wrap(bytes: ByteArray): &ByteBuffer;
+}

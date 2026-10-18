@@ -73,6 +73,39 @@ public sealed interface Expr {
     TypeDescriptor getType();
     void setType(final TypeDescriptor type);
 
+    final class AnonymousObject implements Expr {
+        private final Token keyword;
+        private final List<Stmt.ContractUse> contracts;
+        private Stmt.ClassDecl declaration;
+        private List<Expr> initializers;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+        private String generatedClassName;
+        private boolean declarationResolved;
+
+        public AnonymousObject(final Token keyword, final List<Stmt.ContractUse> contracts,
+                              final Stmt.ClassDecl declaration, final List<Expr> initializers) {
+            this.keyword = keyword;
+            this.contracts = List.copyOf(contracts);
+            this.declaration = declaration;
+            this.initializers = List.copyOf(initializers);
+        }
+
+        public Token keyword() { return keyword; }
+        public List<Stmt.ContractUse> contracts() { return contracts; }
+        public Stmt.ClassDecl declaration() { return declaration; }
+        public void setDeclaration(final Stmt.ClassDecl declaration) { this.declaration = declaration; }
+        public List<Expr> initializers() { return initializers; }
+        public void setInitializers(final List<Expr> initializers) {
+            this.initializers = List.copyOf(initializers);
+        }
+        public String generatedClassName() { return generatedClassName; }
+        public void setGeneratedClassName(final String name) { generatedClassName = name; }
+        public boolean declarationResolved() { return declarationResolved; }
+        public void markDeclarationResolved() { declarationResolved = true; }
+        @Override public TypeDescriptor getType() { return type; }
+        @Override public void setType(final TypeDescriptor type) { this.type = type; }
+    }
+
     final class MemberCall implements Expr {
         public final Expr receiver;
         public final Token name;
@@ -86,6 +119,7 @@ public sealed interface Expr {
         private Stmt.ContractMethod resolvedContractMethod;
         private Stmt.ExtensionMethod resolvedExtensionMethod;
         private Call namespaceCall;
+        private Property functionProperty;
         private String resolvedClassName;
         private boolean sumCaseFactory;
         private boolean internalNewtypeConstructor;
@@ -134,6 +168,8 @@ public sealed interface Expr {
         }
         public Call namespaceCall() { return namespaceCall; }
         public void setNamespaceCall(final Call call) { namespaceCall = call; }
+        public Property functionProperty() { return functionProperty; }
+        public void setFunctionProperty(final Property property) { functionProperty = property; }
         public String resolvedClassName() { return resolvedClassName; }
         public void setResolvedClassName(String className) { resolvedClassName = className; }
         public boolean sumCaseFactory() { return sumCaseFactory; }

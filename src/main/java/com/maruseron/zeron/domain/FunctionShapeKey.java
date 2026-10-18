@@ -45,6 +45,9 @@ public final class FunctionShapeKey {
         final var readable = switch (type) {
             case AnyDescriptor _ -> "Any";
             case IntDescriptor _ -> "Int";
+            case LongDescriptor _ -> "Long";
+            case ByteDescriptor _ -> "Byte";
+            case ByteArrayDescriptor _ -> "ByteArray";
             case FloatDescriptor _ -> "Float";
             case BooleanDescriptor _ -> "Boolean";
             case StringDescriptor _ -> "String";
@@ -89,6 +92,9 @@ public final class FunctionShapeKey {
         switch (type) {
             case AnyDescriptor _ -> encoding.append("y;");
             case IntDescriptor _ -> encoding.append("i;");
+            case LongDescriptor _ -> encoding.append("j;");
+            case ByteDescriptor _ -> encoding.append("c;");
+            case ByteArrayDescriptor _ -> encoding.append("A;");
             case FloatDescriptor _ -> encoding.append("d;");
             case BooleanDescriptor _ -> encoding.append("b;");
             case StringDescriptor _ -> encoding.append("s;");

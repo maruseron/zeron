@@ -1,0 +1,77 @@
+package zeron.io;
+
+import java.io.File;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import zeron.fs.Path;
+import zeron.lang.Option;
+import zeron.resource.Disposable;
+import zeron.resource.DisposeFailure;
+
+public contract Reader requires Disposable {
+    mut read(buffer: &ByteArray, offset: Int, length: Int): Option<Int> raises IoFailure;
+}
+
+public contract Writer requires Disposable {
+    mut write(buffer: ByteArray, offset: Int, length: Int): Unit raises IoFailure;
+    mut flush(): Unit raises IoFailure;
+}
+
+class FileByteReader is Reader, Disposable {
+    input: &InputStream;
+
+    private constructor new;
+
+    public constructor from(input: &InputStream) = FileByteReader.new(input);
+
+    public mut read(buffer: &ByteArray, offset: Int, length: Int): Option<Int> raises IoFailure {
+        let count = this.input.read(buffer, offset, length);
+        if (count < 0) return Option<Int>.None();
+        return Option.Some(count);
+    }
+
+    public mut dispose(): Unit raises DisposeFailure {
+        handle (this.input.close()) with {
+            case IoFailure.cause(cause) -> raise DisposeFailure.new(cause);
+        };
+    }
+}
+
+class FileByteWriter is Writer, Disposable {
+    output: &OutputStream;
+
+    private constructor new;
+
+    public constructor from(output: &OutputStream) = FileByteWriter.new(output);
+
+    public mut write(buffer: ByteArray, offset: Int, length: Int): Unit raises IoFailure {
+        this.output.write(buffer, offset, length);
+    }
+
+    public mut flush(): Unit raises IoFailure {
+        this.output.flush();
+    }
+
+    private mut closeAfterFlushFailure(cause: java.io.IOException): Unit raises DisposeFailure {
+        handle (this.output.close()) with {
+            case IoFailure.cause(closeCause) -> raise DisposeFailure.new(closeCause);
+        };
+        raise DisposeFailure.new(cause);
+    }
+
+    public mut dispose(): Unit raises DisposeFailure {
+        handle (this.output.flush()) with {
+            case IoFailure.cause(cause) -> this.closeAfterFlushFailure(cause);
+        };
+        handle (this.output.close()) with {
+            case IoFailure.cause(cause) -> raise DisposeFailure.new(cause);
+        };
+    }
+}
+
+public fn openReader(path: Path): &Reader raises IoFailure =
+    FileByteReader.from(Files.newInputStream(File.new(path.toString()).toPath()));
+
+public fn openWriter(path: Path): &Writer raises IoFailure =
+    FileByteWriter.from(Files.newOutputStream(File.new(path.toString()).toPath()));

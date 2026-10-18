@@ -40,6 +40,11 @@ The resolver rejects assignment to an immutable binding. The compiler lowers the
 
 Reassignment should preserve the declared type. For example, `let mut n: Int? = 1; n = null;` changes the binding's value but does not change its static type from `Int?`.
 
+Assignment expressions evaluate to the assigned value, with the target's declared type. This applies
+to bindings, properties, and array elements; compound assignment yields the computed new value.
+`??=` yields the existing value when non-null or the newly assigned value otherwise. A setter's
+return type does not affect the assignment expression's type.
+
 ## Mutation Capability
 
 Mutation capability answers: **May code using this reference invoke operations that mutate the referenced value?** It is a property of the reference/view, not of the name holding it.

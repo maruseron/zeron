@@ -14,6 +14,7 @@ final class ResolutionContext {
     final Map<String, Stmt.ClassDecl> classes = new LinkedHashMap<>();
     final Map<String, Stmt.ExternalClass> externalClasses = new LinkedHashMap<>();
     final Map<String, Stmt.ContractDecl> contracts = new LinkedHashMap<>();
+    final Map<String, String> typePackages = new LinkedHashMap<>();
     final Map<String, Stmt.SumDecl> sums = new LinkedHashMap<>();
     final Map<String, Stmt.ProductDecl> products = new LinkedHashMap<>();
     final Map<String, Stmt.NewtypeDecl> newtypes = new LinkedHashMap<>();
@@ -30,6 +31,9 @@ final class ResolutionContext {
     final Map<Token, TypeDescriptor> iterationElementTypes = new IdentityHashMap<>();
     final Map<Token, Resolver.IterationProtocol> iterationProtocols = new IdentityHashMap<>();
     final Map<Token, Resolver.SinkProtocol> sinkProtocols = new IdentityHashMap<>();
+    final Map<Token, Token> referenceTargets = new IdentityHashMap<>();
+    final Map<Token, TypeDescriptor> referenceTypes = new IdentityHashMap<>();
+    final Map<Token, FunctionDescriptor> callSiteFunctionTypes = new IdentityHashMap<>();
     final List<Expr.Lambda> resolvedLambdas = new ArrayList<>();
     private final Set<Expr.Lambda> trackedLambdas = Collections.newSetFromMap(new IdentityHashMap<>());
     final IdentityHashMap<Stmt, String> sourcePathsByDeclaration = new IdentityHashMap<>();
@@ -97,5 +101,19 @@ final class ResolutionContext {
 
     String sourcePath(final Token token) {
         return sourcePathsByToken.get(token);
+    }
+
+    void recordReference(final Token reference, final Token declaration, final TypeDescriptor type) {
+        if (reference == null || declaration == null) return;
+        referenceTargets.put(reference, declaration);
+        if (type != null) referenceTypes.put(reference, type);
+    }
+
+    void recordDeclarationType(final Token declaration, final TypeDescriptor type) {
+        if (declaration != null && type != null) referenceTypes.put(declaration, type);
+    }
+
+    void recordCallSiteFunctionType(final Token callSite, final FunctionDescriptor type) {
+        if (callSite != null && type != null) callSiteFunctionTypes.put(callSite, type);
     }
 }

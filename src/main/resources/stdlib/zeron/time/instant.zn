@@ -1,0 +1,32 @@
+package zeron.time;
+
+import java.lang.System;
+import zeron.lang.Comparable;
+import zeron.lang.Eq;
+import zeron.lang.Hashable;
+import zeron.lang.Ordering;
+
+public class Instant is Comparable<Instant> deriving Eq, Hashable {
+    ticks: Long;
+
+    private constructor new;
+
+    public constructor now() = Instant.new(System.nanoTime());
+
+    // Difference-based ordering follows nanoTime wraparound for intervals shorter than 2^63 ns.
+    public compareTo(other: Instant): Ordering {
+        let difference = this.ticks - other.ticks;
+        if (difference < 0L) return Ordering.LT();
+        if (difference > 0L) return Ordering.GT();
+        return Ordering.EQ();
+    }
+
+    public elapsedSince(earlier: Instant): Duration =
+        Duration.fromNanoseconds(this.ticks - earlier.ticks);
+
+    public advancedBy(duration: Duration): Instant =
+        Instant.new(this.ticks + duration.nanoseconds);
+
+    public retreatedBy(duration: Duration): Instant =
+        Instant.new(this.ticks - duration.nanoseconds);
+}

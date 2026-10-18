@@ -1,0 +1,13 @@
+package zeron.lang;
+
+public class Cell<T> {
+    value: T;
+
+    public constructor new;
+
+    public get(): T = this.value;
+
+    public mut set(value: T): Unit {
+        this.value = value;
+    }
+}

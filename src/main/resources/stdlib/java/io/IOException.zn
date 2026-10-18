@@ -1,0 +1,5 @@
+package java.io;
+
+public external class IOException = "java.io.IOException" {
+    public constructor new(message: String);
+}

@@ -1,14 +1,22 @@
 package zeron.collections;
 
 import zeron.lang.Hashable;
-import zeron.lang.Option;
 
-public class Set<T: Hashable<T>> is Iterable<T> {
+public class Set<T: Hashable<T>> is Iterable<T>, Sink<T> {
     values: &Map<T, Unit>;
 
     private constructor new;
 
     public constructor withMap(values: &Map<T, Unit>) = Set<T>.new(values);
+
+    public constructor empty() =
+        Set<T>.withMap(Map.empty<T, Unit>());
+
+    public constructor of(elements: T...) {
+        let mut result = Set.empty<T>();
+        for (let element in elements) result.add(element);
+        return result;
+    }
 
     public property size: Int {
         get = values.size;
@@ -25,15 +33,4 @@ public class Set<T: Hashable<T>> is Iterable<T> {
     public mut clear(): Unit = values.clear();
 
     public iterator(): &Iterator<T> = values.keyIterator();
-}
-
-namespace Set {
-    public fn empty<T: Hashable<T>>(): &Set<T> =
-        Set<T>.withMap(Map.empty<T, Unit>());
-
-    public fn of<T: Hashable<T>>(elements: T...): &Set<T> {
-        let mut result = Set.empty<T>();
-        for (let element in elements) result.add(element);
-        return result;
-    }
 }

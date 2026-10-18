@@ -17,6 +17,7 @@ final class DeclarationEmitter {
                                final List<Stmt> declarations,
                                final boolean entryHolder ){
         var hasLaunchableMain = false;
+        var hasLaunchableMainWithArguments = false;
         for (final var declaration : declarations) {
             switch (declaration) {
                 case Stmt.Var(Token name, _, _, _, _) -> {
@@ -52,6 +53,13 @@ final class DeclarationEmitter {
                             && functionType.parameters().isEmpty()
                             && functionType.returnType() instanceof UnitDescriptor) {
                         hasLaunchableMain = true;
+                    }
+                    if (entryHolder && name.lexeme().equals("main")
+                            && functionType.parameters().size() == 1
+                            && functionType.parameters().getFirst() instanceof ArrayDescriptor array
+                            && array.elementType() instanceof StringDescriptor
+                            && functionType.returnType() instanceof UnitDescriptor) {
+                        hasLaunchableMainWithArguments = true;
                     }
                     classBuilder.withMethod(
                             name.lexeme(),
@@ -128,16 +136,20 @@ final class DeclarationEmitter {
             }
         }
 
-        if (entryHolder && hasLaunchableMain) {
+        if (entryHolder && (hasLaunchableMain || hasLaunchableMainWithArguments)) {
+            final var passArguments = hasLaunchableMainWithArguments;
             classBuilder.withMethodBody(
                     "main",
                     MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String.arrayType()),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC,
                     composer -> {
+                        if (passArguments) composer.aload(0);
                         composer.invokestatic(composer.constantPool().methodRefEntry(
                                 ClassDesc.of(context.currentHolderName),
                                 "main",
-                                MethodTypeDesc.of(UNIT_CLASS)));
+                                passArguments
+                                        ? MethodTypeDesc.of(UNIT_CLASS, ConstantDescs.CD_Object.arrayType())
+                                        : MethodTypeDesc.of(UNIT_CLASS)));
                         composer.pop();
                         composer.return_();
                     });

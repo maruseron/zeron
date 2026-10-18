@@ -136,6 +136,15 @@ final class TypeCompatibility {
         final var contract = nominalBase(contractType);
         final var concrete = nominalBase(classType);
         if (contract == null || concrete == null || !contracts.containsKey(contract.name())) return false;
+        if (contracts.containsKey(concrete.name())) {
+            final var sourceUse = ContractComposition.fromType(classType);
+            final var targetUse = ContractComposition.fromType(contractType);
+            return sourceUse != null && targetUse != null
+                    && ContractComposition.closure(contracts, sourceUse).stream()
+                            .anyMatch(applied -> applied.use().name().lexeme()
+                                            .equals(targetUse.name().lexeme())
+                                    && applied.use().typeArguments().equals(targetUse.typeArguments()));
+        }
         final var declaration = classes.get(concrete.name());
         if (declaration == null) return false;
         final var classArguments = classType instanceof GenericDescriptor generic

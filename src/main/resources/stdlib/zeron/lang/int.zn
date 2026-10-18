@@ -10,6 +10,15 @@ public extension Int {
     }
 
     public fn toFloat(): Float = intToFloat(this);
+
+    public fn toByte(): Option<Byte> {
+        if (this < 0 or this > 255) return Option<Byte>.None();
+        return Option.Some(intToByteUnchecked(this));
+    }
+
+    public fn toLong(): Long = intToLong(this);
 }
 
 external fn intToFloat(value: Int): Float;
+external fn intToByteUnchecked(value: Int): Byte;
+external fn intToLong(value: Int): Long;

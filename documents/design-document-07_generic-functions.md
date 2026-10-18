@@ -72,10 +72,13 @@ parameter absent from both argument constraints and the expected type requires a
 type argument. Constructor calls that collide with a namespace function are ambiguous when both
 candidates accept the call.
 
-Let-bound lambda generalization remains limited to unresolved identity and constant-result forms.
-It does not infer contract bounds from member calls or carry implicit constraints into a scheme;
-expanding it requires a separate sound constraint-inference rule. Operator requirements remain
-deferred to the operator-witness design.
+The implemented let-bound lambda generalization currently covers unresolved identity and
+constant-result forms. The accepted extension in
+[ZEP-0003](zeps/ZEP-0003.md) defines a broader, still rank-1 rule for lambdas written directly as
+immutable `let` initializers: infer applied-contract bounds from direct member use and substituted
+bounds of generic callees, then quantify only type variables absent from the captured environment.
+Raised effects remain fixed in the function signature. Mutable bindings, nested schemes, arbitrary
+lambda-valued expressions, and operator constraints remain outside that rule.
 
 At a direct generic call, the resolver seeds substitutions from explicit type arguments, if given,
 then resolves non-lambda arguments and structurally matches their types against the generic
@@ -98,12 +101,20 @@ though the evidence ABI uses erased method handles. Complete overlap checking fo
 witness patterns remains future work; see
 [design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
 
-Lambdas with an expected function type remain monomorphic. An immutable let-bound lambda with safe
-unresolved parameters may generalize them into a rank-1 scheme, instantiated freshly at each use.
-The first slice handles direct parameter identity and constant results. Mutable bindings, nested
-schemes, explicit `forall`, and unresolved types used by operators are not generalized. Generic
-function names still require full explicit specialization (`name::<T>`) or an expected function type;
-those named-function references are monomorphic values.
+Lambdas with an expected function type remain monomorphic. The implemented immutable let-bound
+lambda scheme slice handles direct parameter identity and constant results. The accepted
+ZEP-0003 extension is restricted to a lambda written directly as an immutable `let` initializer;
+it infers multiple applied-contract bounds from direct member use and from generic callees after
+substituting their inferred type arguments. Only variables absent from the captured environment are
+quantified, and raised effects are fixed. Each use must resolve its evidence statically, reporting
+missing or ambiguous evidence at the use with a reference to the binding. Schemes remain local and
+are not serialized as top-level API values. At runtime each scheme use is monomorphic: required
+evidence is captured in a specialized closure, one closure is reused per specialization during each
+dynamic activation of the `let`, and different specializations have distinct closure identities.
+Mutable bindings, nested schemes, explicit `forall`, arbitrary lambda-valued expressions, and
+operator constraints remain outside the accepted rule. Generic function names still require full
+explicit specialization (`name::<T>`) or an expected function type; those named-function references
+are monomorphic values.
 
 ## Implementation Details
 
@@ -135,12 +146,12 @@ provide enough information elsewhere or pass an explicit type argument.
 
 Lambdas and bare function names passed as arguments are resolved against the partially substituted
 function signature. Immutable let-bound lambda schemes instantiate freshly at calls and expected
-function types; the binding's scheme is not mutated by an individual use. Let-bound lambda
-generalization remains limited to identity and constant results: it does not invent contract bounds
-or operator constraints, and the lambda syntax has no explicit bounded-parameter form. Operator-constrained
-lambda parameters remain monomorphic and may use later call context. Generic function references validate
-bounds and expected function types after specialization. Neither a scheme nor a lambda acquires the
-enclosing function's polymorphism.
+function types; the binding's scheme is not mutated by an individual use. For the implemented
+identity/constant slice, this is pure type substitution. Under the accepted ZEP-0003 extension, each
+use also checks all inferred applied bounds, selects evidence using the same nominal-conformance and
+witness rules as generic calls, and specializes the lambda to a monomorphic closure. It does not
+infer bounds from unrelated call sites, effects, or operators. Neither a scheme nor a lambda
+acquires the enclosing function's polymorphism.
 
 ### JVM lowering
 
@@ -160,9 +171,13 @@ casts, boxing, and unboxing; `LambdaMetafactory` creates the adapter object. Con
 shapes and ordinary non-generic lambda lowering remain unchanged.
 
 Adapter discovery recursively follows function parameters and results through nullable and
-reference-view wrappers. Generalized lambda values use the erased SAM shape as their runtime
-representation; calls box or unbox at that boundary, and a concrete callback view uses the existing
-adapter mechanism. A specialized generic function value is a zero-capture SAM instance backed
+reference-view wrappers. The implemented identity/constant generalized lambdas use their erased SAM
+shape as the runtime representation; calls box or unbox at that boundary, and a concrete callback
+view uses the existing adapter mechanism. Under accepted ZEP-0003, constrained schemes instead
+specialize to monomorphic closures whose factories capture selected contract evidence alongside
+ordinary immutable captures. The compiler must reuse each variant within a dynamic `let` activation
+without conflating distinct applied-type instantiations. These local schemes do not alter the
+library-index format. A specialized generic function value is a zero-capture SAM instance backed
 by a generated static bridge. The bridge adapts its concrete callback arguments to the generic
 function's erased callback shapes, invokes the original owner, then adapts callback results back to
 the specialized shape. Bridge helpers are deduplicated by qualified function identity and erased
@@ -197,9 +212,14 @@ shape matrix and broader adapter reuse still need coverage.
   be bounded; instances retain evidence for class methods and contract defaults. Mutating methods,
   operator constraints, variance, and broader inference remain deferred. See
   [design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
-6. **Let-bound polymorphic lambdas: implemented first slice.** Immutable identity and constant-result
-    lambdas generalize unresolved parameters into rank-1 schemes; each use instantiates independently.
-    Mutable bindings, nested schemes, and operator constraints remain deferred.
+6. **Let-bound polymorphic lambdas: implemented first slice; constrained extension accepted, pending.**
+    Immutable identity and constant-result lambdas generalize unresolved parameters into rank-1
+    schemes; each use instantiates independently. ZEP-0003 extends this only to direct immutable
+    `let` lambda initializers, inferring applied-contract requirements from body member use and
+    substituted generic-callee bounds. It requires use-site evidence diagnostics with the binding
+    location, captured-environment restrictions, monomorphic closure specialization, and per-
+    activation reuse of each distinct specialization. Mutable bindings, nested schemes, and operator
+    constraints remain deferred.
 
 ## Acceptance Criteria for the Current Slice
 

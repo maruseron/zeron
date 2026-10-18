@@ -5,27 +5,40 @@ import zeron.internal.unwrapSome;
 
 class ArrayStream<T> is Iterable<T> {
     values: Array<T>;
-    
-    public iterator(): &Iterator<T> = ArrayIterator<T>.from(values);
+
+    public iterator(): &Iterator<T> {
+        let array = values;
+        return object : Iterator<T> {
+            values: Array<T> = array;
+            current: Int = 0;
+
+            public mut next(): Option<T> {
+                if (this.current >= this.values.length) return Option<T>.None();
+                let value = this.values[this.current];
+                this.current = this.current + 1;
+                return Option.Some(value);
+            }
+        };
+    }
 }
 
 class MappedStream<T, R> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> R;
 
-    public iterator(): &Iterator<R> =
-        MappedIterator<T, R>.new(source.iterator(), transform);
-}
+    public iterator(): &Iterator<R> {
+        let upstream = source.iterator();
+        let mapper = transform;
+        return object : Iterator<R> {
+            source: &Iterator<T> = upstream;
+            transform: (T) -> R = mapper;
 
-class MappedIterator<T, R> is Iterator<R> {
-    source: &Iterator<T>;
-    transform: (T) -> R;
-
-    public mut next(): Option<R> {
-        let f = transform;
-        let item = source.next();
-        if (not item.isSome()) return Option<R>.None();
-        return Option.Some(f(unwrapSome(item)));
+            public mut next(): Option<R> {
+                let item = this.source.next();
+                if (not item.isSome()) return Option<R>.None();
+                return Option.Some(this.transform(unwrapSome(item)));
+            }
+        };
     }
 }
 
@@ -33,30 +46,27 @@ class FlatMappedStream<T, R> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> Iterable<R>;
 
-    public iterator(): &Iterator<R> =
-        FlatMappedIterator<T, R>.from(source.iterator(), transform);
-}
+    public iterator(): &Iterator<R> {
+        let upstream = source.iterator();
+        let flatMapper = transform;
+        let initialInner = Stream<R>.fromArray([]).iterator();
+        return object : Iterator<R> {
+            source: &Iterator<T> = upstream;
+            transform: (T) -> Iterable<R> = flatMapper;
+            inner: &Iterator<R> = initialInner;
 
-class FlatMappedIterator<T, R> is Iterator<R> {
-    source: &Iterator<T>;
-    transform: (T) -> Iterable<R>;
-    inner: &Iterator<R>;
-
-    private constructor new;
-
-    public constructor from(source: &Iterator<T>, transform: (T) -> Iterable<R>) =
-        FlatMappedIterator<T, R>.new(source, transform, Stream<R>.fromArray([]).iterator());
-
-    public mut next(): Option<R> {
-        let f = transform;
-        while (true) {
-            let item = this.inner.next();
-            if (item.isSome()) return item;
-            let outerItem = this.source.next();
-            if (not outerItem.isSome()) return Option<R>.None();
-            this.inner = f(unwrapSome(outerItem)).iterator();
-        }
-        return Option<R>.None();
+            public mut next(): Option<R> {
+                let mut item = this.inner.next();
+                while (true) {
+                    if (item.isSome()) return item;
+                    let outerItem = this.source.next();
+                    if (not outerItem.isSome()) return Option<R>.None();
+                    this.inner = this.transform(unwrapSome(outerItem)).iterator();
+                    item = this.inner.next();
+                }
+                return Option<R>.None();
+            }
+        };
     }
 }
 
@@ -64,22 +74,22 @@ class FilteredStream<T> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
-    public iterator(): &Iterator<T> =
-        FilteredIterator<T>.new(source.iterator(), predicate);
-}
+    public iterator(): &Iterator<T> {
+        let upstream = source.iterator();
+        let test = predicate;
+        return object : Iterator<T> {
+            source: &Iterator<T> = upstream;
+            predicate: (T) -> Boolean = test;
 
-class FilteredIterator<T> is Iterator<T> {
-    source: &Iterator<T>;
-    predicate: (T) -> Boolean;
-
-    public mut next(): Option<T> {
-        let f = predicate;
-        let mut item = source.next();
-        while (item.isSome()) {
-            if (f(unwrapSome(item))) return item;
-            item = source.next();
-        }
-        return Option<T>.None();
+            public mut next(): Option<T> {
+                let mut item = this.source.next();
+                while (item.isSome()) {
+                    if (this.predicate(unwrapSome(item))) return item;
+                    item = this.source.next();
+                }
+                return Option<T>.None();
+            }
+        };
     }
 }
 
@@ -87,18 +97,19 @@ class TakenStream<T> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
 
-    public iterator(): &Iterator<T> =
-        TakenIterator<T>.new(source.iterator(), count);
-}
+    public iterator(): &Iterator<T> {
+        let upstream = source.iterator();
+        let limit = count;
+        return object : Iterator<T> {
+            source: &Iterator<T> = upstream;
+            remaining: Int = limit;
 
-class TakenIterator<T> is Iterator<T> {
-    source: &Iterator<T>;
-    remaining: Int;
-
-    public mut next(): Option<T> {
-        if (remaining <= 0) return Option<T>.None();
-        this.remaining = remaining - 1;
-        return source.next();
+            public mut next(): Option<T> {
+                if (this.remaining <= 0) return Option<T>.None();
+                this.remaining = this.remaining - 1;
+                return this.source.next();
+            }
+        };
     }
 }
 
@@ -106,29 +117,30 @@ class DroppedStream<T> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
 
-    public iterator(): &Iterator<T> =
-        DroppedIterator<T>.new(source.iterator(), count);
-}
+    public iterator(): &Iterator<T> {
+        let upstream = source.iterator();
+        let dropCount = count;
+        return object : Iterator<T> {
+            source: &Iterator<T> = upstream;
+            count: Int = dropCount;
+            initialized: Boolean = false;
 
-class DroppedIterator<T> is Iterator<T> {
-    source: &Iterator<T>;
-    count: Int;
-    initialized: Boolean = false;
-
-    public mut next(): Option<T> {
-        if (not initialized) {
-            let mut skipped = 0;
-            while (skipped < count) {
-                let item = source.next();
-                if (not item.isSome()) {
+            public mut next(): Option<T> {
+                if (not this.initialized) {
+                    let mut skipped = 0;
+                    while (skipped < this.count) {
+                        let item = this.source.next();
+                        if (not item.isSome()) {
+                            this.initialized = true;
+                            return item;
+                        }
+                        skipped += 1;
+                    }
                     this.initialized = true;
-                    return item;
                 }
-                skipped += 1;
+                return this.source.next();
             }
-            this.initialized = true;
-        }
-        return source.next();
+        };
     }
 }
 
@@ -136,27 +148,27 @@ class DroppedWhileStream<T> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
-    public iterator(): &Iterator<T> =
-        DroppedWhileIterator<T>.new(source.iterator(), predicate);
-}
+    public iterator(): &Iterator<T> {
+        let upstream = source.iterator();
+        let test = predicate;
+        return object : Iterator<T> {
+            source: &Iterator<T> = upstream;
+            predicate: (T) -> Boolean = test;
+            dropping: Boolean = true;
 
-class DroppedWhileIterator<T> is Iterator<T> {
-    source: &Iterator<T>;
-    predicate: (T) -> Boolean;
-    dropping: Boolean = true;
+            public mut next(): Option<T> {
+                while (this.dropping) {
+                    let item = this.source.next();
+                    if (not item.isSome()) return item;
 
-    public mut next(): Option<T> {
-        while (dropping) {
-            let f = predicate;
-            let item = source.next();
-            if (not item.isSome()) return item;
-
-            if (not f(unwrapSome(item))) {
-                this.dropping = false;
-                return item;
+                    if (not this.predicate(unwrapSome(item))) {
+                        this.dropping = false;
+                        return item;
+                    }
+                }
+                return this.source.next();
             }
-        }
-        return source.next();
+        };
     }
 }
 
@@ -164,31 +176,31 @@ class TakenWhileStream<T> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
-    public iterator(): &Iterator<T> =
-        TakenWhileIterator<T>.new(source.iterator(), predicate);
-}
+    public iterator(): &Iterator<T> {
+        let upstream = source.iterator();
+        let test = predicate;
+        return object : Iterator<T> {
+            source: &Iterator<T> = upstream;
+            predicate: (T) -> Boolean = test;
+            done: Boolean = false;
 
-class TakenWhileIterator<T> is Iterator<T> {
-    source: &Iterator<T>;
-    predicate: (T) -> Boolean;
-    done: Boolean = false;
+            public mut next(): Option<T> {
+                if (this.done) return Option<T>.None();
 
-    public mut next(): Option<T> {
-        if (done) return Option<T>.None();
+                let item = this.source.next();
+                if (not item.isSome()) {
+                    this.done = true;
+                    return Option<T>.None();
+                }
 
-        let f = predicate;
-        let item = source.next();
-        if (not item.isSome()) {
-            this.done = true;
-            return Option<T>.None();
-        }
-
-        if (f(unwrapSome(item))) {
-            return item;
-        } else {
-            this.done = true;
-            return Option<T>.None();
-        }
+                if (this.predicate(unwrapSome(item))) {
+                    return item;
+                } else {
+                    this.done = true;
+                    return Option<T>.None();
+                }
+            }
+        };
     }
 }
 

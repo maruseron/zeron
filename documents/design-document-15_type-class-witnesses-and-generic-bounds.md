@@ -39,6 +39,14 @@ checking, even though those arguments erase in JVM descriptors. Bounds expose no
 operations under the current mutability rules; class-side operations use hidden factory evidence.
 Generic methods, like generic functions, can invoke class-side factories through bounds.
 
+The accepted constrained-lambda rule in
+[ZEP-0003](zeps/ZEP-0003.md) uses the same applied-bound and evidence-selection semantics. Bounds
+inferred from a directly let-bound lambda body (including substituted bounds of generic callees)
+must be discharged statically at each specialization. Selected evidence is captured by that
+monomorphic closure variant; it is not looked up at runtime, and an unsatisfied or ambiguous bound
+is a compile-time diagnostic tied to the use and the lambda binding. This does not change witness
+coherence or API-index metadata, because these schemes are local and are not serialized.
+
 Generic class parameters may also declare applied contract bounds. A class application must satisfy
 each bound after substituting all class arguments. Evidence for class parameter bounds is selected
 at construction and retained in private final `MethodHandle` fields on the instance; instance

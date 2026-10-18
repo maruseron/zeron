@@ -334,6 +334,9 @@ described in [design-document-11_compilation-libraries-and-host-integration.md](
    separate semantics.
 6. **Namespace sealing: deferred.** Define library ownership and contribution boundaries before
    preventing downstream namespace augmentation.
+7. **Class/effect member visibility default accepted, pending.** ZEP-0022 makes omitted visibility
+   private for class and effect methods and properties. Public remains explicit; constructors,
+   contracts, extensions, and top-level declarations retain their current rules.
 
 ## Acceptance Criteria
 

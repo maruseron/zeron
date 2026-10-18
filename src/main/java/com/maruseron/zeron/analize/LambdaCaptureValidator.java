@@ -11,18 +11,49 @@ import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 final class LambdaCaptureValidator {
     private final SymbolTable symbols;
+    private final String captureDescription;
+    private final Map<String, Token> anonymousCaptures = new LinkedHashMap<>();
 
     LambdaCaptureValidator(final SymbolTable symbols) {
+        this(symbols, "a lambda");
+    }
+
+    LambdaCaptureValidator(final SymbolTable symbols, final String captureDescription) {
         this.symbols = symbols;
+        this.captureDescription = captureDescription;
     }
 
     void validate(final Expr.Lambda lambda) {
         validate(lambda, Set.of());
+    }
+
+    List<Token> validateAnonymousObject(final Stmt.ClassDecl declaration) {
+        for (final var method : declaration.methods()) {
+            final var locals = new HashSet<String>();
+            method.parameters().forEach(parameter -> locals.add(parameter.lexeme()));
+            walkCaptureUsage(method.body(), locals);
+        }
+        for (final var property : declaration.properties()) {
+            if (property.getterBody() != null) {
+                walkCaptureUsage(property.getterBody(), new HashSet<>());
+            }
+            if (property.setterBody() != null) {
+                walkCaptureUsage(property.setterBody(), new HashSet<>(Set.of(
+                        property.setterParameter().lexeme())));
+            }
+        }
+        return List.copyOf(anonymousCaptures.values());
+    }
+
+    void validateAnonymousInitializer(final Expr initializer) {
+        walkCaptureUsage(initializer, Set.of());
     }
 
     private void validate(final Expr.Lambda lambda, final Set<String> inheritedNames) {
@@ -41,7 +72,7 @@ final class LambdaCaptureValidator {
 
     private void walkCaptureUsage(final Stmt statement, final Set<String> localNames) {
         switch (statement) {
-            case Stmt.Block(List<Stmt> block) -> walkCaptureUsage(block, localNames);
+            case Stmt.Block(List<Stmt> block) -> walkCaptureUsage(block, new HashSet<>(localNames));
             case Stmt.Using using -> {
                 final var nestedNames = new HashSet<>(localNames);
                 for (final var resource : using.resources()) {
@@ -62,16 +93,19 @@ final class LambdaCaptureValidator {
                 if (value != null) walkCaptureUsage(value, localNames);
             }
             case Stmt.Expression(Expr expression) -> walkCaptureUsage(expression, localNames);
-            case Stmt.Var(Token _, TypeDescriptor _, Expr initializer, BindingMutability _, _) -> {
+            case Stmt.Var(Token name, TypeDescriptor _, Expr initializer, BindingMutability _, _) -> {
                 if (initializer != null) walkCaptureUsage(initializer, localNames);
+                localNames.add(name.lexeme());
             }
             case Stmt.While(Token _, Expr condition, Stmt body) -> {
                 walkCaptureUsage(condition, localNames);
                 walkCaptureUsage(body, namesWithConditionBindings(condition, localNames));
             }
-            case Stmt.For(Token _, Token _, Expr iterable, Stmt body) -> {
+            case Stmt.For(Token bind, Token _, Expr iterable, Stmt body) -> {
                 walkCaptureUsage(iterable, localNames);
-                walkCaptureUsage(body, localNames);
+                final var loopNames = new HashSet<>(localNames);
+                loopNames.add(bind.lexeme());
+                walkCaptureUsage(body, loopNames);
             }
             case Stmt.Function(Token _, List<Token> parameters, FunctionDescriptor _, List<Stmt> body,
                                boolean _, List<Expr> _, int _, boolean _) -> {
@@ -176,7 +210,14 @@ final class LambdaCaptureValidator {
                         && symbols.getSymbol(variable.name).mutability().isReassignable()) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                             variable.name,
-                            "Cannot capture mutable binding '" + variable.name.lexeme() + "' in a lambda."));
+                            "Cannot capture mutable binding '" + variable.name.lexeme()
+                                    + "' in " + captureDescription + "."));
+                }
+                if (symbols.containsSymbol(variable.name)
+                        && symbols.getSymbol(variable.name).lvt() != SymbolTable.GLOBAL
+                        && variable.name.type() != com.maruseron.zeron.scan.TokenType.THIS) {
+                    anonymousCaptures.putIfAbsent(variable.name.lexeme(),
+                            symbols.getSymbol(variable.name).name());
                 }
             }
             default -> {}

@@ -1,33 +1,31 @@
 # Zeron Language Support for VS Code
 
-This grammar-only extension associates `.zn` files with Zeron and provides TextMate syntax
-highlighting, comment toggling, bracket matching, and quote/bracket insertion behavior. It does
-not launch the compiler or provide diagnostics, completion, or semantic highlighting.
+This extension associates `.zn` files with Zeron and provides TextMate syntax highlighting, comment
+toggling, bracket matching, and quote/bracket insertion behavior. It also connects VS Code to the
+Zeron language server for diagnostics, completion, hover, and definition navigation.
+
+## Requirements
+
+- Install the Zeron 0.2.0 or later distribution and ensure `zeron` is available on `PATH`.
+- Install the Java runtime required by that Zeron distribution.
+- Open a single-project Zeron workspace containing its `zeron.toml` manifest.
+
+By default, the extension launches `zeron lsp` from the workspace root. If the executable is not on
+`PATH`, set `zeron.server.path` to its command or path, then reload the VS Code window.
+
+Multi-root workspaces are not supported by the current language server integration. Syntax
+highlighting continues to work if the server is missing or cannot start; see the **Zeron Language
+Server** output channel for details.
 
 ## Try it from a source checkout
 
-From the repository root, launch an Extension Development Host:
-
-```sh
-code --extensionDevelopmentPath=editors/vscode .
-```
-
-Open a `.zn` file in the new window to test the grammar.
-
-Alternatively, you could formally register Zeron globally with a symbolic link:
-
-- Windows:
+From the repository root, install the extension dependency and launch an Extension Development Host:
 
 ```powershell
-New-Item -ItemType symboliclink -Path "$env:USERPROFILE\.vscode\extensions\zeron-syntax-highlighting" -Value "$pwd\editors\vscode"
-```
-
-- macOS or Linux:
-
-```bash
-ln -s "$(pwd)/editors/vscode" ~/.vscode/extensions/zeron-syntax-highlighting
+npm --prefix editors/vscode install
+code --extensionDevelopmentPath=editors/vscode sample_programs/list_monad
 ```
 
 The grammar is intentionally a lightweight editor grammar rather than a second implementation of
 the compiler scanner. Contextual soft keywords are generally left as identifiers to avoid coloring
-ordinary variables as keywords.
+ordinary variables as keywords. Language semantics come from the LSP server, not the grammar.

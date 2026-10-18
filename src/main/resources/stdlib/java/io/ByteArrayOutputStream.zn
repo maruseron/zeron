@@ -1,0 +1,8 @@
+package java.io;
+
+public external class ByteArrayOutputStream = "java.io.ByteArrayOutputStream" {
+    public constructor new();
+    public mut write(buffer: ByteArray, offset: Int, length: Int): Unit;
+    public toByteArray(): ByteArray;
+    public toString(): String;
+}

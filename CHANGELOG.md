@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.3.0] - 2026, 18 OCT
+
+### Compiler and language work
+
+- Added opt-in `deriving Eq, Hashable` support for products, sums, classes, and newtypes.
+- Added anonymous object expressions that implement explicitly listed contracts.
+- Made visibility modifiers optional on class and effect methods and properties; omitted visibility
+  now defaults to private, while public visibility remains explicit.
+- Added the compiler-backed Zeron Language Server Protocol server with diagnostics, completion,
+  hover, and definition navigation.
+
+### Standard Library
+
+- Added `zeron.lang.Cell<T>` for explicit shared mutable state captured by lambdas.
+- Added byte and byte-array support, byte-oriented I/O with strict UTF-8 text adapters, signed
+  64-bit `Long`, launcher argument forwarding, and monotonic elapsed-time APIs in `zeron.time`.
+
+### Compiler API and tooling
+
+- Added the public member-discovery API for querying source and compiled-library type members.
+- Added a VS Code language client for launching and connecting to the Zeron language server.
+
 ## [0.2.0] - 2026, 14 OCT
 
 ### Compiler and language work

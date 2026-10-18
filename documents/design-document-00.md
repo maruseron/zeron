@@ -26,7 +26,12 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
 
 - Core scalar types, `Unit`, function declarations, and type inference for ordinary bindings and
     function results.
-- Remainder for `Int` and `Float`, 32-bit `Int` bitwise and shift operators, and their variable-only
+- `Long` signed 64-bit literals (with the `L` suffix), arithmetic, bitwise and shift operators,
+    plus checked `Long.toInt(): Option<Int>` and widening `Int.toLong()` conversions.
+- `zeron.time.Duration` provides signed nanoseconds with checked arithmetic; `Instant` uses a
+    monotonic clock for elapsed-time measurement. Wall-clock time remains out of scope.
+- Remainder for `Int`, `Long`, and `Float`, 32-bit `Int` and 64-bit `Long` bitwise and shift operators,
+    and their variable-only
     compound assignments. `++`/`--` are not part of the language; use `+= 1` or `-= 1`.
 - Built-in `Any` as a non-null top type: non-null values widen to `Any`, nullable values and `null`
     widen to `Any?`; supported type tests and checked/safe casts are implemented.
@@ -108,7 +113,9 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     and `take`/`takeWhile` may stop traversal early.
     A final `collect` expression is the only terminal stage; it must evaluate to a mutable reference to a
     `Sink<T>`, and the expression returns that sink. The pipeline is lowered directly to iteration and
-    sink additions. Before traversal, the collected form evaluates the source and acquires its iterator
+    sink additions. `Sink<T>.add(T)` returns `Boolean`; collected pipelines ignore that result, allowing
+    sinks such as `Set<T>` to report whether an element was newly inserted. Before traversal, the
+    collected form evaluates the source and acquires its iterator
     for iterable inputs, then evaluates the collector, then evaluates count expressions and snapshots
     stage captures in source order. Stage expressions are emitted inline in the collected loop, so there
     is no per-element stage callback invocation; stage bodies still run for each relevant element during
@@ -216,7 +223,8 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     not implicitly lifted. This sequences value-level failures and does not handle declared
     `raises` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
 - Low priority: compiler-recognized type-admissibility constraints on generic type parameters, such
-    as `NonNull` to exclude nullable type arguments, `Numeric` to admit only `Int` and `Float`, or
+    as `NonNull` to exclude nullable type arguments, `Numeric` to admit only `Int`, `Long`, and
+    `Float`, or
     `Stable` to admit only values whose equality- and hash-relevant state cannot change while used as
     keys in hash-based collections. A sound `Stable` guarantee may need to ensure aliasable reachable
     state is deeply copied; ordinary immutable views alone do not rule out mutation through another
@@ -657,14 +665,16 @@ does not make a type iterable. A custom iterable imports and implements these pu
 through ordinary class conformance; arrays retain specialized lowering and ranges use ordinary
 protocol dispatch.
 
-`Stream<T>` operators `map`, `flatMap`, `filter`, `take`, and `drop` are lazy; each traversal requests
-a fresh iterator from the source, without guaranteeing that the source is replayable. `flatMap`
-traverses each returned `Iterable<T>` before advancing the source. Negative `take`/`drop` counts
-behave like zero. Terminal operations
-`forEach`, `fold`, `count`, `any`, and `all` consume the sequence, with `any` and `all` short-circuiting.
-`Stream.fromArray` and `ArrayIterator` adapt arrays to `Iterable<T>`; direct array `for` loops keep
-their specialized index-based lowering. For-expressions over arrays likewise retain direct array
-iteration in the collected form, while an uncollected expression builds a lazy stream.
+`Stream<T>` operators `map`, `flatMap`, `filter`, `take`, `drop`, `dropWhile`, and `takeWhile` are
+lazy; each traversal requests a fresh iterator from the source, without guaranteeing that the source
+is replayable. `flatMap` traverses each returned `Iterable<T>` before advancing the source. Negative
+`take`/`drop` counts behave like zero. Terminal operations `forEach`, `fold`, `count`, `any`, and
+`all` consume the sequence, with `any` and `all` short-circuiting. Stream adapter iterators are
+anonymous `Iterator<T>` contract objects whose mutable traversal state belongs to each iterator
+instance. `Stream.fromArray` adapts arrays to `Iterable<T>`, while `ArrayIterator` is a public
+array-backed iterator; direct array `for` loops keep their specialized index-based lowering.
+For-expressions over arrays likewise retain direct array iteration in the collected form, while an
+uncollected expression builds a lazy stream.
 
 `List<T>.empty()` creates a growable list, and `List<T>.fromArray(values)` copies an array. Its
 read operations (`size`, `isEmpty`, `at`, and iteration) work through `List<T>`; structural

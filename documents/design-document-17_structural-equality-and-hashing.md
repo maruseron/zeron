@@ -10,12 +10,13 @@ Direct self-recursive sums and products are supported; mutually recursive declar
 synthesized as a recursive evidence group. Contract composition with `requires` is implemented.
 `Hashable<T>` now requires `Eq<T>`; compiler-provided evidence for built-in scalar types and nullable
 lifting are implemented, as are generic `Hashable<T>` bounds and the `Map`/`Set` collections.
-Structural hashing and explicit derivation remain future work.
+Explicit `deriving Eq, Hashable` is implemented for products, sums, classes, and newtypes. Derived
+generic requirements travel through the library index as opaque applied contract/target pairs.
 
 The direction is to make `==` and `!=` evidence-driven value comparisons, keep `===` as explicit
 reference identity, provide equality for sums by comparing their case and payloads, and let other
 types opt in through equality evidence. Hashing is a separate capability that depends on equality.
-Explicit derivation remains a later stage rather than a prerequisite for the equality contract.
+Derivation is declaration-site opt-in and does not add nominal `is` conformance to classes.
 
 ## Agreed direction
 
@@ -34,9 +35,8 @@ The work is staged:
 4. **Implemented: add hash-based `Map<K, V>` and `Set<T>`.** Their type parameters carry
    class-level `Hashable` bounds, and nullable keys/elements use the established nullable evidence.
    Keys must not change their equality- or hash-relevant state while stored.
-5. **Explore explicit contract derivation.** Decide whether and how a type declaration or witness
-   declaration can request generated `Eq` and `Hashable` evidence. Derivation is opt-in for ordinary
-   nominal types and must not be invented silently at a use site.
+5. **Implemented: explicit contract derivation.** A type declaration can request generated `Eq` and
+   `Hashable` evidence. Derived behavior is structural, opt-in, and never invented at a use site.
 
 This order establishes the equality semantics before designing their hash-key extension. It also
 avoids making equality-only values provide an irrelevant hash implementation merely to support
@@ -112,7 +112,17 @@ comparator-handle graph.
 
 Ordinary classes do not gain structural equality merely because they have fields. Without `Eq<T>`
 evidence, `==` is unavailable for them; users use `===` when they intend identity or provide an
-explicit equality implementation.
+explicit equality implementation. Classes can opt in with `deriving Eq`; classes and newtypes can
+derive `Hashable` only alongside derived `Eq`. Products and sums already have structural equality,
+so listing `Eq` in a derive clause is rejected as redundant; they may derive `Hashable`.
+
+Derivation inspects declared stored state in source declaration order: private fields and initialized
+fields/properties participate, while computed properties and compiler-generated backing state do
+not. Generic component evidence is conditional and recorded in the library index as opaque
+contract/target requirements, without exposing private member names. Derived evidence is not nominal
+`is` conformance. A custom `Eq` implementation prevents derived `Hashable`; supply `Hashable`
+explicitly if its hash matches that custom equality. Direct self-recursion is handled by recursive
+helpers; mutually recursive declaration groups and runtime object-cycle detection are not provided.
 
 ## Relational comparison operators
 
@@ -127,23 +137,10 @@ Other operands require applicable `Comparable<T>` evidence, including an explici
 contract is separate from `Eq<T>`: ordering does not imply equality, and `==` does not imply an
 ordering.
 
-The later derivation stage will consider explicit requests to synthesize contract evidence from
-declared fields. Such a feature must define:
-
-- Which fields participate, including private fields and initialized fields.
-- How inherited or generated members participate, if those become possible.
-- Whether mutable state is permitted and the consequences of changing a value after insertion into
-  a hash collection.
-- How generic fields create prerequisite bounds such as `T: Eq<T>`.
-- How recursive references, cycles, nullable values, arrays, and `Any` are treated.
-- How a derived implementation is represented in library metadata and selected across compilation
-  boundaries.
-- Whether a class can supply custom `Eq` while requesting derived `Hashable`, and how equality/hash
-  consistency is guarded.
-
-Derivation must be explicit and stable across library consumers. The compiler should not silently
-invent evidence just because a particular use site requests it; that would make a type's capabilities
-depend on the consumer's compilation context.
+Derivation is explicit and stable across library consumers. The compiler does not silently invent
+evidence just because a particular use site requests it; that would make a type's capabilities
+depend on the consumer's compilation context. It does not guarantee that mutable state remains
+stable while used as a hash key.
 
 Sums are distinct from ordinary classes: structural `Eq` for sums is part of their built-in
 algebraic value semantics, subject to payload evidence. This does not imply automatic structural

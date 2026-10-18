@@ -112,6 +112,8 @@ final class ExpressionFlowEmitter {
             final var type = argument.resolvedType();
             if (type instanceof IntDescriptor || type instanceof BooleanDescriptor) {
                 composer.iconst_0();
+            } else if (type instanceof LongDescriptor) {
+                composer.lconst_0();
             } else if (type instanceof FloatDescriptor) {
                 composer.ldc(0.0d);
             } else {
@@ -367,9 +369,9 @@ final class ExpressionFlowEmitter {
             loadPipelineValue(context, composer, currentValue, currentType);
             emitConversion(context, composer, currentType, TypeDescriptor.ofAny());
             composer.invokeinterface(SINK_CLASS, "add",
-                    MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(TypeDescriptor.ofUnit()),
+                    MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(TypeDescriptor.ofBoolean()),
                             ConstantDescs.CD_Object));
-            emitPop(context, composer, TypeDescriptor.ofUnit());
+            emitPop(context, composer, TypeDescriptor.ofBoolean());
             return;
         }
 
@@ -781,6 +783,11 @@ final class ExpressionFlowEmitter {
                 composer.ldc((Integer) literal.value);
                 composer.if_icmpne(failure);
             }
+            case LongDescriptor _ -> {
+                composer.ldc((Long) literal.value);
+                composer.lcmp();
+                composer.ifne(failure);
+            }
             case BooleanDescriptor _ -> {
                 if ((Boolean) literal.value) composer.iconst_1();
                 else composer.iconst_0();
@@ -918,6 +925,7 @@ final class ExpressionFlowEmitter {
         }
 
         if (cast.targetType instanceof IntDescriptor
+                || cast.targetType instanceof LongDescriptor
                 || cast.targetType instanceof FloatDescriptor
                 || cast.targetType instanceof BooleanDescriptor) {
             emitUnboxOrCast(context, composer, cast.targetType);
@@ -930,6 +938,7 @@ final class ExpressionFlowEmitter {
     private static ClassDesc runtimeTypeTestClass(CompilationContext context, final TypeDescriptor type) {
         return switch (type) {
             case IntDescriptor _ -> ConstantDescs.CD_Integer;
+            case LongDescriptor _ -> ConstantDescs.CD_Long;
             case FloatDescriptor _ -> ConstantDescs.CD_Double;
             case BooleanDescriptor _ -> ConstantDescs.CD_Boolean;
             case AnyDescriptor _ -> ConstantDescs.CD_Object;
@@ -952,6 +961,18 @@ final class ExpressionFlowEmitter {
             composer.if_acmpeq(matched);
         } else switch (operandDescriptor) {
             case "I", "Z" -> branchIntegerComparison(context, composer, binary.operator.type(), matched);
+            case "J" -> {
+                composer.lcmp();
+                switch (binary.operator.type()) {
+                    case EQUAL_EQUAL -> composer.ifeq(matched);
+                    case BANG_EQUAL -> composer.ifne(matched);
+                    case GREATER -> composer.ifgt(matched);
+                    case GREATER_EQUAL -> composer.ifge(matched);
+                    case LESS -> composer.iflt(matched);
+                    case LESS_EQUAL -> composer.ifle(matched);
+                    default -> throw new IllegalStateException("Unsupported Long comparison operator.");
+                }
+            }
             case "D" -> {
                 if (binary.operator.type() == TokenType.EQUAL_EQUAL
                         || binary.operator.type() == TokenType.BANG_EQUAL) {

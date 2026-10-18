@@ -100,6 +100,7 @@ public final class ArrayViewTest {
         assertEquals(IntrinsicId.ARRAY_WRITE, write.intrinsicOperation().id());
         assertEquals(TypeDescriptor.ofInt(), write.intrinsicOperation().parameterTypes().get(2));
         assertEquals(TypeDescriptor.ofUnit(), write.intrinsicOperation().resultType());
+        assertEquals(TypeDescriptor.ofInt(), write.getType());
 
         final var length = (Expr.Property)
             ((Stmt.Return) ((Stmt.Function) statements.get(3)).body().getFirst()).value();
@@ -144,6 +145,11 @@ public final class ArrayViewTest {
                     values[1] = 8;
                     return readonly[index] + readonly.length;
                 }
+                fn arrayWriteResult(values: &Array<Int>, index: Int, value: Int): Int {
+                    let assigned = values[index] = value;
+                    return assigned + values[index];
+                }
+                fn longWriteResult(values: &Array<Long>, value: Long): Long = values[0] = value;
                 fn nullableRead(): Int? {
                     let values: &Array<Int?> = [1, null];
                     return values[1];
@@ -168,12 +174,94 @@ public final class ArrayViewTest {
                     getClass().getClassLoader())) {
                 final var method = loader.loadClass(className).getMethod("arrayRead", int.class);
                 assertEquals(10, method.invoke(null, 1));
+                final Object[] values = {2};
+                assertEquals(16, loader.loadClass(className)
+                        .getMethod("arrayWriteResult", Object[].class, int.class, int.class)
+                        .invoke(null, values, 0, 8));
+                assertEquals(8, values[0]);
+                final Object[] longValues = {1L};
+                assertEquals(9L, loader.loadClass(className)
+                        .getMethod("longWriteResult", Object[].class, long.class)
+                        .invoke(null, longValues, 9L));
+                assertEquals(9L, longValues[0]);
                 final var failure = assertThrows(InvocationTargetException.class,
                         () -> method.invoke(null, 2));
                 assertTrue(failure.getCause() instanceof IndexOutOfBoundsException);
                 assertNull(loader.loadClass(className).getMethod("nullableRead").invoke(null));
                 assertEquals(2.5, loader.loadClass(className).getMethod("floatRead").invoke(null));
                 assertEquals(false, loader.loadClass(className).getMethod("booleanRead").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
+    public void emitsByteArrayLengthReadsAndWritesAgainstJvmByteArrays() throws Exception {
+        final var className = "ByteArrayGenerated" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                fn byteRead(values: ByteArray, index: Int): Byte = values[index];
+                fn byteWrite(values: &ByteArray, index: Int, value: Byte): Unit {
+                    values[index] = value;
+                }
+                fn byteWriteResult(values: &ByteArray, index: Int, value: Byte): Byte =
+                    values[index] = value;
+                fn byteLength(values: ByteArray): Int = values.length;
+                """);
+
+        try {
+            final var compiler = new CompilationService(statements, className);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()},
+                    getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                final byte[] bytes = {(byte) 0x80, 0};
+                assertEquals(2, generated.getMethod("byteLength", byte[].class).invoke(null, (Object) bytes));
+                assertEquals((byte) 0x80,
+                        generated.getMethod("byteRead", byte[].class, int.class).invoke(null, bytes, 0));
+                assertEquals((byte) 0xFF, generated.getMethod("byteWriteResult", byte[].class, int.class, byte.class)
+                        .invoke(null, bytes, 1, (byte) 0xFF));
+                generated.getMethod("byteWrite", byte[].class, int.class, byte.class)
+                        .invoke(null, bytes, 1, (byte) 0xFF);
+                assertEquals((byte) 0xFF, bytes[1]);
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
+    public void convertsBytesUsingUnsignedLanguageValues() throws Exception {
+        final var className = "ByteConversionsGenerated" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                fn byteToInt(value: Byte): Int = value.toInt();
+                fn intToByte(value: Int): Int = match (value.toByte()) {
+                    case Option.Some(result) -> result.toInt();
+                    case Option.None() -> -1;
+                };
+                """);
+
+        try {
+            final var compiler = new CompilationService(statements, className);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()},
+                    getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(0, generated.getMethod("byteToInt", byte.class).invoke(null, (byte) 0));
+                assertEquals(128, generated.getMethod("byteToInt", byte.class).invoke(null, (byte) 0x80));
+                assertEquals(255, generated.getMethod("byteToInt", byte.class).invoke(null, (byte) 0xFF));
+                assertEquals(0, generated.getMethod("intToByte", int.class).invoke(null, 0));
+                assertEquals(255, generated.getMethod("intToByte", int.class).invoke(null, 255));
+                assertEquals(-1, generated.getMethod("intToByte", int.class).invoke(null, -1));
+                assertEquals(-1, generated.getMethod("intToByte", int.class).invoke(null, 256));
             }
         } finally {
             Files.deleteIfExists(classFile);

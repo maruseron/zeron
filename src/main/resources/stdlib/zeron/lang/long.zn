@@ -1,0 +1,7 @@
+package zeron.lang;
+
+public extension Long {
+    public fn toInt(): Option<Int> = longToInt(this);
+}
+
+external fn longToInt(value: Long): Option<Int>;

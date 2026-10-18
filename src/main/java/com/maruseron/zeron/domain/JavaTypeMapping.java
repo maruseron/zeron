@@ -9,18 +9,25 @@ public final class JavaTypeMapping {
         return switch (javaType.descriptorString()) {
             case "V" -> TypeDescriptor.ofUnit();
             case "I" -> TypeDescriptor.ofInt();
+            case "J" -> TypeDescriptor.ofLong();
+            case "B" -> TypeDescriptor.ofByte();
             case "D" -> TypeDescriptor.ofFloat();
             case "Z" -> TypeDescriptor.ofBoolean();
             case "Ljava/lang/String;" -> TypeDescriptor.ofString().toNullable();
             case "Ljava/lang/Integer;" -> TypeDescriptor.ofInt().toNullable();
+            case "Ljava/lang/Long;" -> TypeDescriptor.ofLong().toNullable();
             case "Ljava/lang/Double;" -> TypeDescriptor.ofFloat().toNullable();
             case "Ljava/lang/Boolean;" -> TypeDescriptor.ofBoolean().toNullable();
+            case "[B" -> TypeDescriptor.ofByteArray();
             case "Ljava/lang/Object;" -> TypeDescriptor.ofAny().toNullable();
             default -> referenceType(javaType.descriptorString());
         };
     }
 
     public static TypeDescriptor toZeronMethodType(final ClassDesc javaType) {
+        if (javaType.descriptorString().equals("[B")) {
+            return TypeDescriptor.ofByteArray();
+        }
         if (javaType.descriptorString().equals("[Ljava/lang/Object;")) {
             return TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable()).toNullable();
         }

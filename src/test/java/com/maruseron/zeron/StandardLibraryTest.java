@@ -4,6 +4,7 @@ import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.compile.CompilationService;
+import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
@@ -28,6 +29,64 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public final class StandardLibraryTest {
+
+    @Test
+    public void cellSharesMutableStateAcrossClosuresAndEscapesItsScope() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "cellFixture" + suffix;
+        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-cell-");
+        final var entry = sourceRoot.resolve(packageName).resolve("Main.zn");
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, """
+                package %s;
+                import zeron.lang.Cell;
+                fn shared(): Int {
+                    let cell = Cell<Int>.new(0);
+                    let increment = () -> {
+                        cell.set(cell.get() + 1);
+                        return cell.get();
+                    };
+                    let current = () -> cell.get();
+                    increment();
+                    increment();
+                    return current();
+                }
+                fn escaped(): () -> Int {
+                    let cell = Cell<Int>.new(42);
+                    return () -> cell.get();
+                }
+                """.formatted(packageName));
+
+        try {
+            deleteTree(Path.of("dist"));
+            assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
+                    "--entry", Path.of(packageName, "Main.zn").toString()));
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + ".Main");
+                assertEquals(2, main.getMethod("shared").invoke(null));
+                final var escaped = main.getMethod("escaped").invoke(null);
+                assertEquals(42, escaped.getClass().getInterfaces()[0]
+                        .getMethod("invoke").invoke(escaped));
+            }
+        } finally {
+            deleteTree(sourceRoot);
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void cellMutationRequiresMutableReferenceView() {
+        final var userUnit = parse("cell-read-only.zn", """
+                package cellReadOnly;
+                import zeron.lang.Cell;
+                fn invalid(cell: Cell<Int>): Unit = cell.set(1);
+                """);
+        final var units = StandardLibrary.withBundledUnits(List.of(userUnit));
+
+        assertThrows(ResolutionError.class,
+                () -> new com.maruseron.zeron.analize.ResolutionService().resolveUnits(units));
+    }
 
     @Test
     public void classPatternsExtractMultipleOutputsAndShortCircuitNestedRefutation() throws Exception {
@@ -731,7 +790,7 @@ public final class StandardLibraryTest {
         try (final var index = StandardLibrary.class.getResourceAsStream("/stdlib/sources.index")) {
             assertTrue(index != null);
             assertEquals(expectedSources,
-                    new String(index.readAllBytes(), StandardCharsets.UTF_8).lines().toList());
+                    new String(index.readAllBytes(), StandardCharsets.UTF_8).lines().sorted().toList());
         }
         for (final var resourcePath : StandardLibrary.BUNDLED_SOURCE_PATHS) {
             final var sourcePath = sourceRoot.resolve(resourcePath.substring("/stdlib/".length()));
@@ -1785,6 +1844,12 @@ public final class StandardLibraryTest {
                     return values.any(value -> value == 4) and values.all(value -> value > 0);
                 }
                 fn count(): Int = Stream<Int>.fromArray([1, 2, 3]).filter(value -> value > 1).count();
+                fn whileOperators(): Int {
+                    return Stream<Int>.fromArray([1, 2, 3, 4, 5, 6])
+                        .dropWhile(value -> value < 3)
+                        .takeWhile(value -> value < 6)
+                        .fold(0, (sum, value) -> sum + value);
+                }
                 fn forEachTotal(): Int {
                     let total = Total.new(0);
                     Stream<Int>.fromArray([3, 5, 7]).forEach(value -> total.add(value));
@@ -1866,6 +1931,7 @@ public final class StandardLibraryTest {
                 assertEquals(10, test.getMethod("folded").invoke(null));
                 assertEquals(true, test.getMethod("predicates").invoke(null));
                 assertEquals(2, test.getMethod("count").invoke(null));
+                assertEquals(12, test.getMethod("whileOperators").invoke(null));
                 assertEquals(15, test.getMethod("forEachTotal").invoke(null));
                 assertEquals(41, test.getMethod("lazyEvaluation").invoke(null));
                 assertEquals(true, test.getMethod("emptyStreamPredicates").invoke(null));
@@ -2100,14 +2166,17 @@ public final class StandardLibraryTest {
         final var arrayIteratorClass = libraryOutput.resolve(
                 Path.of("zeron", "collections", "ArrayIterator.class"));
         final var rangeClass = libraryOutput.resolve(Path.of("zeron", "ranges", "IntRange.class"));
+        final var cellClass = libraryOutput.resolve(Path.of("zeron", "lang", "Cell.class"));
         final var unitClass = libraryOutput.resolve(Path.of("zeron", "lang", "Unit.class"));
         Files.createDirectories(sourceFile.getParent());
         Files.writeString(sourceFile, """
                 package %s;
                 import zeron.collections.Iterable;
                 import zeron.collections.ArrayIterator;
+                import zeron.lang.Cell;
                 import zeron.io.print;
                 import zeron.io.println;
+                fn cellResult(): Int = Cell<Int>.new(42).get();
                 fn sum(values: Iterable<Int>): Int {
                     let mut total = 0;
                     for (let value in values) total += value;
@@ -2139,7 +2208,15 @@ public final class StandardLibraryTest {
             assertTrue(Files.exists(iteratorClass));
             assertTrue(Files.exists(arrayIteratorClass));
             assertTrue(Files.exists(rangeClass));
+            assertTrue(Files.exists(cellClass));
             assertTrue(Files.exists(unitClass));
+            final var standardLibraryIndex = ZeronLibraryIndex.readFrom(apiIndex);
+            assertTrue(standardLibraryIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.ClassExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ClassExport.class::cast)
+                    .anyMatch(export -> export.qualifiedName().equals("zeron.lang.Cell")
+                            && export.methods().stream().anyMatch(method -> method.name().equals("get"))
+                            && export.methods().stream().anyMatch(method -> method.name().equals("set"))));
             try (final var jar = new JarFile(libraryJar.toFile())) {
                 assertTrue(jar.getJarEntry(ZeronVersions.API_INDEX_JAR_ENTRY) != null);
                 assertTrue(jar.getJarEntry("zeron/collections/Stream.class") != null);
@@ -2156,6 +2233,7 @@ public final class StandardLibraryTest {
                 try (final var loader = new URLClassLoader(new java.net.URL[]{
                         Path.of("dist").toUri().toURL(), libraryJar.toUri().toURL()}, getClass().getClassLoader())) {
                     final var client = loader.loadClass(appPackage + "." + entryName);
+                    assertEquals(42, client.getMethod("cellResult").invoke(null));
                     assertEquals(6, client.getMethod("result").invoke(null));
                     assertEquals(10, client.getMethod("arrayIteratorResult").invoke(null));
                     client.getMethod("announce").invoke(null);

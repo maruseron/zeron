@@ -83,8 +83,20 @@ Contextual typing and inference are kept consistent across initializers, assignm
 Unresolved lambda parameters in an immutable `let` binding can be generalized for identity and
 constant-result bodies. The binding stores a rank-1 `FunctionDescriptor` scheme; each call or expected
 function type instantiates its type parameters independently without mutating the scheme. At runtime,
-the closure is stored once using its erased SAM shape, with boxing/unboxing at calls and existing
-adapters when viewed as a concrete callback.
+this implemented slice stores one closure using its erased SAM shape, with boxing/unboxing at calls
+and existing adapters when viewed as a concrete callback.
+
+The accepted constrained extension in [ZEP-0003](zeps/ZEP-0003.md) is limited to a lambda written
+directly as an immutable `let` initializer. It infers multiple applied-contract bounds from direct
+member use and substituted bounds of generic callees, quantifies only variables absent from the
+captured environment, and leaves raised effects fixed. Schemes are local-only and are not serialized
+in the library API index. Each use must resolve required evidence at compile time; missing or
+ambiguous evidence is reported at that use with a reference to the lambda binding. A use specializes
+the body to a monomorphic closure that captures its evidence. Within each dynamic activation of the
+`let`, repeated uses of one specialization reuse one closure, while distinct instantiations have
+distinct closure variants and identities. This is not higher-rank polymorphism: nested schemes and
+polymorphic lambdas in arbitrary positions remain unsupported. The accepted extension is not yet
+implemented by the current lowering.
 
 This is an initial, intentionally constrained generalization rule. Reassignable bindings, nested
 polymorphic schemes, explicit `forall`, and unresolved parameters used by operators are not
@@ -139,10 +151,13 @@ Address the remaining work in this order:
 	freshly at each use; operator-constrained lambdas retain monomorphic contextual inference.
 3. **Add multi-parameter lambdas: implemented.** The AST, parser, resolver, and lowering logic now support zero-argument, single-argument, and multi-argument lambda forms, and they lower each shape to the appropriate generated functional interface.
 4. **Specify capture semantics before classes: implemented.** Captures are immutable by default: a lambda may close over immutable values, but it must not implicitly capture and mutate stack-scoped locals. Mutation must happen through explicitly shared heap state such as objects or a dedicated cell/reference abstraction.
-5. **Extend polymorphic lambda inference.** Generalize additional lambda bodies using a sound constraint
-	solver; design explicit `forall`, nested schemes, and operator constraints separately. The current
-	implementation does not provide higher-rank polymorphism.
-6. **Specify and implement capture lowering: implemented prototype.** Immutable captured values are passed through the `invokedynamic` factory descriptor and bound to the runtime function object; static helpers receive captures before the lambda's declared parameters. Explicit shared mutable cells remain future work.
+5. **Extend polymorphic lambda inference: constrained rank-1 generalization accepted, pending.**
+	Implement ZEP-0003's direct immutable-let boundary, body-derived applied-contract bounds,
+	captured-environment restriction, static evidence diagnostics, and evidence-aware monomorphic
+	closure specialization with per-activation reuse. Design explicit `forall`, nested schemes, and
+	operator constraints separately; the current implementation does not provide higher-rank
+	polymorphism.
+6. **Specify and implement capture lowering: implemented.** Immutable captured values are passed through the `invokedynamic` factory descriptor and bound to the runtime function object; static helpers receive captures before the lambda's declared parameters. Explicit shared mutable state is available through the ordinary `zeron.lang.Cell<T>` library type; capturing a mutable cell reference preserves the existing by-value reference-capture model.
 7. **Unify artifact output: implemented baseline.** Generated programs are emitted under `dist/`; source classes follow their declared package paths, while generated lambda interfaces remain in the default package. Define stale-artifact handling and configurable output directories if incremental or multi-project compilation requires them.
 8. **Expand behavior tests: broader baseline implemented.** Tests cover same-shape lambdas with different bodies, zero and multiple parameters, the complete `Int`/`Float`/`Boolean`/`String` callback input-output matrix, stored and returned callbacks, nested lambdas, immutable captures across generic boundaries, adapter reuse, and deterministic repeated compilation. Continue with incremental/multi-project compilation, explicit shared mutation, and additional nominal/nested shape combinations; verify both program output and emitted descriptors/call instructions.
 

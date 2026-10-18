@@ -1,0 +1,12 @@
+package java.io;
+
+import zeron.io.IoFailure;
+
+public external class OutputStream = "java.io.OutputStream" {
+    public mut write(buffer: ByteArray, offset: Int, length: Int): Unit
+        throws java.io.IOException -> IoFailure::fromIOException;
+    public mut flush(): Unit
+        throws java.io.IOException -> IoFailure::fromIOException;
+    public mut close(): Unit
+        throws java.io.IOException -> IoFailure::fromIOException;
+}

@@ -14,7 +14,8 @@ import java.util.*;
 import static com.maruseron.zeron.analize.Resolver.*;
 
 final class MemberInteropResolver {
-    record PropertyInfo(String name, TypeDescriptor type, boolean isPublic, boolean isMutating) {}
+    record PropertyInfo(String name, Token nameToken, TypeDescriptor type,
+                        boolean isPublic, boolean isMutating) {}
     private record SafeNavigationFlows(FlowState nonNull, FlowState nullPath) {}
     private record JavaCandidate(JavaClassPath.JavaMethod method, List<TypeDescriptor> parameterTypes,
                                  TypeDescriptor returnType, int cost, boolean varArgs) {}
@@ -55,6 +56,12 @@ final class MemberInteropResolver {
     }
 
     static TypeDescriptor resolveProperty(final ResolutionContext context, final Expr.Property property) {
+        return resolveProperty(context, property, null, false);
+    }
+
+    private static TypeDescriptor resolveProperty(final ResolutionContext context, final Expr.Property property,
+                                                  final TypeDescriptor alreadyResolvedReceiverType,
+                                                  final boolean allowMissing) {
         final var receiverPath = expressionPath(property.receiver);
         if ("Float".equals(receiverPath) && property.name.lexeme().equals("NaN")) {
             if (property.safeNavigation()) {
@@ -124,7 +131,9 @@ final class MemberInteropResolver {
             property.setType(type);
             return type;
         }
-        final var receiverType = ExpressionFlowResolver.resolveExpression(context, property.receiver);
+        final var receiverType = alreadyResolvedReceiverType == null
+                ? ExpressionFlowResolver.resolveExpression(context, property.receiver)
+                : alreadyResolvedReceiverType;
         final var safeFlows = property.safeNavigation()
                 ? beginSafeNavigation(context, property.receiver, property.name, receiverType)
                 : null;
@@ -139,6 +148,17 @@ final class MemberInteropResolver {
             && baseType instanceof ArrayDescriptor arrayType) {
             final var operation = IntrinsicResolver.resolveIntrinsic(context, propertyIntrinsic.id(),
                 List.of(arrayType.elementType()), List.of(memberReceiverType), property.name);
+            property.setIntrinsicOperation(operation);
+            final var resultType = property.safeNavigation()
+                    ? operation.resultType().toNullable()
+                    : operation.resultType();
+            property.setType(resultType);
+            finishSafeNavigation(context, safeFlows);
+            return resultType;
+        }
+        if ("length".equals(property.name.lexeme()) && baseType instanceof ByteArrayDescriptor) {
+            final var operation = IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.BYTE_ARRAY_LENGTH,
+                    List.of(), List.of(memberReceiverType), property.name);
             property.setIntrinsicOperation(operation);
             final var resultType = property.safeNavigation()
                     ? operation.resultType().toNullable()
@@ -168,6 +188,7 @@ final class MemberInteropResolver {
                 }
                 property.setResolvedOwnerName(selected.getKey().declaration().name().lexeme());
                 property.setResolvedAsProperty(true);
+                context.recordReference(property.name, selected.getValue().name(), propertyType);
                 final var resultType = property.safeNavigation()
                         ? propertyType.toNullable()
                         : propertyType;
@@ -210,6 +231,7 @@ final class MemberInteropResolver {
             final var propertyType = resolvedPropertyType(context, ownerName, propertyDeclaration, memberReceiverType);
             property.setResolvedOwnerName(ownerName);
             property.setResolvedAsProperty(true);
+            context.recordReference(property.name, propertyDeclaration.nameToken(), propertyType);
             final var resultType = property.safeNavigation()
                     ? propertyType.toNullable()
                     : propertyType;
@@ -277,6 +299,7 @@ final class MemberInteropResolver {
             finishSafeNavigation(context, safeFlows);
             return resultType;
         }
+        if (allowMissing) return null;
         if (owner == null) Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                 property.name, "Unknown property."));
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
@@ -433,6 +456,11 @@ final class MemberInteropResolver {
         final var contractMethodOwner = appliedContract == null ? null : appliedContract.declaration();
         call.setResolvedSourceMethod(classMethod);
         call.setResolvedContractMethod(contractMethod);
+        if (classMethod != null) {
+            context.recordReference(call.name, classMethod.name(), classMethod.typeDescriptor());
+        } else if (contractMethod != null) {
+            context.recordReference(call.name, contractMethod.name(), contractMethod.typeDescriptor());
+        }
         if (owner != null && classMethod != null
                 && call.arguments.size() < classMethod.minimumArity()) {
             final var defaults = DeclarationResolver.defaultMethodsOnClass(context, owner, call.name.lexeme());
@@ -454,6 +482,8 @@ final class MemberInteropResolver {
                 }
                 call.setResolvedOwnerName(defaultMethod.ownerName());
                 call.setResolvedContractMethod(defaultMethod.method());
+                context.recordReference(call.name, defaultMethod.method().name(),
+                        defaultMethod.method().typeDescriptor());
                 call.setReceiverRequiresCast(true);
                 final var variadic = defaultMethod.method().variadic();
                 final var fixedArity = Stmt.fixedArity(defaultMethod.method().parameters(), variadic);
@@ -501,6 +531,8 @@ final class MemberInteropResolver {
                     }
                     call.setResolvedOwnerName(defaultMethod.ownerName());
                     call.setResolvedContractMethod(defaultMethod.method());
+                    context.recordReference(call.name, defaultMethod.method().name(),
+                            defaultMethod.method().typeDescriptor());
                     call.setReceiverRequiresCast(true);
                     final var variadic = defaultMethod.method().variadic();
                     final var fixedArity = Stmt.fixedArity(defaultMethod.method().parameters(), variadic);
@@ -537,6 +569,8 @@ final class MemberInteropResolver {
             if (witnessResult != null) return witnessResult;
             final var javaClass = context.javaClassPath.find(ownerName);
             if (javaClass != null) return resolveJavaInstanceCall(context, call, receiverType, javaClass);
+            final var functionPropertyResult = resolveFunctionPropertyCall(context, call, receiverType);
+            if (functionPropertyResult != null) return functionPropertyResult;
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                     call.name, "Unknown method: '" + call.name.lexeme() + "'"));
         }
@@ -548,6 +582,8 @@ final class MemberInteropResolver {
             if (witnessResult != null) return witnessResult;
             final var javaClass = context.javaClassPath.find(ownerName);
             if (javaClass != null) return resolveJavaInstanceCall(context, call, receiverType, javaClass);
+            final var functionPropertyResult = resolveFunctionPropertyCall(context, call, receiverType);
+            if (functionPropertyResult != null) return functionPropertyResult;
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                     call.name, "Unknown method: '" + call.name.lexeme() + "'"));
         }
@@ -613,6 +649,36 @@ final class MemberInteropResolver {
         return instantiatedDescriptor.returnType();
     }
 
+    private static TypeDescriptor resolveFunctionPropertyCall(final ResolutionContext context,
+                                                              final Expr.MemberCall call,
+                                                              final TypeDescriptor receiverType) {
+        final var property = new Expr.Property(call.receiver, call.name, TypeDescriptor.ofInfer());
+        final var propertyType = resolveProperty(context, property, receiverType, true);
+        if (propertyType == null) return null;
+        final var callableType = propertyType instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : propertyType;
+        if (!(callableType instanceof FunctionDescriptor functionType)) return null;
+        if (!call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    call.name, "A function-valued property does not declare type parameters."));
+        }
+        if (call.arguments.size() != functionType.arity()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    call.name, "Expected " + functionType.arity() + " arguments, found "
+                            + call.arguments.size() + "."));
+        }
+        for (int index = 0; index < call.arguments.size(); index++) {
+            final var expected = functionType.parameters().get(index);
+            ensureAssignable(context, expected,
+                    resolveArgument(context, call.arguments.get(index), expected), call.name);
+        }
+        call.setFunctionProperty(property);
+        call.setResolvedDescriptor(functionType);
+        call.setType(functionType.returnType());
+        return functionType.returnType();
+    }
+
     private static TypeDescriptor resolveWitnessMethodCall(final ResolutionContext context,
                                                            final Expr.MemberCall call,
                                                            final TypeDescriptor receiverType) {
@@ -630,6 +696,7 @@ final class MemberInteropResolver {
         final var signature = method.methodSignature();
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
                 signature.typeDescriptor(), selection.substitutions());
+        context.recordReference(call.name, method.implementation().name(), descriptor);
         call.setWitnessMethod(selection.helperQualifiedName(),
                 method.implementation().name().lexeme(),
                 selection.helperType());
@@ -783,6 +850,7 @@ final class MemberInteropResolver {
                 context, signature.typeParameters(), substitutions, call.name));
         final var instantiatedDescriptor = (FunctionDescriptor) TypeSubstitution.substitute(signature, substitutions);
         call.setResolvedExtensionMethod(method);
+        context.recordReference(call.name, method.name(), method.typeDescriptor());
         call.setResolvedDescriptor(instantiatedDescriptor);
         if (method.variadic()) {
             call.setVariadic(((ArrayDescriptor) instantiatedDescriptor.parameters().getLast())
@@ -1031,7 +1099,9 @@ final class MemberInteropResolver {
             }
         }
 
-        inferClassArgumentsFromExpectedType(declaration, substitutions, expectedType, call.name);
+        if (call.explicitTypeArguments.isEmpty()) {
+            inferClassArgumentsFromExpectedType(declaration, substitutions, expectedType, call.name);
+        }
 
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
@@ -1655,6 +1725,9 @@ final class MemberInteropResolver {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
                         "Mutating methods are not available through a generic contract bound."));
             }
+            final var functionPropertyResult = resolveFunctionPropertyCall(
+                    context, call, call.receiver.getType());
+            if (functionPropertyResult != null) return functionPropertyResult;
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "Method is not provided by any of the type parameter's contract bounds."));
         }
@@ -1933,8 +2006,8 @@ final class MemberInteropResolver {
             return owner.properties().stream()
                     .filter(property -> property.name().lexeme().equals(name.lexeme()))
                     .findFirst()
-                    .map(property -> new PropertyInfo(property.name().lexeme(), property.type(), property.isPublic(),
-                            property.isMutating()))
+                    .map(property -> new PropertyInfo(property.name().lexeme(), property.name(),
+                            property.type(), property.isPublic(), property.isMutating()))
                     .orElse(null);
         }
         final var contract = context.contracts.get(ownerName);
@@ -1944,7 +2017,7 @@ final class MemberInteropResolver {
                         nominalArguments(context, ownerName, name)))) {
             for (final var property : applied.declaration().properties()) {
                 if (property.name().lexeme().equals(name.lexeme())) {
-                    return new PropertyInfo(property.name().lexeme(),
+                    return new PropertyInfo(property.name().lexeme(), property.name(),
                             TypeSubstitution.substitute(property.type(), applied.substitutions()),
                             true, property.isMutating());
                 }

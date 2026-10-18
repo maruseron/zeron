@@ -2,6 +2,8 @@ package zeron.io;
 
 import java.lang.System;
 
+public fn allocateByteArray(size: Int): &ByteArray = allocateByteArray(size);
+
 public fn print(value: Any?): Unit {
     System.out?.print(value);
 }

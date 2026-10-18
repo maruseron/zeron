@@ -46,10 +46,12 @@ final class CallResolver {
                 throw new IllegalStateException("Resolved namespace function disappeared.");
             }
             call.setResolvedFunctionDeclaration(declaration);
+            context.recordReference(call.callee, declaration.name(), declaration.typeDescriptor());
             descriptor = declaration.typeDescriptor();
         } else if (callableSymbol != null && context.symbols.containsSymbol(callableSymbol)) {
             call.setResolvedSymbolToken(callableSymbol);
             final var symbol = context.symbols.getSymbol(callableSymbol).type();
+            context.recordReference(call.callee, context.symbols.getSymbol(callableSymbol).name(), symbol);
             if (symbol instanceof FunctionDescriptor function) {
                 descriptor = function;
             } else if (symbol instanceof ReferenceDescriptor reference
@@ -78,6 +80,8 @@ final class CallResolver {
                         call.arguments, call.explicitTypeArguments, TypeDescriptor.ofInfer());
                 call.setImplicitMemberCall(implicitCall);
                 final var resultType = MemberInteropResolver.resolveMemberCall(context, implicitCall);
+                recordCallSiteFunctionType(call.callee, implicitCall.resolvedDescriptor(),
+                        implicitCall.resolvedExtensionMethod() != null);
                 call.setType(resultType);
                 return resultType;
             }
@@ -87,6 +91,7 @@ final class CallResolver {
                 throw new IllegalStateException("Resolved function disappeared.");
             }
             call.setResolvedFunctionDeclaration(declaration);
+            context.recordReference(call.callee, declaration.name(), declaration.typeDescriptor());
             descriptor = declaration.typeDescriptor();
         }
         if (descriptor.isGeneric()) {
@@ -134,6 +139,8 @@ final class CallResolver {
 
         call.setGenericFunctionType(descriptor);
         call.setType(descriptor.returnType());
+        recordCallSiteFunctionType(call.callee, descriptor, false);
+        attachIntrinsicOperation(call);
         return descriptor.returnType();
     }
 
@@ -144,6 +151,16 @@ final class CallResolver {
             call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.ARRAY_ALLOC,
                     List.of(arrayElement),
                     call.arguments.stream().map(Expr::getType).toList(), call.callee));
+        } else if ("zeron.internal.allocateByteArray".equals(call.resolvedFunctionName())
+                || "zeron.io.allocateByteArray".equals(call.resolvedFunctionName())) {
+            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.BYTE_ARRAY_ALLOC,
+                    List.of(), call.arguments.stream().map(Expr::getType).toList(), call.callee));
+        } else if ("zeron.internal.intToByte".equals(call.resolvedFunctionName())) {
+            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.INT_TO_BYTE,
+                    List.of(), call.arguments.stream().map(Expr::getType).toList(), call.callee));
+        } else if ("zeron.internal.byteToInt".equals(call.resolvedFunctionName())) {
+            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.BYTE_TO_INT,
+                    List.of(), call.arguments.stream().map(Expr::getType).toList(), call.callee));
         } else if ("zeron.collections.clearArraySlot".equals(call.resolvedFunctionName())) {
             final var arrayElement = IntrinsicResolver.arrayElementType(context,
                     call.arguments.getFirst().getType(), call.callee);
@@ -248,8 +265,26 @@ final class CallResolver {
                     resolvedArguments[i], call.callee);
         }
         final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
+        final var instantiatedEffects = genericType.raisedEffects().stream()
+                .map(effect -> TypeSubstitution.substitute(effect, substitutions))
+                .toList();
+        context.recordCallSiteFunctionType(call.callee, TypeDescriptor.functionWithEffectsOf(
+                genericType.name(), instantiatedReturn, instantiatedParameters, List.of(),
+                instantiatedEffects));
         call.setType(instantiatedReturn);
         return instantiatedReturn;
+    }
+
+    private void recordCallSiteFunctionType(final Token callSite,
+                                            final FunctionDescriptor descriptor,
+                                            final boolean extensionCall) {
+        if (descriptor == null) return;
+        final var parameters = extensionCall && !descriptor.parameters().isEmpty()
+                ? descriptor.parameters().subList(1, descriptor.parameters().size())
+                : descriptor.parameters();
+        context.recordCallSiteFunctionType(callSite, TypeDescriptor.functionWithEffectsOf(
+                descriptor.name(), descriptor.returnType(), parameters, descriptor.typeParameters(),
+                descriptor.raisedEffects()));
     }
 
     private int minimumArity(final Expr.Call call, final FunctionDescriptor descriptor) {

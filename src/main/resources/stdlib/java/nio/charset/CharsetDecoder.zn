@@ -1,0 +1,12 @@
+package java.nio.charset;
+
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import zeron.io.IoFailure;
+
+public external class CharsetDecoder = "java.nio.charset.CharsetDecoder" {
+    public mut onMalformedInput(action: &CodingErrorAction?): &CharsetDecoder;
+    public mut onUnmappableCharacter(action: &CodingErrorAction?): &CharsetDecoder;
+    public mut decode(input: &ByteBuffer): &CharBuffer
+        throws java.nio.charset.CharacterCodingException -> IoFailure::fromCharacterCodingException;
+}

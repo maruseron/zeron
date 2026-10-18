@@ -1,0 +1,5 @@
+package java.nio.charset;
+
+public external class CodingErrorAction = "java.nio.charset.CodingErrorAction" {
+    public static property REPORT: &CodingErrorAction?;
+}

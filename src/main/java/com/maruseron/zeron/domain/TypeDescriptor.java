@@ -6,8 +6,9 @@ import java.util.*;
 
 public sealed interface TypeDescriptor
         permits InferDescriptor, NeverDescriptor, UnitDescriptor,
-                IntDescriptor, FloatDescriptor, BooleanDescriptor, StringDescriptor,
+                IntDescriptor, LongDescriptor, ByteDescriptor, FloatDescriptor, BooleanDescriptor, StringDescriptor,
             AnyDescriptor, NominalDescriptor, FunctionDescriptor, GenericDescriptor, ArrayDescriptor,
+                ByteArrayDescriptor,
                 NullableDescriptor, NullDescriptor, ReferenceDescriptor,
                 TypeParameterDescriptor {
 
@@ -51,9 +52,12 @@ public sealed interface TypeDescriptor
             case "Infer"   -> ofInfer();
             case "Unit"    -> ofUnit();
             case "Int"     -> ofInt();
+            case "Long"    -> ofLong();
+            case "Byte"    -> ofByte();
             case "Float"   -> ofFloat();
             case "Boolean" -> ofBoolean();
             case "String"  -> ofString();
+            case "ByteArray" -> ofByteArray();
             default -> ofName(typeName);
         };
     }
@@ -84,6 +88,18 @@ public sealed interface TypeDescriptor
 
     static IntDescriptor ofInt() {
         return IntDescriptor.INT;
+    }
+
+    static LongDescriptor ofLong() {
+        return LongDescriptor.LONG;
+    }
+
+    static ByteDescriptor ofByte() {
+        return ByteDescriptor.BYTE;
+    }
+
+    static ByteArrayDescriptor ofByteArray() {
+        return ByteArrayDescriptor.BYTE_ARRAY;
     }
 
     static FloatDescriptor ofFloat() {
@@ -149,6 +165,8 @@ public sealed interface TypeDescriptor
             case UnitDescriptor          _ -> ClassDesc.of("zeron.lang.Unit");
             case AnyDescriptor           _ -> ConstantDescs.CD_Object;
             case IntDescriptor           _ -> ConstantDescs.CD_int;
+            case LongDescriptor          _ -> ConstantDescs.CD_long;
+            case ByteDescriptor          _ -> ConstantDescs.CD_byte;
             case FloatDescriptor         _ -> ConstantDescs.CD_double;
             case BooleanDescriptor       _ -> ConstantDescs.CD_boolean;
             case StringDescriptor        _ -> ConstantDescs.CD_String;
@@ -157,10 +175,13 @@ public sealed interface TypeDescriptor
             case FunctionDescriptor     fd -> ClassDesc.of(FunctionShapeNames.interfaceName(
                     (FunctionDescriptor) TypeSubstitution.erase(fd)));
             case ArrayDescriptor         _ -> ConstantDescs.CD_Object.arrayType();
+            case ByteArrayDescriptor     _ -> ClassDesc.ofDescriptor("[B");
             case ReferenceDescriptor    rd -> toJavaClassDesc(rd.baseType());
             case NullableDescriptor     nd -> switch (nd.baseType()) {
                 case UnitDescriptor    _ -> ClassDesc.of("zeron.lang.Unit");
                 case IntDescriptor     _ -> ConstantDescs.CD_Integer;
+                case LongDescriptor    _ -> ConstantDescs.CD_Long;
+                case ByteDescriptor    _ -> ClassDesc.of("java.lang.Byte");
                 case FloatDescriptor   _ -> ConstantDescs.CD_Double;
                 case BooleanDescriptor _ -> ConstantDescs.CD_Boolean;
                 case NeverDescriptor   _ -> ConstantDescs.CD_Object;
@@ -182,6 +203,8 @@ public sealed interface TypeDescriptor
             case UnitDescriptor          _ -> ClassDesc.of("zeron.lang.Unit");
             case AnyDescriptor           _ -> ConstantDescs.CD_Object;
             case IntDescriptor           _ -> ConstantDescs.CD_Integer;
+            case LongDescriptor          _ -> ConstantDescs.CD_Long;
+            case ByteDescriptor          _ -> ClassDesc.of("java.lang.Byte");
             case FloatDescriptor         _ -> ConstantDescs.CD_Double;
             case BooleanDescriptor       _ -> ConstantDescs.CD_Boolean;
             case StringDescriptor        _ ->
@@ -196,6 +219,7 @@ public sealed interface TypeDescriptor
                             "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");
             case ReferenceDescriptor    rd -> toJavaWrapper(rd.baseType());
             case ArrayDescriptor         _ -> ConstantDescs.CD_Object.arrayType();
+            case ByteArrayDescriptor     _ -> ClassDesc.ofDescriptor("[B");
             case NullableDescriptor     nd -> toJavaClassDesc(nd);
             case NullDescriptor          _ -> ConstantDescs.CD_Object;
             case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());

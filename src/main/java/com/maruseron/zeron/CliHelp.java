@@ -15,6 +15,7 @@ final class CliHelp {
               zeron init
               zeron build [--manifest <file>] [--debug]
               zeron run [--manifest <file>] [--debug]
+              zeron lsp [--manifest <file>]
               zeron explain <ZR0000>
               zeron dump <api-index|class-directory|library.jar>
               zeron --build-stdlib <dir> [--jar-output <file>]
@@ -52,6 +53,13 @@ final class CliHelp {
 
                     Compile the project described by zeron.toml and launch its entry point.
                     The manifest defaults to ./zeron.toml.
+                    """),
+            Map.entry("lsp", """
+                    Usage: zeron lsp [--manifest <file>] [--stdio]
+
+                    Start the Zeron Language Server Protocol server over stdio for the project
+                    described by zeron.toml. The manifest defaults to ./zeron.toml.
+                    --stdio explicitly selects the default stdio transport for language clients.
                     """),
             Map.entry("explain", """
                     Usage: zeron explain <ZR0000>
@@ -127,7 +135,7 @@ final class CliHelp {
                     """));
 
     private static final Set<String> COMMANDS =
-            Set.of("init", "build", "run", "explain", "dump", "help");
+            Set.of("init", "build", "run", "lsp", "explain", "dump", "help");
 
     private CliHelp() {}
 

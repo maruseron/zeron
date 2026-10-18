@@ -1,0 +1,5 @@
+package java.nio.charset;
+
+public external class Charset = "java.nio.charset.Charset" {
+    public newDecoder(): &CharsetDecoder;
+}

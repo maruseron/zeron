@@ -10,6 +10,7 @@ The goal is to establish useful object semantics before adding class inheritance
 
 - Class and contract names are collected before member resolution, so signatures can refer to types declared later in the same program. Names are unique in the program type namespace and remain source-level nominal identities.
 - Classes conform to multiple contracts through declaration-site conformance and lower to generated JVM classes implementing each generated contract interface. Generated binary names do not determine source-level assignability.
+- Anonymous object expressions implement explicitly listed contracts using unique, hidden nominal classes. They support methods, contract properties, private initialized fields, and immutable local captures; fields and auto-property initializers run once at object creation. A transitive named-constructor requirement cannot be met by an anonymous instance and is rejected.
 - Binding reassignment and reference mutation remain independent: `let mut x` permits rebinding, while `&T` permits mutation through the reference.
 - Lambdas can capture immutable class or contract references by value, including mutable reference views. Reassignable local bindings remain uncapturable.
 - Classes and contracts support invariant type parameters. Fields, methods, construction, and declaration-site conformance are checked after substitution.
@@ -106,6 +107,29 @@ and lowers to the JVM `<init>`. If a class omits a canonical-constructor
 declaration, the compiler synthesizes a public one. A class may explicitly declare
 `private constructor new;` to restrict direct construction; an explicit `public constructor new;`
 remains valid but is redundant.
+
+Anonymous object expressions provide one-off contract implementations without introducing a
+source-level class name:
+
+```zeron
+let counter = object : Counter {
+    current: Int = 0;
+    public mut next(): Int {
+        this.current = this.current + 1;
+        return this.current;
+    }
+}
+```
+
+The compiler emits one unique nominal class per expression. Its type is opaque and non-denotable;
+assignability still follows its explicit contract list, with no structural compatibility between
+unrelated objects. Private fields and auto-properties require initializers, which are evaluated at
+construction and passed to the generated canonical constructor. Initializers, methods, and custom
+property accessors may capture enclosing immutable bindings; mutable local bindings remain
+uncapturable. Anonymous implementations cannot satisfy contracts whose transitive requirements
+include named constructors, because those are static class-side capabilities. Constructors and
+patterns are not available in anonymous object bodies. The generated classes are implementation
+details and are omitted from the public library API index.
 
 ```zeron
 class Person {
@@ -467,19 +491,23 @@ ContractUse          ::= Identifier ["<" TypeList ">"]
 TypeList             ::= Type {"," Type}
 ClassMember          ::= Field | Property | Constructor | NamedConstructor | Method
 Field                ::= Identifier ":" Type ["=" Expression] ";"
-Property             ::= Visibility ["mut"] "property" Identifier ":" Type ["=" Expression] ";"
-                     |  Visibility ["mut"] "property" Identifier ":" Type "{" PropertyAccessor+ "}"
+Property             ::= [Visibility] ["mut"] "property" Identifier ":" Type ["=" Expression] ";"
+                     |  [Visibility] ["mut"] "property" Identifier ":" Type "{" PropertyAccessor+ "}"
 PropertyAccessor     ::= "get" ("=" Expression ";" | Block)
                      |  "set" "(" Identifier ")" ("=" Expression ";" | Block)
 Constructor          ::= Visibility "constructor" "new" ";"
 NamedConstructor     ::= Visibility "constructor" Identifier "(" [ParameterList] ")" MethodBody
-Method               ::= Visibility ["mut"] Identifier "(" [ParameterList] ")" ":" Type MethodBody
+Method               ::= [Visibility] ["mut"] Identifier "(" [ParameterList] ")" ":" Type MethodBody
 ContractDeclaration  ::= "contract" Identifier [TypeParameters] "{" (ContractProperty | ContractMethod)* "}"
 ContractProperty     ::= ["mut"] "property" Identifier ":" Type ";"
 ContractMethod       ::= ["mut"] Identifier "(" [ParameterList] ")" ":" Type ";"
 Visibility           ::= "public" | "private"
 MethodBody           ::= "=" Expression ";" | Block
 ```
+
+For class and effect methods and properties, omitted visibility means `private`; public API members
+must say `public` explicitly. A property's visibility applies to its accessors. This default does
+not change contract requirements, constructors, extension methods, or top-level declarations.
 
 Fields, properties, methods, and named constructors share one member namespace; every member name
 is unique within a class or contract. Calls resolve to that single declaration and validate arity,
@@ -512,6 +540,12 @@ constructor signature.
 5. **Expand the type-system surface.** Consider class inheritance, abstract classes,
     intersection types, bounds, variance,
     broader inference, and module-qualified type identity as separate designs.
+6. **Anonymous contract implementations accepted, pending.** ZEP-0017 specifies contextually typed
+    object expressions backed by unique opaque nominal classes. Structural typing and assignability
+    between separate object expressions are excluded.
+7. **Omitted member visibility implemented.** Under ZEP-0022, omitted visibility on class and
+    effect methods and properties means private; public remains explicit. Other declaration
+    categories are unchanged.
 
 ## Acceptance Criteria
 

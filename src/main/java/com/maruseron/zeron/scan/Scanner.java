@@ -7,6 +7,8 @@ import com.maruseron.zeron.diagnostic.Severity;
 import com.maruseron.zeron.diagnostic.SourcePosition;
 import com.maruseron.zeron.diagnostic.SourceSpan;
 
+import java.math.BigInteger;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +60,7 @@ public final class Scanner {
             entry("not",         NOT),
             entry("null",        NULL),
             entry("namespace",    NAMESPACE),
+            entry("object",      OBJECT),
             entry("or",          OR),
             entry("package",     PACKAGE),
             entry("pattern",     PATTERN),
@@ -240,6 +243,16 @@ public final class Scanner {
 
         if (isDecimal) {
             addToken(DOUBLE, Double.parseDouble(source.substring(start, current)));
+        } else if (match('L')) {
+            final var value = new BigInteger(source.substring(start, current - 1));
+            if (value.compareTo(BigInteger.ONE.shiftLeft(63)) > 0) {
+                addToken(LONG, BigInteger.ZERO);
+                recordDiagnostic(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                        span(tokenStart, position()),
+                        "Long literal is outside the supported Long range.");
+            } else {
+                addToken(LONG, value);
+            }
         } else {
             try {
                 addToken(INT, Integer.parseInt(source.substring(start, current)));

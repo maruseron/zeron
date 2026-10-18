@@ -1,0 +1,60 @@
+package zeron.time;
+
+import zeron.lang.Comparable;
+import zeron.lang.Eq;
+import zeron.lang.Hashable;
+import zeron.lang.Option;
+import zeron.lang.Ordering;
+
+public class Duration is Comparable<Duration> deriving Eq, Hashable {
+    value: Long;
+
+    private constructor new;
+
+    public constructor fromNanoseconds(value: Long) = Duration.new(value);
+    public constructor zero() = Duration.new(0L);
+
+    public property nanoseconds: Long {
+        get = this.value;
+    }
+
+    public compareTo(other: Duration): Ordering {
+        if (this.value < other.value) return Ordering.LT();
+        if (this.value > other.value) return Ordering.GT();
+        return Ordering.EQ();
+    }
+
+    public plus(other: Duration): Option<Duration> {
+        let sum = this.value + other.value;
+        if (other.value > 0L and sum < this.value) return Option<Duration>.None();
+        if (other.value < 0L and sum > this.value) return Option<Duration>.None();
+        return Option.Some(Duration.fromNanoseconds(sum));
+    }
+
+    public minus(other: Duration): Option<Duration> {
+        let difference = this.value - other.value;
+        if (other.value < 0L and difference < this.value) return Option<Duration>.None();
+        if (other.value > 0L and difference > this.value) return Option<Duration>.None();
+        return Option.Some(Duration.fromNanoseconds(difference));
+    }
+
+    public negated(): Option<Duration> {
+        if (this.value == -9223372036854775808L) return Option<Duration>.None();
+        return Option.Some(Duration.fromNanoseconds(-this.value));
+    }
+
+    public multipliedBy(factor: Long): Option<Duration> {
+        if (factor == 0L) return Option.Some(Duration.zero());
+        if (this.value == -9223372036854775808L and factor == -1L) {
+            return Option<Duration>.None();
+        }
+        let product = this.value * factor;
+        if (product / factor != this.value) return Option<Duration>.None();
+        return Option.Some(Duration.fromNanoseconds(product));
+    }
+}
+
+namespace Duration {
+    public fn fromSeconds(value: Long): Option<Duration> =
+        Duration.fromNanoseconds(1000000000L).multipliedBy(value);
+}

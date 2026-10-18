@@ -236,6 +236,20 @@ final class RuntimeSupportEmitter {
                         code.iconst_0();
                         code.ireturn();
                     });
+            builder.withMethodBody("eqLong", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+                    ConstantDescs.CD_long, ConstantDescs.CD_long),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        final var unequal = code.newLabel();
+                        code.lload(0);
+                        code.lload(2);
+                        code.lcmp();
+                        code.ifne(unequal);
+                        code.iconst_1();
+                        code.ireturn();
+                        code.labelBinding(unequal);
+                        code.iconst_0();
+                        code.ireturn();
+                    });
             builder.withMethodBody("eqFloat", MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_double, ConstantDescs.CD_double),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
@@ -328,6 +342,13 @@ final class RuntimeSupportEmitter {
             builder.withMethodBody("hashInt", MethodTypeDesc.of(ConstantDescs.CD_int,
                     ConstantDescs.CD_int), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                 code.iload(0);
+                code.ireturn();
+            });
+            builder.withMethodBody("hashLong", MethodTypeDesc.of(ConstantDescs.CD_int,
+                    ConstantDescs.CD_long), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                code.lload(0);
+                code.invokestatic(ClassDesc.of("java.lang.Long"), "hashCode",
+                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_long));
                 code.ireturn();
             });
             builder.withMethodBody("hashFloat", MethodTypeDesc.of(ConstantDescs.CD_int,

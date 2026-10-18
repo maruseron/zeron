@@ -1,6 +1,7 @@
 module ZeronGrammar;
 
-# IDENTIFIER, INT, DOUBLE, and STRING denote scanner token kinds.
+# IDENTIFIER, INT, LONG, DOUBLE, and STRING denote scanner token kinds; LONG is an integer literal
+# with an `L` suffix.
 # // and /* */ comments are retained as ranged scanner tokens and exposed by ParseResult,
 # but are excluded from the grammar and the compilation unit.
 # `type` below is source syntax; design-document-02 describes encoded descriptors.
@@ -27,11 +28,14 @@ publicContractDecl         : "public" contractDecl ;
 publicSealedContractDecl   : "public" sealedContractDecl ;
 publicTypeDecl             : "public" typeDecl ;
 sealedContractDecl         : "sealed" contractDecl ;
-typeDecl                   : "type" IDENTIFIER [typeParameters] "=" (productComponents | sumCase {"|" sumCase}) ";" ;
+typeDecl                   : "type" IDENTIFIER [typeParameters] [derivingClause] "="
+                             (productComponents | sumCase {"|" sumCase}) ";" ;
+derivingClause             : soft("deriving") IDENTIFIER {"," IDENTIFIER} ;
 productComponents          : "(" productComponent "," productComponent {"," productComponent} ")" ;
 productComponent           : IDENTIFIER ":" type ;
-newtypeDecl                : soft("newtype") IDENTIFIER "=" builtinType [soft("where") expression] ";" ;
-builtinType                : "Int" | "Float" | "Boolean" | "String" ;
+newtypeDecl                : soft("newtype") IDENTIFIER [derivingClause] "=" builtinType
+                             [soft("where") expression] ";" ;
+builtinType                : "Int" | "Long" | "Byte" | "Float" | "Boolean" | "String" ;
 sumCase                    : IDENTIFIER ["(" [sumPayload {"," sumPayload}] ")"] ;
 sumPayload                 : IDENTIFIER ":" type ;
 declaration                : varDecl | funDecl | statement ;
@@ -53,17 +57,18 @@ plainParameter             : IDENTIFIER ":" type ;
 
 classDecl                  : "class" IDENTIFIER [typeParameters]
                              ["is" contractUse {"," contractUse}]
+                             [derivingClause]
                              "{" classMember* "}" ;
 effectDecl                 : "effect" IDENTIFIER "{" classMember* "}" ;
 extensionDecl              : "extension" [typeParameters] type "{" extensionMethod* "}" ;
-extensionMethod            : ["public"] ["mut"] "fn" IDENTIFIER [typeParameters]
+extensionMethod            : ["public"] ["mut"] "fn" memberName [typeParameters]
                              "(" parameters ")" ":" type [raisesClause]
                              ("=" expression ";" | block) ;
 contractUse                : qualifiedName [typeArguments] ;
 classMember                : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl
                            | methodDecl | patternDecl ;
 fieldDecl                  : IDENTIFIER ":" type ";" ;
-propertyDecl               : visibility ["mut"] "property" IDENTIFIER ":" type ["=" expression]
+propertyDecl               : [visibility] ["mut"] "property" IDENTIFIER ":" type ["=" expression]
                              (";" | "{" propertyAccessor+ "}") ;
 propertyAccessor           : "get" ("=" expression ";" | block)
                            | "set" "(" IDENTIFIER ")" ("=" expression ";" | block) ;
@@ -72,7 +77,7 @@ namedConstructorDecl       : visibility "constructor" IDENTIFIER "(" namedConstr
                              ("=" expression ";" | block) ;
 namedConstructorParameters : [namedConstructorParameter {"," namedConstructorParameter}] ;
 namedConstructorParameter  : IDENTIFIER ":" type ["..."] ;
-methodDecl                 : visibility ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
+methodDecl                 : [visibility] ["mut"] memberName [typeParameters] "(" parameters ")" ":" type
                              [raisesClause]
                              ("=" expression ";" | block) ;
 patternDecl                : visibility "pattern" IDENTIFIER "(" [patternOutput {"," patternOutput}] ")"
@@ -84,11 +89,12 @@ contractDecl               : "contract" IDENTIFIER [typeParameters] [soft("requi
 permittedClass             : qualifiedName [typeArguments] ;
 contractMember             : contractProperty | contractMethod | contractConstructor ;
 contractProperty           : ["mut"] "property" IDENTIFIER ":" type ";" ;
-contractMethod             : ["default"] ["mut"] IDENTIFIER [typeParameters] "(" parameters ")" ":" type
+contractMethod             : ["default"] ["mut"] memberName [typeParameters] "(" parameters ")" ":" type
                              [raisesClause]
                              (";" | "=" expression ";" | block) ;
 contractConstructor        : "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause] ;
 visibility                 : "public" | "private" ;
+memberName                 : IDENTIFIER | "get" | "set" ;
 
 statement                  : exprStmt
                            | breakStmt
@@ -136,7 +142,7 @@ unary                      : "raise" unary
 cast                       : call {"as" ["?"] type} ;
 call                       : (genericFunctionCall | genericClassFactoryCall | functionValueReference | primary)
                              {callSuffix} ;
-callSuffix                 : arguments | "[" expression "]" | ("." | "?.") IDENTIFIER ;
+callSuffix                 : arguments | "[" expression "]" | ("." | "?.") memberName ;
 genericFunctionCall        : IDENTIFIER typeArguments arguments ;
 functionValueReference     : IDENTIFIER "::" typeArguments ;
 genericClassFactoryCall    : IDENTIFIER [typeArguments] "." IDENTIFIER arguments ;
@@ -150,6 +156,7 @@ typeAtom                   : qualifiedName ["<" typeArgumentsBody ">"]
 typeArgumentsBody          : type {"," type} ;
 
 primary                    : INT
+                           | LONG
                            | DOUBLE
                            | STRING
                            | IDENTIFIER
@@ -160,6 +167,7 @@ primary                    : INT
                            | ifExpr
                            | matchExpr
                            | forExpr
+                           | anonymousObjectExpr
                            | "(" ")"
                            | "(" expression ")"
                            | range ;
@@ -193,6 +201,13 @@ lambda                     : IDENTIFIER "->" lambdaBody
                            | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
 lambdaBody                 : expression | block ;
 range                      : INT ".." INT ;
+anonymousObjectExpr        : "object" ":" contractUse {"+" contractUse}
+                             "{" anonymousObjectMember* "}" ;
+anonymousObjectMember      : ["public"] ["mut"] "property" IDENTIFIER ":" type
+                             ["=" expression]
+                             (";" | "{" propertyAccessor+ "}")
+                           | methodDecl
+                           | IDENTIFIER ":" type "=" expression ";" ;
 
 # Semantic/parser constraints:
 # - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
@@ -258,6 +273,9 @@ range                      : INT ".." INT ;
 # - Named constructors are static factories with explicit visibility and either expression or block
 #   bodies. Their result type is implicitly `&Class`, they have no `this`, and every reachable normal
 #   path in a block must return an `&Class` value. Allocation still uses the canonical `Class.new`.
+# - Anonymous objects list one or more contracts. Auto-properties and private fields require
+#   initializers; constructors and patterns are not valid object members. Initializers, methods, and
+#   property accessors use the existing immutable-capture restrictions.
 # - Generic functions and methods must have explicit return types. Method type parameters are
 #   scoped to that method and cannot shadow enclosing class or contract parameters. Function and
 #   method type parameters may each have multiple contract bounds joined by `+`.
@@ -301,9 +319,9 @@ range                      : INT ".." INT ;
 # - Assignment targets are variables, properties, or array indices. Compound assignment is supported
 #   for variables and writable properties; property receivers are evaluated once, then the getter,
 #   operator, and setter run in that order. Indexed assignment accepts '=' only.
-# - `%` accepts matching `Int` or `Float` operands and follows JVM remainder semantics. Bitwise `&`,
-#   `|`, `^`, `~` and shifts require `Int`; `>>>` is zero-filling. Shift distances follow JVM Int
-#   behavior (only the low five bits are used).
+# - `%` accepts matching `Int`, `Long`, or `Float` operands and follows JVM remainder semantics.
+#   Bitwise `&`, `|`, `^`, `~` and shifts require `Int` or `Long`; `>>>` is zero-filling. Shift
+#   distances are `Int` and follow JVM behavior (only the low five bits for Int and low six for Long).
 # - Array literals are non-empty. A valueless `return` has type Unit and is rejected in non-Unit functions.
 # - Effects are nominal non-generic payload classes. Effects are supported in callable signatures,
 #   function types, and entry-point `main`, but not in external Java signatures or top-level

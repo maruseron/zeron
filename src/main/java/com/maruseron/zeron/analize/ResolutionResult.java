@@ -13,13 +13,21 @@ public record ResolutionResult(
         List<Diagnostic> errors,
         Map<String, Stmt.ClassDecl> classes,
         Map<String, Stmt.ContractDecl> contracts,
+        Map<String, Stmt.SumDecl> sums,
+        Map<String, Stmt.ProductDecl> products,
+        Map<String, Stmt.NewtypeDecl> newtypes,
         Map<Stmt.Var, Token> topLevelValueSymbols,
         Map<Stmt.ExternalFunction, FunctionBindingRegistry.Binding> externalFunctionBindings,
+        Map<String, String> typePackages,
         Map<String, Token> functionSymbolTokens,
         Map<Token, String> functionNamesByDeclaration,
         Map<Token, TypeDescriptor> iterationElementTypes,
         Map<Token, Resolver.IterationProtocol> iterationProtocols,
-        String packageName) {
+        String packageName,
+        List<Stmt.ExtensionMethod> extensions,
+        Map<Token, Token> referenceTargets,
+        Map<Token, TypeDescriptor> referenceTypes,
+        Map<Token, FunctionDescriptor> callSiteFunctionTypes) {
 
     public ResolutionResult {
         Objects.requireNonNull(globalSymbolTable);
@@ -27,13 +35,21 @@ public record ResolutionResult(
         errors = List.copyOf(errors);
         classes = Collections.unmodifiableMap(new LinkedHashMap<>(classes));
         contracts = Collections.unmodifiableMap(new LinkedHashMap<>(contracts));
+        sums = Collections.unmodifiableMap(new LinkedHashMap<>(sums));
+        products = Collections.unmodifiableMap(new LinkedHashMap<>(products));
+        newtypes = Collections.unmodifiableMap(new LinkedHashMap<>(newtypes));
         topLevelValueSymbols = immutableIdentityMap(topLevelValueSymbols);
         externalFunctionBindings = immutableIdentityMap(externalFunctionBindings);
+        typePackages = Collections.unmodifiableMap(new LinkedHashMap<>(typePackages));
         functionSymbolTokens = Collections.unmodifiableMap(new LinkedHashMap<>(functionSymbolTokens));
         functionNamesByDeclaration = immutableIdentityMap(functionNamesByDeclaration);
         iterationElementTypes = immutableIdentityMap(iterationElementTypes);
         iterationProtocols = immutableIdentityMap(iterationProtocols);
+        referenceTargets = immutableIdentityMap(referenceTargets);
+        referenceTypes = immutableIdentityMap(referenceTypes);
+        callSiteFunctionTypes = immutableIdentityMap(callSiteFunctionTypes);
         Objects.requireNonNull(packageName);
+        extensions = List.copyOf(extensions);
     }
 
     private static <K, V> Map<K, V> immutableIdentityMap(final Map<K, V> map) {
@@ -74,6 +90,18 @@ public record ResolutionResult(
 
     public Resolver.IterationProtocol iterationProtocol(final Token iterationBind) {
         return iterationProtocols.get(iterationBind);
+    }
+
+    public Token referenceTarget(final Token reference) {
+        return referenceTargets.get(reference);
+    }
+
+    public TypeDescriptor referenceType(final Token reference) {
+        return referenceTypes.get(reference);
+    }
+
+    public FunctionDescriptor callSiteFunctionType(final Token callSite) {
+        return callSiteFunctionTypes.get(callSite);
     }
 
     public Resolver.DefaultMethodSelection defaultMethodFor(final Stmt.ClassDecl declaration,

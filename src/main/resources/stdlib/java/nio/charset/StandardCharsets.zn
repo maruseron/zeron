@@ -1,0 +1,5 @@
+package java.nio.charset;
+
+public external class StandardCharsets = "java.nio.charset.StandardCharsets" {
+    public static property UTF_8: &Charset?;
+}

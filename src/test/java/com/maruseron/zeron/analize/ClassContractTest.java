@@ -26,6 +26,64 @@ import static org.junit.Assert.assertThrows;
 
 public final class ClassContractTest {
     @Test
+    public void omittedClassMethodAndPropertyVisibilityDefaultsToPrivate() throws Exception {
+        final var programName = "PrivateMemberDefaults"
+                + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                class Example {
+                    public constructor new;
+                    hidden(): Int = 5;
+                    property secret: Int = 8;
+                    public read(): Int = this.hidden() + this.secret;
+                }
+                fn run(): Int = Example.new().read();
+                """;
+        final var statements = parse(source);
+        final var declaration = (Stmt.ClassDecl) statements.getFirst();
+        assertTrue(!declaration.methods().getFirst().isPublic());
+        assertTrue(!declaration.properties().getFirst().isPublic());
+
+        try {
+            final var compiler = new CompilationService(statements, programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(13, loader.loadClass(programName).getMethod("run").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Example.class"));
+        }
+    }
+
+    @Test
+    public void omittedVisibilityDoesNotExposeMembersOrSatisfyPublicContractRequirements() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                class HiddenMethod {
+                    public constructor new;
+                    secret(): Int = 1;
+                }
+                fn read(): Int = HiddenMethod.new().secret();
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                class HiddenProperty {
+                    public constructor new;
+                    property secret: Int = 1;
+                }
+                fn read(): Int = HiddenProperty.new().secret;
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                contract RequiresValue { value(): Int; }
+                class HiddenImplementation is RequiresValue {
+                    public constructor new;
+                    value(): Int = 1;
+                }
+                """)));
+    }
+
+    @Test
     public void requiredContractsComposeMembersBoundsAndJvmInterfaces() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var programName = "ContractComposition" + suffix;
@@ -405,10 +463,15 @@ public final class ClassContractTest {
                     raw: Int;
                     public mut property value: Int {
                         get = this.raw;
-                        set(next) = this.raw = next;
+                        set(next) {
+                            this.raw = next;
+                        }
                     }
                     public mut add(step: Int): Unit {
                         this.value += step;
+                    }
+                    public mut assignRaw(next: Int): Int {
+                        return this.raw = next;
                     }
                 }
                 class AutoValues {
@@ -424,6 +487,16 @@ public final class ClassContractTest {
                     let counter = Counter.new(1);
                     counter.value += 41;
                     return counter.value;
+                }
+                fn assignmentValues(): Int {
+                    let counter = Counter.new(1);
+                    let assigned = counter.value = 40;
+                    let compounded = counter.value += 2;
+                    return assigned * 100 + compounded * 10 + counter.value;
+                }
+                fn fieldAssignmentValue(): Int {
+                    let counter = Counter.new(1);
+                    return counter.assignRaw(19);
                 }
                 fn compoundReceiverCount(): Int {
                     countedCounter().value += 1;
@@ -449,6 +522,8 @@ public final class ClassContractTest {
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 final var program = loader.loadClass(programName);
                 assertEquals(42, program.getMethod("customResult").invoke(null));
+                assertEquals(4462, program.getMethod("assignmentValues").invoke(null));
+                assertEquals(19, program.getMethod("fieldAssignmentValue").invoke(null));
                 assertEquals(1, program.getMethod("compoundReceiverCount").invoke(null));
                 final var counterClass = loader.loadClass("Counter");
                 final var counterConstructor = counterClass.getDeclaredConstructor(int.class);
@@ -885,7 +960,7 @@ public final class ClassContractTest {
                     private readValue(): Int = value;
                     public fieldReader(): () -> Int = () -> value;
                     public methodReader(): () -> Int = () -> readValue();
-                    public mut fieldIncrementer(): () -> Unit = () -> this.value = value + 1;
+                    public mut fieldIncrementer(): () -> Unit = () -> { this.value = value + 1; };
                 }
                 """).scanTokens()).parseCompilationUnit("ImplicitThisPackageBox.zn");
         final var appUnit = Parser.of(Scanner.from("""

@@ -100,6 +100,15 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
         Map<K, V>.new(generateArray<MapEntry<K, V>?>(8, (_) -> null),
                 0, hashFunction, equalityFunction);
 
+    public constructor empty() =
+        Map<K, V>.withOperations(hashKey::<K>, equalKeys::<K>);
+
+    public constructor of(entries: &Pair<K, V>...) {
+        let mut result = Map.empty<K, V>();
+        for (let entry in entries) result.put(entry.fst, entry.snd);
+        return result;
+    }
+
     private bucketIndex(hash: Int, capacity: Int): Int {
         let mut index = hash % capacity;
         if (index < 0) index = index + capacity;
@@ -109,7 +118,7 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
     private findEntry(key: K, hash: Int): MapEntry<K, V>? {
         let equalityFunction = this.equalityFunction;
         let mut entry = this.buckets[this.bucketIndex(hash, this.buckets.length)];
-        while (not (entry === null)) {
+        until (entry === null) {
             if (entry.hash() == hash and equalityFunction(entry.key(), key)) return entry;
             entry = entry.next();
         }
@@ -120,12 +129,12 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
         let equalityFunction = this.equalityFunction;
         let mut prefix: MapEntry<K, V>? = null;
         let mut entry = this.buckets[index];
-        while (not (entry === null)) {
+        until (entry === null) {
             if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
                 let previousValue = entry.value();
                 let mut rebuilt = MapEntry<K, V>.of(
                         entry.key(), value, hash, entry.next());
-                while (not (prefix === null)) {
+                until (prefix === null) {
                     let previous = prefix;
                     rebuilt = MapEntry<K, V>.of(
                             previous.key(), previous.value(), previous.hash(), rebuilt);
@@ -144,11 +153,11 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
         let equalityFunction = this.equalityFunction;
         let mut prefix: MapEntry<K, V>? = null;
         let mut entry = this.buckets[index];
-        while (not (entry === null)) {
+        until (entry === null) {
             if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
                 let removedValue = entry.value();
                 let mut rebuilt = entry.next();
-                while (not (prefix === null)) {
+                until (prefix === null) {
                     let previous = prefix;
                     rebuilt = MapEntry<K, V>.of(
                             previous.key(), previous.value(), previous.hash(), rebuilt);
@@ -242,15 +251,4 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
     public iterator(): &Iterator<Pair<K, V>> = MapIterator<K, V>.from(this.buckets);
 
     public keyIterator(): &Iterator<K> = MapKeyIterator<K, V>.from(this.buckets);
-}
-
-namespace Map {
-    public fn empty<K: Hashable<K>, V>(): &Map<K, V> =
-        Map<K, V>.withOperations(hashKey::<K>, equalKeys::<K>);
-
-    public fn of<K: Hashable<K>, V>(entries: &Pair<K, V>...): &Map<K, V> {
-        let mut result = Map.empty<K, V>();
-        for (let entry in entries) result.put(entry.fst, entry.snd);
-        return result;
-    }
 }

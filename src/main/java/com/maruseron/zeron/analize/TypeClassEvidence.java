@@ -5,6 +5,8 @@ import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -91,7 +93,7 @@ final class TypeClassEvidence {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     witness.name(), "A witness cannot override methods of a nominally conforming class."));
         }
-        if (target == null || !classContract) {
+        if (!witness.derived() && (target == null || !classContract)) {
             synthesizeDefaultWitnessMethods(context, witness, contract, targetSubstitutions, contractArguments);
             validateWitnessMethods(context, witness, contract, targetSubstitutions, contractArguments);
         }
@@ -146,6 +148,160 @@ final class TypeClassEvidence {
         context.typeClassWitnesses.add(new WitnessEntry(witness, packageName));
     }
 
+    static void registerDerived(final ResolutionContext context, final Stmt declaration,
+                                final String packageName) {
+        final var name = declaredTypeName(declaration);
+        if (name == null) return;
+        final var derives = derivedContracts(declaration);
+        if (derives.isEmpty()) return;
+        final var product = declaration instanceof Stmt.ProductDecl;
+        final var sum = declaration instanceof Stmt.SumDecl;
+        final var parameters = typeParameters(declaration);
+        final var target = parameters.isEmpty()
+                ? (TypeDescriptor) TypeDescriptor.ofName(name.lexeme())
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(name.lexeme()),
+                        parameters.stream().map(parameter -> (TypeDescriptor) parameter).toList());
+        final var componentTypes = componentTypes(declaration);
+        componentTypes.forEach(type -> TypeResolver.validateType(context, type, name));
+        final var requested = new HashSet<String>();
+        for (final var derived : derives) {
+            final var contractName = switch (derived.lexeme()) {
+                case "Eq" -> "zeron.lang.Eq";
+                case "Hashable" -> "zeron.lang.Hashable";
+                default -> null;
+            };
+            if (contractName == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        derived, "Only Eq and Hashable can currently be derived."));
+                continue;
+            }
+            if (!requested.add(contractName)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        derived, "A derived contract may be listed only once."));
+                continue;
+            }
+            if (product || sum) {
+                if (contractName.equals("zeron.lang.Eq")) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                            derived, "Products and sums already have structural Eq evidence."));
+                    continue;
+                }
+            } else if (contractName.equals("zeron.lang.Hashable")
+                    && !derives.stream().anyMatch(token -> token.lexeme().equals("Eq"))) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        derived, "Hashable derivation requires structural Eq derivation."));
+                continue;
+            }
+            if (contractName.equals("zeron.lang.Eq")
+                    && hasCustomEquality(context, declaration, target)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        derived, "Eq cannot be derived for a type with custom Eq."));
+                continue;
+            }
+            if (contractName.equals("zeron.lang.Hashable")
+                    && hasCustomEquality(context, declaration, target)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        derived, "Hashable cannot be derived for a type with custom Eq."));
+                continue;
+            }
+            final var requiredContract = TypeDescriptor.genericOf(TypeDescriptor.ofName(contractName),
+                    List.of(target));
+            final var requirements = new ArrayList<Stmt.WitnessRequirement>();
+            if (contractName.equals("zeron.lang.Eq")) {
+                for (final var componentType : componentTypes) {
+                    if (!isDirectlyRecursive(componentType, target)) {
+                        requirements.add(new Stmt.WitnessRequirement(
+                                TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Eq"),
+                                        List.of(componentType)), componentType));
+                    }
+                }
+            } else {
+                for (final var componentType : componentTypes) {
+                    if (!isDirectlyRecursive(componentType, target)) {
+                        requirements.add(new Stmt.WitnessRequirement(
+                                TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Hashable"),
+                                        List.of(componentType)), componentType));
+                    }
+                }
+            }
+            final var syntheticName = new Token(TokenType.IDENTIFIER,
+                    "$zeron$derived$" + name.lexeme() + "$" + derived.lexeme(), null, derived.span());
+            final var witness = new Stmt.Witness(syntheticName, parameters, requiredContract, target,
+                    List.of(), List.of(), true, requirements);
+            register(context, witness, packageName);
+        }
+    }
+
+    private static Token declaredTypeName(final Stmt declaration) {
+        return switch (declaration) {
+            case Stmt.ClassDecl value -> value.name();
+            case Stmt.ProductDecl value -> value.name();
+            case Stmt.SumDecl value -> value.name();
+            case Stmt.NewtypeDecl value -> value.name();
+            default -> null;
+        };
+    }
+
+    private static List<TypeParameterDescriptor> typeParameters(final Stmt declaration) {
+        return switch (declaration) {
+            case Stmt.ClassDecl value -> value.typeParameters();
+            case Stmt.ProductDecl value -> value.typeParameters();
+            case Stmt.SumDecl value -> value.typeParameters();
+            default -> List.of();
+        };
+    }
+
+    private static List<Token> derivedContracts(final Stmt declaration) {
+        return switch (declaration) {
+            case Stmt.ClassDecl value -> value.derivedContracts();
+            case Stmt.ProductDecl value -> value.derivedContracts();
+            case Stmt.SumDecl value -> value.derivedContracts();
+            case Stmt.NewtypeDecl value -> value.derivedContracts();
+            default -> List.of();
+        };
+    }
+
+    private static List<TypeDescriptor> componentTypes(final Stmt declaration) {
+        return switch (declaration) {
+            case Stmt.ClassDecl value -> {
+                final var typesByName = new LinkedHashMap<String, TypeDescriptor>();
+                value.fields().forEach(field -> typesByName.put(field.name().lexeme(), field.type()));
+                value.properties().stream().filter(property -> !property.isCustom())
+                        .forEach(property -> typesByName.put(property.name().lexeme(), property.type()));
+                if (value.storedStateOrder().isEmpty()) yield List.copyOf(typesByName.values());
+                yield value.storedStateOrder().stream().map(Token::lexeme)
+                        .filter(typesByName::containsKey).map(typesByName::get).toList();
+            }
+            case Stmt.ProductDecl value -> value.components().stream()
+                    .map(Stmt.ProductComponent::type).toList();
+            case Stmt.SumDecl value -> value.cases().stream()
+                    .flatMap(sumCase -> sumCase.payloads().stream())
+                    .map(Stmt.SumPayload::type).toList();
+            case Stmt.NewtypeDecl value -> List.of(value.underlyingType());
+            default -> List.of();
+        };
+    }
+
+    private static boolean isDirectlyRecursive(final TypeDescriptor component,
+                                               final TypeDescriptor target) {
+        final var unwrapped = component instanceof NullableDescriptor nullable ? nullable.baseType() : component;
+        return nominalName(unwrapped).equals(nominalName(target))
+                && typeArguments(unwrapped).equals(typeArguments(target));
+    }
+
+    private static boolean hasCustomEquality(final ResolutionContext context, final Stmt declaration,
+                                             final TypeDescriptor target) {
+        if (declaration instanceof Stmt.ClassDecl classDeclaration
+                && ContractComposition.forClass(context, classDeclaration).stream()
+                .anyMatch(applied -> nominalName(appliedType(applied, Map.of()))
+                        .equals("zeron.lang.Eq"))) return true;
+        return context.typeClassWitnesses.stream().anyMatch(entry ->
+                !entry.declaration().derived()
+                        && isEqContract(entry.declaration().contractType())
+                        && matchPattern(entry.declaration().targetType(), target,
+                                entry.declaration().typeParameters(), new LinkedHashMap<>()));
+    }
+
     static List<ResolutionError> activeOverlapErrors(
             final ResolutionContext context, final Set<Long> previouslyReportedPairs) {
         final var errors = new ArrayList<ResolutionError>();
@@ -177,7 +333,7 @@ final class TypeClassEvidence {
         TypeResolver.validateType(context, type, where);
         final var base = type instanceof ReferenceDescriptor reference ? reference.baseType() : type;
         if (!(base instanceof NominalDescriptor || base instanceof GenericDescriptor
-                || base instanceof IntDescriptor || base instanceof FloatDescriptor
+                || base instanceof IntDescriptor || base instanceof LongDescriptor || base instanceof FloatDescriptor
                 || base instanceof BooleanDescriptor || base instanceof StringDescriptor
                 || base instanceof UnitDescriptor)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
@@ -322,7 +478,8 @@ final class TypeClassEvidence {
 
     private static String packageOfTarget(final TypeDescriptor target) {
         final var base = target instanceof ReferenceDescriptor reference ? reference.baseType() : target;
-        if (base instanceof IntDescriptor || base instanceof FloatDescriptor || base instanceof BooleanDescriptor
+        if (base instanceof IntDescriptor || base instanceof LongDescriptor
+                || base instanceof FloatDescriptor || base instanceof BooleanDescriptor
                 || base instanceof StringDescriptor || base instanceof UnitDescriptor) return "zeron.lang";
         return packageOf(nominalName(base));
     }
@@ -470,6 +627,9 @@ final class TypeClassEvidence {
             var matchingWitnesses = 0;
             for (final var entry : context.typeClassWitnesses) {
                 if (!isActive(context, entry)) continue;
+                if (entry.declaration().derived()
+                        && isEqContract(contractType)
+                        && isHashableContract(entry.declaration().contractType())) continue;
                 final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
                 if (matchPattern(entry.declaration().targetType(), actual,
                         entry.declaration().typeParameters(), substitutions)
@@ -493,6 +653,13 @@ final class TypeClassEvidence {
             final ResolutionContext context, final Stmt.Witness witness,
             final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
             final com.maruseron.zeron.scan.Token where, final Set<String> resolving) {
+        for (final var requirement : witness.requirements()) {
+            final var requiredContract = TypeSubstitution.substitute(
+                    requirement.contractType(), substitutions);
+            final var requiredTarget = TypeSubstitution.substitute(
+                    requirement.targetType(), substitutions);
+            if (!hasEvidence(context, requiredContract, requiredTarget, where, resolving)) return false;
+        }
         for (final var parameter : witness.typeParameters()) {
             final var actual = substitutions.get(parameter);
             if (actual == null) return false;
@@ -598,6 +765,10 @@ final class TypeClassEvidence {
                     helperType, null, true, Expr.EvidenceHandleKind.STATIC, prerequisiteEvidence);
         }
 
+        final var derived = derivedMethodHandle(context, requiredBound, concrete, requirement,
+                targetParameter, targetBoundIndex, targetMethodIndex, where);
+        if (derived != null) return derived;
+
         final var builtin = builtinDisplayHandle(requiredBound, concrete, requirement, targetParameter,
                 targetBoundIndex, targetMethodIndex);
         if (builtin != null) return builtin;
@@ -616,6 +787,54 @@ final class TypeClassEvidence {
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
                 "No method witness satisfies bound '" + requiredBound + "'."));
         throw new IllegalStateException("Unreachable");
+    }
+
+    private static Expr.EvidenceArgument derivedMethodHandle(
+            final ResolutionContext context, final TypeDescriptor requiredBound,
+            final TypeDescriptor concrete, final Stmt.ContractMethod requirement,
+            final TypeParameterDescriptor targetParameter, final int targetBoundIndex,
+            final int targetMethodIndex, final com.maruseron.zeron.scan.Token where) {
+        final var selected = new ArrayList<Map.Entry<Stmt.Witness, Map<TypeParameterDescriptor, TypeDescriptor>>>();
+        for (final var entry : context.typeClassWitnesses) {
+            final var witness = entry.declaration();
+            if (!witness.derived()) continue;
+            if (isEqContract(requiredBound) && isHashableContract(witness.contractType())) continue;
+            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            if (matchPattern(witness.targetType(), concrete, witness.typeParameters(), substitutions)
+                    && witnessEntails(context, witness, substitutions, requiredBound)
+                    && prerequisitesAvailable(context, witness, substitutions, where, new HashSet<>())) {
+                selected.add(Map.entry(witness, substitutions));
+            }
+        }
+        if (selected.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
+                    "Ambiguous derived contract witness for '" + requiredBound + "'."));
+        }
+        if (selected.isEmpty()) return null;
+        final var witness = selected.getFirst().getKey();
+        final var substitutions = selected.getFirst().getValue();
+        final var arguments = new ArrayList<Expr.EvidenceArgument>();
+        for (final var prerequisite : witness.requirements()) {
+            final var prerequisiteContract = TypeSubstitution.substitute(
+                    prerequisite.contractType(), substitutions);
+            final var prerequisiteTarget = TypeSubstitution.substitute(
+                    prerequisite.targetType(), substitutions);
+            final var childContract = context.contracts.get(nominalName(prerequisiteContract));
+            if (childContract == null || childContract.methods().isEmpty()) return null;
+            arguments.add(selectMethodEvidence(context, targetParameter, targetBoundIndex,
+                    targetMethodIndex, prerequisiteContract, prerequisiteTarget,
+                    childContract.methods().getFirst(), where));
+        }
+        final var owner = nominalName(witness.targetType());
+        final var helperName = isEqContract(requiredBound) ? "$zeron$eq" : "$zeron$hash";
+        final var helperType = isEqContract(requiredBound)
+                ? TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(), concrete, concrete)
+                : TypeDescriptor.functionOf("hash", TypeDescriptor.ofInt(), concrete);
+        return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
+                owner, helperName, helperType, null, true,
+                context.sums.containsKey(owner)
+                        ? Expr.EvidenceHandleKind.INTERFACE_STATIC : Expr.EvidenceHandleKind.STATIC,
+                arguments);
     }
 
     private static WitnessMethodSelection findMethodWitness(
@@ -687,7 +906,7 @@ final class TypeClassEvidence {
         final String method;
         final Expr.EvidenceHandleKind kind;
         final FunctionDescriptor signature;
-        if (concrete instanceof IntDescriptor || concrete instanceof FloatDescriptor
+        if (concrete instanceof IntDescriptor || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
                 || concrete instanceof BooleanDescriptor) {
             owner = "java.lang.String";
             method = "valueOf";
@@ -720,7 +939,7 @@ final class TypeClassEvidence {
                     ? reference.baseType() : arguments.getFirst();
         return nominalName(contractType).equals("zeron.lang.Display")
                 && arguments.size() == 1 && displayTarget.equals(concrete)
-                && (concrete instanceof IntDescriptor || concrete instanceof FloatDescriptor
+                && (concrete instanceof IntDescriptor || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
                     || concrete instanceof BooleanDescriptor || concrete instanceof StringDescriptor
                     || concrete instanceof UnitDescriptor);
     }
@@ -742,11 +961,12 @@ final class TypeClassEvidence {
     private static String builtinEqualityMethod(final TypeDescriptor concrete) {
         if (concrete instanceof NullableDescriptor nullable) {
             final var base = nullable.baseType();
-            if (base instanceof IntDescriptor || base instanceof FloatDescriptor
+            if (base instanceof IntDescriptor || base instanceof LongDescriptor || base instanceof FloatDescriptor
                     || base instanceof BooleanDescriptor || base instanceof StringDescriptor
                     || base instanceof UnitDescriptor) return "eqNullable";
         }
         if (concrete instanceof IntDescriptor) return "eqInt";
+        if (concrete instanceof LongDescriptor) return "eqLong";
         if (concrete instanceof FloatDescriptor) return "eqFloat";
         if (concrete instanceof BooleanDescriptor) return "eqBoolean";
         if (concrete instanceof StringDescriptor) return "eqString";
@@ -763,11 +983,12 @@ final class TypeClassEvidence {
                 : arguments.getFirst() instanceof ReferenceDescriptor reference
                     ? reference.baseType() : arguments.getFirst();
         final var isBuiltInType = concrete instanceof NullableDescriptor nullable
-                ? nullable.baseType() instanceof IntDescriptor || nullable.baseType() instanceof FloatDescriptor
+                ? nullable.baseType() instanceof IntDescriptor || nullable.baseType() instanceof LongDescriptor
+                    || nullable.baseType() instanceof FloatDescriptor
                     || nullable.baseType() instanceof BooleanDescriptor
                     || nullable.baseType() instanceof StringDescriptor
                     || nullable.baseType() instanceof UnitDescriptor
-                : concrete instanceof IntDescriptor || concrete instanceof FloatDescriptor
+                : concrete instanceof IntDescriptor || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
                     || concrete instanceof BooleanDescriptor || concrete instanceof StringDescriptor
                     || concrete instanceof UnitDescriptor;
         return nominalName(contractType).equals("zeron.lang.Eq")
@@ -784,6 +1005,7 @@ final class TypeClassEvidence {
                 || !(requirement.typeDescriptor().returnType() instanceof IntDescriptor)
                 || !requirement.typeDescriptor().parameters().isEmpty()) return null;
         final var method = concrete instanceof IntDescriptor ? "hashInt"
+                : concrete instanceof LongDescriptor ? "hashLong"
                 : concrete instanceof FloatDescriptor ? "hashFloat"
                 : concrete instanceof BooleanDescriptor ? "hashBoolean"
                 : concrete instanceof StringDescriptor ? "hashString"
@@ -804,7 +1026,7 @@ final class TypeClassEvidence {
                     ? reference.baseType() : arguments.getFirst();
         return nominalName(contractType).equals("zeron.lang.Hashable")
                 && arguments.size() == 1 && target.equals(concrete)
-                && (concrete instanceof IntDescriptor || concrete instanceof FloatDescriptor
+                && (concrete instanceof IntDescriptor || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
                     || concrete instanceof BooleanDescriptor || concrete instanceof StringDescriptor
                     || concrete instanceof UnitDescriptor);
     }
@@ -1107,7 +1329,9 @@ final class TypeClassEvidence {
 
     private static boolean isActive(final ResolutionContext context, final WitnessEntry entry) {
         return entry.packageName().equals(context.packageName)
-                || context.currentImports.onDemandPackages().contains(entry.packageName());
+                || context.currentImports.onDemandPackages().contains(entry.packageName())
+                || context.currentImports.types().values().stream()
+                        .anyMatch(importedType -> packageOf(importedType).equals(entry.packageName()));
     }
 
     private static String qualifyPackage(final String packageName, final String name) {

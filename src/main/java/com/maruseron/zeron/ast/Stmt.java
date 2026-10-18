@@ -12,6 +12,20 @@ import java.util.ArrayList;
 import java.util.List;
 
 public sealed interface Stmt {
+    String ANONYMOUS_CAPTURE_PREFIX = "$zeron$capture$";
+
+    static String anonymousCaptureFieldName(final String sourceName) {
+        return ANONYMOUS_CAPTURE_PREFIX + sourceName;
+    }
+
+    static boolean isAnonymousCaptureField(final Field field) {
+        return field.name().lexeme().startsWith(ANONYMOUS_CAPTURE_PREFIX);
+    }
+
+    static String anonymousCaptureSourceName(final Field field) {
+        return field.name().lexeme().substring(ANONYMOUS_CAPTURE_PREFIX.length());
+    }
+
     static String propertyGetterName(final String name) {
         return "$zeron$get$" + name;
     }
@@ -149,10 +163,17 @@ public sealed interface Stmt {
     }
 
     record SumDecl(Token name, List<TypeParameterDescriptor> typeParameters,
-                   List<SumCase> cases, boolean isPublic) implements Stmt, Decl {
+                   List<SumCase> cases, boolean isPublic,
+                   List<Token> derivedContracts) implements Stmt, Decl {
         public SumDecl {
             typeParameters = List.copyOf(typeParameters);
             cases = List.copyOf(cases);
+            derivedContracts = List.copyOf(derivedContracts);
+        }
+
+        public SumDecl(final Token name, final List<TypeParameterDescriptor> typeParameters,
+                       final List<SumCase> cases, final boolean isPublic) {
+            this(name, typeParameters, cases, isPublic, List.of());
         }
 
         public String generatedCaseName(final SumCase sumCase) {
@@ -169,17 +190,33 @@ public sealed interface Stmt {
     record SumPayload(Token name, TypeDescriptor type) {}
 
     record ProductDecl(Token name, List<TypeParameterDescriptor> typeParameters,
-                       List<ProductComponent> components, boolean isPublic) implements Stmt, Decl {
+                       List<ProductComponent> components, boolean isPublic,
+                       List<Token> derivedContracts) implements Stmt, Decl {
         public ProductDecl {
             typeParameters = List.copyOf(typeParameters);
             components = List.copyOf(components);
+            derivedContracts = List.copyOf(derivedContracts);
+        }
+
+        public ProductDecl(final Token name, final List<TypeParameterDescriptor> typeParameters,
+                           final List<ProductComponent> components, final boolean isPublic) {
+            this(name, typeParameters, components, isPublic, List.of());
         }
     }
 
     record ProductComponent(Token name, TypeDescriptor type) {}
 
     record NewtypeDecl(Token name, TypeDescriptor underlyingType, Expr validator,
-                       boolean isPublic) implements Stmt, Decl {}
+                       boolean isPublic, List<Token> derivedContracts) implements Stmt, Decl {
+        public NewtypeDecl {
+            derivedContracts = List.copyOf(derivedContracts);
+        }
+
+        public NewtypeDecl(final Token name, final TypeDescriptor underlyingType,
+                           final Expr validator, final boolean isPublic) {
+            this(name, underlyingType, validator, isPublic, List.of());
+        }
+    }
 
     final class Witness implements Stmt, Decl {
         private final Token name;
@@ -188,17 +225,29 @@ public sealed interface Stmt {
         private final TypeDescriptor targetType;
         private final List<WitnessFactoryMapping> mappings;
         private final List<WitnessMethod> methods;
+        private final boolean derived;
+        private final List<WitnessRequirement> requirements;
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
                        final TypeDescriptor contractType, final TypeDescriptor targetType,
                        final List<WitnessFactoryMapping> mappings,
-                       final List<WitnessMethod> methods) {
+                       final List<WitnessMethod> methods, final boolean derived,
+                       final List<WitnessRequirement> requirements) {
             this.name = name;
             this.typeParameters = List.copyOf(typeParameters);
             this.contractType = contractType;
             this.targetType = targetType;
             this.mappings = List.copyOf(mappings);
             this.methods = new ArrayList<>(methods);
+            this.derived = derived;
+            this.requirements = List.copyOf(requirements);
+        }
+
+        public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
+                       final TypeDescriptor contractType, final TypeDescriptor targetType,
+                       final List<WitnessFactoryMapping> mappings,
+                       final List<WitnessMethod> methods) {
+            this(name, typeParameters, contractType, targetType, mappings, methods, false, List.of());
         }
 
         public Witness(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -213,8 +262,12 @@ public sealed interface Stmt {
         public TypeDescriptor targetType() { return targetType; }
         public List<WitnessFactoryMapping> mappings() { return mappings; }
         public List<WitnessMethod> methods() { return List.copyOf(methods); }
+        public boolean derived() { return derived; }
+        public List<WitnessRequirement> requirements() { return requirements; }
         public void addMethod(final WitnessMethod method) { methods.add(method); }
     }
+
+    record WitnessRequirement(TypeDescriptor contractType, TypeDescriptor targetType) {}
 
     record WitnessFactoryMapping(Token requirementName, TypeDescriptor targetType,
                                  Token constructorName) {
@@ -228,9 +281,30 @@ public sealed interface Stmt {
                      List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
                      Constructor constructor, List<NamedConstructor> namedConstructors,
                      List<Method> methods, List<Pattern> patterns,
-                     boolean isPublic, boolean isEffect) implements Stmt, Decl {
+                     boolean isPublic, boolean isEffect,
+                     List<Token> derivedContracts, List<Token> storedStateOrder) implements Stmt, Decl {
         public ClassDecl {
             patterns = List.copyOf(patterns);
+            derivedContracts = List.copyOf(derivedContracts);
+            storedStateOrder = List.copyOf(storedStateOrder);
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, List<Pattern> patterns,
+                         boolean isPublic, boolean isEffect) {
+            this(name, typeParameters, contractUses, fields, properties, constructor,
+                    namedConstructors, methods, patterns, isPublic, isEffect, List.of(), List.of());
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, List<Pattern> patterns,
+                         boolean isPublic, boolean isEffect, List<Token> derivedContracts) {
+            this(name, typeParameters, contractUses, fields, properties, constructor,
+                    namedConstructors, methods, patterns, isPublic, isEffect, derivedContracts, List.of());
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,

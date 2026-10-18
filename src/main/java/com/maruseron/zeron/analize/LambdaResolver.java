@@ -398,6 +398,8 @@ final class LambdaResolver {
             case Expr.Lambda nested -> nested.body.stream().anyMatch(statement ->
                 statement instanceof Stmt.Return returned && returned.value() != null
                     && referencesAnyVariable(context, returned.value(), names));
+            case Expr.AnonymousObject object -> object.initializers().stream()
+                    .anyMatch(initializer -> referencesAnyVariable(context, initializer, names));
             case Expr.Literal _ -> false;
         };
         }

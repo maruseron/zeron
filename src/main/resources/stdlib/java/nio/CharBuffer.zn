@@ -1,0 +1,5 @@
+package java.nio;
+
+public external class CharBuffer = "java.nio.CharBuffer" {
+    public toString(): String;
+}

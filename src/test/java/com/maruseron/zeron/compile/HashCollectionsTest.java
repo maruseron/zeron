@@ -96,6 +96,11 @@ public final class HashCollectionsTest {
                     initialized.clear();
                     return initialized.isEmpty();
                 }
+
+                fn collectedSetBehavior(): Boolean {
+                    let collected = for [1, 1, 2] collect Set.empty<Int>();
+                    return collected.size == 2 and collected.contains(1) and collected.contains(2);
+                }
                 """;
 
         try {
@@ -110,6 +115,7 @@ public final class HashCollectionsTest {
                 assertTrue((Boolean) generated.getMethod("mapBehavior").invoke(null));
                 assertTrue((Boolean) generated.getMethod("hashableBoundsEntailEquality").invoke(null));
                 assertTrue((Boolean) generated.getMethod("setBehavior").invoke(null));
+                assertTrue((Boolean) generated.getMethod("collectedSetBehavior").invoke(null));
             }
         } finally {
             Files.deleteIfExists(classFile);

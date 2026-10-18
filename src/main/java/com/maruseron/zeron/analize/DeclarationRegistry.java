@@ -502,7 +502,8 @@ final class DeclarationRegistry {
     }
 
     private void registerType(final Token name) {
-        final var builtin = Set.of("Never", "Any", "Unit", "Int", "Float", "Boolean", "String", "Array");
+        final var builtin = Set.of("Never", "Any", "Unit", "Int", "Long", "Byte", "ByteArray",
+                "Float", "Boolean", "String", "Array");
         if (builtin.contains(name.lexeme()) || !types.add(name.lexeme())) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, name,
                     "Type name '" + name.lexeme() + "' is already declared."));

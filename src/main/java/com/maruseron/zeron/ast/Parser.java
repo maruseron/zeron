@@ -11,8 +11,11 @@ import com.maruseron.zeron.domain.GenericDescriptor;
 import com.maruseron.zeron.domain.ArrayDescriptor;
 import com.maruseron.zeron.domain.BooleanDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
+import com.maruseron.zeron.domain.ByteArrayDescriptor;
+import com.maruseron.zeron.domain.ByteDescriptor;
 import com.maruseron.zeron.domain.FloatDescriptor;
 import com.maruseron.zeron.domain.IntDescriptor;
+import com.maruseron.zeron.domain.LongDescriptor;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.NullableDescriptor;
 import com.maruseron.zeron.domain.StringDescriptor;
@@ -23,9 +26,13 @@ import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 import com.maruseron.zeron.scan.ScanResult;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.List;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -41,6 +48,7 @@ public final class Parser {
     private final List<Token> tokens;
     private final List<Token> comments;
     private final List<Diagnostic> diagnostics = new ArrayList<>();
+    private final String anonymousClassSourceId;
     private int current = 0;
     private String packageName = "";
     private String sourcePath;
@@ -61,6 +69,25 @@ public final class Parser {
     private Parser(List<Token> tokens) {
         comments = tokens.stream().filter(token -> token.type().isComment()).toList();
         this.tokens = tokens.stream().filter(token -> !token.type().isComment()).toList();
+        anonymousClassSourceId = anonymousClassSourceId(this.tokens);
+    }
+
+    private static String anonymousClassSourceId(final List<Token> tokens) {
+        try {
+            final var digest = MessageDigest.getInstance("SHA-256");
+            for (final var token : tokens) {
+                final var sourcePath = token.span().sourcePath();
+                if (sourcePath != null) digest.update(sourcePath.getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(token.type().name().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(token.lexeme().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+            }
+            return HexFormat.of().formatHex(digest.digest(), 0, 8);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is required for stable anonymous object names.", exception);
+        }
     }
 
     public static Parser of(final List<Token> tokens) {
@@ -228,6 +255,7 @@ public final class Parser {
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
+            final var derivedContracts = parseDerivedContracts();
             consume(EQUAL, "Expect '=' before type definition.");
             if (match(LEFT_PAREN)) {
                 final var components = new ArrayList<Stmt.ProductComponent>();
@@ -240,7 +268,8 @@ public final class Parser {
                 }
                 consume(RIGHT_PAREN, "Expect ')' after product components.");
                 consume(SEMICOLON, "Expect ';' after product declaration.");
-                return new Stmt.ProductDecl(name, List.copyOf(typeParameters.values()), components, isPublic);
+                return new Stmt.ProductDecl(name, List.copyOf(typeParameters.values()), components,
+                        isPublic, derivedContracts);
             }
             final var cases = new ArrayList<Stmt.SumCase>();
             do {
@@ -259,7 +288,8 @@ public final class Parser {
                 cases.add(new Stmt.SumCase(caseName, payloads));
             } while (match(PIPE));
             consume(SEMICOLON, "Expect ';' after sum declaration.");
-            return new Stmt.SumDecl(name, List.copyOf(typeParameters.values()), cases, isPublic);
+            return new Stmt.SumDecl(name, List.copyOf(typeParameters.values()), cases,
+                    isPublic, derivedContracts);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -267,6 +297,7 @@ public final class Parser {
 
     private Stmt.NewtypeDecl newtypeDeclaration(final boolean isPublic) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect newtype name."));
+        final var derivedContracts = parseDerivedContracts();
         consume(EQUAL, "Expect '=' before newtype representation.");
         final var underlyingType = collectType();
         if (!(underlyingType instanceof IntDescriptor || underlyingType instanceof FloatDescriptor
@@ -276,7 +307,16 @@ public final class Parser {
         }
         final var validator = matchSoftKeyword("where") ? expression() : null;
         consume(SEMICOLON, "Expect ';' after newtype declaration.");
-        return new Stmt.NewtypeDecl(name, underlyingType, validator, isPublic);
+        return new Stmt.NewtypeDecl(name, underlyingType, validator, isPublic, derivedContracts);
+    }
+
+    private List<Token> parseDerivedContracts() {
+        if (!matchSoftKeyword("deriving")) return List.of();
+        final var contracts = new ArrayList<Token>();
+        do {
+            contracts.add(consume(IDENTIFIER, "Expect a contract name after 'deriving'."));
+        } while (match(COMMA));
+        return List.copyOf(contracts);
     }
 
     private Stmt.Namespace validatedNewtypeNamespace(final Stmt.NewtypeDecl newtype) {
@@ -331,7 +371,7 @@ public final class Parser {
                         error(declarationToken, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                                 "Witness methods cannot be marked mut.");
                     }
-                    final var methodName = consume(IDENTIFIER, "Expect witness method name.");
+                    final var methodName = consumeMemberName("Expect witness method name.");
                     final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
                     final var enclosingMethodTypeParameters = activeTypeParameters;
                     activeTypeParameters = new LinkedHashMap<>(enclosingMethodTypeParameters);
@@ -470,7 +510,7 @@ public final class Parser {
                     continue;
                 }
                 consume(FN, "Extension methods must be declared with 'fn'.");
-                final var methodName = consume(IDENTIFIER, "Expect extension method name.");
+                final var methodName = consumeMemberName("Expect extension method name.");
                 final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
                 final var enclosingMethodParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(enclosingMethodParameters);
@@ -512,8 +552,11 @@ public final class Parser {
 
     private static boolean isSupportedBuiltinExtensionReceiver(final TypeDescriptor receiverType) {
         return receiverType instanceof ArrayDescriptor
+                || receiverType instanceof ByteDescriptor
+                || receiverType instanceof ByteArrayDescriptor
                 || receiverType instanceof UnitDescriptor
                 || receiverType instanceof IntDescriptor
+                || receiverType instanceof LongDescriptor
                 || receiverType instanceof FloatDescriptor
                 || receiverType instanceof BooleanDescriptor
                 || receiverType instanceof StringDescriptor;
@@ -678,7 +721,7 @@ public final class Parser {
                 throw error(previous(), DiagnosticCatalog.INVALID_EXTERNAL_FUNCTION_DECLARATION,
                         "Static external methods cannot be marked mut.");
             }
-            final var methodName = consume(IDENTIFIER, "Expect external method name.");
+            final var methodName = consumeMemberName("Expect external method name.");
             consume(LEFT_PAREN, "Expect '(' after external method name.");
             final var parameters = new ArrayList<Token>();
             final var parameterTypes = new ArrayList<TypeDescriptor>();
@@ -857,6 +900,7 @@ public final class Parser {
                     contractUses.add(new Stmt.ContractUse(contractName, typeArguments));
                 } while (match(COMMA));
             }
+            final var derivedContracts = parseDerivedContracts();
             consume(LEFT_BRACE, "Expect '{' before class members.");
 
             final var fields = new ArrayList<Stmt.Field>();
@@ -864,6 +908,7 @@ public final class Parser {
             final var namedConstructors = new ArrayList<Stmt.NamedConstructor>();
             final var methods = new ArrayList<Stmt.Method>();
             final var patterns = new ArrayList<Stmt.Pattern>();
+            final var storedStateOrder = new ArrayList<Token>();
             Stmt.Constructor constructor = null;
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
                 if (match(PUBLIC, PRIVATE)) {
@@ -890,8 +935,9 @@ public final class Parser {
                             final var propertyName = consume(IDENTIFIER, "Expect property name.");
                             consume(COLON, "Expect ':' after property name.");
                             properties.add(classProperty(propertyName, isPublic, isMutating));
+                            storedStateOrder.add(propertyName);
                         } else {
-                            final var memberName = consume(IDENTIFIER, "Expect method name or 'property'.");
+                            final var memberName = consumeMemberName("Expect method name or 'property'.");
                             methods.add(classMethod(isPublic, isMutating, memberName));
                         }
                     }
@@ -899,12 +945,28 @@ public final class Parser {
                     error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
                             "Constructors must declare 'public' or 'private' visibility.");
                 } else {
-                    final var fieldName = consume(IDENTIFIER, "Expect field name or explicitly visible method.");
-                    consume(COLON, "Expect ':' after field name.");
-                    final var fieldType = collectType();
-                    final var initializer = match(EQUAL) ? expression() : null;
-                    consume(SEMICOLON, "Expect ';' after field declaration.");
-                    fields.add(new Stmt.Field(fieldName, fieldType, initializer));
+                    final var isMutating = match(MUT);
+                    if (match(PROPERTY)) {
+                        final var propertyName = consume(IDENTIFIER, "Expect property name.");
+                        consume(COLON, "Expect ':' after property name.");
+                        properties.add(classProperty(propertyName, false, isMutating));
+                        storedStateOrder.add(propertyName);
+                    } else if (isClassMethodStart()) {
+                        methods.add(classMethod(false, isMutating,
+                                consumeMemberName("Expect method name.")));
+                    } else if (isMutating) {
+                        throw error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "'mut' must precede a method or property.");
+                    } else {
+                        final var fieldName = consume(IDENTIFIER,
+                                "Expect field name or method name.");
+                        consume(COLON, "Expect ':' after field name.");
+                        final var fieldType = collectType();
+                        final var initializer = match(EQUAL) ? expression() : null;
+                        consume(SEMICOLON, "Expect ';' after field declaration.");
+                        fields.add(new Stmt.Field(fieldName, fieldType, initializer));
+                        storedStateOrder.add(fieldName);
+                    }
                 }
             }
             consume(RIGHT_BRACE, "Expect '}' after class members.");
@@ -915,7 +977,7 @@ public final class Parser {
             return new Stmt.ClassDecl(name, List.copyOf(typeParameters.values()), List.copyOf(contractUses),
                     List.copyOf(fields), List.copyOf(properties), constructor,
                     List.copyOf(namedConstructors), List.copyOf(methods), List.copyOf(patterns),
-                    isTopLevelPublic, isEffect);
+                    isTopLevelPublic, isEffect, derivedContracts, storedStateOrder);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -963,6 +1025,11 @@ public final class Parser {
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
+    }
+
+    private boolean isClassMethodStart() {
+        if (!(check(IDENTIFIER) || check(GET) || check(SET))) return false;
+        return checkNext(LEFT_PAREN) || checkNext(LESS);
     }
 
     private Stmt.Property classProperty(final Token name,
@@ -1160,7 +1227,7 @@ public final class Parser {
                     consume(SEMICOLON, "Expect ';' after contract property requirement.");
                     continue;
                 }
-                final var methodName = consume(IDENTIFIER, "Expect contract method name.");
+                final var methodName = consumeMemberName("Expect contract method name.");
                 final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
                 final var enclosingMethodTypeParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(enclosingMethodTypeParameters);
@@ -1410,7 +1477,8 @@ public final class Parser {
 
     private String qualifyTypeReference(final String name) {
         if (name.indexOf('.') >= 0
-                || Set.of("Never", "Any", "Infer", "Unit", "Int", "Float", "Boolean", "String", "Array")
+                || Set.of("Never", "Any", "Infer", "Unit", "Int", "Long", "Byte", "ByteArray",
+                        "Float", "Boolean", "String", "Array")
                         .contains(name)
                 || activeTypeParameters.containsKey(name)) return name;
         if (localTypeNames.contains(name)) {
@@ -1859,6 +1927,13 @@ public final class Parser {
             final var keyword = previous();
             return new Expr.Raise(keyword, unary());
         }
+        if (check(MINUS) && checkNext(LONG)
+                && ((java.math.BigInteger) tokens.get(current + 1).literal())
+                        .equals(java.math.BigInteger.ONE.shiftLeft(63))) {
+            advance();
+            advance();
+            return new Expr.Literal(Long.MIN_VALUE, TypeDescriptor.ofLong());
+        }
         if (match(NOT, MINUS, PLUS, TYPEOF, TILDE)) {
             final var operator = previous();
             final var right = unary();
@@ -1922,7 +1997,7 @@ public final class Parser {
                 expr = new Expr.Index(expr, index, TypeDescriptor.ofInfer());
             } else if (match(DOT, HUH_DOT)) {
                 final var safeNavigation = previous().type() == HUH_DOT;
-                final var property = consume(IDENTIFIER, "Expect member name after '.'.");
+                final var property = consumeMemberName("Expect member name after '.'.");
                 expr = new Expr.Property(expr, property, TypeDescriptor.ofInfer(), safeNavigation);
             } else {
                 break;
@@ -1999,6 +2074,7 @@ public final class Parser {
         if (match(HANDLE)) return handleExpression(previous());
         if (match(MATCH)) return matchExpression(previous());
         if (match(FOR)) return forExpression(previous());
+        if (match(OBJECT)) return anonymousObject(previous());
 
         if (match(LEFT_BRACKET)) {
             final var elements = new ArrayList<Expr>();
@@ -2031,6 +2107,16 @@ public final class Parser {
                 List.of(), TypeDescriptor.ofInfer());
             }
             return new Expr.Literal(number.literal(), TypeDescriptor.ofInt());
+        }
+
+        if (match(LONG)) {
+            final var number = previous();
+            final var value = (java.math.BigInteger) number.literal();
+            if (value.compareTo(java.math.BigInteger.valueOf(Long.MAX_VALUE)) > 0) {
+                throw error(number, DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                        "Positive Long literal is outside the supported Long range.");
+            }
+            return new Expr.Literal(value.longValueExact(), TypeDescriptor.ofLong());
         }
 
         if (match(DOUBLE, STRING)) {
@@ -2139,6 +2225,94 @@ public final class Parser {
          */
 
         throw error(peek(), "Expect expression.");
+    }
+
+    private Expr anonymousObject(final Token keyword) {
+        consume(COLON, "Expect ':' after 'object'.");
+        final var contracts = new ArrayList<Stmt.ContractUse>();
+        do {
+            final var contractName = qualifyTypeToken(
+                    consume(IDENTIFIER, "Expect contract name after 'object :'."));
+            final var hasTypeArguments = match(LESS);
+            final var typeArguments = hasTypeArguments
+                    ? collectTypeArguments()
+                    : List.<TypeDescriptor>of();
+            if (hasTypeArguments) consume(GREATER, "Expect '>' after contract type arguments.");
+            contracts.add(new Stmt.ContractUse(contractName, typeArguments));
+        } while (match(PLUS));
+        consume(LEFT_BRACE, "Expect '{' before anonymous object members.");
+
+        final var fields = new ArrayList<Stmt.Field>();
+        final var properties = new ArrayList<Stmt.Property>();
+        final var methods = new ArrayList<Stmt.Method>();
+        final var initializers = new LinkedHashMap<String, Expr>();
+        final var storedStateOrder = new ArrayList<Token>();
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            var isPublic = false;
+            if (match(PUBLIC, PRIVATE)) isPublic = previous().type() == PUBLIC;
+            if (match(CONSTRUCTOR)) {
+                throw error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Anonymous objects cannot declare constructors.");
+            }
+            final var isMutating = match(MUT);
+            if (match(PROPERTY)) {
+                final var propertyName = consume(IDENTIFIER, "Expect property name.");
+                consume(COLON, "Expect ':' after property name.");
+                final var property = classProperty(propertyName, isPublic, isMutating);
+                if (!property.isCustom()) {
+                    if (property.initializer() == null) {
+                        throw error(propertyName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "An anonymous auto-property requires an initializer.");
+                    }
+                    initializers.put(propertyName.lexeme(), property.initializer());
+                    properties.add(new Stmt.Property(property.name(), property.type(), null,
+                            property.isPublic(), property.isMutating(), null, null, null,
+                            true));
+                } else {
+                    if (property.initializer() != null) {
+                        throw error(propertyName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "A custom anonymous property cannot have an initializer.");
+                    }
+                    properties.add(property);
+                }
+                storedStateOrder.add(propertyName);
+            } else if (isClassMethodStart()) {
+                methods.add(classMethod(isPublic, isMutating,
+                        consumeMemberName("Expect method name.")));
+            } else if (isMutating) {
+                throw error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "'mut' must precede a method or property.");
+            } else {
+                if (isPublic) {
+                    throw error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
+                            "Anonymous object fields are private.");
+                }
+                final var fieldName = consume(IDENTIFIER, "Expect field name, property, or method.");
+                consume(COLON, "Expect ':' after field name.");
+                final var fieldType = collectType();
+                if (!match(EQUAL)) {
+                    throw error(fieldName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "An anonymous object field requires an initializer.");
+                }
+                initializers.put(fieldName.lexeme(), expression());
+                consume(SEMICOLON, "Expect ';' after field initializer.");
+                fields.add(new Stmt.Field(fieldName, fieldType));
+                storedStateOrder.add(fieldName);
+            }
+        }
+        consume(RIGHT_BRACE, "Expect '}' after anonymous object members.");
+        final var start = keyword.span().start();
+        final var location = start.offset() == null ? start.line() + "_" + current : start.offset().toString();
+        final var syntheticName = new Token(IDENTIFIER,
+                "$zeron$anonymous$" + anonymousClassSourceId + "$" + location, null, keyword.span());
+        final var declaration = new Stmt.ClassDecl(syntheticName, List.of(), contracts, fields, properties,
+                new Stmt.Constructor(new Token(IDENTIFIER, "new", null, keyword.span()), true),
+                List.of(), methods, List.of(), false, false, List.of(), storedStateOrder);
+        final var orderedInitializers = new ArrayList<Expr>();
+        fields.forEach(field -> orderedInitializers.add(initializers.get(field.name().lexeme())));
+        properties.stream().filter(Stmt.Property::canonicalConstructorParameter)
+                .forEach(property -> orderedInitializers.add(initializers.get(property.name().lexeme())));
+        return new Expr.AnonymousObject(keyword, contracts, declaration, orderedInitializers);
     }
 
     private Expr.Handle handleExpression(final Token keyword) {
@@ -2278,8 +2452,28 @@ public final class Parser {
                 final var number = advance();
                 return literalPattern(keyword, -((Integer) number.literal()), TypeDescriptor.ofInt(), root);
             }
+            if (check(MINUS) && tokens.get(current + 1).type() == LONG) {
+                advance();
+                final var number = advance();
+                final var magnitude = (java.math.BigInteger) number.literal();
+                if (magnitude.compareTo(java.math.BigInteger.ONE.shiftLeft(63)) > 0) {
+                    throw error(number, DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                            "Negative Long literal is outside the supported Long range.");
+                }
+                return literalPattern(keyword, magnitude.negate().longValueExact(),
+                        TypeDescriptor.ofLong(), root);
+            }
             if (match(INT)) {
                 return literalPattern(keyword, previous().literal(), TypeDescriptor.ofInt(), root);
+            }
+            if (match(LONG)) {
+                final var number = previous();
+                final var magnitude = (java.math.BigInteger) number.literal();
+                if (magnitude.compareTo(java.math.BigInteger.valueOf(Long.MAX_VALUE)) > 0) {
+                    throw error(number, DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                            "Positive Long literal is outside the supported Long range.");
+                }
+                return literalPattern(keyword, magnitude.longValueExact(), TypeDescriptor.ofLong(), root);
             }
             if (match(STRING)) {
                 return literalPattern(keyword, previous().literal(), TypeDescriptor.ofString(), root);
@@ -2477,6 +2671,15 @@ public final class Parser {
 
     private Token consume(final TokenType type, final String message) {
         return consume(type, DiagnosticCatalog.EXPECTED_SYNTAX, message);
+    }
+
+    private Token consumeMemberName(final String message) {
+        if (match(IDENTIFIER)) return previous();
+        if (match(GET, SET)) {
+            final var token = previous();
+            return new Token(IDENTIFIER, token.lexeme(), null, token.span());
+        }
+        throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX, message);
     }
 
     private Token consume(final TokenType type,

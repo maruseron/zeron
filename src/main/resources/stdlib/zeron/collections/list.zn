@@ -82,10 +82,11 @@ public class List<T> is Iterable<T>, Sink<T> {
         return previous;
     }
 
-    public mut add(value: T): Unit {
+    public mut add(value: T): Boolean {
         this.ensureCapacity(this.count + 1);
         this.values[this.count] = value;
         this.count = this.count + 1;
+        return true;
     }
 
     public mut insert(index: Int, value: T): Unit {

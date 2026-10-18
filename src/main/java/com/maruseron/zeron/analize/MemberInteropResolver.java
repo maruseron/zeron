@@ -387,6 +387,12 @@ final class MemberInteropResolver {
                     ? TypeDescriptor.ofName(sumDeclaration.name().lexeme())
                     : TypeDescriptor.genericOf(TypeDescriptor.ofName(sumDeclaration.name().lexeme()), arguments);
             final var sumResult = new ReferenceDescriptor(sumType);
+            final var constructorType = context.callSiteFunctionTypes.get(call.name);
+            if (constructorType != null) {
+                context.recordCallSiteFunctionType(call.name, TypeDescriptor.functionWithEffectsOf(
+                        call.name.lexeme(), sumResult, constructorType.parameters(),
+                        constructorType.typeParameters(), constructorType.raisedEffects()));
+            }
             call.setType(sumResult);
             return sumResult;
         }
@@ -1143,15 +1149,25 @@ final class MemberInteropResolver {
                 ? TypeDescriptor.of(declaration.name().lexeme())
                 : TypeDescriptor.genericOf(TypeDescriptor.ofName(declaration.name().lexeme()),
                         typeParameters.stream().map(substitutions::get).toList());
+        final var constructorToken = factory.canonical()
+                ? declaration.constructor().name()
+                : factory.named().name();
+        final var instantiatedFactoryParameters = signature.parameters().stream()
+                .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
+                .toList();
+        final var callSiteFactory = TypeDescriptor.functionOf(
+                constructorToken.lexeme(), new ReferenceDescriptor(constructedType),
+                instantiatedFactoryParameters.toArray(TypeDescriptor[]::new));
+        context.recordReference(call.name, constructorToken, signature);
+        context.recordCallSiteFunctionType(call.name, callSiteFactory);
         call.setEvidenceArguments(TypeClassEvidence.selectClassArguments(
                 context, declaration, substitutions, call.name));
         final TypeDescriptor result;
         if (factory.canonical()) {
             result = new ReferenceDescriptor(constructedType);
         } else {
-            final var instantiatedFactory = (FunctionDescriptor) TypeSubstitution.substitute(signature, substitutions);
-            call.setResolvedDescriptor(instantiatedFactory);
-            result = instantiatedFactory.returnType();
+            call.setResolvedDescriptor(callSiteFactory);
+            result = callSiteFactory.returnType();
         }
         call.setType(result);
         return result;

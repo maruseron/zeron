@@ -97,7 +97,7 @@ public class LspProtocolTest {
                     .get(5, TimeUnit.SECONDS);
             assertTrue(completion.isRight());
             assertTrue(completion.getRight().getItems().stream()
-                    .anyMatch(item -> item.getLabel().equals("greet")));
+                    .anyMatch(item -> item.getLabel().equals("greet()")));
 
             final var definition = remote.getTextDocumentService()
                     .definition(new DefinitionParams(new TextDocumentIdentifier(uri), usePosition))

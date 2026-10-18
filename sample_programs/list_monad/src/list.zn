@@ -13,7 +13,7 @@ namespace List {
     fn pure<T>(head: T): List<T> = List.Cons(head, List.Nil());
 }
 
-extension<T> List<T> {
+public extension<T> List<T> {
     fn append(second: List<T>): List<T> = match (this) {
         case Cons(head, tail) -> List.Cons(head, tail.append(second));
         case Nil()            -> second;
@@ -27,7 +27,7 @@ extension<T> List<T> {
     fn bind<U>(map: (T) -> List<U>): List<U> = this.fmap(map).join();
 }
 
-extension<T> List<List<T>> {
+public extension<T> List<List<T>> {
     fn join(): List<T> = match (this) {
         case Cons(head, tail) -> head.append(tail.join());
         case Nil()            -> List<T>.Nil();

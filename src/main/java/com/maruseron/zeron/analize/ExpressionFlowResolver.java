@@ -227,12 +227,6 @@ final class ExpressionFlowResolver {
                     assignment.setType(operation.resultType());
                     yield operation.resultType();
             }
-            // |> a = expr ::= when
-            //               | assignable (typeof a, typeof expr) -> typeof expr
-            //               | else                               -> ResolutionError
-            // suggested type for assignment will always be inferred,
-            // resolve the expression, ensure it's assignable
-            // return the assigned type (the resolved one)
             case Expr.Assignment assignment -> {
                 final var symbolName = context.symbols.containsSymbol(assignment.name)
                         ? assignment.name : MemberInteropResolver.resolveTopLevelValueSymbol(context, assignment.name);
@@ -266,13 +260,6 @@ final class ExpressionFlowResolver {
                 yield expectedType;
             }
             case Expr.CoalesceAssignment assignment -> resolveCoalesceAssignment(context, assignment);
-            // |> a + b ::= when predicate x is Infer, TypeParam
-            //            | predicate a && not predicate b -> typeof b
-            //            | predicate b && not predicate a -> typeof a
-            //            | else                           -> ResolutionError
-            // suggested type for binary will always be inferred,
-            // resolve left and right, ensure types are exact and
-            // return the expression tagged with the resolved type
             case Expr.Binary binary -> {
                 if (binary.operator.type() == TokenType.EQUAL_EQUAL_EQUAL) {
                     final var leftType = resolve(context, binary.left);

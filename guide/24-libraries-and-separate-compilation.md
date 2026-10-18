@@ -14,7 +14,7 @@ implementation.
 Build the bundled standard library into a class directory with:
 
 ```text
-java --enable-preview -cp target/classes com.maruseron.zeron.Zeron --build-stdlib target/zeron-stdlib
+java -cp target/classes com.maruseron.zeron.Zeron --build-stdlib target/zeron-stdlib
 ```
 
 Add `--jar-output target/zeron-stdlib.jar` to produce a JAR. Keep this artifact separate from

@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [0.3.0] - 2026, 18 OCT
 
 ### Compiler and language work
@@ -10,6 +12,11 @@
   now defaults to private, while public visibility remains explicit.
 - Added the compiler-backed Zeron Language Server Protocol server with diagnostics, completion,
   hover, and definition navigation.
+
+### Compiler and tooling
+
+- Set the minimum supported Java release to stable Java 25 and removed the preview-feature runtime
+  requirement.
 
 ### Standard Library
 

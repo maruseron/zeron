@@ -52,8 +52,8 @@ limitations.
 ## Get started
 
 See the [Zeron Guide](guide/README.md) for installation, project creation, language concepts, and
-examples. It assumes JDK 26; Zeron currently uses Java preview features. The guide explains how to
-build and run projects with the packaged launcher or from a source checkout.
+examples. It assumes JDK 25 or later. The guide explains how to build and run projects with the
+packaged launcher or from a source checkout.
 
 For contributors, build with Maven:
 
@@ -61,10 +61,10 @@ For contributors, build with Maven:
 mvn package
 ```
 
-Run the test suite with preview features enabled:
+Run the test suite:
 
 ```sh
-mvn -DargLine=--enable-preview test
+mvn test
 ```
 
 The [language overview](documents/design-document-00.md) summarizes the implemented foundations and

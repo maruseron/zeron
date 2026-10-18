@@ -1,23 +1,23 @@
 # 1. Install Zeron and create a project
 
-This guide assumes JDK 26. Check that Java is available:
+This guide assumes JDK 25 or later. Check that Java is available:
 
 ```text
 java -version
 ```
 
-The output should identify Java 26. Zeron uses Java preview features. The packaged launchers enable
-them automatically; direct Java invocations need the `--enable-preview` flag.
+The output should identify Java 25 or later. Zeron targets stable Java 25 and does not require
+preview features.
 
 If you have a portable Zeron distribution, extract it to a location you control. On Windows, use
 `bin\zeron.cmd`; on macOS or Linux, use `bin/zeron`. Add the distribution's `bin` directory to
 `PATH` to invoke `zeron` from any directory.
 
-From a Zeron source checkout, build with JDK 26 and Maven:
+From a Zeron source checkout, build with JDK 25 or later and Maven:
 
 ```powershell
 mvn package
-java --enable-preview -jar target/zeron-0.1-alpha.jar init
+java -jar target/zeron-0.1-alpha.jar init
 ```
 
 Use the versioned JAR name produced in `target/` if it differs from the example.

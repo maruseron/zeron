@@ -30,6 +30,7 @@ final class RuntimeSupportEmitter {
         final var output = outputDirectory.resolve(Path.of("zeron", "lang", "Unit.class"));
         Files.createDirectories(output.getParent());
         ClassFile.of().buildTo(output, UNIT_CLASS, builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
             builder.withField("INSTANCE", UNIT_CLASS,
                     field -> field.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL));
@@ -57,6 +58,7 @@ final class RuntimeSupportEmitter {
         final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "RaisedEffect.class"));
         Files.createDirectories(output.getParent());
         ClassFile.of().buildTo(output, RAISED_EFFECT_CLASS, builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
             builder.withSuperclass(RUNTIME_EXCEPTION_CLASS);
             builder.withField("payload", ConstantDescs.CD_Object,
@@ -118,6 +120,7 @@ final class RuntimeSupportEmitter {
         final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "ResourceSupport.class"));
         Files.createDirectories(output.getParent());
         ClassFile.of().buildTo(output, RESOURCE_SUPPORT_CLASS, builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
             builder.withMethodBody("dispose", MethodTypeDesc.of(THROWABLE_CLASS,
                     ConstantDescs.CD_Object.arrayType(), ConstantDescs.CD_int, THROWABLE_CLASS),
@@ -209,6 +212,7 @@ final class RuntimeSupportEmitter {
         final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "EqSupport.class"));
         Files.createDirectories(output.getParent());
         ClassFile.of().buildTo(output, EQ_SUPPORT_CLASS, builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
             builder.withMethodBody("eqInt", MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_int, ConstantDescs.CD_int), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC,
@@ -338,6 +342,7 @@ final class RuntimeSupportEmitter {
         final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "HashSupport.class"));
         Files.createDirectories(output.getParent());
         ClassFile.of().buildTo(output, HASH_SUPPORT_CLASS, builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
             builder.withMethodBody("hashInt", MethodTypeDesc.of(ConstantDescs.CD_int,
                     ConstantDescs.CD_int), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
@@ -404,6 +409,7 @@ final class RuntimeSupportEmitter {
         final var parent = outFile.getParent();
         if (parent != null) Files.createDirectories(parent);
         ClassFile.of().buildTo(outFile, classDesc, builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_INTERFACE | ClassFile.ACC_ABSTRACT);
             builder.withMethod("invoke", methodDescriptor(type),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_ABSTRACT, _ -> {});

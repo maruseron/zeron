@@ -6,6 +6,7 @@ import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
+import java.lang.classfile.ClassFile;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -20,6 +21,26 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class CompilationDiagnosticsTest {
+    @Test
+    public void emittedClassesUseJava25ClassFileVersion() throws IOException {
+        final var source = parse("src/main.zn", """
+                class Box {}
+                fn main() {}
+                """);
+        final var output = Files.createTempDirectory("zeron-java25-");
+        try {
+            final var compiler = compiler(List.of(source), "Main", output);
+            compiler.resolve();
+            compiler.compile();
+
+            assertJava25Class(output.resolve("Main.class"));
+            assertJava25Class(output.resolve("Box.class"));
+            assertJava25Class(output.resolve("zeron/lang/Unit.class"));
+        } finally {
+            deleteTree(output);
+        }
+    }
+
     @Test
     public void reportsInitializerCyclesWithoutWritingClassFiles() throws IOException {
         final var source = parse("src/cycle.zn", """
@@ -136,5 +157,11 @@ public final class CompilationDiagnosticsTest {
                 Files.delete(entry);
             }
         }
+    }
+
+    private static void assertJava25Class(final Path path) throws IOException {
+        assertEquals(path.toString(), ClassFile.JAVA_25_VERSION,
+                ClassFile.of().parse(path).majorVersion());
+        assertEquals(path.toString(), 0, ClassFile.of().parse(path).minorVersion());
     }
 }

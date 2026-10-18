@@ -205,10 +205,12 @@ public final class Scanner {
             }
 
             case '"' -> string();
-            case char _ when isDigit(c) -> number();
-            case char _ when isAlpha(c) -> identifier();
-            default -> recordDiagnostic(DiagnosticCatalog.UNEXPECTED_CHARACTER,
-                    span(tokenStart, position()), "Unexpected character: " + c);
+            default -> {
+                if (isDigit(c)) number();
+                else if (isAlpha(c)) identifier();
+                else recordDiagnostic(DiagnosticCatalog.UNEXPECTED_CHARACTER,
+                        span(tokenStart, position()), "Unexpected character: " + c);
+            }
         }
     }
 

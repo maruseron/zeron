@@ -27,7 +27,7 @@ $standardLibraryJar = Join-Path $stageRoot "lib\$standardLibraryJarName"
 
 Push-Location $repositoryRoot
 try {
-    & mvn "-DargLine=--enable-preview" clean package
+    & mvn clean package
     if ($LASTEXITCODE -ne 0) { throw "Maven package failed with exit code $LASTEXITCODE." }
 
     $builtCompilerJar = Join-Path $repositoryRoot "target\zeron-$projectVersion.jar"
@@ -53,7 +53,7 @@ try {
     Copy-Item -Path (Join-Path $repositoryRoot "src\main\resources\errorcode\*.md") `
         -Destination (Join-Path $stageRoot "share\zeron\errorcode")
 
-    & java --enable-preview -jar $compilerJar --build-stdlib (Join-Path $stageRoot "lib\stdlib") `
+    & java -jar $compilerJar --build-stdlib (Join-Path $stageRoot "lib\stdlib") `
         --jar-output $standardLibraryJar
     if ($LASTEXITCODE -ne 0) { throw "Standard-library packaging failed with exit code $LASTEXITCODE." }
 

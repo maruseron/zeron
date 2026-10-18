@@ -2,4 +2,4 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec java --enable-preview -jar "$SCRIPT_DIR/../lib/zeron.jar" "$@"
+exec java -jar "$SCRIPT_DIR/../lib/zeron.jar" "$@"

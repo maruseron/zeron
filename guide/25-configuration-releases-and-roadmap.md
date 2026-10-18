@@ -67,8 +67,8 @@ explanations for installation outside a source checkout. It is a local packaging
 a mature cross-platform release service; check the repository's release script and platform
 requirements before distributing it.
 
-The packaged launcher enables the Java preview features used by the current compiler. A source
-checkout instead needs the development JDK and build tooling. A release should keep the launcher,
+The packaged launcher requires Java 25 or later; a source checkout also needs Maven. A release
+should keep the launcher,
 standard library, and diagnostic descriptions from the same compatible build, so users receive
 matching runtime support and actionable errors.
 

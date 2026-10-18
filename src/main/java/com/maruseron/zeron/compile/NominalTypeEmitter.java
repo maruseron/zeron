@@ -39,6 +39,7 @@ final class NominalTypeEmitter {
             context.classFile.buildTo(contractPath.toAbsolutePath(),
                     ClassDesc.of(contractName),
                     builder -> {
+                        builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
                         builder.withFlags((contract.isPublic() ? ClassFile.ACC_PUBLIC : 0)
                             | ClassFile.ACC_INTERFACE | ClassFile.ACC_ABSTRACT);
                         if (!contract.requiredContracts().isEmpty()) {
@@ -361,6 +362,7 @@ final class NominalTypeEmitter {
         context.classFile.buildTo(classPath.toAbsolutePath(),
                 classDesc,
                 builder -> {
+                    builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
                     builder.withFlags((declaration.isPublic() ? ClassFile.ACC_PUBLIC : 0) | ClassFile.ACC_FINAL);
                     final var nestHost = newtype != null && newtype.validator() != null
                             ? newtypeNestHost(context, newtype)

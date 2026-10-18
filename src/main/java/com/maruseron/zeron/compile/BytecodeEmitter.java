@@ -67,6 +67,7 @@ final class BytecodeEmitter {
             Files.createDirectories(holderPath.getParent());
             context.currentHolderName = holderName;
             context.classFile.buildTo(holderPath.toAbsolutePath(), ClassDesc.of(holderName), builder -> {
+                builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
                 builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
                 final var nestMembers = nestMembersForMainClass(context);
                 if (holderName.equals(context.mainClassName) && !nestMembers.isEmpty()
@@ -90,6 +91,7 @@ final class BytecodeEmitter {
             Files.createDirectories(namespacePath.getParent());
             context.currentHolderName = namespace.getKey();
             context.classFile.buildTo(namespacePath.toAbsolutePath(), ClassDesc.of(namespace.getKey()), builder -> {
+                builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
                 builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
                 final var nestMembers = validatedNewtypeNestMembers(context, namespace.getKey());
                 if (!nestMembers.isEmpty()) {

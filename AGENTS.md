@@ -2,8 +2,8 @@
 
 ## Environment and Build
 
-- Use JDK 26 with preview features enabled. The compiler currently uses Java 26 preview APIs, including the ClassFile API.
-- `pom.xml` targets Java 26 and enables preview features. Use Maven to build when it is available:
+- Use JDK 25 or later. The project targets stable Java 25 and does not require preview features.
+- `pom.xml` targets Java 25. Use Maven to build when it is available:
 
   ```powershell
   mvn compile
@@ -13,13 +13,13 @@
 
   ```powershell
   $sourceFiles = Get-ChildItem -Recurse -Path src/main/java -Filter *.java | ForEach-Object { $_.FullName }
-  javac --enable-preview --source 26 -d target/classes $sourceFiles
+  javac --release 25 -d target/classes $sourceFiles
   ```
 
 - Compile the sample Zeron source with:
 
   ```powershell
-  java --enable-preview -cp target/classes com.maruseron.zeron.Zeron src/main/resources/test.zn
+  java -cp target/classes com.maruseron.zeron.Zeron src/main/resources/test.zn
   ```
 
   This runs the compiler and emits `dist/test.class`, generated lambda-shape interfaces, the `zeron.lang.Unit` singleton class, and the versioned public API index at `dist/META-INF/zeron/api-v<schema-version>.bin`. File compilation uses the source filename without its extension for the main class name. It does not execute the generated Zeron program.
@@ -27,8 +27,8 @@
 - Pass `--debug` (or `-d`) to print parser, resolver, and compiler traces to stderr; normal compilation is quiet.
 - Pass one or more `--library <class-directory-or-jar>` arguments with source files or project options to load compiled Zeron APIs from the artifact's `META-INF/zeron/api-v<schema-version>.bin`. Generated programs using an external library also need that library on their runtime classpath.
 - Pass one or more `--java-classpath <class-directory>` arguments with source files or project options to resolve the initial Java interop subset. Expanded Java varargs calls are supported when their component type is supported; signature-only top-level `external fn` declarations use compiler-configured typed bindings. Prepacked/ordinary Java arrays, JARs, Java generics, fields, inherited members, JDK module discovery, and SAM conversions are not implemented. Generated programs also need those class directories on their runtime classpath.
-- Build the bundled standard library as a separate class directory with `java --enable-preview -cp target/classes com.maruseron.zeron.Zeron --build-stdlib target/zeron-stdlib`. To build the standard library into a JAR, add `--jar-output target/zeron-stdlib.jar`. Consumers can opt in with `--stdlib compiled --library target/zeron-stdlib.jar`; the default remains bundled source mode. The artifact includes the compiler-known `zeron.lang.Unit` singleton class. Keep this output separate from `dist/` so normal Zeron-source cleanup does not remove it.
-- Inspect a library API index file, class directory, or JAR with `java --enable-preview -cp target/classes com.maruseron.zeron.ZeronLibraryIndexDump target/zeron-stdlib.jar` (or pass the generated index from `target/zeron-stdlib/META-INF/zeron/` directly).
+- Build the bundled standard library as a separate class directory with `java -cp target/classes com.maruseron.zeron.Zeron --build-stdlib target/zeron-stdlib`. To build the standard library into a JAR, add `--jar-output target/zeron-stdlib.jar`. Consumers can opt in with `--stdlib compiled --library target/zeron-stdlib.jar`; the default remains bundled source mode. The artifact includes the compiler-known `zeron.lang.Unit` singleton class. Keep this output separate from `dist/` so normal Zeron-source cleanup does not remove it.
+- Inspect a library API index file, class directory, or JAR with `java -cp target/classes com.maruseron.zeron.ZeronLibraryIndexDump target/zeron-stdlib.jar` (or pass the generated index from `target/zeron-stdlib/META-INF/zeron/` directly).
 - To exercise the generated sample program, invoke its public zero-argument `main` method through JShell:
 
   ```powershell
@@ -49,10 +49,10 @@
 
 ## Validation
 
-- For compiler or resolver changes, run `mvn -DargLine=--enable-preview test` (or compile all Java sources using the command above when Maven is unavailable).
+- For compiler or resolver changes, run `mvn test` (or compile all Java sources using the command above when Maven is unavailable).
 - For function-shape identity changes, run the canonical key tests and compile `src/main/resources/test.zn`; inspect generated interface names and method descriptors with `javap` when bytecode identity matters.
 - For lambda-lowering changes, compile `src/main/resources/test.zn`, invoke the generated program, and inspect `test` plus generated shape interfaces with `javap -classpath dist` when bytecode shape matters.
-- Keep changes scoped to the behavior being changed. Do not update Java/Maven versions or generated outputs as incidental cleanup.
+- Keep changes scoped to the behavior being changed. Maintain the stable Java 25 target and do not change generated outputs as incidental cleanup.
 
 ## Design References
 

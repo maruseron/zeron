@@ -108,8 +108,8 @@ stay consistent.
 
 ### Local Release Prototype
 
-Run `powershell -ExecutionPolicy Bypass -File scripts/release.ps1` from a checkout with JDK 26 and
-Maven installed. The script runs the preview-enabled test/package build, stages a self-contained
+Run `powershell -ExecutionPolicy Bypass -File scripts/release.ps1` from a checkout with JDK 25 or later
+and Maven installed. The script runs the test/package build, stages a self-contained
 compiler JAR, builds the versioned compiled standard-library JAR, copies both launcher scripts and
 the source error-code Markdown, exercises `explain` and a compiled-standard-library build/run, then
 creates `target/releases/zeron-<version>.zip` and a SHA-256 sidecar. The archive is a portable

@@ -217,7 +217,6 @@ public class Zeron {
                 System.getProperty("os.name").toLowerCase().contains("win") ? "java.exe" : "java");
         final var command = new ArrayList<String>();
         command.add(javaExecutable.toString());
-        command.add("--enable-preview");
         command.add("-cp");
         command.add(String.join(File.pathSeparator, classPathEntries));
         command.add(className);

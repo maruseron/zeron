@@ -1,0 +1,22 @@
+package query.codec;
+
+import query.value.UserId;
+import query.value.Value;
+
+public contract Codec<T> {
+    toValue(): Value;
+}
+
+witness Codec<Int> for Int {
+    fn toValue(): Value = Value.Integer(this);
+}
+
+witness Codec<String> for String {
+    fn toValue(): Value = Value.Text(this);
+}
+
+witness Codec<Boolean> for Boolean {
+    fn toValue(): Value = Value.Flag(this);
+}
+
+public fn encode<T: Codec<T>>(value: T): Value = value.toValue();

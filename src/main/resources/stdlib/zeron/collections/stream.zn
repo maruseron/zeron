@@ -1,5 +1,7 @@
 package zeron.collections;
 
+import zeron.control.Foldable;
+import zeron.control.Monad;
 import zeron.lang.Option;
 import zeron.internal.unwrapSome;
 
@@ -65,6 +67,63 @@ class FlatMappedStream<T, R> is Iterable<R> {
                     item = this.inner.next();
                 }
                 return Option<R>.None();
+            }
+        };
+    }
+}
+
+class MonadFlatMappedStream<T, R> is Iterable<R> {
+    source: Iterable<T>;
+    transform: (T) -> Stream<R>;
+
+    public iterator(): &Iterator<R> {
+        let upstream = source.iterator();
+        let flatMapper = transform;
+        let initialInner = Stream<R>.fromArray([]).iterator();
+        return object : Iterator<R> {
+            source: &Iterator<T> = upstream;
+            transform: (T) -> Stream<R> = flatMapper;
+            inner: &Iterator<R> = initialInner;
+
+            public mut next(): Option<R> {
+                let mut item = this.inner.next();
+                while (true) {
+                    if (item.isSome()) return item;
+                    let outerItem = this.source.next();
+                    if (not outerItem.isSome()) return Option<R>.None();
+                    this.inner = this.transform(unwrapSome(outerItem)).iterator();
+                    item = this.inner.next();
+                }
+                return Option<R>.None();
+            }
+        };
+    }
+}
+
+class AppliedStream<A, B> is Iterable<B> {
+    functions: Iterable<(A) -> B>;
+    values: Iterable<A>;
+
+    public iterator(): &Iterator<B> {
+        let functionSource = functions.iterator();
+        let valueSource = values;
+        let initialValues = Stream<B>.fromArray([]).iterator();
+        return object : Iterator<B> {
+            functions: &Iterator<(A) -> B> = functionSource;
+            values: Iterable<A> = valueSource;
+            currentValues: &Iterator<B> = initialValues;
+
+            public mut next(): Option<B> {
+                let mut value = this.currentValues.next();
+                while (true) {
+                    if (value.isSome()) return value;
+                    let function = this.functions.next();
+                    if (not function.isSome()) return Option<B>.None();
+                    this.currentValues = MappedStream<A, B>.new(
+                            this.values, unwrapSome(function)).iterator();
+                    value = this.currentValues.next();
+                }
+                return Option<B>.None();
             }
         };
     }
@@ -204,7 +263,17 @@ class TakenWhileStream<T> is Iterable<T> {
     }
 }
 
-public class Stream<T> is Iterable<T> {
+fn streamMonadAp<A, B>(
+    functions: Stream<(A) -> B>,
+    values: Stream<A>
+): Stream<B> = Stream<B>.from(AppliedStream<A, B>.new(functions, values));
+
+fn streamMonadFlatMap<A, B>(
+    source: Stream<A>,
+    transform: (A) -> Stream<B>
+): Stream<B> = Stream<B>.from(MonadFlatMappedStream<A, B>.new(source, transform));
+
+public class Stream<T> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>> {
     source: Iterable<T>;
 
     private constructor new;
@@ -219,6 +288,24 @@ public class Stream<T> is Iterable<T> {
         Stream<T>.from(ArrayStream<T>.new(source));
 
     public iterator(): &Iterator<T> = source.iterator();
+
+    implementation Monad<Stream<_>> {
+        fn map<A, B>(this: Stream<A>, transform: (A) -> B): Stream<B> =
+            this.map(transform);
+
+        fn pure<A>(value: A): Stream<A> = Stream<A>.of(value);
+
+        fn ap<A, B>(this: Stream<(A) -> B>, values: Stream<A>): Stream<B> =
+            streamMonadAp(this, values);
+
+        fn flatMap<A, B>(this: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
+            streamMonadFlatMap(this, transform);
+    }
+
+    implementation Foldable<Stream<_>> {
+        fn foldLeft<A, B>(this: Stream<A>, initial: B, combine: (B, A) -> B): B =
+            this.fold(initial, combine);
+    }
 
     public map<R>(transform: (T) -> R): Stream<R> =
         Stream<R>.new(MappedStream<T, R>.new(source, transform));

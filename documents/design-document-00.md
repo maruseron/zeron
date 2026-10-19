@@ -71,8 +71,13 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     matched through `Option.Some(value)` and `Option<T>.None()`. Public extension operations provide
     `isSome`, `getOrElse`, `fold`, `map`, and `filter`. `Iterator<T>.next()` returns this type,
     using `Option<T>.None()` for exhaustion and `Option.Some(value)` for yielded values.
-- `zeron.lang.Result<T, E>` as a sealed contract implemented by `Ok<T, E>` and `Err<T, E>`, with
-    `fold`, `map`, `mapError`, and `andThen` for explicit error-value composition. No propagation
+- Higher-kinded `Functor<F<_>>`, `Applicative<F<_>>`, `Monad<F<_>>`, and `Foldable<F<_>>` contracts
+    in `zeron.control`. `Stream` implements lazy `Monad` and `Foldable` operations; `Option` and
+    `Result` provide `Monad` and `Foldable` witnesses. `List` and intrinsic `Array` expose eager
+    `foldLeft` terminal operations through `Foldable` without eager mapping or filtering pipelines.
+- `zeron.lang.Result<T, E>` as the nominal sum `Ok(value: T) | Err(error: E)`, constructed with
+    `Result.Ok(value)` / `Result.Err(error)` or the `Result.ok` / `Result.err` factories. Its `fold`,
+    `map`, `mapError`, and `andThen` operations compose explicit error values. No propagation
     operator or source-level exception handling is introduced.
 - Exhaustive `match` expressions over non-null sealed-contract values. Cases name permitted classes,
     may bind the whole value with `as`, use declared class-defined extractor patterns with nested or
@@ -272,9 +277,10 @@ be written as ordinary declared types.
 | `Any` | Top type for all non-null values. | Implicit widening is implemented; it lowers to JVM `Object`. `Any?` also accepts nullable values and `null`. `is`-based narrowing and checked/safe casts are implemented for supported targets. |
 | `Unit` | The single unit value, used when a computation has no useful result. | Supported as a type; the `()` literal is distinct from `Never` and has a shared non-null runtime singleton. |
 | `Int` | Integer values. | Supported. |
+| `Char` | One Unicode scalar value, represented as an integer at runtime. | Supported; single-quoted literals and explicit scalar-aware String operations are available. |
 | `Float` | Floating-point values. | Supported. |
 | `Boolean` | Truth values. | Supported. |
-| `String` | Immutable text values backed by `java.lang.String`. | Supported; `zeron.lang` provides UTF-16 length, search, prefix/suffix checks, and bounds-checked substring. |
+| `String` | Immutable text values backed by `java.lang.String`. | Supported; existing length, search, and substring operations use UTF-16 code-unit indices. Explicit `codePoint*` operations use Unicode scalar indices and replace lone surrogates with U+FFFD; strict variants return `Result<_, UnicodeError>`. |
 
 #### Internal and nominal types
 
@@ -604,14 +610,13 @@ loop {
 
 ### Error handling
 
-`zeron.lang.Result<T, E>` represents recoverable failures as ordinary values. Its sealed `Ok` and
-`Err` cases can be consumed with exhaustive matching or `fold`, and composed explicitly with
-`map`, `mapError`, and `andThen`. Propagation syntax remains deferred while its interaction with
-nullability and other sequencing notation is explored. `using` provides synchronous lexical resource
-cleanup; it does not catch arbitrary Java exceptions or make `Result` interoperate with raised effects.
-`Ok.value` and `Err.error` are read-only properties on
-their respective variants, not members of the common `Result` contract; narrow or match the result
-before accessing a payload.
+`zeron.lang.Result<T, E>` represents recoverable failures as ordinary values. Its sum cases `Ok` and
+`Err` can be consumed with exhaustive matching or `fold`, and composed explicitly with `map`,
+`mapError`, and `andThen`. It is a `Monad` over its success type and a `Foldable` that combines an
+`Ok` payload while leaving the accumulator unchanged for `Err`. Propagation syntax remains deferred
+while its interaction with nullability and other sequencing notation is explored. `using` provides
+synchronous lexical resource cleanup; it does not catch arbitrary Java exceptions or make `Result`
+interoperate with raised effects.
 
 For now, scanner/parser and resolver failures are compile-time diagnostics that stop code generation.
 Runtime exceptions from generated JVM code propagate to the host caller; Zeron does not catch or

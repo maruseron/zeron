@@ -3,6 +3,7 @@ package com.maruseron.zeron.domain;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.ConstantDescs;
 import java.lang.constant.MethodTypeDesc;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -144,6 +145,26 @@ public final class FunctionBindingRegistry {
         final var stringSubstring = TypeDescriptor.functionOf("stringSubstring",
                 string, string, TypeDescriptor.ofInt(), TypeDescriptor.ofInt());
         final var stringClass = ClassDesc.of("java.lang.String");
+        final var stringCodePointLength = TypeDescriptor.functionOf("stringCodePointLength",
+                TypeDescriptor.ofInt(), string);
+        final var stringCodePointAt = TypeDescriptor.functionOf("stringCodePointAt",
+                TypeDescriptor.ofInt(), string, TypeDescriptor.ofInt());
+        final var stringSubstringByCodePoints = TypeDescriptor.functionOf("stringSubstringByCodePoints",
+                string, string, TypeDescriptor.ofInt(), TypeDescriptor.ofInt());
+        final var stringIndexOfCodePoint = TypeDescriptor.functionOf("stringIndexOfCodePoint",
+                TypeDescriptor.ofInt(), string, TypeDescriptor.ofChar());
+        final var stringFirstMalformedOffset = TypeDescriptor.functionOf("stringFirstMalformedOffset",
+                TypeDescriptor.ofInt(), string);
+        final var stringCodePointAtOffset = TypeDescriptor.functionOf("stringCodePointAtOffset",
+                TypeDescriptor.ofChar(), string, TypeDescriptor.ofInt());
+        final var stringCodePointWidthAtOffset = TypeDescriptor.functionOf("stringCodePointWidthAtOffset",
+                TypeDescriptor.ofInt(), string, TypeDescriptor.ofInt());
+        final var charToInt = TypeDescriptor.functionOf("charToInt",
+                TypeDescriptor.ofInt(), TypeDescriptor.ofChar());
+        final var intToChar = TypeDescriptor.functionOf("intToChar",
+                TypeDescriptor.ofChar(), TypeDescriptor.ofInt());
+        final var charToString = TypeDescriptor.functionOf("charToString",
+                TypeDescriptor.ofString(), TypeDescriptor.ofChar());
         final var doubleClass = ClassDesc.of("java.lang.Double");
         return new FunctionBindingRegistry(Map.ofEntries(
                 Map.entry("zeron.lang.intToFloat",
@@ -178,6 +199,73 @@ public final class FunctionBindingRegistry {
                 Map.entry("zeron.lang.floatIsFinite",
                         new Binding(floatPredicate, new StaticMethod(doubleClass, "isFinite",
                                 MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_double)))),
+                Map.entry("zeron.math.mathAbsInt",
+                        mathBinding("mathAbsInt", "abs", TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
+                Map.entry("zeron.math.mathAbsLong",
+                        mathBinding("mathAbsLong", "abs", TypeDescriptor.ofLong(), TypeDescriptor.ofLong())),
+                Map.entry("zeron.math.mathAbsFloat",
+                        mathBinding("mathAbsFloat", "abs", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathMinInt",
+                        mathBinding("mathMinInt", "min", TypeDescriptor.ofInt(),
+                                TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
+                Map.entry("zeron.math.mathMinLong",
+                        mathBinding("mathMinLong", "min", TypeDescriptor.ofLong(),
+                                TypeDescriptor.ofLong(), TypeDescriptor.ofLong())),
+                Map.entry("zeron.math.mathMinFloat",
+                        mathBinding("mathMinFloat", "min", TypeDescriptor.ofFloat(),
+                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathMaxInt",
+                        mathBinding("mathMaxInt", "max", TypeDescriptor.ofInt(),
+                                TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
+                Map.entry("zeron.math.mathMaxLong",
+                        mathBinding("mathMaxLong", "max", TypeDescriptor.ofLong(),
+                                TypeDescriptor.ofLong(), TypeDescriptor.ofLong())),
+                Map.entry("zeron.math.mathMaxFloat",
+                        mathBinding("mathMaxFloat", "max", TypeDescriptor.ofFloat(),
+                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathClampInt",
+                        mathBinding("mathClampInt", "clamp", TypeDescriptor.ofInt(),
+                                TypeDescriptor.ofLong(), TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
+                Map.entry("zeron.math.mathClampLong",
+                        mathBinding("mathClampLong", "clamp", TypeDescriptor.ofLong(),
+                                TypeDescriptor.ofLong(), TypeDescriptor.ofLong(), TypeDescriptor.ofLong())),
+                Map.entry("zeron.math.mathClampFloat",
+                        mathBinding("mathClampFloat", "clamp", TypeDescriptor.ofFloat(),
+                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatSqrt",
+                        mathBinding("mathFloatSqrt", "sqrt", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatPow",
+                        mathBinding("mathFloatPow", "pow", TypeDescriptor.ofFloat(),
+                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatExp",
+                        mathBinding("mathFloatExp", "exp", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatLn",
+                        mathBinding("mathFloatLn", "log", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatLog10",
+                        mathBinding("mathFloatLog10", "log10", TypeDescriptor.ofFloat(),
+                                TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatSin",
+                        mathBinding("mathFloatSin", "sin", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatCos",
+                        mathBinding("mathFloatCos", "cos", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatTan",
+                        mathBinding("mathFloatTan", "tan", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatAsin",
+                        mathBinding("mathFloatAsin", "asin", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatAcos",
+                        mathBinding("mathFloatAcos", "acos", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatAtan",
+                        mathBinding("mathFloatAtan", "atan", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatAtan2",
+                        mathBinding("mathFloatAtan2", "atan2", TypeDescriptor.ofFloat(),
+                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatFloor",
+                        mathBinding("mathFloatFloor", "floor", TypeDescriptor.ofFloat(),
+                                TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatCeil",
+                        mathBinding("mathFloatCeil", "ceil", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.mathFloatRound",
+                        mathBinding("mathFloatRound", "round", TypeDescriptor.ofLong(), TypeDescriptor.ofFloat())),
                 Map.entry("zeron.lang.stringLength",
                         new Binding(stringLength, new InstanceMethod(stringClass, "length",
                                 MethodTypeDesc.of(ConstantDescs.CD_int)))),
@@ -199,6 +287,44 @@ public final class FunctionBindingRegistry {
                 Map.entry("zeron.lang.stringSubstring",
                         new Binding(stringSubstring, new InstanceMethod(stringClass, "substring",
                                 MethodTypeDesc.of(ConstantDescs.CD_String, ConstantDescs.CD_int,
-                                        ConstantDescs.CD_int))))));
+                                        ConstantDescs.CD_int)))),
+                Map.entry("zeron.lang.stringCodePointLength",
+                        intrinsicBinding(stringCodePointLength, IntrinsicId.STRING_CODE_POINT_LENGTH)),
+                Map.entry("zeron.lang.stringCodePointAt",
+                        intrinsicBinding(stringCodePointAt, IntrinsicId.STRING_CODE_POINT_AT)),
+                Map.entry("zeron.lang.stringSubstringByCodePoints",
+                        intrinsicBinding(stringSubstringByCodePoints,
+                                IntrinsicId.STRING_SUBSTRING_BY_CODE_POINTS)),
+                Map.entry("zeron.lang.stringIndexOfCodePoint",
+                        intrinsicBinding(stringIndexOfCodePoint, IntrinsicId.STRING_INDEX_OF_CODE_POINT)),
+                Map.entry("zeron.lang.stringFirstMalformedOffset",
+                        intrinsicBinding(stringFirstMalformedOffset, IntrinsicId.STRING_FIRST_MALFORMED_OFFSET)),
+                Map.entry("zeron.lang.stringCodePointAtOffset",
+                        intrinsicBinding(stringCodePointAtOffset, IntrinsicId.STRING_CODE_POINT_AT_OFFSET)),
+                Map.entry("zeron.lang.stringCodePointWidthAtOffset",
+                        intrinsicBinding(stringCodePointWidthAtOffset,
+                                IntrinsicId.STRING_CODE_POINT_WIDTH_AT_OFFSET)),
+                Map.entry("zeron.lang.charToInt",
+                        intrinsicBinding(charToInt, IntrinsicId.CHAR_TO_INT)),
+                Map.entry("zeron.lang.intToChar",
+                        intrinsicBinding(intToChar, IntrinsicId.INT_TO_CHAR)),
+                Map.entry("zeron.lang.charToString",
+                        intrinsicBinding(charToString, IntrinsicId.CHAR_TO_STRING))));
+    }
+
+    private static Binding intrinsicBinding(final FunctionDescriptor signature, final IntrinsicId id) {
+        return new Binding(signature, new IntrinsicBinding(id));
+    }
+
+    private static Binding mathBinding(final String functionName,
+                                       final String methodName,
+                                       final TypeDescriptor returnType,
+                                       final TypeDescriptor... parameterTypes) {
+        final var parameterClasses = Arrays.stream(parameterTypes)
+                .map(TypeDescriptor::toJavaClassDesc)
+                .toArray(ClassDesc[]::new);
+        return new Binding(TypeDescriptor.functionOf(functionName, returnType, parameterTypes),
+                new StaticMethod(ClassDesc.of("java.lang.Math"), methodName,
+                        MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(returnType), parameterClasses)));
     }
 }

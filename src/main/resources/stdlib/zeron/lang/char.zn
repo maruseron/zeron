@@ -1,0 +1,20 @@
+package zeron.lang;
+
+public extension Char {
+    public fn toInt(): Int = charToInt(this);
+    public fn toString(): String = charToString(this);
+}
+
+public extension Int {
+    public fn toChar(): Option<Char> {
+        if (this < 0 or this > 1114111
+                or this >= 55296 and this <= 57343) {
+            return Option<Char>.None();
+        }
+        return Option.Some(intToChar(this));
+    }
+}
+
+external fn charToInt(value: Char): Int;
+external fn intToChar(value: Int): Char;
+external fn charToString(value: Char): String;

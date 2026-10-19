@@ -34,12 +34,17 @@ final class BytecodeEmitter {
         RuntimeSupportEmitter.emitResourceSupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitEqualitySupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitHashSupportClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitStringUnicodeSupportClass(context.outputDirectory);
         final var signatureDeclarations = context.compilationUnits.stream()
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
                 .map(NamespaceMembers.Member::declaration).toList();
         context.lambdaPlan = new LambdaCompilationPlan(context.topLevelDeclarations, signatureDeclarations,
                 context.symbols);
+        if (context.lambdaPlan.hasLambdaTemplates()) {
+            RuntimeSupportEmitter.emitLambdaTemplateSupportClass(context.outputDirectory);
+        }
         for (final var shape : context.lambdaPlan.functionShapes().entrySet()) {
+            context.registerGeneratedInterface(FunctionShapeNames.interfaceName(shape.getKey()));
             RuntimeSupportEmitter.emitFunctionShape(context.outputDirectory, shape.getKey(), shape.getValue());
         }
 
@@ -662,6 +667,10 @@ final class BytecodeEmitter {
             }
             case Expr.Lambda lambda -> {
                 final var functionType = (FunctionDescriptor) lambda.getType();
+                if (context.lambdaPlan.lambdaTemplateFactoryName(lambda) != null) {
+                    emitLambdaTemplateValue(context, composer, lambda);
+                    break;
+                }
                 final var captures = context.lambdaPlan.captures(lambda);
                 final var captureTypes = context.lambdaPlan.captureTypes(lambda);
                 final var implementationParameters = new ArrayList<>(captureTypes);
@@ -710,7 +719,7 @@ final class BytecodeEmitter {
                     }
                     case Integer i -> {
                         composer.ldc(i);
-                        context.lastEmittedType = TypeDescriptor.ofInt();
+                        context.lastEmittedType = literal.getType();
                     }
                     case Long value -> {
                         composer.ldc(value);
@@ -785,7 +794,14 @@ final class BytecodeEmitter {
                     emitConversion(context, composer, erasedFieldType, variable.getType());
                     context.lastEmittedType = variable.getType();
                 } else {
-                    emitVariable(context, composer, variable.resolvedSymbolToken());
+                    if (variable.storedFunctionType() != null
+                            && LambdaCompilationPlan.hasInferredContractBounds(variable.storedFunctionType())) {
+                        emitLambdaTemplateSpecialization(context, composer,
+                                variable.resolvedSymbolToken(), variable.storedFunctionType(),
+                                (FunctionDescriptor) variable.getType(), variable.evidenceArguments());
+                    } else {
+                        emitVariable(context, composer, variable.resolvedSymbolToken());
+                    }
                     if (!(variable.getType() instanceof InferDescriptor)
                             && !context.lastEmittedType.equals(variable.getType())) {
                         emitConversion(context, composer, context.lastEmittedType, variable.getType());
@@ -887,7 +903,16 @@ final class BytecodeEmitter {
         final var runtimeType = functionType.isGeneric()
                 ? (FunctionDescriptor) TypeSubstitution.erase(functionType)
                 : functionType;
-        emitVariable(context, composer, call.resolvedSymbolToken());
+        if (LambdaCompilationPlan.hasInferredContractBounds(functionType)) {
+            final var specializedType = call.specializedFunctionType();
+            if (specializedType == null) {
+                throw new IllegalStateException("Constrained lambda call has no specialized function type.");
+            }
+            emitLambdaTemplateSpecialization(context, composer, call.resolvedSymbolToken(),
+                    functionType, specializedType, call.evidenceArguments());
+        } else {
+            emitVariable(context, composer, call.resolvedSymbolToken());
+        }
         if (call.variadicElementType() != null) {
             emitVariadicArguments(context, composer, call.arguments, runtimeType,
                     call.variadicFixedArity(), call.variadicElementType());
@@ -906,6 +931,68 @@ final class BytecodeEmitter {
             context.lastEmittedType = call.getType();
         } else {
             context.lastEmittedType = functionType.returnType();
+        }
+    }
+
+    private static void emitLambdaTemplateValue(final CompilationContext context,
+                                                final CodeBuilder composer,
+                                                final Expr.Lambda lambda) {
+        final var templateClass = ClassDesc.of("zeron.runtime.LambdaTemplateSupport");
+        final var methodHandleClass = ClassDesc.of("java.lang.invoke.MethodHandle");
+        final var factoryDescriptor = MethodTypeDesc.of(ConstantDescs.CD_Object,
+                ConstantDescs.CD_Object.arrayType(), methodHandleClass.arrayType());
+        final var factory = MethodHandleDesc.of(DirectMethodHandleDesc.Kind.STATIC,
+                ClassDesc.of(context.mainClassName),
+                context.lambdaPlan.lambdaTemplateFactoryName(lambda),
+                factoryDescriptor.descriptorString());
+        final var captures = context.lambdaPlan.captures(lambda);
+
+        composer.new_(templateClass);
+        composer.dup();
+        composer.ldc(factory);
+        composer.loadConstant(Integer.valueOf(captures.size()));
+        composer.anewarray(ConstantDescs.CD_Object);
+        for (int index = 0; index < captures.size(); index++) {
+            composer.dup();
+            composer.loadConstant(Integer.valueOf(index));
+            emitVariable(context, composer, captures.get(index));
+            emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
+            composer.aastore();
+        }
+        composer.invokespecial(templateClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void,
+                        methodHandleClass, ConstantDescs.CD_Object.arrayType()));
+        context.lastEmittedType = lambda.getType();
+    }
+
+    private static void emitLambdaTemplateSpecialization(
+            final CompilationContext context, final CodeBuilder composer, final Token binding,
+            final FunctionDescriptor scheme, final FunctionDescriptor specializedType,
+            final List<Expr.EvidenceArgument> evidenceArguments) {
+        final var templateClass = ClassDesc.of("zeron.runtime.LambdaTemplateSupport");
+        final var erasedScheme = (FunctionDescriptor) TypeSubstitution.erase(scheme);
+        emitVariable(context, composer, binding);
+        composer.ldc(FunctionShapeKey.of(
+                (FunctionDescriptor) TypeSubstitution.erase(specializedType)).canonicalEncoding());
+        emitEvidenceArray(context, composer, evidenceArguments);
+        composer.invokevirtual(templateClass, "specialize",
+                MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_String,
+                        ClassDesc.of("java.lang.invoke.MethodHandle").arrayType()));
+        composer.checkcast(TypeDescriptor.toJavaClassDesc(erasedScheme));
+        context.lastEmittedType = scheme;
+    }
+
+    private static void emitEvidenceArray(final CompilationContext context,
+                                          final CodeBuilder composer,
+                                          final List<Expr.EvidenceArgument> evidenceArguments) {
+        final var methodHandleClass = ClassDesc.of("java.lang.invoke.MethodHandle");
+        composer.loadConstant(Integer.valueOf(evidenceArguments.size()));
+        composer.anewarray(methodHandleClass);
+        for (int index = 0; index < evidenceArguments.size(); index++) {
+            composer.dup();
+            composer.loadConstant(Integer.valueOf(index));
+            emitEvidenceArguments(context, composer, List.of(evidenceArguments.get(index)));
+            composer.aastore();
         }
     }
 
@@ -1799,6 +1886,22 @@ final class BytecodeEmitter {
         final var target = binding.target();
         if (target instanceof FunctionBindingRegistry.IntrinsicBinding intrinsicBinding) {
             emitExternalFunctionArguments(context, composer, signature);
+            final var unicodeMethod = stringUnicodeIntrinsicMethod(intrinsicBinding.id());
+            if (unicodeMethod != null) {
+                final var descriptor = MethodTypeDesc.of(
+                        TypeDescriptor.toJavaClassDesc(signature.returnType()),
+                        signature.parameters().stream().map(TypeDescriptor::toJavaClassDesc).toList());
+                composer.invokestatic(ClassDesc.of("zeron.runtime.StringUnicode"), unicodeMethod, descriptor);
+                switch (TypeDescriptor.toJavaClassDesc(signature.returnType()).descriptorString()) {
+                    case "I", "B", "Z" -> composer.ireturn();
+                    case "J" -> composer.lreturn();
+                    case "D" -> composer.dreturn();
+                    case "V" -> composer.return_();
+                    default -> composer.areturn();
+                }
+                context.lastEmittedType = signature.returnType();
+                return;
+            }
             switch (intrinsicBinding.id()) {
                 case INT_TO_FLOAT -> {
                     composer.i2d();
@@ -1832,6 +1935,7 @@ final class BytecodeEmitter {
             context.lastEmittedType = signature.returnType();
             return;
         }
+
         final MethodTypeDesc methodDescriptor;
         if (target instanceof FunctionBindingRegistry.StaticMethod staticMethod) {
             methodDescriptor = staticMethod.descriptor();
@@ -1856,6 +1960,22 @@ final class BytecodeEmitter {
             composer.return_(TypeKind.fromDescriptor(methodDescriptor.returnType().descriptorString()));
         }
         context.lastEmittedType = signature.returnType();
+    }
+
+    private static String stringUnicodeIntrinsicMethod(final IntrinsicId id) {
+        return switch (id) {
+            case STRING_CODE_POINT_LENGTH -> "codePointLength";
+            case STRING_CODE_POINT_AT -> "codePointAt";
+            case STRING_SUBSTRING_BY_CODE_POINTS -> "substringByCodePoints";
+            case STRING_INDEX_OF_CODE_POINT -> "indexOfCodePoint";
+            case STRING_FIRST_MALFORMED_OFFSET -> "firstMalformedOffset";
+            case STRING_CODE_POINT_AT_OFFSET -> "scalarAtOffset";
+            case STRING_CODE_POINT_WIDTH_AT_OFFSET -> "scalarWidthAtOffset";
+            case CHAR_TO_INT -> "charToInt";
+            case INT_TO_CHAR -> "intToChar";
+            case CHAR_TO_STRING -> "charToString";
+            default -> null;
+        };
     }
 
     private static void emitFloatToIntOption(final CompilationContext context,
@@ -2074,7 +2194,7 @@ final class BytecodeEmitter {
     static void emitBox(CompilationContext context, final CodeBuilder composer, final TypeDescriptor type ){
         if (type == null) return;
         final var boxer = switch (type) {
-            case IntDescriptor _ -> "I";
+            case IntDescriptor _, CharDescriptor _ -> "I";
             case LongDescriptor _ -> "J";
             case ByteDescriptor _ -> "C";
             case FloatDescriptor _ -> "D";
@@ -2142,7 +2262,7 @@ final class BytecodeEmitter {
         }
         if (sourceType instanceof NullableDescriptor nullable
                 && nullable.baseType().equals(targetType)
-                && (targetType instanceof IntDescriptor
+                && (targetType instanceof IntDescriptor || targetType instanceof CharDescriptor
                 || targetType instanceof LongDescriptor
                 || targetType instanceof ByteDescriptor
                 || targetType instanceof FloatDescriptor
@@ -2230,6 +2350,11 @@ final class BytecodeEmitter {
     }
 
     static void emitUnboxOrCast(CompilationContext context, final CodeBuilder composer, final TypeDescriptor targetType ){
+        if (targetType instanceof CharDescriptor) {
+            composer.invokestatic(ClassDesc.of("zeron.runtime.StringUnicode"), "unboxCharValue",
+                    MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_Object));
+            return;
+        }
         final var targetDescriptor = TypeDescriptor.toJavaClassDesc(targetType).descriptorString();
         switch (targetDescriptor) {
             case "I" -> {
@@ -2281,7 +2406,7 @@ final class BytecodeEmitter {
                 : targetType;
         if (targetType instanceof NullableDescriptor) {
             composer.checkcast(TypeDescriptor.toJavaClassDesc(targetType));
-        } else if (valueType instanceof IntDescriptor) {
+        } else if (valueType instanceof IntDescriptor || valueType instanceof CharDescriptor) {
             composer.checkcast(ConstantDescs.CD_Integer);
             composer.invokevirtual(ClassDesc.of("java.lang.Integer"), "intValue",
                     MethodTypeDesc.of(ConstantDescs.CD_int));

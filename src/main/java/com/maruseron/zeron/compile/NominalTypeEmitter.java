@@ -22,7 +22,8 @@ import static com.maruseron.zeron.compile.BytecodeEmitter.*;
 final class NominalTypeEmitter {
     static void emit(CompilationContext context) throws IOException {
         for (final var contract : context.resolution.contracts().values()) {
-            if (context.metadata.metadataTypeNames().contains(contract.name().lexeme())) continue;
+            if (contract.higherKinded()
+                    || context.metadata.metadataTypeNames().contains(contract.name().lexeme())) continue;
             final var contractName = contract.name().lexeme();
             if (contractName.equals(context.mainClassName)) {
                 throw new IllegalStateException("Contract name conflicts with generated program class: " + contractName);
@@ -515,6 +516,13 @@ final class NominalTypeEmitter {
                             builder.withMethodBody(constructor.name().lexeme(),
                                     toJavaMethodDescriptor(factoryType), flags,
                                     BytecodeEmitter::emitEvidenceUnavailable);
+                        }
+                    }
+
+                    for (final var witness : declaration.higherKindedImplementations()) {
+                        for (final var method : witness.methods()) {
+                                    DeclarationEmitter.generateClassHktImplementationHelper(
+                                            context, builder, method.implementation());
                         }
                     }
 

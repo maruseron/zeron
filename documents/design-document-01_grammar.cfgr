@@ -1,7 +1,9 @@
 module ZeronGrammar;
 
-# IDENTIFIER, INT, LONG, DOUBLE, and STRING denote scanner token kinds; LONG is an integer literal
+# IDENTIFIER, INT, LONG, DOUBLE, STRING, and CHAR denote scanner token kinds; LONG is an integer literal
 # with an `L` suffix.
+# CHAR is a single-quoted Unicode scalar literal; its escapes are `\\`, `\'`, `\n`, `\r`, `\t`, and
+# braced hexadecimal `\u{...}`.
 # // and /* */ comments are retained as ranged scanner tokens and exposed by ParseResult,
 # but are excluded from the grammar and the compilation unit.
 # `type` below is source syntax; design-document-02 describes encoded descriptors.
@@ -70,8 +72,8 @@ classMember                : fieldDecl | propertyDecl | constructorDecl | namedC
 fieldDecl                  : IDENTIFIER ":" type ";" ;
 propertyDecl               : [visibility] ["mut"] "property" IDENTIFIER ":" type ["=" expression]
                              (";" | "{" propertyAccessor+ "}") ;
-propertyAccessor           : "get" ("=" expression ";" | block)
-                           | "set" "(" IDENTIFIER ")" ("=" expression ";" | block) ;
+propertyAccessor           : soft("get") ("=" expression ";" | block)
+                           | soft("set") "(" IDENTIFIER ")" ("=" expression ";" | block) ;
 constructorDecl            : visibility "constructor" "new" ";" ;
 namedConstructorDecl       : visibility "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause]
                              ("=" expression ";" | block) ;
@@ -94,7 +96,7 @@ contractMethod             : ["default"] ["mut"] memberName [typeParameters] "("
                              (";" | "=" expression ";" | block) ;
 contractConstructor        : "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause] ;
 visibility                 : "public" | "private" ;
-memberName                 : IDENTIFIER | "get" | "set" ;
+memberName                 : IDENTIFIER ;
 
 statement                  : exprStmt
                            | breakStmt
@@ -159,6 +161,7 @@ primary                    : INT
                            | LONG
                            | DOUBLE
                            | STRING
+                           | CHAR
                            | IDENTIFIER
                            | handleExpr
                            | arrayLiteral

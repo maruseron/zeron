@@ -103,8 +103,13 @@ final class LambdaSupportEmitter {
         }
 
         final var captures = context.lambdaPlan.captures(lambda);
+        final var evidenceFields = BytecodeEmitter.evidenceFields(
+                context, functionType.typeParameters(), "lambda",
+                context.lambdaPlan.lambdaMethodName(lambda));
+        final var methodHandleType = TypeDescriptor.ofName("java.lang.invoke.MethodHandle");
         final var allParameters = new ArrayList<TypeDescriptor>();
         allParameters.addAll(context.lambdaPlan.captureTypes(lambda));
+        allParameters.addAll(Collections.nCopies(evidenceFields.size(), methodHandleType));
         for (final var parameter : functionType.parameters()) {
             allParameters.add(parameter);
         }
@@ -121,6 +126,11 @@ final class LambdaSupportEmitter {
                 final var captureType = context.lambdaPlan.captureTypes(lambda).get(i);
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, capture, captureType, BindingMutability.IMMUTABLE);
                 context.symbols.define(capture);
+            }
+            for (final var evidenceField : evidenceFields) {
+                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceField.token(),
+                        methodHandleType, BindingMutability.IMMUTABLE);
+                context.symbols.define(evidenceField.token());
             }
             for (int i = 0; i < lambda.params.size(); i++) {
                 final var param = lambda.params.get(i);
@@ -151,6 +161,66 @@ final class LambdaSupportEmitter {
             context.currentReturnType = previousReturnType;
             context.emittingLambdaImplementation = previousLambdaImplementation;
         }
+    }
+
+    static void emitLambdaTemplateFactory(final CompilationContext context,
+                                          final CodeBuilder composer,
+                                          final Expr.Lambda lambda) {
+        final var functionType = (FunctionDescriptor) lambda.getType();
+        final var erasedFunctionType = (FunctionDescriptor) TypeSubstitution.erase(functionType);
+        final var captures = context.lambdaPlan.captureTypes(lambda);
+        final var evidenceCount = BytecodeEmitter.evidenceFields(
+                context, functionType.typeParameters(), "lambda",
+                context.lambdaPlan.lambdaMethodName(lambda)).size();
+        final var methodHandleType = ClassDesc.of("java.lang.invoke.MethodHandle");
+        final var capturedTypes = new ArrayList<TypeDescriptor>(captures);
+        capturedTypes.addAll(Collections.nCopies(evidenceCount,
+                TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
+
+        final var invokedParameters = new ArrayList<ClassDesc>();
+        for (int index = 0; index < captures.size(); index++) {
+            composer.aload(0);
+            composer.loadConstant(Integer.valueOf(index));
+            composer.aaload();
+            BytecodeEmitter.emitConversion(context, composer, TypeDescriptor.ofAny(), captures.get(index));
+            invokedParameters.add(TypeDescriptor.toJavaClassDesc(captures.get(index)));
+        }
+        for (int index = 0; index < evidenceCount; index++) {
+            composer.aload(1);
+            composer.loadConstant(Integer.valueOf(index));
+            composer.aaload();
+            composer.checkcast(methodHandleType);
+            invokedParameters.add(methodHandleType);
+        }
+
+        final var implementationParameters = new ArrayList<TypeDescriptor>(capturedTypes);
+        implementationParameters.addAll(erasedFunctionType.parameters());
+        final var implementation = MethodHandleDesc.of(
+                DirectMethodHandleDesc.Kind.STATIC,
+                ClassDesc.of(context.mainClassName),
+                context.lambdaPlan.lambdaMethodName(lambda),
+                toJavaMethodDescriptor(erasedFunctionType, implementationParameters).descriptorString());
+        final var metafactoryType = MethodTypeDesc.of(
+                ClassDesc.of("java.lang.invoke.CallSite"),
+                ClassDesc.of("java.lang.invoke.MethodHandles$Lookup"),
+                ConstantDescs.CD_String,
+                ClassDesc.of("java.lang.invoke.MethodType"),
+                ClassDesc.of("java.lang.invoke.MethodType"),
+                ClassDesc.of("java.lang.invoke.MethodHandle"),
+                ClassDesc.of("java.lang.invoke.MethodType"));
+        final var metafactory = MethodHandleDesc.of(
+                DirectMethodHandleDesc.Kind.STATIC,
+                ClassDesc.of("java.lang.invoke.LambdaMetafactory"),
+                "metafactory",
+                metafactoryType.descriptorString());
+        composer.invokedynamic(DynamicCallSiteDesc.of(
+                metafactory,
+                "invoke",
+                MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedFunctionType), invokedParameters),
+                toJavaMethodDescriptor(erasedFunctionType),
+                implementation,
+                toJavaMethodDescriptor(erasedFunctionType)));
+        composer.areturn();
     }
 
 

@@ -207,6 +207,7 @@ final class CallResolver {
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        final var localLambdaBinding = localLambdaBinding(call);
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
             final var explicitType = call.explicitTypeArguments.get(i);
             TypeResolver.validateType(context, explicitType, call.callee);
@@ -247,7 +248,10 @@ final class CallResolver {
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
                 final var actual = substitutions.get(parameter);
-                if (!TypeClassEvidence.hasEvidence(context, requiredBound, actual, call.callee)) {
+                if (localLambdaBinding != null) {
+                    LambdaResolver.ensureLambdaSchemeBound(
+                            context, requiredBound, actual, call.callee, localLambdaBinding);
+                } else if (!TypeClassEvidence.hasEvidence(context, requiredBound, actual, call.callee)) {
                     Resolver.ensureAssignable(context, requiredBound, actual, call.callee);
                 }
             }
@@ -268,11 +272,23 @@ final class CallResolver {
         final var instantiatedEffects = genericType.raisedEffects().stream()
                 .map(effect -> TypeSubstitution.substitute(effect, substitutions))
                 .toList();
-        context.recordCallSiteFunctionType(call.callee, TypeDescriptor.functionWithEffectsOf(
+        final var specializedFunctionType = TypeDescriptor.functionWithEffectsOf(
                 genericType.name(), instantiatedReturn, instantiatedParameters, List.of(),
-                instantiatedEffects));
+                instantiatedEffects);
+        call.setSpecializedFunctionType(specializedFunctionType);
+        context.recordCallSiteFunctionType(call.callee, specializedFunctionType);
         call.setType(instantiatedReturn);
         return instantiatedReturn;
+    }
+
+    private Stmt.Var localLambdaBinding(final Expr.Call call) {
+        if (call.resolvedFunctionName() != null
+                || !context.symbols.containsSymbol(call.resolvedSymbolToken())) return null;
+        final var declaration = context.symbols.getSymbol(call.resolvedSymbolToken()).declaration();
+        return declaration instanceof Stmt.Var variable
+                && variable.mutability() == BindingMutability.IMMUTABLE
+                && variable.initializer() instanceof Expr.Lambda
+                ? variable : null;
     }
 
     private void recordCallSiteFunctionType(final Token callSite,
@@ -320,11 +336,17 @@ final class CallResolver {
     }
 
     private boolean isFunctionReferenceCandidate(final Expr expression) {
-        return expression instanceof Expr.Variable variable
-                && variable.explicitFunctionTypeArguments.isEmpty()
-                && variable.resolvedFunctionName() == null
-                && !context.symbols.containsSymbol(variable.name)
-                && MemberInteropResolver.resolveFunctionName(context, variable.name.lexeme(), variable.name) != null;
+        if (!(expression instanceof Expr.Variable variable)
+                || !variable.explicitFunctionTypeArguments.isEmpty()
+                || variable.resolvedFunctionName() != null) return false;
+        if (context.symbols.containsSymbol(variable.name)) {
+            final var bindingType = context.symbols.getSymbol(variable.name).type();
+            if (bindingType instanceof FunctionDescriptor function) return function.isGeneric();
+            return bindingType instanceof ReferenceDescriptor reference
+                    && reference.baseType() instanceof FunctionDescriptor referencedFunction
+                    && referencedFunction.isGeneric();
+        }
+        return MemberInteropResolver.resolveFunctionName(context, variable.name.lexeme(), variable.name) != null;
     }
 
     private FunctionDescriptor functionType(final TypeDescriptor type) {

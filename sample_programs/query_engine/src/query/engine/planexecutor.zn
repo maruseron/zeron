@@ -1,0 +1,187 @@
+package query.engine;
+
+import query.ast.Expr;
+import query.ast.QueryPlan;
+import query.backend.MemoryDatabase;
+import query.dsl.Query;
+import query.error.QueryError;
+import query.schema.Row;
+import query.value.Value;
+
+import zeron.collections.List;
+import zeron.lang.Result;
+
+public fn execute(query: Query, database: MemoryDatabase): Result<&List<Row>, QueryError> =
+    executePlan(query.toPlan(), database);
+
+fn executePlan(
+    plan: QueryPlan,
+    database: MemoryDatabase
+): Result<&List<Row>, QueryError> = match (plan) {
+    case QueryPlan.Scan(table) -> database.rowsFor(table);
+    case QueryPlan.Filter(source, predicate) -> match (executePlan(source, database)) {
+        case Result.Ok(rows) -> filterRows(rows, predicate);
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+    case QueryPlan.Project(source, columns) -> match (executePlan(source, database)) {
+        case Result.Ok(rows) -> projectRows(rows, columns);
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+    case QueryPlan.Join(left, right, leftKey, rightKey) ->
+        executeJoin(left, right, leftKey, rightKey, database);
+    case QueryPlan.OrderBy(source, column) -> match (executePlan(source, database)) {
+        case Result.Ok(rows) -> orderRows(rows, column);
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+};
+
+fn filterRows(rows: List<Row>, predicate: Expr): Result<&List<Row>, QueryError> =
+    filterRowsFrom(rows, predicate, 0, List<Row>.empty());
+
+fn filterRowsFrom(
+    rows: List<Row>,
+    predicate: Expr,
+    index: Int,
+    filtered: &List<Row>
+): Result<&List<Row>, QueryError> =
+    if (index >= rows.size) then Result<&List<Row>, QueryError>.Ok(filtered)
+    else match (evaluatePredicate(predicate, rows.at(index))) {
+        case Result.Ok(keep) ->
+            if (keep)
+            then filterRowsFrom(rows, predicate, index + 1, appendRow(filtered, rows.at(index)))
+            else filterRowsFrom(rows, predicate, index + 1, filtered);
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+
+fn projectRows(rows: List<Row>, columns: Array<String>): Result<&List<Row>, QueryError> =
+    projectRowsFrom(rows, columns, 0, List<Row>.empty());
+
+fn projectRowsFrom(
+    rows: List<Row>,
+    columns: Array<String>,
+    index: Int,
+    projected: &List<Row>
+): Result<&List<Row>, QueryError> =
+    if (index >= rows.size) then Result<&List<Row>, QueryError>.Ok(projected)
+    else match (rows.at(index).project(columns)) {
+        case Result.Ok(row) ->
+            projectRowsFrom(rows, columns, index + 1, appendRow(projected, row));
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+
+fn executeJoin(
+    left: QueryPlan,
+    right: QueryPlan,
+    leftKey: String,
+    rightKey: String,
+    database: MemoryDatabase
+): Result<&List<Row>, QueryError> = match (executePlan(left, database)) {
+    case Result.Ok(leftRows) -> match (executePlan(right, database)) {
+        case Result.Ok(rightRows) ->
+            joinRows(leftRows, rightRows, leftKey, rightKey, 0, List<Row>.empty());
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+    case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+};
+
+fn joinRows(
+    leftRows: List<Row>,
+    rightRows: List<Row>,
+    leftKey: String,
+    rightKey: String,
+    leftIndex: Int,
+    joined: &List<Row>
+): Result<&List<Row>, QueryError> =
+    if (leftIndex >= leftRows.size) then Result<&List<Row>, QueryError>.Ok(joined)
+    else joinRight(
+        leftRows,
+        rightRows,
+        leftKey,
+        rightKey,
+        leftIndex,
+        0,
+        joined
+    );
+
+fn joinRight(
+    leftRows: List<Row>,
+    rightRows: List<Row>,
+    leftKey: String,
+    rightKey: String,
+    leftIndex: Int,
+    rightIndex: Int,
+    joined: &List<Row>
+): Result<&List<Row>, QueryError> =
+    if (rightIndex >= rightRows.size) then
+        joinRows(leftRows, rightRows, leftKey, rightKey, leftIndex + 1, joined)
+    else match (leftRows.at(leftIndex).get(leftKey)) {
+        case Result.Ok(leftValue) -> match (rightRows.at(rightIndex).get(rightKey)) {
+            case Result.Ok(rightValue) ->
+                joinRight(
+                    leftRows,
+                    rightRows,
+                    leftKey,
+                    rightKey,
+                    leftIndex,
+                    rightIndex + 1,
+                    appendJoined(
+                        joined,
+                        leftRows.at(leftIndex),
+                        rightRows.at(rightIndex),
+                        equalValues(leftValue, rightValue)
+                    )
+                );
+            case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+        };
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+
+fn orderRows(rows: List<Row>, column: String): Result<&List<Row>, QueryError> =
+    orderRowsFrom(rows, column, 0, List<Row>.empty());
+
+fn orderRowsFrom(
+    rows: List<Row>,
+    column: String,
+    index: Int,
+    ordered: &List<Row>
+): Result<&List<Row>, QueryError> =
+    if (index >= rows.size) then Result<&List<Row>, QueryError>.Ok(ordered)
+    else match (insertOrdered(ordered, rows.at(index), column, 0)) {
+        case Result.Ok(result) -> orderRowsFrom(rows, column, index + 1, result);
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+
+fn insertOrdered(
+    ordered: &List<Row>,
+    row: Row,
+    column: String,
+    index: Int
+): Result<&List<Row>, QueryError> =
+    if (index >= ordered.size) then
+        Result<&List<Row>, QueryError>.Ok(appendRow(ordered, row))
+    else match (row.get(column)) {
+        case Result.Ok(value) -> match (ordered.at(index).get(column)) {
+            case Result.Ok(existing) -> match (compareValues(value, existing)) {
+                case Result.Ok(order) ->
+                    if (order < 0)
+                    then Result<&List<Row>, QueryError>.Ok(insertRow(ordered, index, row))
+                    else insertOrdered(ordered, row, column, index + 1);
+                case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+            };
+            case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+        };
+        case Result.Err(error) -> Result<&List<Row>, QueryError>.Err(error);
+    };
+
+fn appendRow(rows: &List<Row>, row: Row): &List<Row> {
+    rows.add(row);
+    return rows;
+}
+
+fn insertRow(rows: &List<Row>, index: Int, row: Row): &List<Row> {
+    rows.insert(index, row);
+    return rows;
+}
+
+fn appendJoined(rows: &List<Row>, left: Row, right: Row, shouldJoin: Boolean): &List<Row> =
+    if (shouldJoin) then appendRow(rows, left.merge(right)) else rows;

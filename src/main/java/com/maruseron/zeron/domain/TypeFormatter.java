@@ -11,6 +11,7 @@ public final class TypeFormatter {
             case AnyDescriptor _ -> "Any";
             case UnitDescriptor _ -> "Unit";
             case IntDescriptor _ -> "Int";
+            case CharDescriptor _ -> "Char";
             case LongDescriptor _ -> "Long";
             case ByteDescriptor _ -> "Byte";
             case FloatDescriptor _ -> "Float";
@@ -19,7 +20,14 @@ public final class TypeFormatter {
             case NullDescriptor _ -> "null";
             case InferDescriptor _ -> "<inferred>";
             case NominalDescriptor nominal -> nominal.name();
-            case TypeParameterDescriptor parameter -> parameter.name();
+            case TypeParameterDescriptor parameter ->
+                    parameter.name() + (parameter.isHigherKinded() ? "<_>" : "");
+            case AppliedConstructorDescriptor applied ->
+                    applied.constructor().name() + "<" + format(applied.argument()) + ">";
+            case TypeConstructorDescriptor constructor -> constructor.baseType().name()
+                    + constructor.arguments().stream().map(argument ->
+                            argument instanceof InferDescriptor ? "_" : format(argument))
+                            .collect(Collectors.joining(", ", "<", ">"));
             case ArrayDescriptor array -> "Array<" + format(array.elementType()) + ">";
             case ByteArrayDescriptor _ -> "ByteArray";
             case GenericDescriptor generic -> generic.baseType().name()

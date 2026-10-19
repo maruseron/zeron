@@ -38,6 +38,7 @@ final class CompilationContext {
     final List<Path> javaClassPathRoots;
     final FunctionBindingRegistry functionBindings;
     final Map<Stmt, String> sourcePathsByDeclaration = new IdentityHashMap<>();
+    private final Map<ClassDesc, ClassHierarchyResolver.ClassHierarchyInfo> generatedTypes = new HashMap<>();
 
     ResolutionResult resolution;
     LambdaCompilationPlan lambdaPlan;
@@ -66,7 +67,7 @@ final class CompilationContext {
                        final FunctionBindingRegistry functionBindings) {
         compilationUnits = List.copyOf(units);
         classFile = ClassFile.of(ClassFile.ClassHierarchyResolverOption.of(
-                sourceTypeResolver(compilationUnits)));
+                sourceTypeResolver(compilationUnits, generatedTypes)));
         this.outputDirectory = outputDirectory;
         this.includeBundledSourcesInIndex = includeBundledSourcesInIndex;
         this.libraryBuild = libraryBuild;
@@ -84,7 +85,9 @@ final class CompilationContext {
         this.mainClassName = mainClassName;
     }
 
-    private static ClassHierarchyResolver sourceTypeResolver(final List<CompilationUnit> units) {
+    private static ClassHierarchyResolver sourceTypeResolver(
+            final List<CompilationUnit> units,
+            final Map<ClassDesc, ClassHierarchyResolver.ClassHierarchyInfo> generatedTypes) {
         final var sourceTypes = new HashMap<ClassDesc, ClassHierarchyResolver.ClassHierarchyInfo>();
         for (final var unit : units) {
             for (final var member : NamespaceMembers.flatten(unit.declarations())) {
@@ -118,8 +121,14 @@ final class CompilationContext {
         final var fallback = ClassHierarchyResolver.defaultResolver();
         return resolver -> {
             final var sourceType = sourceTypes.get(resolver);
-            return sourceType != null ? sourceType : fallback.getClassInfo(resolver);
+            if (sourceType != null) return sourceType;
+            final var generatedType = generatedTypes.get(resolver);
+            return generatedType != null ? generatedType : fallback.getClassInfo(resolver);
         };
+    }
+
+    void registerGeneratedInterface(final String name) {
+        generatedTypes.put(ClassDesc.of(name), ClassHierarchyResolver.ClassHierarchyInfo.ofInterface());
     }
 
     void refreshResolvedDeclarations() {
@@ -133,7 +142,7 @@ final class CompilationContext {
             }
         }
         topLevelDeclarations = List.copyOf(declarations);
-        metadata.indexResolvedFunctions(compilationUnits, mainClassName);
+        metadata.indexResolvedFunctions(compilationUnits, mainClassName, resolution);
     }
 
     String sourcePath(final Stmt declaration) {

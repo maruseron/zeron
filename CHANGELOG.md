@@ -1,6 +1,29 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026, 19 OCT
+
+### Compiler and language work
+
+- Added constraint-aware rank-1 generalization for local immutable let-bound lambdas, with inferred
+  contract bounds and evidence-specialized closure caching.
+- Added higher-kinded abstractions and declarative contracts, including standard-library support for
+  `Stream`, `Option`, `List`, and intrinsic `Array`.
+- Added nominal sum types and the `Result<T, E>` standard-library type, with structural equality and
+  hashing support where derived.
+- Added namespace-scoped wildcard imports for loading extensions and declarations.
+- Added the Unicode-scalar `Char` type and strict String interoperation.
+- Recognized `get` and `set` as soft keywords in property accessor positions.
+
+### Standard Library
+
+- Added `zeron.math` numeric extensions, constants, and Float special-value constants.
+- Added higher-kinded collection operations and migrated `Result` to the sum-type representation.
+
+### Compiler and tooling
+
+- Added the project-aware `zeron fmt` source formatter and non-mutating `--check` mode.
+- Bundled standard-library source files in the release distribution for language-server navigation.
+- Added the query-engine sample project.
 
 ## [0.3.0] - 2026, 18 OCT
 

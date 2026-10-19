@@ -25,6 +25,8 @@ public final class DiagnosticCatalog {
             entry("ZR1003", "Unterminated block comment");
     public static final Entry INTEGER_LITERAL_OUT_OF_RANGE =
             entry("ZR1004", "Integer literal out of range");
+    public static final Entry INVALID_CHARACTER_LITERAL =
+            entry("ZR1005", "Invalid character literal");
 
     public static final Entry EXPECTED_SYNTAX =
             entry("ZR1101", "Expected syntax");
@@ -118,6 +120,7 @@ public final class DiagnosticCatalog {
             UNTERMINATED_STRING,
             UNTERMINATED_BLOCK_COMMENT,
             INTEGER_LITERAL_OUT_OF_RANGE,
+            INVALID_CHARACTER_LITERAL,
             EXPECTED_SYNTAX,
             INVALID_DECLARATION,
             INVALID_VISIBILITY,

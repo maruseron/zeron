@@ -1,72 +1,75 @@
 package zeron.lang;
 
+import zeron.control.Foldable;
+import zeron.control.Functor;
+import zeron.control.Monad;
+
+fn applyResultFunction<A, B>(transform: (A) -> B, value: A): B = transform(value);
+
+public type Result<T, E> = Ok(value: T) | Err(error: E);
+
 namespace Result {
-    public fn ok<T, E>(value: T): Ok<T, E> = Ok.from(value);
+    public fn ok<T, E>(value: T): Result<T, E> = Result<T, E>.Ok(value);
 
-    public fn err<T, E>(error: E): Err<T, E> = Err.from(error);
+    public fn err<T, E>(error: E): Result<T, E> = Result<T, E>.Err(error);
 }
 
-public sealed contract Result<T, E> permits Ok<T, E>, Err<T, E> {
-    isOk(): Boolean;
-    isErr(): Boolean;
-    fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R;
-    map<U>(transform: (T) -> U): Result<U, E>;
-    mapError<F>(transform: (E) -> F): Result<T, F>;
-    andThen<U>(transform: (T) -> Result<U, E>): Result<U, E>;
+public extension<T, E> Result<T, E> {
+    public fn isOk(): Boolean = match (this) {
+        case Result.Ok(_) -> true;
+        case Result.Err(_) -> false;
+    };
+
+    public fn isErr(): Boolean = match (this) {
+        case Result.Ok(_) -> false;
+        case Result.Err(_) -> true;
+    };
+
+    public fn fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R = match (this) {
+        case Result.Ok(value) -> ifOk(value);
+        case Result.Err(error) -> ifErr(error);
+    };
+
+    public fn map<U>(transform: (T) -> U): Result<U, E> = match (this) {
+        case Result.Ok(value) -> Result<U, E>.Ok(transform(value));
+        case Result.Err(error) -> Result<U, E>.Err(error);
+    };
+
+    public fn mapError<F>(transform: (E) -> F): Result<T, F> = match (this) {
+        case Result.Ok(value) -> Result<T, F>.Ok(value);
+        case Result.Err(error) -> Result<T, F>.Err(transform(error));
+    };
+
+    public fn andThen<U>(transform: (T) -> Result<U, E>): Result<U, E> = match (this) {
+        case Result.Ok(value) -> transform(value);
+        case Result.Err(error) -> Result<U, E>.Err(error);
+    };
 }
 
-public class Ok<T, E> is Result<T, E> {
-    item: T;
+witness<E> Monad<Result<_, E>> for Result<_, E> {
+    fn map<A, B>(this: Result<A, E>, transform: (A) -> B): Result<B, E> =
+        this.map(transform);
 
-    private constructor new;
+    fn pure<A>(value: A): Result<A, E> = Result<A, E>.Ok(value);
 
-    public constructor from(value: T) = Ok<T, E>.new(value);
+    fn ap<A, B>(this: Result<(A) -> B, E>, values: Result<A, E>): Result<B, E> =
+        match (this) {
+            case Result.Ok(transform) -> match (values) {
+                case Result.Ok(value) -> Result<B, E>.Ok(applyResultFunction(transform, value));
+                case Result.Err(error) -> Result<B, E>.Err(error);
+            };
+            case Result.Err(error) -> Result<B, E>.Err(error);
+        };
 
-    public isOk(): Boolean = true;
-
-    public isErr(): Boolean = false;
-
-    public property value: T {
-        get = this.item;
-    }
-
-    public fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R =
-        ifOk(this.item);
-
-    public map<U>(transform: (T) -> U): Result<U, E> =
-        Ok<U, E>.from(transform(this.item));
-
-    public mapError<F>(transform: (E) -> F): Result<T, F> =
-        Ok<T, F>.from(this.item);
-
-    public andThen<U>(transform: (T) -> Result<U, E>): Result<U, E> =
-        transform(this.item);
+    fn flatMap<A, B>(
+        this: Result<A, E>,
+        transform: (A) -> Result<B, E>
+    ): Result<B, E> = this.andThen(transform);
 }
 
-public class Err<T, E> is Result<T, E> {
-    errorValue: E;
-
-    private constructor new;
-
-    public constructor from(error: E) = Err<T, E>.new(error);
-
-    public isOk(): Boolean = false;
-
-    public isErr(): Boolean = true;
-
-    public property error: E {
-        get = this.errorValue;
-    }
-
-    public fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R =
-        ifErr(this.errorValue);
-
-    public map<U>(transform: (T) -> U): Result<U, E> =
-        Err<U, E>.from(this.errorValue);
-
-    public mapError<F>(transform: (E) -> F): Result<T, F> =
-        Err<T, F>.from(transform(this.errorValue));
-
-    public andThen<U>(transform: (T) -> Result<U, E>): Result<U, E> =
-        Err<U, E>.from(this.errorValue);
+witness<E> Foldable<Result<_, E>> for Result<_, E> {
+    fn foldLeft<A, B>(this: Result<A, E>, initial: B, combine: (B, A) -> B): B = match (this) {
+        case Result.Ok(value) -> combine(initial, value);
+        case Result.Err(_) -> initial;
+    };
 }

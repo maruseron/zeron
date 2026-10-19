@@ -127,6 +127,43 @@ final class TypeResolver {
             case ArrayDescriptor array -> validateType(context, array.elementType(), where);
             case NullableDescriptor nullable -> validateType(context, nullable.baseType(), where);
             case ReferenceDescriptor reference -> validateType(context, reference.baseType(), where);
+            case AppliedConstructorDescriptor applied -> {
+                if (!applied.constructor().isHigherKinded()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            where, "Only a higher-kinded type parameter can be applied."));
+                }
+                validateType(context, applied.argument(), where);
+            }
+            case TypeConstructorDescriptor constructor -> {
+                constructor.baseType().resolveName(resolveTypeName(
+                        context, constructor.baseType().name(), where));
+                final var name = constructor.baseType().name();
+                final var classDeclaration = context.classes.get(name);
+                final var sumDeclaration = context.sums.get(name);
+                final var productDeclaration = context.products.get(name);
+                final var contractDeclaration = context.contracts.get(name);
+                final var intrinsicArray = name.equals("Array");
+                final var parameters = classDeclaration != null ? classDeclaration.typeParameters()
+                        : sumDeclaration != null ? sumDeclaration.typeParameters()
+                        : productDeclaration != null ? productDeclaration.typeParameters()
+                        : contractDeclaration != null ? contractDeclaration.typeParameters() : List.<TypeParameterDescriptor>of();
+                if (intrinsicArray && constructor.arguments().size() != 1) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            where, "The Array type constructor expects one element type."));
+                } else if (!intrinsicArray
+                        && (parameters.isEmpty() || parameters.size() != constructor.arguments().size())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            where, "Type constructor '" + name + "' has the wrong number of type arguments."));
+                }
+                if (!intrinsicArray && classDeclaration == null && sumDeclaration == null
+                        && productDeclaration == null && contractDeclaration == null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND,
+                            where, "Unknown type constructor '" + name + "'."));
+                }
+                for (final var argument : constructor.arguments()) {
+                    if (!(argument instanceof InferDescriptor)) validateType(context, argument, where);
+                }
+            }
             case FunctionDescriptor function -> validateFunctionTypes(context, function, where);
             case GenericDescriptor generic -> {
                 generic.baseType().resolveName(
@@ -158,9 +195,25 @@ final class TypeResolver {
                             "Type '" + name + "' expects " + arity + " type arguments, found "
                                     + generic.typeParameters().size() + "."));
                 }
-                generic.typeParameters().forEach(parameter -> validateType(context, parameter, where));
                 final var genericParameters = classDeclaration != null
                         ? classDeclaration.typeParameters() : contractDeclaration.typeParameters();
+                for (int index = 0; index < genericParameters.size(); index++) {
+                    final var argument = generic.typeParameters().get(index);
+                    final var expectsConstructor = contractDeclaration != null
+                            && contractDeclaration.higherKinded()
+                            && genericParameters.get(index).isHigherKinded();
+                    final var isConstructor = argument instanceof TypeConstructorDescriptor
+                            || argument instanceof TypeParameterDescriptor parameter
+                                    && parameter.isHigherKinded();
+                    if (expectsConstructor != isConstructor) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                                expectsConstructor
+                                        ? "This HKT contract argument must be a type constructor."
+                                        : "A type constructor cannot be used as an ordinary type argument."));
+                    }
+                }
+                generic.typeParameters().forEach(parameter -> validateType(context, parameter, where));
                 if (!genericParameters.isEmpty()) {
                     final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
                     for (int index = 0; index < genericParameters.size(); index++) {

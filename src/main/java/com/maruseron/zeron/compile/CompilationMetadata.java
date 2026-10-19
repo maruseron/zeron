@@ -3,6 +3,10 @@ package com.maruseron.zeron.compile;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.analize.ContractComposition;
+import com.maruseron.zeron.analize.ResolutionResult;
+import com.maruseron.zeron.domain.FunctionDescriptor;
+import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
 
 import java.nio.charset.StandardCharsets;
@@ -14,6 +18,10 @@ import java.util.*;
 final class CompilationMetadata {
     private final IdentityHashMap<Stmt, String> declarationOwners = new IdentityHashMap<>();
     private final IdentityHashMap<Stmt.Var, String> initializationOwners = new IdentityHashMap<>();
+    private final Set<Stmt.Function> classHktImplementationHelpers =
+            Collections.newSetFromMap(new IdentityHashMap<>());
+    private final IdentityHashMap<Stmt.Function, FunctionDescriptor> hktBridgeSignatures =
+            new IdentityHashMap<>();
     private final Map<String, String> functionOwners = new HashMap<>();
     private final Map<String, String> valueOwners = new HashMap<>();
     private final Map<String, String> valueInitializationOwners = new HashMap<>();
@@ -136,13 +144,43 @@ final class CompilationMetadata {
         return declarationOwners.get(function);
     }
 
-    void indexResolvedFunctions(final List<CompilationUnit> units, final String mainClassName) {
+    boolean isClassHktImplementationHelper(final Stmt.Function function) {
+        return classHktImplementationHelpers.contains(function);
+    }
+
+    FunctionDescriptor hktBridgeSignature(final Stmt.Function function) {
+        return hktBridgeSignatures.get(function);
+    }
+
+    void indexResolvedFunctions(final List<CompilationUnit> units, final String mainClassName,
+                                final ResolutionResult resolution) {
+        hktBridgeSignatures.clear();
         for (var unitIndex = 0; unitIndex < units.size(); unitIndex++) {
             final var unit = units.get(unitIndex);
             if (unit.metadataOnly()) continue;
             final var owner = unitIndex == 0 ? mainClassName : holderName(unit, unitIndex);
             for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (member.declaration() instanceof Stmt.Witness witness && witness.higherKinded()) {
+                    indexHktBridgeSignatures(witness, resolution.contracts());
+                }
+                if (member.declaration() instanceof Stmt.ClassDecl classDeclaration) {
+                    for (final var witness : classDeclaration.higherKindedImplementations()) {
+                        indexHktBridgeSignatures(witness, resolution.contracts());
+                        for (final var method : witness.methods()) {
+                            final var helper = method.implementation();
+                            classHktImplementationHelpers.add(helper);
+                            final var qualifiedName = member.namespaceName() == null
+                                    ? qualifiedName(unit.packageName(), helper.name().lexeme())
+                                    : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
+                                            helper.name().lexeme());
+                            functionOwners.put(qualifiedName, classDeclaration.name().lexeme());
+                            declarationOwners.put(helper, classDeclaration.name().lexeme());
+                        }
+                    }
+                }
                 if (!(member.declaration() instanceof Stmt.FunctionDeclaration function)) continue;
+                if (function instanceof Stmt.Function sourceFunction
+                        && classHktImplementationHelpers.contains(sourceFunction)) continue;
                 if (!function.name().lexeme().startsWith("$zeron$witness$")) continue;
                 final var qualifiedName = member.namespaceName() == null
                         ? qualifiedName(unit.packageName(), function.name().lexeme())
@@ -150,6 +188,22 @@ final class CompilationMetadata {
                                 function.name().lexeme());
                 functionOwners.put(qualifiedName, owner);
                 declarationOwners.put(function, owner);
+            }
+        }
+    }
+
+    private void indexHktBridgeSignatures(final Stmt.Witness witness,
+                                          final Map<String, Stmt.ContractDecl> contracts) {
+        final var contractUse = ContractComposition.fromType(witness.contractType());
+        if (contractUse == null) return;
+        for (final var slot : ContractComposition.methods(contracts, contractUse)) {
+            final var method = witness.methods().stream()
+                    .filter(candidate -> candidate.requirementName().lexeme()
+                            .equals(slot.method().name().lexeme()))
+                    .findFirst()
+                    .orElse(null);
+            if (method != null) {
+                hktBridgeSignatures.put(method.implementation(), slot.method().typeDescriptor());
             }
         }
     }

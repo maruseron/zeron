@@ -78,6 +78,9 @@ public final class Resolver {
                 context.sourcePathsByDeclaration.put(declaration, unit.sourcePath());
                 if (entry.namespaceName() != null) {
                     context.namespaceNamesByDeclaration.put(declaration, entry.namespaceName());
+                    context.namespaces.add(unit.packageName().isEmpty()
+                            ? entry.namespaceName()
+                            : unit.packageName() + "." + entry.namespaceName());
                 }
                 final var name = declarationName(declaration);
                 if (name != null) context.sourcePathsByToken.put(name, unit.sourcePath());
@@ -105,6 +108,14 @@ public final class Resolver {
                 } else if (declaration instanceof Stmt.ExternalClass externalClass) {
                     attempt(context, () -> context.declarationRegistrar.registerTypes(
                             unit.packageName(), List.of(externalClass)));
+                }
+            }
+        }
+        for (final var classDeclaration : context.classes.values()) {
+            for (final var witness : classDeclaration.higherKindedImplementations()) {
+                for (final var method : witness.methods()) {
+                    context.higherKindedImplementationOwners.put(
+                            method.implementation(), classDeclaration.name().lexeme());
                 }
             }
         }
@@ -168,7 +179,8 @@ public final class Resolver {
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = entry.declaration();
                 final var contractUses = declaration instanceof Stmt.ClassDecl classDeclaration
-                        ? classDeclaration.contractUses()
+                        ? java.util.stream.Stream.concat(classDeclaration.contractUses().stream(),
+                                classDeclaration.higherKindedContractUses().stream()).toList()
                         : declaration instanceof Stmt.ContractDecl contractDeclaration
                             ? java.util.stream.Stream.concat(
                                     contractDeclaration.requiredContracts().stream(),

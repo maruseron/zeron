@@ -7,6 +7,10 @@ non-nominal method witnesses, including witnesses targeting nominal sum types. G
 hidden `MethodHandle` evidence where needed. Witness selection uses source-level applied types;
 runtime evidence uses erased JVM descriptors.
 
+Constructor-family HKT contracts and conformance use the same compile-time evidence architecture but
+are distinct from instance contracts and are specified in
+[ZEP-0019](zeps/ZEP-0019.md).
+
 The API index preserves witness patterns and their implementation metadata across separately
 compiled libraries. The current coherence validation rejects overlapping witness patterns it can
 identify; a complete overlap solver for all generic patterns remains future hardening.
@@ -184,6 +188,13 @@ extension error instead of silently falling back to a witness. If multiple appli
 expose the same unqualified method, the call is ambiguous. A helper with an explicit generic
 contract bound is the intended disambiguation mechanism.
 
+HKT operations remain statically dispatched. An HKT contract operation whose first parameter is
+marked `this: F<A>` may additionally be called as `value.operation(...)`; the marker is preserved
+in the API index and receiver syntax supplies that first argument to the selected evidence helper.
+The constructor-bound form `F.operation(value, ...)` remains equivalent. Concrete nominal methods
+win before HKT receiver operations, and HKT operations without the marker are not exposed as
+receiver calls.
+
 When compiling a generic function, each bound that declares class-side factories or instance
 methods contributes hidden evidence parameters to its implementation signature. A call through the
 bound dispatches using the corresponding method/factory evidence; it does not inspect an erased type
@@ -235,9 +246,13 @@ The API index preserves source-level applied bounds, function signatures, witnes
 mappings, method signatures, helper owners/names, and prerequisite bounds. Its schema version must
 be advanced when the witness metadata format changes.
 
-Witness methods are emitted as static helpers rather than generated dictionary classes. Generic
-signatures and method results use erased JVM descriptors, with casts where required. Applied types
-remain available for compile-time resolution and separate compilation.
+Witness methods are emitted as static helpers rather than generated dictionary classes. HKT
+declaration-site implementations are also static helpers, emitted in the implementing class so
+their bodies can access its private members. Receiver-marked methods keep the receiver as the first
+helper parameter; a public synthetic JVM helper does not add an ordinary source-level class method.
+Generic signatures and method results use erased JVM descriptors, with casts where required.
+Applied types and receiver markers remain available for compile-time resolution and separate
+compilation.
 
 For reflection compatibility, bounded generic functions and methods with method-level bounds expose
 their ordinary erased descriptor; calling it directly from Java throws
@@ -259,7 +274,9 @@ Agreed direction:
 4. A contract factory returns `&Self`; through a bound on `C`, its result is `&C`.
 5. Evidence is selected statically, passed implicitly, and recursively composed from prerequisite
    bounds.
-6. Witness bodies are read-only, access only public target members, and have no purity guarantee.
+6. Non-nominal witness bodies are read-only, access only public target members, and have no purity
+   guarantee. Declaration-site HKT implementation helpers may access private members of their
+   implementing class.
 7. The orphan rule is based on the package of the contract or target type.
 8. The current package is implicitly in witness scope; package-star imports activate other witness
    packages, but explicit symbol imports do not.

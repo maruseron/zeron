@@ -16,12 +16,12 @@ namespace List {
 public extension<T> List<T> {
     fn append(second: List<T>): List<T> = match (this) {
         case Cons(head, tail) -> List.Cons(head, tail.append(second));
-        case Nil()            -> second;
+        case Nil() -> second;
     };
 
     fn fmap<U>(map: (T) -> U): List<U> = match (this) {
         case Cons(head, tail) -> List.Cons(map(head), tail.fmap<U>(map));
-        case Nil()            -> List<U>.Nil();
+        case Nil() -> List<U>.Nil();
     };
 
     fn bind<U>(map: (T) -> List<U>): List<U> = this.fmap(map).join();
@@ -30,13 +30,13 @@ public extension<T> List<T> {
 public extension<T> List<List<T>> {
     fn join(): List<T> = match (this) {
         case Cons(head, tail) -> head.append(tail.join());
-        case Nil()            -> List<T>.Nil();
+        case Nil() -> List<T>.Nil();
     };
 }
 
 witness<T: Display<T>> Display<T> for List<T> {
     fn toString(): String = match (this) {
         case List.Cons(head, tail) -> head.toString() + tail.toString();
-        case List.Nil()            -> "";
+        case List.Nil() -> "";
     };
 }

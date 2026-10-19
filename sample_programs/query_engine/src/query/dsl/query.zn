@@ -1,0 +1,27 @@
+package query.dsl;
+
+import query.ast.Expr;
+import query.ast.QueryPlan;
+import query.value.TableId;
+
+public class Query {
+    plan: QueryPlan;
+
+    public toPlan(): QueryPlan = this.plan;
+}
+
+public fn from(table: TableId): Query = Query.new(QueryPlan.Scan(table));
+
+public extension Query {
+    public fn where(predicate: Expr): Query =
+        Query.new(QueryPlan.Filter(this.toPlan(), predicate));
+
+    public fn select(columns: Array<String>): Query =
+        Query.new(QueryPlan.Project(this.toPlan(), columns));
+
+    public fn join(other: Query, leftKey: String, rightKey: String): Query =
+        Query.new(QueryPlan.Join(this.toPlan(), other.toPlan(), leftKey, rightKey));
+
+    public fn orderBy(column: String): Query =
+        Query.new(QueryPlan.OrderBy(this.toPlan(), column));
+}

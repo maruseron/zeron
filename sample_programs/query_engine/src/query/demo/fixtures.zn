@@ -1,0 +1,33 @@
+package query.demo;
+
+import query.backend.MemoryDatabase;
+import query.codec.*;
+import query.schema.Row;
+import query.value.UserId;
+import query.value.Value;
+
+import zeron.collections.List;
+
+fn row(columns: Array<String>, values: Array<Value>): Row =
+    Row.new(List<String>.fromArray(columns), List<Value>.fromArray(values));
+
+fn encodeUserId(id: UserId): Value = Value.Integer(id.value);
+
+public fn sampleDatabase(): MemoryDatabase = MemoryDatabase.new(
+    List<Row>.of(
+        row(["id", "name", "age"],
+            [encodeUserId(UserId.new(1)), encode("Ada"), encode(36)]),
+        row(["id", "name", "age"],
+            [encodeUserId(UserId.new(2)), encode("Lin"), encode(19)]),
+        row(["id", "name", "age"],
+            [encodeUserId(UserId.new(3)), encode("Sam"), encode(16)])
+    ),
+    List<Row>.of(
+        row(["id", "user_id", "amount"],
+            [encode(101), encodeUserId(UserId.new(1)), encode(42)]),
+        row(["id", "user_id", "amount"],
+            [encode(102), encodeUserId(UserId.new(2)), encode(27)]),
+        row(["id", "user_id", "amount"],
+            [encode(103), encodeUserId(UserId.new(3)), encode(15)])
+    )
+);

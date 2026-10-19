@@ -94,6 +94,11 @@ public final class CliParserTest {
         final var index = createFile(ZeronVersions.API_INDEX_FILE_NAME);
         assertEquals(index,
                 ((CliParser.Dump) parse("dump", index.toString())).source());
+
+        final var format = (CliParser.Format) parse("fmt", "--check", "src");
+        assertTrue(format.check());
+        assertEquals(List.of(Path.of("src")), format.paths());
+        assertTrue(CliHelp.hasTopic("fmt"));
     }
 
     @Test
@@ -127,6 +132,8 @@ public final class CliParserTest {
         invalid("help", "build", "run");
         invalid("dump");
         invalid("dump", "index.bin", "extra");
+        invalid("fmt", "--unknown");
+        invalid("fmt", "--check", "--check");
     }
 
     @Test

@@ -111,10 +111,12 @@ stay consistent.
 Run `powershell -ExecutionPolicy Bypass -File scripts/release.ps1` from a checkout with JDK 25 or later
 and Maven installed. The script runs the test/package build, stages a self-contained
 compiler JAR, builds the versioned compiled standard-library JAR, copies both launcher scripts and
-the source error-code Markdown, exercises `explain` and a compiled-standard-library build/run, then
+the source error-code Markdown and standard-library source tree, exercises `explain` and a
+compiled-standard-library build/run, then
 creates `target/releases/zeron-<version>.zip` and a SHA-256 sidecar. The archive is a portable
 distribution requiring the supported JDK; it is not a native executable. Error explanations are
-also embedded in the compiler JAR so `zeron explain` works offline.
+also embedded in the compiler JAR so `zeron explain` works offline. The standard-library source tree
+is installed under `share/zeron/stdlib` for language-server source navigation.
 
 ## Zeron Library Artifacts
 
@@ -281,6 +283,11 @@ typed external function bindings. These are curated compiler bindings, not a gen
 Java interop receiver mutability or arbitrary instance method access. The Zeron `String` extension
 API exposes UTF-16 code-unit `length`, `isEmpty`, `indexOf`/`lastIndexOf` (returning `-1` when absent),
 `contains`, `startsWith`, `endsWith`, and bounds-checked `substring(start, end): Option<String>`.
+`Char` represents a Unicode scalar and uses JVM `int`; Java `char` remains unsupported and has no
+implicit conversion to or from `Char`. Scalar-indexed `codePoint*` String extensions normalize lone
+surrogates to U+FFFD, while their `Strict` variants return `Result<_, UnicodeError>`. The compiler
+copies the small Unicode support class into generated outputs and standard-library artifacts so
+compiled consumers do not need the compiler JAR at runtime.
 
 ## Roadmap
 

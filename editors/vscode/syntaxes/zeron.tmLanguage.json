@@ -107,7 +107,7 @@
     },
     "keywords": {
       "name": "keyword.control.zeron",
-      "match": "\\b(?:and|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|get|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|private|property|public|raise|raises|return|sealed|set|static|then|this|throws|type|typeof|until|using|witness|while)\\b"
+      "match": "\\b(?:and|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|private|property|public|raise|raises|return|sealed|static|then|this|throws|type|typeof|until|using|witness|while)\\b"
     },
     "constants": {
       "name": "constant.language.zeron",

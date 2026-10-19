@@ -7,10 +7,11 @@ import java.util.*;
 public sealed interface TypeDescriptor
         permits InferDescriptor, NeverDescriptor, UnitDescriptor,
                 IntDescriptor, LongDescriptor, ByteDescriptor, FloatDescriptor, BooleanDescriptor, StringDescriptor,
+                CharDescriptor,
             AnyDescriptor, NominalDescriptor, FunctionDescriptor, GenericDescriptor, ArrayDescriptor,
                 ByteArrayDescriptor,
                 NullableDescriptor, NullDescriptor, ReferenceDescriptor,
-                TypeParameterDescriptor {
+                TypeParameterDescriptor, AppliedConstructorDescriptor, TypeConstructorDescriptor {
 
     // Contract
     String name();
@@ -52,6 +53,7 @@ public sealed interface TypeDescriptor
             case "Infer"   -> ofInfer();
             case "Unit"    -> ofUnit();
             case "Int"     -> ofInt();
+            case "Char"    -> ofChar();
             case "Long"    -> ofLong();
             case "Byte"    -> ofByte();
             case "Float"   -> ofFloat();
@@ -88,6 +90,10 @@ public sealed interface TypeDescriptor
 
     static IntDescriptor ofInt() {
         return IntDescriptor.INT;
+    }
+
+    static CharDescriptor ofChar() {
+        return CharDescriptor.CHAR;
     }
 
     static LongDescriptor ofLong() {
@@ -165,6 +171,7 @@ public sealed interface TypeDescriptor
             case UnitDescriptor          _ -> ClassDesc.of("zeron.lang.Unit");
             case AnyDescriptor           _ -> ConstantDescs.CD_Object;
             case IntDescriptor           _ -> ConstantDescs.CD_int;
+            case CharDescriptor          _ -> ConstantDescs.CD_int;
             case LongDescriptor          _ -> ConstantDescs.CD_long;
             case ByteDescriptor          _ -> ConstantDescs.CD_byte;
             case FloatDescriptor         _ -> ConstantDescs.CD_double;
@@ -172,6 +179,8 @@ public sealed interface TypeDescriptor
             case StringDescriptor        _ -> ConstantDescs.CD_String;
             case NominalDescriptor      nd -> ClassDesc.of(nd.name());
             case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
+            case AppliedConstructorDescriptor _ -> ConstantDescs.CD_Object;
+            case TypeConstructorDescriptor _ -> ConstantDescs.CD_Object;
             case FunctionDescriptor     fd -> ClassDesc.of(FunctionShapeNames.interfaceName(
                     (FunctionDescriptor) TypeSubstitution.erase(fd)));
             case ArrayDescriptor         _ -> ConstantDescs.CD_Object.arrayType();
@@ -180,6 +189,7 @@ public sealed interface TypeDescriptor
             case NullableDescriptor     nd -> switch (nd.baseType()) {
                 case UnitDescriptor    _ -> ClassDesc.of("zeron.lang.Unit");
                 case IntDescriptor     _ -> ConstantDescs.CD_Integer;
+                case CharDescriptor    _ -> ConstantDescs.CD_Integer;
                 case LongDescriptor    _ -> ConstantDescs.CD_Long;
                 case ByteDescriptor    _ -> ClassDesc.of("java.lang.Byte");
                 case FloatDescriptor   _ -> ConstantDescs.CD_Double;
@@ -203,6 +213,7 @@ public sealed interface TypeDescriptor
             case UnitDescriptor          _ -> ClassDesc.of("zeron.lang.Unit");
             case AnyDescriptor           _ -> ConstantDescs.CD_Object;
             case IntDescriptor           _ -> ConstantDescs.CD_Integer;
+            case CharDescriptor          _ -> ConstantDescs.CD_Integer;
             case LongDescriptor          _ -> ConstantDescs.CD_Long;
             case ByteDescriptor          _ -> ClassDesc.of("java.lang.Byte");
             case FloatDescriptor         _ -> ConstantDescs.CD_Double;
@@ -214,6 +225,9 @@ public sealed interface TypeDescriptor
                     throw new IllegalArgumentException(
                             "Illegal conversion: NominalDescriptor to java.constant.ClassDesc");
             case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
+            case AppliedConstructorDescriptor _ -> ConstantDescs.CD_Object;
+            case TypeConstructorDescriptor _ ->
+                    throw new IllegalArgumentException("A type constructor is not a runtime value type.");
             case FunctionDescriptor      _ ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: FunctionDescriptor to java.constant.ClassDesc");

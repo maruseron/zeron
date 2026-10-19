@@ -63,13 +63,21 @@ final class MemberInteropResolver {
                                                   final TypeDescriptor alreadyResolvedReceiverType,
                                                   final boolean allowMissing) {
         final var receiverPath = expressionPath(property.receiver);
-        if ("Float".equals(receiverPath) && property.name.lexeme().equals("NaN")) {
+        final var floatConstant = "Float".equals(receiverPath)
+                ? switch (property.name.lexeme()) {
+                    case "NaN" -> "NaN";
+                    case "POSITIVE_INFINITY" -> "POSITIVE_INFINITY";
+                    case "NEGATIVE_INFINITY" -> "NEGATIVE_INFINITY";
+                    default -> null;
+                }
+                : null;
+        if (floatConstant != null) {
             if (property.safeNavigation()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                         property.name, "Safe navigation cannot be used for a static property."));
             }
             property.setJavaFieldTarget(new JavaFieldTarget(
-                    "java.lang.Double", "NaN", "D", true, true));
+                    "java.lang.Double", floatConstant, "D", true, true));
             property.setType(TypeDescriptor.ofFloat());
             return TypeDescriptor.ofFloat();
         }
@@ -156,6 +164,7 @@ final class MemberInteropResolver {
             finishSafeNavigation(context, safeFlows);
             return resultType;
         }
+
         if ("length".equals(property.name.lexeme()) && baseType instanceof ByteArrayDescriptor) {
             final var operation = IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.BYTE_ARRAY_LENGTH,
                     List.of(), List.of(memberReceiverType), property.name);
@@ -336,10 +345,146 @@ final class MemberInteropResolver {
         return resolveMemberCall(context, call, null, expectedType);
     }
 
+    private static TypeDescriptor resolveHigherKindedCall(final ResolutionContext context,
+                                                          final Expr.MemberCall call,
+                                                          final TypeParameterDescriptor parameter) {
+        final var matches = new ArrayList<Map.Entry<Integer, ContractComposition.MethodSlot>>();
+        for (int boundIndex = 0; boundIndex < parameter.bounds().size(); boundIndex++) {
+            final var use = ContractComposition.fromType(parameter.bounds().get(boundIndex));
+            if (use == null) continue;
+            for (final var slot : ContractComposition.methods(context, use)) {
+                if (slot.applied().declaration().higherKinded()
+                        && slot.method().name().lexeme().equals(call.name.lexeme())) {
+                    matches.add(Map.entry(boundIndex, slot));
+                }
+            }
+        }
+        if (matches.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                    "The higher-kinded parameter has no bound providing this operation."));
+        }
+        final var selected = matches.getFirst();
+        final var selectedSignature = (FunctionDescriptor) TypeSubstitution.substitute(
+                selected.getValue().method().typeDescriptor(),
+                selected.getValue().applied().substitutions());
+        for (final var other : matches.stream().skip(1).toList()) {
+            final var otherSignature = (FunctionDescriptor) TypeSubstitution.substitute(
+                    other.getValue().method().typeDescriptor(), other.getValue().applied().substitutions());
+            if (!selectedSignature.equals(otherSignature)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                        "HKT operation is ambiguous across the constructor parameter's bounds."));
+            }
+        }
+        final var methodIndex = selected.getValue().index();
+        call.setWitnessEvidence(Expr.methodEvidenceToken(parameter, selected.getKey(), methodIndex),
+                selectedSignature);
+        call.setResolvedOwnerName(selected.getValue().applied().declaration().name().lexeme());
+        final var method = selected.getValue().method();
+        final var fixedArity = Stmt.fixedArity(method.parameters(), method.variadic());
+        if (selectedSignature.isGeneric()) {
+            return resolveGenericMemberCall(context, call, selectedSignature,
+                    method.minimumArity(), method.variadic(), fixedArity);
+        }
+        ensureMemberCallArity(call, selectedSignature, method.minimumArity(), method.variadic());
+        if (method.variadic()) {
+            call.setVariadic(((ArrayDescriptor) selectedSignature.parameters().getLast()).elementType(),
+                    fixedArity);
+        }
+        for (int index = 0; index < call.arguments.size(); index++) {
+            final var expected = memberParameterType(selectedSignature.parameters(), index,
+                    fixedArity, method.variadic());
+            ensureAssignable(context, expected,
+                    resolveArgument(context, call.arguments.get(index), expected), call.name);
+        }
+        call.setResolvedDescriptor(selectedSignature);
+        call.setType(selectedSignature.returnType());
+        return selectedSignature.returnType();
+    }
+
+    private static TypeDescriptor resolveHigherKindedReceiverCall(
+            final ResolutionContext context, final Expr.MemberCall call,
+            final AppliedConstructorDescriptor receiverType) {
+        final var constructor = receiverType.constructor();
+        final var matches = new ArrayList<Map.Entry<Integer, ContractComposition.MethodSlot>>();
+        for (int boundIndex = 0; boundIndex < constructor.bounds().size(); boundIndex++) {
+            final var use = ContractComposition.fromType(constructor.bounds().get(boundIndex));
+            if (use == null) continue;
+            for (final var slot : ContractComposition.methods(context, use)) {
+                if (slot.applied().declaration().higherKinded()
+                        && Stmt.hasReceiverParameter(slot.method().parameters())
+                        && slot.method().name().lexeme().equals(call.name.lexeme())) {
+                    matches.add(Map.entry(boundIndex, slot));
+                }
+            }
+        }
+        if (matches.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                    "The higher-kinded parameter has no receiver operation with this name."));
+        }
+        final var selected = matches.getFirst();
+        final var signature = (FunctionDescriptor) TypeSubstitution.substitute(
+                selected.getValue().method().typeDescriptor(),
+                selected.getValue().applied().substitutions());
+        for (final var other : matches.stream().skip(1).toList()) {
+            final var otherSignature = (FunctionDescriptor) TypeSubstitution.substitute(
+                    other.getValue().method().typeDescriptor(), other.getValue().applied().substitutions());
+            if (!signature.equals(otherSignature)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                        "HKT receiver operation is ambiguous across the constructor parameter's bounds."));
+            }
+        }
+
+        final var method = selected.getValue().method();
+        final var receiverParameter = signature.parameters().getFirst();
+        final var explicitParameters = signature.parameters().subList(1, signature.arity());
+        final var explicitSignature = TypeDescriptor.functionWithEffectsOf(signature.name(), signature.returnType(),
+                explicitParameters, signature.typeParameters(), signature.raisedEffects());
+        final var fixedArity = Stmt.fixedArity(method.parameters(), method.variadic()) - 1;
+        final var minimumArity = method.minimumArity() - 1;
+        final var evidenceToken = Expr.methodEvidenceToken(
+                constructor, selected.getKey(), selected.getValue().index());
+        call.setResolvedOwnerName(selected.getValue().applied().declaration().name().lexeme());
+        if (explicitSignature.isGeneric()) {
+            final var result = resolveGenericMemberCall(context, call, explicitSignature,
+                    minimumArity, method.variadic(), fixedArity,
+                    receiverParameter, receiverType);
+            call.setWitnessMethodEvidence(evidenceToken, signature);
+            return result;
+        }
+        if (!call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    call.name, "This operation does not declare type parameters."));
+        }
+        ensureAssignable(context, receiverParameter, receiverType, call.name);
+        ensureMemberCallArity(call, explicitSignature, minimumArity, method.variadic());
+        if (method.variadic()) {
+            call.setVariadic(((ArrayDescriptor) explicitSignature.parameters().getLast()).elementType(),
+                    fixedArity);
+        }
+        for (int index = 0; index < call.arguments.size(); index++) {
+            final var expected = memberParameterType(explicitSignature.parameters(), index,
+                    fixedArity, method.variadic());
+            ensureAssignable(context, expected,
+                    resolveArgument(context, call.arguments.get(index), expected), call.name);
+        }
+        call.setWitnessMethodEvidence(evidenceToken, signature);
+        call.setResolvedDescriptor(explicitSignature);
+        call.setType(signature.returnType());
+        return signature.returnType();
+    }
+
     private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                              final TypeDescriptor alreadyResolvedReceiverType,
                                              final TypeDescriptor expectedType) {
         Zeron.debug("resolving member call       " + call.name.lexeme() + " for " + call.receiver);
+        if (call.receiver.getType() instanceof TypeParameterDescriptor parameter
+                && parameter.isHigherKinded()) {
+            return resolveHigherKindedCall(context, call, parameter);
+        }
+        if (call.receiver.getType() instanceof AppliedConstructorDescriptor applied
+                && applied.constructor().isHigherKinded()) {
+            return resolveHigherKindedReceiverCall(context, call, applied);
+        }
         final var receiverPath = expressionPath(call.receiver);
         final var classOwnerName = receiverPath == null ? null : resolveClassName(context, receiverPath,
                 call.receiver instanceof Expr.Variable typeName ? typeName.name : call.name);
@@ -434,6 +579,12 @@ final class MemberInteropResolver {
         final var receiverType = alreadyResolvedReceiverType == null
                 ? ExpressionFlowResolver.resolveExpression(context, call.receiver)
                 : alreadyResolvedReceiverType;
+        final var receiverBaseType = receiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : receiverType;
+        if (receiverBaseType instanceof AppliedConstructorDescriptor applied
+                && applied.constructor().isHigherKinded()) {
+            return resolveHigherKindedReceiverCall(context, call, applied);
+        }
         if (receiverType instanceof TypeParameterDescriptor parameter) {
             return resolveBoundedMemberCall(context, call, parameter);
         }
@@ -442,20 +593,17 @@ final class MemberInteropResolver {
         final var classMethods = owner == null ? List.<Stmt.Method>of() : owner.methods().stream()
                 .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
                 .filter(method -> method.isPublic() || Objects.equals(context.frame.currentClassName, ownerName))
-                .filter(method -> !method.isMutating() || receiverType instanceof ReferenceDescriptor).toList();
+                .toList();
         final var contract = context.contracts.get(ownerName);
         final var appliedContract = contract == null ? null
                 : contractCompositionForType(context, ownerName, receiverType).stream()
                         .filter(applied -> applied.declaration().methods().stream().anyMatch(method ->
-                                method.name().lexeme().equals(call.name.lexeme())
-                                        && (!method.isMutating()
-                                            || receiverType instanceof ReferenceDescriptor)))
+                                method.name().lexeme().equals(call.name.lexeme())))
                         .findFirst().orElse(null);
         final var contractMethods = appliedContract == null ? List.<Stmt.ContractMethod>of()
                 : appliedContract.declaration().methods().stream()
                         .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
-                        .filter(method -> !method.isMutating()
-                                || receiverType instanceof ReferenceDescriptor).toList();
+                        .toList();
         final var classMethod = classMethods.isEmpty() ? null : classMethods.getFirst();
         final var contractMethod = classMethod != null || contractMethods.isEmpty()
                 ? null : contractMethods.getFirst();
@@ -695,8 +843,10 @@ final class MemberInteropResolver {
                                                            final Expr.MemberCall call,
                                                            final TypeDescriptor receiverType,
                                                            final TypeDescriptor requiredContractType) {
-        final var selection = TypeClassEvidence.selectMethod(context, receiverType,
-                requiredContractType, call.name.lexeme(), call.name);
+        final var selection = requiredContractType == null
+                ? TypeClassEvidence.selectMemberMethod(context, receiverType, call.name.lexeme(), call.name)
+                : TypeClassEvidence.selectMethod(context, receiverType,
+                        requiredContractType, call.name.lexeme(), call.name);
         if (selection == null) return null;
         final var method = selection.method();
         final var signature = method.methodSignature();
@@ -706,14 +856,25 @@ final class MemberInteropResolver {
         call.setWitnessMethod(selection.helperQualifiedName(),
                 method.implementation().name().lexeme(),
                 selection.helperType());
-        call.setResolvedDescriptor(descriptor);
         final var witnessEvidence = TypeClassEvidence.selectArguments(
                 context, method.implementation().typeDescriptor().typeParameters(),
                 selection.substitutions(), call.name);
-        final var fixedArity = Stmt.fixedArity(signature.parameters(), signature.variadic());
-        if (descriptor.isGeneric()) {
-            final var result = resolveGenericMemberCall(context, call, descriptor, signature.minimumArity(),
-                    signature.variadic(), fixedArity);
+        final var receiverOperation = Stmt.hasReceiverParameter(signature.parameters());
+        final var resolvedSignature = receiverOperation
+                ? TypeDescriptor.functionWithEffectsOf(descriptor.name(), descriptor.returnType(),
+                        descriptor.parameters().subList(1, descriptor.arity()),
+                        descriptor.typeParameters(), descriptor.raisedEffects())
+                : descriptor;
+        final var fixedArity = Stmt.fixedArity(signature.parameters(), signature.variadic())
+                - (receiverOperation ? 1 : 0);
+        final var minimumArity = signature.minimumArity() - (receiverOperation ? 1 : 0);
+        final var receiverParameter = receiverOperation ? descriptor.parameters().getFirst() : null;
+        final var receiverBaseType = receiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : receiverType;
+        if (resolvedSignature.isGeneric()) {
+            final var result = resolveGenericMemberCall(context, call, resolvedSignature, minimumArity,
+                    signature.variadic(), fixedArity, receiverParameter,
+                    receiverOperation ? receiverBaseType : null);
             if (!witnessEvidence.isEmpty()) {
                 final var evidence = new ArrayList<>(witnessEvidence);
                 evidence.addAll(call.evidenceArguments());
@@ -725,20 +886,24 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     call.name, "This method does not declare type parameters."));
         }
-        ensureMemberCallArity(call, descriptor, signature.minimumArity(),
+        if (receiverOperation) {
+            ensureAssignable(context, receiverParameter, receiverBaseType, call.name);
+        }
+        call.setResolvedDescriptor(resolvedSignature);
+        ensureMemberCallArity(call, resolvedSignature, minimumArity,
                 signature.variadic());
         if (signature.variadic()) {
-            call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(), fixedArity);
+            call.setVariadic(((ArrayDescriptor) resolvedSignature.parameters().getLast()).elementType(), fixedArity);
         }
         for (int index = 0; index < call.arguments.size(); index++) {
-            final var expected = memberParameterType(descriptor.parameters(), index,
+            final var expected = memberParameterType(resolvedSignature.parameters(), index,
                     fixedArity, signature.variadic());
             ensureAssignable(context, expected,
                     resolveArgument(context, call.arguments.get(index), expected), call.name);
         }
-        call.setType(descriptor.returnType());
+        call.setType(resolvedSignature.returnType());
         call.setEvidenceArguments(witnessEvidence);
-        return descriptor.returnType();
+        return resolvedSignature.returnType();
     }
 
     private record ExtensionReceiverMatch(Stmt.ExtensionMethod method, TypeDescriptor projection) {}
@@ -752,14 +917,18 @@ final class MemberInteropResolver {
         final var explicitDeclarations = extensionName == null
                 ? List.<Stmt.ExtensionMethod>of()
                 : extensionDeclarations(context, List.of(extensionName));
+        final var namespaceDeclarations = namespaceExtensionDeclarations(context, call.name.lexeme());
+        final var importedDeclarations = new ArrayList<>(explicitDeclarations);
+        importedDeclarations.addAll(namespaceDeclarations);
         final var starDeclarations = starExtensionDeclarations(context, call.name.lexeme());
         final var matchingLocalDeclarations = localDeclarations.stream()
                 .filter(method -> method.property() == propertyAccess).toList();
-        final var matchingExplicitDeclarations = explicitDeclarations.stream()
+        final var matchingImportedDeclarations = importedDeclarations.stream()
+                .distinct()
                 .filter(method -> method.property() == propertyAccess).toList();
         final var matchingStarDeclarations = starDeclarations.stream()
                 .filter(method -> method.property() == propertyAccess).toList();
-        if (matchingLocalDeclarations.isEmpty() && matchingExplicitDeclarations.isEmpty()
+        if (matchingLocalDeclarations.isEmpty() && matchingImportedDeclarations.isEmpty()
                 && matchingStarDeclarations.isEmpty()) return null;
         final var mutableReceiver = receiverType instanceof ReferenceDescriptor;
         final var receiverBase = receiverType instanceof ReferenceDescriptor reference
@@ -769,7 +938,7 @@ final class MemberInteropResolver {
                 context, matchingLocalDeclarations, receiverProjections, receiverType);
         if (receiverMatches.isEmpty()) {
             receiverMatches = findReceiverApplicableExtensions(
-                    context, matchingExplicitDeclarations, receiverProjections, receiverType);
+                    context, matchingImportedDeclarations, receiverProjections, receiverType);
         }
         if (receiverMatches.isEmpty()) {
             receiverMatches = findReceiverApplicableExtensions(
@@ -899,6 +1068,24 @@ final class MemberInteropResolver {
                 .filter(method -> context.currentImports.onDemandPackages().contains(
                         context.namespaceMemberPackages.get(context.functionNamesByDeclaration.get(method.name()))))
                 .filter(Stmt.ExtensionMethod::isPublic)
+                .distinct()
+                .toList();
+    }
+
+    private static List<Stmt.ExtensionMethod> namespaceExtensionDeclarations(
+            final ResolutionContext context, final String methodName) {
+        return context.extensionMethods.values().stream()
+                .flatMap(Collection::stream)
+                .filter(method -> method.isPublic()
+                        || Objects.equals(context.namespaceMemberPackages.get(
+                                context.functionNamesByDeclaration.get(method.name())), context.packageName))
+                .filter(method -> method.name().lexeme().equals(methodName))
+                .filter(method -> {
+                    final var qualifiedName = context.functionNamesByDeclaration.get(method.name());
+                    final var separator = qualifiedName == null ? -1 : qualifiedName.lastIndexOf('.');
+                    final var namespaceName = separator < 0 ? null : qualifiedName.substring(0, separator);
+                    return context.currentImports.onDemandNamespaces().contains(namespaceName);
+                })
                 .distinct()
                 .toList();
     }
@@ -1268,6 +1455,15 @@ final class MemberInteropResolver {
     private static TypeDescriptor resolveGenericMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                                     final FunctionDescriptor genericType, final int minimumArity,
                                                     final boolean variadic, final int fixedArity) {
+        return resolveGenericMemberCall(context, call, genericType, minimumArity, variadic, fixedArity,
+                null, null);
+    }
+
+    private static TypeDescriptor resolveGenericMemberCall(final ResolutionContext context, final Expr.MemberCall call,
+                                                    final FunctionDescriptor genericType, final int minimumArity,
+                                                    final boolean variadic, final int fixedArity,
+                                                    final TypeDescriptor receiverParameter,
+                                                    final TypeDescriptor receiverType) {
         final var typeParameters = genericType.typeParameters();
         if (!call.explicitTypeArguments.isEmpty()
                 && call.explicitTypeArguments.size() != typeParameters.size()) {
@@ -1291,6 +1487,9 @@ final class MemberInteropResolver {
             final var explicitType = call.explicitTypeArguments.get(i);
             TypeResolver.validateType(context, explicitType, call.name);
             substitutions.put(typeParameters.get(i), explicitType);
+        }
+        if (receiverParameter != null) {
+            TypeUnifier.unify(receiverParameter, receiverType, substitutions, call.name);
         }
 
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
@@ -1853,13 +2052,18 @@ final class MemberInteropResolver {
                 .map(importedPackage -> qualify(importedPackage, name))
                 .filter(functionName -> hasOrdinaryFunction(context, functionName))
                 .filter(functionName -> context.functions.get(functionName).isPublic())
-                .distinct()
-                .toList();
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        context.currentImports.onDemandNamespaces().stream()
+                .map(namespace -> qualifyNamespaceMember("", namespace, name))
+                .filter(functionName -> hasOrdinaryFunction(context, functionName))
+                .filter(functionName -> isNamespaceMemberAccessible(context, functionName,
+                        context.functions.get(functionName).isPublic()))
+                .forEach(candidates::add);
         if (candidates.size() > 1) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT, where,
                     "Ambiguous function '" + name + "' from star imports; add an explicit import or alias."));
         }
-        return candidates.isEmpty() ? null : candidates.getFirst();
+        return candidates.isEmpty() ? null : candidates.iterator().next();
     }
 
     private static boolean hasOrdinaryFunction(final ResolutionContext context, final String name) {
@@ -1892,14 +2096,19 @@ final class MemberInteropResolver {
                 .map(importedPackage -> qualify(importedPackage, name.lexeme()))
                 .filter(context.topLevelValues::containsKey)
                 .filter(valueName -> context.topLevelValues.get(valueName).isPublic())
-                .distinct()
-                .toList();
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        context.currentImports.onDemandNamespaces().stream()
+                .map(namespace -> qualifyNamespaceMember("", namespace, name.lexeme()))
+                .filter(context.topLevelValues::containsKey)
+                .filter(valueName -> isNamespaceMemberAccessible(context, valueName,
+                        context.topLevelValues.get(valueName).isPublic()))
+                .forEach(candidates::add);
         if (candidates.size() > 1) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, name,
                     "Ambiguous value '" + name.lexeme()
                             + "' from star imports; add an explicit import or alias."));
         }
-        return candidates.isEmpty() ? null : context.topLevelValueSymbols.get(candidates.getFirst());
+        return candidates.isEmpty() ? null : context.topLevelValueSymbols.get(candidates.iterator().next());
     }
 
     private static String namespaceMemberName(final ResolutionContext context, final Expr receiver,
@@ -1978,12 +2187,17 @@ final class MemberInteropResolver {
             return ExpressionFlowResolver.resolveEmptyArrayLiteral(context, literal, expectedType);
         }
         if (argument instanceof Expr.Variable variable && context.symbols.containsSymbol(variable.name)) {
-            var bindingType = context.symbols.getSymbol(variable.name).type();
+            final var binding = context.symbols.getSymbol(variable.name);
+            var bindingType = binding.type();
             if (bindingType instanceof ReferenceDescriptor reference) bindingType = reference.baseType();
             if (bindingType instanceof FunctionDescriptor scheme && scheme.isGeneric()) {
                 final var expectedFunction = LambdaResolver.functionType(context, expectedType);
                 if (expectedFunction != null) {
-                    final var specialized = LambdaResolver.instantiateLambdaScheme(context, scheme, expectedFunction, variable.name);
+                    if (binding.declaration() instanceof Stmt.Var declaration) {
+                        variable.setResolvedValue(binding.name(), declaration);
+                    }
+                    final var specialized = LambdaResolver.instantiateLambdaScheme(
+                            context, scheme, expectedFunction, variable, variable.name);
                     variable.setStoredFunctionType(scheme);
                     variable.setType(specialized);
                     return specialized;

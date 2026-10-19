@@ -1,0 +1,87 @@
+package query.schema;
+
+import query.error.QueryError;
+import query.value.Value;
+import query.value.Value.render;
+
+import zeron.collections.List;
+import zeron.lang.Result;
+
+public class Row {
+    columns: List<String>;
+    values: List<Value>;
+
+    public get(column: String): Result<Value, QueryError> {
+        let mut index = 0;
+        while (index < this.columns.size) {
+            if (this.columns.at(index) == column) {
+                return Result<Value, QueryError>.Ok(this.values.at(index));
+            }
+            index = index + 1;
+        }
+        return Result<Value, QueryError>.Err(QueryError.MissingColumn(column));
+    }
+
+    public project(selected: Array<String>): Result<Row, QueryError> =
+        projectColumns(this, selected, 0, List<String>.empty(), List<Value>.empty());
+
+    public merge(other: Row): Row {
+        let mut mergedColumns = List<String>.empty();
+        let mut mergedValues = List<Value>.empty();
+        let mut index = 0;
+        while (index < this.columns.size) {
+            mergedColumns.add(this.columns.at(index));
+            mergedValues.add(this.values.at(index));
+            index = index + 1;
+        }
+        index = 0;
+        while (index < other.columns.size) {
+            mergedColumns.add(other.columns.at(index));
+            mergedValues.add(other.values.at(index));
+            index = index + 1;
+        }
+        return Row.new(mergedColumns, mergedValues);
+    }
+
+    public render(): String {
+        let mut text = "{";
+        let mut index = 0;
+        while (index < this.columns.size) {
+            if (index > 0) text = text + ", ";
+            text = text + this.columns.at(index) + "=" + this.values.at(index).render();
+            index = index + 1;
+        }
+        return text + "}";
+    }
+}
+
+fn projectColumns(
+    row: Row,
+    selected: Array<String>,
+    index: Int,
+    projectedColumns: &List<String>,
+    projectedValues: &List<Value>
+): Result<Row, QueryError> =
+    if (index >= selected.length) then
+        Result<Row, QueryError>.Ok(Row.new(projectedColumns, projectedValues))
+    else match (row.get(selected[index])) {
+        case Result.Ok(value) ->
+            projectColumns(
+                row,
+                selected,
+                index + 1,
+                appendColumn(projectedColumns, selected[index]),
+                appendValue(projectedValues, value)
+            );
+        case Result.Err(error) -> Result<Row, QueryError>.Err(error);
+    };
+
+fn appendColumn(columns: &List<String>, column: String): &List<String> {
+    columns.add(column);
+    return columns;
+}
+
+fn appendValue(values: &List<Value>, value: Value): &List<Value> {
+    values.add(value);
+    return values;
+}

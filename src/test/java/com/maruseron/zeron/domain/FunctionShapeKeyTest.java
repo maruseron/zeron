@@ -44,6 +44,16 @@ public final class FunctionShapeKeyTest {
     }
 
     @Test
+    public void distinguishesCharFromIntDespiteSharedJvmRepresentation() {
+        final var intFunction = function("asInt", TypeDescriptor.ofInt(), TypeDescriptor.ofInt());
+        final var charFunction = function("asChar", TypeDescriptor.ofChar(), TypeDescriptor.ofChar());
+
+        assertNotEquals(FunctionShapeKey.of(intFunction), FunctionShapeKey.of(charFunction));
+        assertEquals(TypeDescriptor.toJavaClassDesc(TypeDescriptor.ofInt()),
+                TypeDescriptor.toJavaClassDesc(TypeDescriptor.ofChar()));
+    }
+
+    @Test
     public void distinguishesNullableReferenceEvenWhenJvmAbiIsErased() {
         final var nonNullable = function("a", TypeDescriptor.ofInt(), TypeDescriptor.ofString());
         final var nullable = function("b", TypeDescriptor.ofInt(), TypeDescriptor.ofString().toNullable());

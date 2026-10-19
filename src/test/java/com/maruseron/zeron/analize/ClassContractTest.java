@@ -26,6 +26,47 @@ import static org.junit.Assert.assertThrows;
 
 public final class ClassContractTest {
     @Test
+    public void getAndSetAreIdentifiersExceptInPropertyAccessorBlocks() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "SoftAccessorProgram" + suffix;
+        final var typeName = "SoftAccessorType" + suffix;
+        final var source = """
+                class %s {
+                    raw: Int;
+                    public constructor new;
+                    public mut property value: Int {
+                        get = this.raw;
+                        set(next) {
+                            this.raw = next;
+                        }
+                    }
+                    public get(): Int = this.raw;
+                    public set(value: Int): Int = value;
+                }
+                fn run(): Int {
+                    let mut get = %s.new(1);
+                    let set = get.get();
+                    get.value = get.set(2);
+                    return set + get.value;
+                }
+                """.formatted(typeName, typeName);
+        final var programFile = Path.of("dist", programName + ".class");
+        final var typeFile = Path.of("dist", typeName + ".class");
+        try {
+            final var compiler = new CompilationService(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(3, loader.loadClass(programName).getMethod("run").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(programFile);
+            Files.deleteIfExists(typeFile);
+        }
+    }
+
+    @Test
     public void omittedClassMethodAndPropertyVisibilityDefaultsToPrivate() throws Exception {
         final var programName = "PrivateMemberDefaults"
                 + UUID.randomUUID().toString().replace("-", "");

@@ -28,6 +28,7 @@ final class LambdaCompilationPlan {
     private final Map<String, FunctionShapeKey> functionShapeNames = new HashMap<>();
     private final List<Expr.Lambda> lambdaImplementations = new ArrayList<>();
     private final Map<Expr.Lambda, String> lambdaMethodNames = new IdentityHashMap<>();
+    private final Map<Expr.Lambda, String> lambdaTemplateFactoryNames = new IdentityHashMap<>();
     private final Map<Expr.Lambda, List<Token>> lambdaCaptures = new IdentityHashMap<>();
     private final Map<Expr.Lambda, List<TypeDescriptor>> lambdaCaptureTypes = new IdentityHashMap<>();
     private final Map<FunctionAdapterKey, String> functionAdapterNames = new LinkedHashMap<>();
@@ -68,6 +69,14 @@ final class LambdaCompilationPlan {
 
     String lambdaMethodName(final Expr.Lambda lambda) {
         return lambdaMethodNames.get(lambda);
+    }
+
+    String lambdaTemplateFactoryName(final Expr.Lambda lambda) {
+        return lambdaTemplateFactoryNames.get(lambda);
+    }
+
+    boolean hasLambdaTemplates() {
+        return !lambdaTemplateFactoryNames.isEmpty();
     }
 
     List<Token> captures(final Expr.Lambda lambda) {
@@ -147,6 +156,7 @@ final class LambdaCompilationPlan {
                     collectFunctionShapes(constructor.typeDescriptor().returnType());
                     collectLambdaShapes(constructor.body());
                 }
+                declaration.higherKindedImplementations().forEach(this::collectWitnessAdapters);
                 collectContractBridgeAdapters(declaration);
             }
             case Stmt.ContractDecl declaration -> {
@@ -163,6 +173,7 @@ final class LambdaCompilationPlan {
                 collectFunctionShapes(type.returnType());
                 collectLambdaShapes(body);
             }
+            case Stmt.Witness witness -> collectWitnessAdapters(witness);
             case Stmt.ExtensionMethod extension -> {
                 for (final var parameter : extension.typeDescriptor().parameters()) {
                     collectFunctionShapes(parameter);
@@ -219,6 +230,20 @@ final class LambdaCompilationPlan {
                     throw new IllegalStateException("Function shape digest collision for " + interfaceName);
                 }
                 functionShapes.putIfAbsent(shapeKey, erasedFunction);
+                final List<TypeDescriptor> erasedParameters = Collections.nCopies(
+                        erasedFunction.arity(), TypeDescriptor.ofName("java.lang.Object"));
+                final var objectShape = TypeDescriptor.functionWithEffectsOf(
+                        erasedFunction.name(), TypeDescriptor.ofName("java.lang.Object"),
+                        erasedParameters, List.of(), List.of());
+                final var objectShapeKey = FunctionShapeKey.of(objectShape);
+                final var objectInterfaceName = FunctionShapeNames.interfaceName(objectShapeKey);
+                final var previousObjectKey = functionShapeNames.putIfAbsent(
+                        objectInterfaceName, objectShapeKey);
+                if (previousObjectKey != null && !previousObjectKey.equals(objectShapeKey)) {
+                    throw new IllegalStateException(
+                            "Function shape digest collision for " + objectInterfaceName);
+                }
+                functionShapes.putIfAbsent(objectShapeKey, objectShape);
                 for (final var parameter : erasedFunction.parameters()) collectFunctionShapes(parameter);
                 collectFunctionShapes(erasedFunction.returnType());
             }
@@ -228,7 +253,44 @@ final class LambdaCompilationPlan {
             case GenericDescriptor generic -> {
                 for (final var parameter : generic.typeParameters()) collectFunctionShapes(parameter);
             }
+            case AppliedConstructorDescriptor applied -> collectFunctionShapes(applied.argument());
+            case TypeConstructorDescriptor constructor -> {
+                for (final var argument : constructor.arguments()) collectFunctionShapes(argument);
+            }
             default -> {}
+        }
+    }
+
+    private void collectWitnessShapes(final Stmt.Witness witness) {
+        for (final var method : witness.methods()) {
+            final var implementation = method.implementation();
+            for (final var parameter : implementation.typeDescriptor().parameters()) {
+                collectFunctionShapes(parameter);
+            }
+            collectFunctionShapes(implementation.typeDescriptor().returnType());
+            collectLambdaShapes(implementation.body());
+        }
+    }
+
+    private void collectWitnessAdapters(final Stmt.Witness witness) {
+        collectWitnessShapes(witness);
+        if (!witness.higherKinded()) return;
+        final var contractUse = ContractComposition.fromType(witness.contractType());
+        if (contractUse == null) return;
+        for (final var slot : ContractComposition.methods(contracts, contractUse)) {
+            final var method = witness.methods().stream()
+                    .filter(candidate -> candidate.requirementName().lexeme()
+                            .equals(slot.method().name().lexeme()))
+                    .findFirst()
+                    .orElse(null);
+            if (method == null) continue;
+            final var required = slot.method().typeDescriptor();
+            final var implementation = method.implementation().typeDescriptor();
+            for (int index = 0; index < Math.min(required.arity(), implementation.arity()); index++) {
+                collectFunctionAdapters(required.parameters().get(index),
+                        implementation.parameters().get(index));
+            }
+            collectFunctionAdapters(implementation.returnType(), required.returnType());
         }
     }
 
@@ -277,6 +339,10 @@ final class LambdaCompilationPlan {
                     if (!lambdaMethodNames.containsKey(lambda)) {
                         lambdaMethodNames.put(lambda, "$lambda$" + lambdaMethodNames.size());
                         lambdaImplementations.add(lambda);
+                    }
+                    if (hasInferredContractBounds(functionType)) {
+                        lambdaTemplateFactoryNames.putIfAbsent(lambda,
+                                "$lambdaTemplateFactory$" + lambdaTemplateFactoryNames.size());
                     }
                     collectLambdaShapes(lambda.body);
                 }
@@ -363,6 +429,10 @@ final class LambdaCompilationPlan {
             case null -> {}
             default -> {}
         }
+    }
+
+    static boolean hasInferredContractBounds(final FunctionDescriptor functionType) {
+        return functionType.typeParameters().stream().anyMatch(parameter -> !parameter.bounds().isEmpty());
     }
 
     private void collectPipelineLambda(final Expr.Lambda lambda, final FunctionDescriptor targetType) {
@@ -652,6 +722,16 @@ final class LambdaCompilationPlan {
     }
 
     private void collectMemberCallAdapters(final Expr.MemberCall call) {
+        if (call.witnessEvidenceToken() != null) {
+            final var witnessType = call.witnessFactoryType();
+            final var receiverOffset = call.witnessEvidenceIsMethod() ? 1 : 0;
+            for (int index = 0; index < call.arguments.size(); index++) {
+                collectFunctionAdapters(call.arguments.get(index).getType(),
+                        TypeSubstitution.erase(witnessType.parameters().get(index + receiverOffset)));
+            }
+            return;
+        }
+
         final var extensionMethod = call.resolvedExtensionMethod();
         if (extensionMethod != null) {
             final var parameters = extensionMethod.typeDescriptor().parameters();

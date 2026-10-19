@@ -19,7 +19,17 @@ public enum IntrinsicId {
     BYTE_ARRAY_WRITE("zeron.byte-array.write.v1"),
     INT_TO_BYTE("zeron.numeric.int-to-byte.v1"),
     BYTE_TO_INT("zeron.numeric.byte-to-int.v1"),
-    CHARACTER_CODING_EXCEPTION_TO_IO_EXCEPTION("zeron.io.character-coding-exception-to-io-exception.v1");
+    CHARACTER_CODING_EXCEPTION_TO_IO_EXCEPTION("zeron.io.character-coding-exception-to-io-exception.v1"),
+    STRING_CODE_POINT_LENGTH("zeron.string.code-point-length.v1"),
+    STRING_CODE_POINT_AT("zeron.string.code-point-at.v1"),
+    STRING_SUBSTRING_BY_CODE_POINTS("zeron.string.substring-by-code-points.v1"),
+    STRING_INDEX_OF_CODE_POINT("zeron.string.index-of-code-point.v1"),
+    STRING_FIRST_MALFORMED_OFFSET("zeron.string.first-malformed-offset.v1"),
+    STRING_CODE_POINT_AT_OFFSET("zeron.string.code-point-at-offset.v1"),
+    STRING_CODE_POINT_WIDTH_AT_OFFSET("zeron.string.code-point-width-at-offset.v1"),
+    CHAR_TO_INT("zeron.char.to-int.v1"),
+    INT_TO_CHAR("zeron.char.from-int.v1"),
+    CHAR_TO_STRING("zeron.char.to-string.v1");
 
     private final String stableName;
 

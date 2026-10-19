@@ -5,6 +5,7 @@ import org.junit.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -43,7 +44,8 @@ public final class ScannerLocationTest {
 
     @Test
     public void scansContextualKeywordsAsIdentifiers() {
-        final var tokens = Scanner.from("permits requires when with matches map flatMap filter collect").scanTokens();
+        final var tokens = Scanner.from("permits requires when with matches map flatMap filter collect get set")
+                .scanTokens();
 
         assertEquals(TokenType.IDENTIFIER, tokens.get(0).type());
         assertEquals(TokenType.IDENTIFIER, tokens.get(1).type());
@@ -53,6 +55,8 @@ public final class ScannerLocationTest {
         assertEquals(TokenType.IDENTIFIER, tokens.get(5).type());
         assertEquals(TokenType.IDENTIFIER, tokens.get(6).type());
         assertEquals(TokenType.IDENTIFIER, tokens.get(7).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(8).type());
+        assertEquals(TokenType.IDENTIFIER, tokens.get(9).type());
     }
 
     @Test
@@ -115,6 +119,27 @@ public final class ScannerLocationTest {
         assertEquals(0, result.tokens().getFirst().literal());
         assertEquals("ZR1004", result.diagnostics().getFirst().code().toString());
         assertEquals(1, result.diagnostics().size());
+    }
+
+    @Test
+    public void scansScalarCharacterLiteralsAndSupportedEscapes() {
+        final var result = Scanner.from("'A' '\\n' '\\'' '\\\\' '\\u{1F600}' '😀'")
+                .scanWithDiagnostics();
+
+        assertTrue(result.diagnostics().isEmpty());
+        assertEquals(List.of(65, 10, 39, 92, 0x1F600, 0x1F600),
+                result.tokens().stream().filter(token -> token.type() == TokenType.CHAR)
+                        .map(token -> (Integer) token.literal()).toList());
+    }
+
+    @Test
+    public void rejectsInvalidCharacterLiteralScalarForms() {
+        final var result = Scanner.from("'' 'ab' '\\u{}' '\\u{D800}' '\\u{110000}' '\\q'")
+                .scanWithDiagnostics();
+
+        assertEquals(6, result.diagnostics().size());
+        assertTrue(result.diagnostics().stream()
+                .allMatch(diagnostic -> diagnostic.code().toString().equals("ZR1005")));
     }
 
     @Test

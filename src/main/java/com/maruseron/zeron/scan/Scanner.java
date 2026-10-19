@@ -46,7 +46,6 @@ public final class Scanner {
             entry("false",       FALSE),
             entry("fn",          FN),
             entry("for",         FOR),
-            entry("get",         GET),
             entry("handle",      HANDLE),
             entry("if",          IF),
             entry("implement",   IMPLEMENT),
@@ -72,7 +71,6 @@ public final class Scanner {
             entry("throws",      THROWS),
             entry("return",      RETURN),
             entry("sealed",      SEALED),
-            entry("set",         SET),
             entry("static",       STATIC),
             entry("then",        THEN),
             entry("this",        THIS),
@@ -205,6 +203,7 @@ public final class Scanner {
             }
 
             case '"' -> string();
+            case '\'' -> character();
             default -> {
                 if (isDigit(c)) number();
                 else if (isAlpha(c)) identifier();
@@ -230,6 +229,107 @@ public final class Scanner {
         advance();
 
         addToken(STRING, source.substring(start + 1, current - 1));
+    }
+
+    private void character() {
+        var valid = true;
+        var closed = false;
+        var scalarCount = 0;
+        var scalar = 0;
+        var reason = "A character literal must contain exactly one Unicode scalar value.";
+
+        while (!isAtEnd()) {
+            final var currentCharacter = advance();
+            if (currentCharacter == '\'') {
+                closed = true;
+                break;
+            }
+            if (currentCharacter == '\n' || currentCharacter == '\r') {
+                valid = false;
+                reason = "A character literal cannot contain a line break.";
+                break;
+            }
+
+            final int value;
+            if (currentCharacter == '\\') {
+                if (isAtEnd()) {
+                    valid = false;
+                    reason = "Incomplete escape sequence in character literal.";
+                    break;
+                }
+                final var escape = advance();
+                value = switch (escape) {
+                    case '\\' -> '\\';
+                    case '\'' -> '\'';
+                    case 'n' -> '\n';
+                    case 'r' -> '\r';
+                    case 't' -> '\t';
+                    case 'u' -> scanScalarEscape();
+                    default -> {
+                        valid = false;
+                        reason = "Unsupported escape sequence in character literal.";
+                        yield -1;
+                    }
+                };
+                if (value < 0) {
+                    valid = false;
+                    reason = "Malformed Unicode scalar escape in character literal.";
+                    continue;
+                }
+            } else if (Character.isHighSurrogate(currentCharacter)
+                    && Character.isLowSurrogate(peek())) {
+                value = Character.toCodePoint(currentCharacter, advance());
+            } else if (Character.isSurrogate(currentCharacter)) {
+                valid = false;
+                reason = "A character literal cannot contain a surrogate code point.";
+                continue;
+            } else {
+                value = currentCharacter;
+            }
+
+            scalarCount++;
+            if (scalarCount == 1) scalar = value;
+            else {
+                valid = false;
+                reason = "A character literal must contain exactly one Unicode scalar value.";
+            }
+        }
+
+        if (!closed) {
+            valid = false;
+            reason = "Unterminated character literal.";
+        } else if (scalarCount != 1) {
+            valid = false;
+            reason = "A character literal must contain exactly one Unicode scalar value.";
+        }
+
+        if (!valid) {
+            recordDiagnostic(DiagnosticCatalog.INVALID_CHARACTER_LITERAL,
+                    span(tokenStart, position()), reason);
+        }
+        addToken(CHAR, scalarCount == 1 ? scalar : 0);
+    }
+
+    private int scanScalarEscape() {
+        if (!match('{')) return -1;
+        var digits = 0;
+        var value = 0;
+        var valid = true;
+        while (!isAtEnd() && peek() != '}' && peek() != '\'' && peek() != '\n' && peek() != '\r') {
+            final var digit = Character.digit(advance(), 16);
+            if (digit < 0 || value > (0x10FFFF - digit) / 16) {
+                valid = false;
+            } else {
+                value = value * 16 + digit;
+            }
+            digits++;
+        }
+        if (!match('}')) return -1;
+        if (!valid || digits == 0 || value > Character.MAX_CODE_POINT
+                || value >= Character.MIN_SURROGATE && value <= Character.MAX_SURROGATE) {
+            return -1;
+        }
+        return value;
     }
 
     private void number() {

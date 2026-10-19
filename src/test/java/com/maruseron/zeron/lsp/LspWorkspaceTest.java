@@ -75,6 +75,27 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void definitionNavigatesToBundledStandardLibrarySource() throws Exception {
+        final var source = """
+                import zeron.lang.Option;
+                fn inspect(value: Option<Int>): Option<Int> = value.map((item) -> item);
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var offset = source.indexOf("map(");
+        final var definition = LspFeatures.definition(snapshot, project.entry(),
+                new DefinitionParams(new TextDocumentIdentifier(project.entry().toUri().toString()),
+                        DocumentCoordinates.positionAt(source, offset)));
+
+        assertTrue(definition.isLeft());
+        assertEquals(1, definition.getLeft().size());
+        final var target = Path.of(java.net.URI.create(definition.getLeft().getFirst().getUri()));
+        assertTrue(target.toString(), target.endsWith(Path.of("stdlib", "zeron", "lang", "option.zn")));
+        assertTrue(Files.readString(target).contains("public type Option<T>"));
+        assertEquals(24, definition.getLeft().getFirst().getRange().getStart().getLine());
+    }
+
+    @Test
     public void hoverFormatsFunctionTypesWithoutStrayGenericTerminator() throws Exception {
         final var source = """
                 fn main() {
@@ -230,6 +251,58 @@ public class LspWorkspaceTest {
                 + ", type=" + resolution.referenceType(callToken)
                 + ", call signature=" + resolution.callSiteFunctionType(callToken), hover);
         assertTrue(hover.getContents().getRight().getValue().contains("fn readValue() -> Int"));
+    }
+
+    @Test
+    public void completionUsesReturnTypeOfChainedMemberCalls() throws Exception {
+        final var source = """
+                public class Box {
+                    public constructor new;
+                    public next(step: Int): Box = this;
+                    public read(): Int = 42;
+                }
+                fn main() {
+                    Box.new().next(1).read();
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var resolution = snapshot.resolution().orElseThrow();
+        final var nextToken = snapshot.tokens().get(project.entry()).stream()
+                .filter(token -> token.span().start().offset() == source.indexOf("next(1)"))
+                .findFirst().orElseThrow();
+        final var nextCallType = resolution.callSiteFunctionType(nextToken);
+
+        assertNotNull(resolution.referenceTarget(nextToken));
+        assertNotNull(nextCallType);
+        assertEquals("Box", com.maruseron.zeron.domain.TypeFormatter.format(nextCallType.returnType()));
+
+        final var completion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, source.lastIndexOf("read")));
+        assertTrue(completion.getItems().stream().anyMatch(item -> item.getLabel().startsWith("read(")));
+    }
+
+    @Test
+    public void immutableReceiverMutationHasMutationDiagnostic() throws Exception {
+        final var source = """
+                class Counter {
+                    value: Int;
+                    public constructor new;
+                    public mut increment(): Unit {
+                        this.value = this.value + 1;
+                    }
+                }
+                fn main(counter: Counter) {
+                    counter.increment();
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        assertTrue(snapshot.diagnostics().get(project.entry()).toString(),
+                snapshot.diagnostics().get(project.entry()).stream()
+                .anyMatch(diagnostic -> diagnostic.code().value().equals("ZR2012")
+                        && diagnostic.message().contains("Mutating method requires a mutable reference.")));
     }
 
     @Test
@@ -476,6 +549,53 @@ public class LspWorkspaceTest {
         assertEquals("List<U>", fmap.getDetail());
         assertTrue(completion.getItems().stream()
                 .anyMatch(item -> item.getLabel().equals("append(second: List<T>)")));
+    }
+
+    @Test
+    public void namespaceWildcardImportCompletionIncludesMethodsAndProperties() throws Exception {
+        final var project = project("""
+                import Box.*;
+                fn main() {
+                    let box = Box.new();
+                    box.imported();
+                }
+                """);
+        Files.writeString(project.entry().getParent().resolve("Box.zn"), """
+                public class Box {
+                    public constructor new;
+                }
+                """);
+        Files.writeString(project.entry().getParent().resolve("Extensions.zn"), """
+                public extension Box {
+                    public fn imported(): Int = 1;
+                    public property enabled: Boolean {
+                        get = true;
+                    }
+                }
+                """);
+
+        final var source = Files.readString(project.entry());
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var receiverOffset = source.indexOf("box.imported") + "box.".length();
+        final var receiverCompletion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, receiverOffset));
+        assertTrue("items=" + receiverCompletion.getItems()
+                        + ", imports=Box.*",
+                receiverCompletion.getItems().stream()
+                .anyMatch(item -> item.getLabel().startsWith("imported(")));
+        assertTrue(receiverCompletion.getItems().toString(), receiverCompletion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("enabled")));
+
+        final var incompleteImport = source.replace("import Box.*;", "import Box.");
+        final var importSnapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of(
+                project.entry(), new ProjectAnalysisWorkspace.Overlay(1, incompleteImport)));
+        final var importOffset = incompleteImport.indexOf("import Box.") + "import Box.".length();
+        final var importCompletion = LspFeatures.completion(importSnapshot, project.entry(),
+                DocumentCoordinates.positionAt(incompleteImport, importOffset));
+        assertTrue(importCompletion.getItems().toString(), importCompletion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("*")));
+        assertTrue(importCompletion.getItems().toString(), importCompletion.getItems().stream()
+                .anyMatch(item -> item.getLabel().startsWith("imported(")));
     }
 
     @Test

@@ -1,0 +1,41 @@
+package query.engine;
+
+import query.ast.Expr;
+import query.error.QueryError;
+import query.schema.Row;
+import query.value.Value;
+
+import zeron.lang.Result;
+
+public fn evaluate(expression: Expr, row: Row): Result<Value, QueryError> = match (expression) {
+    case Expr.Column(name) -> row.get(name);
+    case Expr.Literal(value) -> Result<Value, QueryError>.Ok(value);
+    case Expr.Equal(left, right) -> match (evaluate(left, row)) {
+        case Result.Ok(leftValue) -> match (evaluate(right, row)) {
+            case Result.Ok(rightValue) ->
+                Result<Value, QueryError>.Ok(Value.Flag(equalValues(leftValue, rightValue)));
+            case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+        };
+        case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+    };
+    case Expr.GreaterThan(left, right) -> match (evaluate(left, row)) {
+        case Result.Ok(leftValue) -> match (evaluate(right, row)) {
+            case Result.Ok(rightValue) -> match (compareValues(leftValue, rightValue)) {
+                case Result.Ok(order) ->
+                    Result<Value, QueryError>.Ok(Value.Flag(order > 0));
+                case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+            };
+            case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+        };
+        case Result.Err(error) -> Result<Value, QueryError>.Err(error);
+    };
+};
+
+public fn evaluatePredicate(expression: Expr, row: Row): Result<Boolean, QueryError> =
+    match (evaluate(expression, row)) {
+        case Result.Ok(value) -> match (value) {
+            case Value.Flag(flag) -> Result<Boolean, QueryError>.Ok(flag);
+            case _ -> Result<Boolean, QueryError>.Err(QueryError.InvalidPredicate());
+        };
+        case Result.Err(error) -> Result<Boolean, QueryError>.Err(error);
+    };

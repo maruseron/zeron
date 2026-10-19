@@ -178,6 +178,13 @@ public final class ProjectAnalysisWorkspace {
                 units.add(unit);
             }
         }
+        for (final var sourcePath : StandardLibrary.BUNDLED_SOURCE_PATHS) {
+            final var file = StandardLibrary.bundledSourceFile(sourcePath).orElse(null);
+            if (file != null) {
+                filesByCompilerPath.put(sourcePath, file);
+                sourceText.put(file, Files.readString(file));
+            }
+        }
 
         final var entryUnit = units.stream()
                 .filter(unit -> Objects.equals(unit.sourcePath(), filesByCompilerPath.entrySet().stream()

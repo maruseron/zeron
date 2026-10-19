@@ -450,23 +450,21 @@ public final class StandardLibraryTest {
                 package %s;
                 import zeron.lang.Option;
                 import zeron.lang.Result;
-                import zeron.lang.Ok;
-                import zeron.lang.Err;
                 fn optionValue(value: Option<Int>): Int = match (value) {
                     case Option.Some(item) if item > 0 -> item;
                     case Option.Some(_) -> 0;
                     case Option.None() -> -1;
                 };
                 fn resultValue(value: Result<Int, String>): Int = match (value) {
-                    case Ok<Int, String>.value(item) if item > 0 -> item;
-                    case Ok<Int, String>.value(_) -> 0;
-                    case Err<Int, String>.error(message) -> if (message == "bad") then 7 else -1;
+                    case Result.Ok(item) if item > 0 -> item;
+                    case Result.Ok(_) -> 0;
+                    case Result.Err(message) -> if (message == "bad") then 7 else -1;
                 };
                 fn some(): Option<Int> = Option.Some(42);
                 fn negative(): Option<Int> = Option.Some(-2);
                 fn none(): Option<Int> = Option<Int>.None();
-                fn ok(): Result<Int, String> = Ok<Int, String>.from(9);
-                fn bad(): Result<Int, String> = Err<Int, String>.from("bad");
+                fn ok(): Result<Int, String> = Result.ok<Int, String>(9);
+                fn bad(): Result<Int, String> = Result.err<Int, String>("bad");
                 """.formatted(packageName));
 
         try {
@@ -803,6 +801,26 @@ public final class StandardLibraryTest {
     }
 
     @Test
+    public void installedStandardLibrarySourcesResolveFromDistributionRoot() throws Exception {
+        final var distribution = Files.createTempDirectory("zeron-stdlib-distribution");
+        final var relativePath = Path.of("zeron", "lang", "option.zn");
+        final var source = distribution.resolve("share").resolve("zeron").resolve("stdlib")
+                .resolve(relativePath);
+        Files.createDirectories(source.getParent());
+        Files.copy(Path.of("src", "main", "resources", "stdlib").resolve(relativePath), source);
+        final var previousHome = System.getProperty("zeron.home");
+        try {
+            System.setProperty("zeron.home", distribution.toString());
+            assertEquals(source.toAbsolutePath().normalize(),
+                    StandardLibrary.bundledSourceFile("/stdlib/zeron/lang/option.zn").orElseThrow());
+        } finally {
+            if (previousHome == null) System.clearProperty("zeron.home");
+            else System.setProperty("zeron.home", previousHome);
+            deleteTree(distribution);
+        }
+    }
+
+    @Test
     public void cliErrorStateDoesNotLeakBetweenInvocations() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var invalidSource = Files.createTempFile(Path.of("target"), "InvalidCli" + suffix, ".zn");
@@ -1042,35 +1060,38 @@ public final class StandardLibraryTest {
         final var source = parse("ResultTest.zn", """
                 package %s;
                 import zeron.lang.Result;
-                import zeron.lang.Ok;
-                import zeron.lang.Err;
 
                 fn increment(value: Int): Result<Int, String> =
-                    Ok<Int, String>.from(value + 1);
-                fn success(): Result<Int, String> = Ok<Int, String>.from(41)
+                    Result.ok<Int, String>(value + 1);
+                fn success(): Result<Int, String> = Result.ok<Int, String>(41)
                     .map(value -> value + 1)
                     .andThen(value -> increment(value + 1));
-                fn failure(): Result<Int, String> = Err<Int, String>.from("bad")
+                fn failure(): Result<Int, String> = Result.err<Int, String>("bad")
                     .map(value -> value + 1);
-                fn mappedFailure(): Result<Int, Int> = Err<Int, String>.from("bad")
+                fn mappedFailure(): Result<Int, Int> = Result.err<Int, String>("bad")
                     .mapError(error -> 3);
                 fn successAfterErrorMap(): Result<Int, Int> =
-                    Ok<Int, String>.from(42).mapError(error -> 3);
+                    Result.ok<Int, String>(42).mapError(error -> 3);
+                fn mappedFailureHasMappedError(): Boolean =
+                    mappedFailure().fold(value -> false, error -> error == 3);
+                fn successAfterErrorMapPreservesValue(): Boolean =
+                    successAfterErrorMap().fold(value -> value == 42, error -> false);
                 fn foldedSuccess(): Int = success().fold(value -> value, error -> -1);
                 fn foldedError(): Int = failure().fold(value -> value, error -> -1);
                 fn matchedSuccess(): Int = match (success()) {
-                    case Ok<Int, String> as ok -> ok.value;
-                    case Err<Int, String> -> -1;
+                    case Result.Ok(value) -> value;
+                    case Result.Err(_) -> -1;
                 };
                 fn matchedError(): Boolean = match (failure()) {
-                    case Ok<Int, String> -> false;
-                    case Err<Int, String> as err -> err.error == "bad";
+                    case Result.Ok(_) -> false;
+                    case Result.Err(error) -> error == "bad";
                 };
                 fn successIsOk(): Boolean = success().isOk() and not success().isErr();
                 fn errorIsRetained(): Boolean = failure().isErr()
                     and failure().fold(value -> false, error -> error == "bad");
-                fn errorShortCircuitsAndThen(): Result<Int, String> = failure()
-                    .andThen(value -> increment(value + 1));
+                fn errorShortCircuitsAndThen(): Boolean = failure()
+                    .andThen(value -> increment(value + 1))
+                    .fold(value -> false, error -> error == "bad");
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
@@ -1088,14 +1109,123 @@ public final class StandardLibraryTest {
                 assertEquals(true, test.getMethod("matchedError").invoke(null));
                 assertEquals(true, test.getMethod("successIsOk").invoke(null));
                 assertEquals(true, test.getMethod("errorIsRetained").invoke(null));
-                final var mappedFailure = test.getMethod("mappedFailure").invoke(null);
-                assertEquals(3, mappedFailure.getClass().getMethod("$zeron$get$error").invoke(mappedFailure));
-                final var successAfterErrorMap = test.getMethod("successAfterErrorMap").invoke(null);
-                assertEquals(42, successAfterErrorMap.getClass().getMethod("$zeron$get$value")
-                        .invoke(successAfterErrorMap));
-                final var errorShortCircuited = test.getMethod("errorShortCircuitsAndThen").invoke(null);
-                assertEquals("bad", errorShortCircuited.getClass().getMethod("$zeron$get$error")
-                        .invoke(errorShortCircuited));
+                assertEquals(true, test.getMethod("mappedFailureHasMappedError").invoke(null));
+                assertEquals(true, test.getMethod("successAfterErrorMapPreservesValue").invoke(null));
+                assertEquals(true, test.getMethod("errorShortCircuitsAndThen").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void standardCollectionsExposeTheirHigherKindedOperations() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "collectionHkt" + suffix;
+        final var className = packageName + ".CollectionHktTest" + suffix;
+        final var source = parse("CollectionHktTest.zn", """
+                package %s;
+                import zeron.collections.List;
+                import zeron.collections.Stream;
+                import zeron.control.Foldable;
+                import zeron.control.Functor;
+                import zeron.control.Monad;
+                import zeron.lang.Option;
+                import zeron.lang.Result;
+
+                fn mapAll<F<_>: Functor<F>, A, B>(source: F<A>, transform: (A) -> B): F<B> =
+                    source.map(transform);
+                fn flatMapAll<F<_>: Monad<F>, A, B>(
+                    source: F<A>, transform: (A) -> F<B>
+                ): F<B> = source.flatMap(transform);
+                fn applyAll<F<_>: Monad<F>, A, B>(
+                    functions: F<(A) -> B>, values: F<A>
+                ): F<B> = functions.ap(values);
+                fn pureAll<F<_>: Monad<F>, A>(value: A): F<A> = F.pure(value);
+                fn foldAll<F<_>: Foldable<F>>(values: F<Int>): Int =
+                    values.foldLeft(0, (total, value) -> total + value);
+
+                fn streamMap(): Int =
+                    foldAll<Stream<_>>(
+                        mapAll<Stream<_>, Int, Int>(Stream<Int>.of(1, 2, 3), value -> value + 1));
+                fn streamFlatMap(): Int =
+                    foldAll<Stream<_>>(flatMapAll<Stream<_>, Int, Int>(
+                        Stream<Int>.of(1, 2), value -> Stream<Int>.of(value, value + 10)));
+                fn streamApply(): Int =
+                    foldAll<Stream<_>>(applyAll<Stream<_>, Int, Int>(
+                        Stream<(Int) -> Int>.of(value -> value + 1, value -> value * 2),
+                        Stream<Int>.of(1, 2)));
+                fn streamPure(): Int = foldAll<Stream<_>>(pureAll<Stream<_>, Int>(7));
+
+                fn optionMap(): Int =
+                    foldAll<Option<_>>(
+                        mapAll<Option<_>, Int, Int>(Option.Some(4), value -> value + 1));
+                fn optionFlatMap(): Int =
+                    foldAll<Option<_>>(flatMapAll<Option<_>, Int, Int>(
+                        Option.Some(5), value -> Option.Some(value + 1)));
+                fn optionApply(): Int {
+                    let transform: (Int) -> Int = value -> value * 3;
+                    return foldAll<Option<_>>(applyAll<Option<_>, Int, Int>(
+                        Option.Some(transform), Option.Some(4)));
+                }
+                fn optionPure(): Int = foldAll<Option<_>>(pureAll<Option<_>, Int>(8));
+
+                fn resultMap(): Int =
+                    foldAll<Result<_, String>>(
+                        mapAll<Result<_, String>, Int, Int>(
+                            Result.ok<Int, String>(5), value -> value + 2));
+                fn resultFlatMap(): Int =
+                    foldAll<Result<_, String>>(flatMapAll<Result<_, String>, Int, Int>(
+                        Result.ok<Int, String>(5), value -> Result.ok<Int, String>(value + 2)));
+                fn resultApply(): Int =
+                    foldAll<Result<_, String>>(applyAll<Result<_, String>, Int, Int>(
+                        Result.ok<(Int) -> Int, String>(value -> value + 10),
+                        Result.ok<Int, String>(2)));
+                fn resultPure(): Int =
+                    foldAll<Result<_, String>>(pureAll<Result<_, String>, Int>(9));
+                fn resultErrorFold(): Int =
+                    foldAll<Result<_, String>>(Result.err<Int, String>("bad"));
+
+                fn listFold(): Int = List<Int>.of(1, 2, 3).foldLeft(0,
+                    (total, value) -> total + value);
+                fn listGenericFold(): Int =
+                    foldAll<List<_>>(List<Int>.of(1, 2, 3));
+                fn arrayFold(): Int {
+                    let values: &Array<Int> = [4, 5, 6];
+                    return values.foldLeft(0, (total, value) -> total + value);
+                }
+                fn arrayGenericFold(): Int {
+                    let values: &Array<Int> = [4, 5, 6];
+                    return foldAll<Array<_>>(values);
+                }
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(source)), className, packageName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var test = loader.loadClass(className);
+                assertEquals(9, test.getMethod("streamMap").invoke(null));
+                assertEquals(26, test.getMethod("streamFlatMap").invoke(null));
+                assertEquals(11, test.getMethod("streamApply").invoke(null));
+                assertEquals(7, test.getMethod("streamPure").invoke(null));
+                assertEquals(5, test.getMethod("optionMap").invoke(null));
+                assertEquals(6, test.getMethod("optionFlatMap").invoke(null));
+                assertEquals(12, test.getMethod("optionApply").invoke(null));
+                assertEquals(8, test.getMethod("optionPure").invoke(null));
+                assertEquals(7, test.getMethod("resultMap").invoke(null));
+                assertEquals(7, test.getMethod("resultFlatMap").invoke(null));
+                assertEquals(12, test.getMethod("resultApply").invoke(null));
+                assertEquals(9, test.getMethod("resultPure").invoke(null));
+                assertEquals(0, test.getMethod("resultErrorFold").invoke(null));
+                assertEquals(6, test.getMethod("listFold").invoke(null));
+                assertEquals(6, test.getMethod("listGenericFold").invoke(null));
+                assertEquals(15, test.getMethod("arrayFold").invoke(null));
+                assertEquals(15, test.getMethod("arrayGenericFold").invoke(null));
             }
         } finally {
             deleteTree(Path.of("dist"));

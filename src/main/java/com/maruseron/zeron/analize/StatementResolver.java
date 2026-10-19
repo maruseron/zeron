@@ -80,7 +80,19 @@ final class StatementResolver {
                 if (!context.functionNamesByDeclaration.containsKey(fn.name())) {
                     context.declarationRegistrar.registerFunction(context.packageName, fn);
                 }
-                LambdaResolver.resolveFunction(context, fn);
+                final var previousClassName = context.frame.currentClassName;
+                final var previousMethodOwner = context.frame.currentMethodOwner;
+                final var implementationOwner = context.higherKindedImplementationOwners.get(fn);
+                if (implementationOwner != null) {
+                    context.frame.currentClassName = implementationOwner;
+                    context.frame.currentMethodOwner = context.classes.get(implementationOwner);
+                }
+                try {
+                    LambdaResolver.resolveFunction(context, fn);
+                } finally {
+                    context.frame.currentClassName = previousClassName;
+                    context.frame.currentMethodOwner = previousMethodOwner;
+                }
             }
             case Stmt.ExtensionMethod extension -> {
                 TypeResolver.validateFunctionTypes(context, extension.typeDescriptor(), extension.name());
@@ -201,15 +213,7 @@ final class StatementResolver {
     }
 
     private static boolean isSupportedBuiltinExtensionReceiver(final TypeDescriptor receiverType) {
-        return receiverType instanceof ArrayDescriptor
-                || receiverType instanceof ByteDescriptor
-                || receiverType instanceof ByteArrayDescriptor
-                || receiverType instanceof UnitDescriptor
-                || receiverType instanceof IntDescriptor
-                || receiverType instanceof LongDescriptor
-                || receiverType instanceof FloatDescriptor
-                || receiverType instanceof BooleanDescriptor
-                || receiverType instanceof StringDescriptor;
+        return BuiltinTypes.supportsExtensionReceiver(receiverType);
     }
 
     private void resolveVariable(final Stmt.Var var) {
@@ -231,8 +235,14 @@ final class StatementResolver {
         }
 
         if (var.initializer() != null) {
+            final var constrainedLambda = globalToken == null
+                    && var.type() instanceof InferDescriptor
+                    && var.mutability() == BindingMutability.IMMUTABLE
+                    && var.initializer() instanceof Expr.Lambda lambda
+                    ? LambdaResolver.resolveConstrainedLambda(context, lambda)
+                    : null;
             resolvedType = var.type() instanceof InferDescriptor
-                    ? resolve(var.initializer())
+                    ? constrainedLambda == null ? resolve(var.initializer()) : constrainedLambda
                     : MemberInteropResolver.resolveArgument(context, var.initializer(), var.type());
             if (var.type() instanceof InferDescriptor
                     && var.mutability() == BindingMutability.IMMUTABLE

@@ -1,0 +1,10 @@
+package query.ast;
+
+import query.value.TableId;
+
+public type QueryPlan =
+      Scan(table: TableId)
+    | Filter(source: QueryPlan, predicate: Expr)
+    | Project(source: QueryPlan, columns: Array<String>)
+    | Join(left: QueryPlan, right: QueryPlan, leftKey: String, rightKey: String)
+    | OrderBy(source: QueryPlan, column: String);

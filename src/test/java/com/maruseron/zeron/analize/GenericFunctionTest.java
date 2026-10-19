@@ -497,6 +497,95 @@ public final class GenericFunctionTest {
     }
 
     @Test
+    public void infersContractBoundsForLetBoundLambdas() throws Exception {
+        final var className = "ConstrainedLambdas" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var source = parse("""
+                public contract Named { name(): String; }
+                public contract Encodable { encode(): String; }
+                public class Person is Named, Encodable {
+                    label: String;
+                    public constructor new;
+                    public name(): String = this.label;
+                    public encode(): String = "[" + this.label + "]";
+                }
+                public class Place is Named {
+                    label: String;
+                    public constructor new;
+                    public name(): String = this.label;
+                }
+                fn display<T: Named>(value: T): String = value.name();
+                fn apply<T: Named>(value: T, operation: (T) -> String): String = operation(value);
+                fn directMembers(): String {
+                    let readName = value -> value.name();
+                    let person = readName(Person.new("Ada"));
+                    let place = readName(Place.new("Paris"));
+                    return person + place;
+                }
+                fn inheritedBounds(): String {
+                    let readName = value -> display(value);
+                    return readName(Person.new("Grace"));
+                }
+                fn callbackArgument(): String {
+                    let readName = value -> value.name();
+                    return apply(Person.new("Lin"), readName);
+                }
+                fn callbackReturn(): (Person) -> String {
+                    let readName = value -> value.name();
+                    return readName;
+                }
+                fn capturedMemberUse(): String {
+                    let prefix = "name:";
+                    let describe = value -> prefix + value.name();
+                    return describe(Person.new("Mira"));
+                }
+                fn invokeReturnedCallback(): String {
+                    let callback = callbackReturn();
+                    return callback(Person.new("Nia"));
+                }
+                fn multipleBounds(): String {
+                    let describe = value -> value.name() + value.encode();
+                    return describe(Person.new("Zeron"));
+                }
+                """);
+        final var compiler = new CompilationService(source, className);
+        compiler.resolve();
+
+        try {
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals("AdaParis", generated.getMethod("directMembers").invoke(null));
+                assertEquals("Grace", generated.getMethod("inheritedBounds").invoke(null));
+                assertEquals("Lin", generated.getMethod("callbackArgument").invoke(null));
+                assertEquals("name:Mira", generated.getMethod("capturedMemberUse").invoke(null));
+                assertEquals("Nia", generated.getMethod("invokeReturnedCallback").invoke(null));
+                assertEquals("Zeron[Zeron]", generated.getMethod("multipleBounds").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            for (final var generated : List.of("Named", "Encodable", "Person", "Place")) {
+                Files.deleteIfExists(Path.of("dist", generated + ".class"));
+            }
+        }
+    }
+
+    @Test
+    public void reportsUnsatisfiedInferredLambdaBoundsAtTheUse() {
+        final var source = """
+                contract Named { name(): String; }
+                fn invalid(): String {
+                    let readName = value -> value.name();
+                    return readName("not named");
+                }
+                """;
+        final var failure = assertThrows(ResolutionError.class,
+                () -> new ResolutionService().resolve(parse(source)));
+        assertTrue(failure.getMessage().contains("readName"));
+    }
+
+    @Test
     public void doesNotGeneralizeMutableLambdaBindings() {
         for (final var source : List.of(
             "fn invalid(): Unit { let mut identity = value -> value; "
@@ -699,7 +788,7 @@ public final class GenericFunctionTest {
                 final var adapterCount = java.util.Arrays.stream(program.getDeclaredMethods())
                         .filter(method -> method.getName().startsWith("$adapter$"))
                         .count();
-                assertEquals(5, adapterCount);
+                assertEquals(8, adapterCount);
             }
         } finally {
             Files.deleteIfExists(classFile);

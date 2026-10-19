@@ -1,0 +1,55 @@
+# Starter canonical style rules keyed by productions in
+# documents/design-document-01_grammar.cfgr.
+# Placeholders refer to recursively formatted syntax fields. Lists use the
+# separator declared for that field. {?field}...{/field} emits its contents
+# only when the field is present; whitespace and punctuation inside the
+# section are omitted with it.
+
+[meta]
+version = "1.0"
+style_name = "zeron-canonical"
+
+[general]
+overflow_strategy = "prefer_multiline"
+indent_width = 4
+max_line_length = 100
+
+[line_ending]
+end_of_line = "preserve"
+insert_final_newline = true
+
+[style.declarations]
+blank_lines_between = 1
+
+[style.imports]
+sort = "qualified_name"
+group_by = "first_package_component"
+blank_lines_between_groups = 1
+blank_lines_within_group = 0
+
+# Imports are sorted by qualified name, then separated by one blank line
+# when the first package component changes. Aliases are emitted only when present.
+[templates.import_group]
+op = "text"
+value = 'import {qualified_name}{?alias} as {alias}{/alias}'
+group_by_root = true
+blank_lines_between_groups = 1
+
+[style.sum_cases]
+one_case_per_line = true
+break_after_equals = true
+continuation_indent = 4
+first_case_name_extra_indent = 2
+subsequent_case_prefix = "| "
+align_case_names = true
+
+[style.functions]
+break_priority = ["after_equals", "parameter_list"]
+parameter_list_break = "only_if_header_exceeds_width"
+continuation_indent = 4
+
+# Prefer the implicit canonical public constructor. A formatter must preserve
+# an explicit constructor unless it can prove omission is semantics-preserving.
+[style.classes]
+avoid_public_new = true
+remove_explicit_public_new = false

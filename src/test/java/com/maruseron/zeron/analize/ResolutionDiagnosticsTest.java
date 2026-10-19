@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.diagnostic.DiagnosticHelp;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
@@ -133,6 +134,24 @@ public final class ResolutionDiagnosticsTest {
         assertEquals(1, result.errors().size());
         assertEquals("ZR2022", result.errors().getFirst().code().toString());
         assertTrue(result.errors().getFirst().message().contains("Cannot infer type parameter"));
+    }
+
+    @Test
+    public void formatsTypesInMissingWitnessDiagnostics() {
+        final var unit = Parser.of(Scanner.from("""
+                class Box<T> {}
+                fn stringify(value: Box<Int>): String = "value=" + value;
+                fn equal(left: Box<Int>, right: Box<Int>): Boolean = left == right;
+                """).scanTokens()).parseCompilationUnit("witness-diagnostics.zn");
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(unit), "WitnessDiagnostics", "");
+
+        final var messages = compiler.resolveWithDiagnostics().errors().stream()
+                .map(error -> error.message())
+                .toList();
+
+        assertTrue(messages.contains("No Display witness is in scope for 'Box<Int>'."));
+        assertTrue(messages.contains("No Eq witness is in scope for 'Box<Int>'."));
     }
 
     @Test

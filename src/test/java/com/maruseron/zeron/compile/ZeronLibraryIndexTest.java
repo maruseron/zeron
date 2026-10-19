@@ -182,6 +182,69 @@ public final class ZeronLibraryIndexTest {
     }
 
     @Test
+    public void separatelyCompiledClientUsesClassDeclaredHktImplementationFromLibraryIndex() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "hktlibrary" + suffix;
+        final var clientPackage = "hktclient" + suffix;
+        final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-hkt-library-");
+        final var library = parse("Library.zn", """
+                package %s;
+                import zeron.control.Functor;
+                public class Box<T> is Functor<Box<_>> {
+                    public property value: T;
+                    implementation Functor<Box<_>> {
+                        fn map<A, B>(this: Box<A>, transform: (A) -> B): Box<B> =
+                            Box.new(transform(this.value));
+                    }
+                }
+                """.formatted(libraryPackage));
+        final var client = parse("Main.zn", """
+                package %s;
+                import %s.Box;
+                import zeron.control.Functor;
+                fn mapValue<F<_>: Functor<F>, A, B>(
+                    source: F<A>, transform: (A) -> B
+                ): F<B> = source.map(transform);
+                fn run(): Int {
+                    let mapped = mapValue<Box<_>, Int, Int>(Box.new(41), value -> value + 1);
+                    return mapped.value;
+                }
+                """.formatted(clientPackage, libraryPackage));
+        try {
+            deleteTree(Path.of("dist"));
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            copyTree(Path.of("dist"), libraryRoot);
+            final var libraryIndex = ZeronLibraryIndex.readFromDirectory(libraryRoot);
+            final var hktWitness = libraryIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.WitnessExport.class::isInstance)
+                    .map(ZeronLibraryIndex.WitnessExport.class::cast)
+                    .filter(witness -> witness.higherKinded()
+                            && witness.targetType().name().equals(libraryPackage + ".Box"))
+                    .findFirst().orElseThrow();
+            assertEquals(List.of("this", "transform"),
+                    hktWitness.methods().getFirst().methodParameterNames());
+            assertEquals(libraryPackage + ".Box", hktWitness.methods().getFirst().helperJvmOwner());
+
+            deleteTree(Path.of("dist"));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), clientPackage + ".Main", clientPackage, List.of(libraryIndex));
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(clientPackage + ".Main").getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(libraryRoot);
+        }
+    }
+
+    @Test
     public void separatelyCompiledClientResolvesWitnessPrerequisiteEvidence() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var libraryPackage = "prereqlibrary" + suffix;

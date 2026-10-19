@@ -12,6 +12,7 @@ import java.lang.constant.ConstantDescs;
 import java.lang.constant.MethodTypeDesc;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 final class RuntimeSupportEmitter {
     private static final ClassDesc UNIT_CLASS = ClassDesc.of("zeron.lang.Unit");
@@ -52,6 +53,30 @@ final class RuntimeSupportEmitter {
                         code.areturn();
                     });
         });
+    }
+
+    static void emitLambdaTemplateSupportClass(final Path outputDirectory) throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "LambdaTemplateSupport.class"));
+        Files.createDirectories(output.getParent());
+        try (final var classBytes = RuntimeSupportEmitter.class.getResourceAsStream(
+                "/zeron/runtime/LambdaTemplateSupport.class")) {
+            if (classBytes == null) {
+                throw new IOException("Missing compiled LambdaTemplateSupport runtime class.");
+            }
+            Files.copy(classBytes, output, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    static void emitStringUnicodeSupportClass(final Path outputDirectory) throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "StringUnicode.class"));
+        Files.createDirectories(output.getParent());
+        try (final var classBytes = RuntimeSupportEmitter.class.getResourceAsStream(
+                "/zeron/runtime/StringUnicode.class")) {
+            if (classBytes == null) {
+                throw new IOException("Missing compiled StringUnicode runtime class.");
+            }
+            Files.copy(classBytes, output, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     static void emitRaisedEffectClass(final Path outputDirectory) throws IOException {
@@ -411,9 +436,74 @@ final class RuntimeSupportEmitter {
         ClassFile.of().buildTo(outFile, classDesc, builder -> {
             builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_INTERFACE | ClassFile.ACC_ABSTRACT);
+            final var objectType = TypeDescriptor.ofName("java.lang.Object");
+            final var objectShape = TypeDescriptor.functionWithEffectsOf(type.name(), objectType,
+                    java.util.Collections.nCopies(type.arity(), objectType),
+                    java.util.List.of(), java.util.List.of());
+            final var objectShapeKey = FunctionShapeKey.of(objectShape);
+            final var objectInterface = ClassDesc.of(FunctionShapeNames.interfaceName(objectShapeKey));
+            if (!methodDescriptor(type).equals(methodDescriptor(objectShape))) {
+                builder.withInterfaceSymbols(java.util.List.of(objectInterface));
+            }
             builder.withMethod("invoke", methodDescriptor(type),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_ABSTRACT, _ -> {});
+            if (!methodDescriptor(type).equals(methodDescriptor(objectShape))) {
+                builder.withMethod("invoke", methodDescriptor(objectShape), ClassFile.ACC_PUBLIC,
+                        methodBuilder -> methodBuilder.withCode(code -> {
+                            code.aload(0);
+                            for (int index = 0; index < type.arity(); index++) {
+                                code.aload(index + 1);
+                                final var parameter = TypeDescriptor.toJavaClassDesc(type.parameters().get(index));
+                                emitObjectToFunctionType(code, type.parameters().get(index));
+                            }
+                            code.invokeinterface(classDesc, "invoke", methodDescriptor(type));
+                            emitFunctionResultToObject(code, type.returnType());
+                            code.areturn();
+                        }));
+            }
         });
+    }
+
+    private static void emitObjectToFunctionType(final java.lang.classfile.CodeBuilder code,
+                                                 final TypeDescriptor type) {
+        final var descriptor = TypeDescriptor.toJavaClassDesc(type);
+        final var wrapper = switch (descriptor.descriptorString()) {
+            case "I" -> ClassDesc.of("java.lang.Integer");
+            case "J" -> ClassDesc.of("java.lang.Long");
+            case "D" -> ClassDesc.of("java.lang.Double");
+            case "Z" -> ClassDesc.of("java.lang.Boolean");
+            case "B" -> ClassDesc.of("java.lang.Byte");
+            default -> null;
+        };
+        if (wrapper == null) {
+            if (!descriptor.equals(ConstantDescs.CD_Object)) code.checkcast(descriptor);
+            return;
+        }
+        code.checkcast(wrapper);
+        final var method = switch (descriptor.descriptorString()) {
+            case "I" -> "intValue";
+            case "J" -> "longValue";
+            case "D" -> "doubleValue";
+            case "Z" -> "booleanValue";
+            case "B" -> "byteValue";
+            default -> throw new IllegalStateException("Unsupported primitive function parameter.");
+        };
+        code.invokevirtual(wrapper, method, MethodTypeDesc.of(descriptor));
+    }
+
+    private static void emitFunctionResultToObject(final java.lang.classfile.CodeBuilder code,
+                                                   final TypeDescriptor type) {
+        final var descriptor = TypeDescriptor.toJavaClassDesc(type);
+        final var wrapper = switch (descriptor.descriptorString()) {
+            case "I" -> ClassDesc.of("java.lang.Integer");
+            case "J" -> ClassDesc.of("java.lang.Long");
+            case "D" -> ClassDesc.of("java.lang.Double");
+            case "Z" -> ClassDesc.of("java.lang.Boolean");
+            case "B" -> ClassDesc.of("java.lang.Byte");
+            default -> null;
+        };
+        if (wrapper == null) return;
+        code.invokestatic(wrapper, "valueOf", MethodTypeDesc.of(wrapper, descriptor));
     }
 
     private static MethodTypeDesc methodDescriptor(final FunctionDescriptor type) {

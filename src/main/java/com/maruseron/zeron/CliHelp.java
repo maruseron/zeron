@@ -15,6 +15,7 @@ final class CliHelp {
               zeron init
               zeron build [--manifest <file>] [--debug]
               zeron run [--manifest <file>] [--debug]
+              zeron fmt [--check] [<file-or-directory>...]
               zeron lsp [--manifest <file>]
               zeron explain <ZR0000>
               zeron dump <api-index|class-directory|library.jar>
@@ -53,6 +54,13 @@ final class CliHelp {
 
                     Compile the project described by zeron.toml and launch its entry point.
                     The manifest defaults to ./zeron.toml.
+                    """),
+            Map.entry("fmt", """
+                    Usage: zeron fmt [--check] [<file-or-directory>...]
+
+                    Format selected .zn files, or discover them under the source roots in
+                    ./zeron.toml when no paths are provided. With --check, report files that
+                    differ from the canonical style without modifying them.
                     """),
             Map.entry("lsp", """
                     Usage: zeron lsp [--manifest <file>] [--stdio]
@@ -135,7 +143,7 @@ final class CliHelp {
                     """));
 
     private static final Set<String> COMMANDS =
-            Set.of("init", "build", "run", "lsp", "explain", "dump", "help");
+            Set.of("init", "build", "run", "fmt", "lsp", "explain", "dump", "help");
 
     private CliHelp() {}
 

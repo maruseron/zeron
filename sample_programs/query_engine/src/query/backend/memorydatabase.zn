@@ -1,0 +1,19 @@
+package query.backend;
+
+import query.error.QueryError;
+import query.schema.Row;
+import query.value.TableId;
+
+import zeron.collections.List;
+import zeron.lang.Result;
+
+public class MemoryDatabase {
+    users: &List<Row>;
+    orders: &List<Row>;
+
+    public rowsFor(table: TableId): Result<&List<Row>, QueryError> {
+        if (table.value == "users") return Result.Ok(this.users);
+        if (table.value == "orders") return Result.Ok(this.orders);
+        return Result<&List<Row>, QueryError>.Err(QueryError.UnknownTable(table.value));
+    }
+}

@@ -1,0 +1,74 @@
+package zeron.math;
+
+public extension Int {
+    public fn abs(): Int = mathAbsInt(this);
+    public fn min(other: Int): Int = mathMinInt(this, other);
+    public fn max(other: Int): Int = mathMaxInt(this, other);
+    public fn clamp(min: Int, max: Int): Int = mathClampInt(this.toLong(), min, max);
+}
+
+public extension Long {
+    public fn abs(): Long = mathAbsLong(this);
+    public fn min(other: Long): Long = mathMinLong(this, other);
+    public fn max(other: Long): Long = mathMaxLong(this, other);
+    public fn clamp(min: Long, max: Long): Long = mathClampLong(this, min, max);
+}
+
+public extension Float {
+    public fn abs(): Float = mathAbsFloat(this);
+    public fn min(other: Float): Float = mathMinFloat(this, other);
+    public fn max(other: Float): Float = mathMaxFloat(this, other);
+    public fn clamp(min: Float, max: Float): Float = mathClampFloat(this, min, max);
+
+    public fn sqrt(): Float = mathFloatSqrt(this);
+    public fn pow(exponent: Float): Float = mathFloatPow(this, exponent);
+    public fn exp(): Float = mathFloatExp(this);
+    public fn ln(): Float = mathFloatLn(this);
+    public fn log10(): Float = mathFloatLog10(this);
+    public fn sin(): Float = mathFloatSin(this);
+    public fn cos(): Float = mathFloatCos(this);
+    public fn tan(): Float = mathFloatTan(this);
+    public fn asin(): Float = mathFloatAsin(this);
+    public fn acos(): Float = mathFloatAcos(this);
+    public fn atan(): Float = mathFloatAtan(this);
+    public fn atan2(x: Float): Float = mathFloatAtan2(this, x);
+    public fn floor(): Float = mathFloatFloor(this);
+    public fn ceil(): Float = mathFloatCeil(this);
+    public fn trunc(): Float {
+        if (this < 0.0) return mathFloatCeil(this);
+        return mathFloatFloor(this);
+    }
+    public fn round(): Long = mathFloatRound(this);
+}
+
+public let PI: Float = 3.141592653589793;
+public let TAU: Float = 6.283185307179586;
+public let E: Float = 2.718281828459045;
+
+external fn mathAbsInt(value: Int): Int;
+external fn mathAbsLong(value: Long): Long;
+external fn mathAbsFloat(value: Float): Float;
+external fn mathMinInt(left: Int, right: Int): Int;
+external fn mathMinLong(left: Long, right: Long): Long;
+external fn mathMinFloat(left: Float, right: Float): Float;
+external fn mathMaxInt(left: Int, right: Int): Int;
+external fn mathMaxLong(left: Long, right: Long): Long;
+external fn mathMaxFloat(left: Float, right: Float): Float;
+external fn mathClampInt(value: Long, min: Int, max: Int): Int;
+external fn mathClampLong(value: Long, min: Long, max: Long): Long;
+external fn mathClampFloat(value: Float, min: Float, max: Float): Float;
+external fn mathFloatSqrt(value: Float): Float;
+external fn mathFloatPow(value: Float, exponent: Float): Float;
+external fn mathFloatExp(value: Float): Float;
+external fn mathFloatLn(value: Float): Float;
+external fn mathFloatLog10(value: Float): Float;
+external fn mathFloatSin(value: Float): Float;
+external fn mathFloatCos(value: Float): Float;
+external fn mathFloatTan(value: Float): Float;
+external fn mathFloatAsin(value: Float): Float;
+external fn mathFloatAcos(value: Float): Float;
+external fn mathFloatAtan(value: Float): Float;
+external fn mathFloatAtan2(y: Float, x: Float): Float;
+external fn mathFloatFloor(value: Float): Float;
+external fn mathFloatCeil(value: Float): Float;
+external fn mathFloatRound(value: Float): Long;

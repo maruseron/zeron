@@ -1,0 +1,4 @@
+package query.value;
+
+public newtype TableId = String;
+public newtype UserId = Int;

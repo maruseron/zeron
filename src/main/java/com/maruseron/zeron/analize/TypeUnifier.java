@@ -16,6 +16,14 @@ final class TypeUnifier {
                       final Token where) {
         if (pattern instanceof TypeParameterDescriptor parameter) {
             if (actual instanceof NullDescriptor) return;
+            if (parameter.isHigherKinded()
+                    && !(actual instanceof TypeConstructorDescriptor)
+                    && !(actual instanceof TypeParameterDescriptor actualParameter
+                            && actualParameter.isHigherKinded())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE, where,
+                        "Cannot infer a type constructor for '" + parameter.name()
+                                + "'; provide an explicit constructor argument."));
+            }
             final var previous = substitutions.putIfAbsent(parameter, actual);
             if (previous != null && !previous.equals(actual)
                 && !acceptsAny(previous, actual)
@@ -26,6 +34,30 @@ final class TypeUnifier {
                                 + previous + " and " + actual + "."));
             }
             return;
+        }
+        if (pattern instanceof AppliedConstructorDescriptor applied) {
+            if (actual instanceof ReferenceDescriptor reference) actual = reference.baseType();
+            if (actual instanceof AppliedConstructorDescriptor actualApplied) {
+                if (!applied.constructor().equals(actualApplied.constructor())) {
+                    unify(applied.constructor(), actualApplied.constructor(), substitutions, where);
+                }
+                unify(applied.argument(), actualApplied.argument(), substitutions, where);
+                return;
+            }
+            final var selected = substitutions.get(applied.constructor());
+            if (selected instanceof TypeConstructorDescriptor constructor) {
+                unify(constructor.apply(applied.argument()), actual, substitutions, where);
+                return;
+            }
+            if (actual instanceof GenericDescriptor generic && generic.typeParameters().size() == 1) {
+                substitutions.putIfAbsent(applied.constructor(),
+                        new TypeConstructorDescriptor(generic.baseType(), java.util.List.of(
+                                TypeDescriptor.ofInfer())));
+                unify(applied.argument(), generic.typeParameters().getFirst(), substitutions, where);
+                return;
+            }
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE, where,
+                    "Cannot infer the constructor parameter from this type; provide an explicit constructor argument."));
         }
         if (pattern.equals(actual)
                 && !(pattern instanceof NullableDescriptor || pattern instanceof ReferenceDescriptor
@@ -61,6 +93,16 @@ final class TypeUnifier {
             for (int i = 0; i < genericPattern.typeParameters().size(); i++) {
                 unify(genericPattern.typeParameters().get(i),
                         genericActual.typeParameters().get(i), substitutions, where);
+            }
+            return;
+        }
+        if (pattern instanceof TypeConstructorDescriptor constructorPattern
+                && actual instanceof TypeConstructorDescriptor constructorActual
+                && constructorPattern.baseType().equals(constructorActual.baseType())
+                && constructorPattern.arguments().size() == constructorActual.arguments().size()) {
+            for (int i = 0; i < constructorPattern.arguments().size(); i++) {
+                unify(constructorPattern.arguments().get(i), constructorActual.arguments().get(i),
+                        substitutions, where);
             }
             return;
         }

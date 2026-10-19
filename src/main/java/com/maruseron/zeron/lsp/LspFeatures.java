@@ -4,6 +4,7 @@ import com.maruseron.zeron.ProjectAnalysisWorkspace;
 import com.maruseron.zeron.analize.ResolutionResult;
 import com.maruseron.zeron.api.PublicMemberCatalog;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.ImportDeclaration;
 import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
@@ -37,15 +38,11 @@ final class LspFeatures {
     private static final List<String> KEYWORDS = List.of(
             "as", "and", "break", "case", "class", "contract", "constructor", "continue",
             "default", "else", "effect", "extension", "external", "false", "fn", "for",
-            "get", "handle", "if", "implement", "import", "in", "is", "let", "loop",
+            "handle", "if", "implement", "import", "in", "is", "let", "loop",
             "match", "mut", "namespace", "newtype", "not", "null", "object", "or",
             "package", "pattern", "property", "public", "raise", "return", "sealed",
             "super", "this", "throw", "true", "try", "type", "using", "var", "while",
             "witness");
-    private static final List<String> BUILTIN_TYPES = List.of(
-            "Any", "Array", "Boolean", "Byte", "ByteArray", "Float", "Int", "Long",
-            "Never", "String", "Unit");
-
     private LspFeatures() {}
 
     static CompletionList completion(final ProjectAnalysisWorkspace.Snapshot snapshot,
@@ -63,7 +60,7 @@ final class LspFeatures {
                         && token.type() != TokenType.EOF)
                 .toList();
         final var symbols = new SymbolIndex(snapshot);
-        final var importItems = extensionImportMembers(snapshot, beforeCursor, prefix);
+        final var importItems = extensionImportMembers(snapshot, path, beforeCursor, prefix, symbols);
         if (importItems != null) return new CompletionList(false, importItems);
         final var items = receiverMembers(snapshot, path, beforeCursor, prefix, symbols);
         if (items != null) return new CompletionList(false, items);
@@ -80,7 +77,7 @@ final class LspFeatures {
                 unique.putIfAbsent("keyword:" + keyword, item);
             }
         }
-        for (final var type : BUILTIN_TYPES) {
+        for (final var type : BuiltinTypes.COMPLETION_CANDIDATES) {
             if (type.startsWith(prefix)) {
                 final var item = new CompletionItem(type);
                 item.setKind(CompletionItemKind.Class);
@@ -91,8 +88,8 @@ final class LspFeatures {
     }
 
     private static List<CompletionItem> extensionImportMembers(
-            final ProjectAnalysisWorkspace.Snapshot snapshot,
-            final List<Token> beforeCursor, final String prefix) {
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final Path path,
+            final List<Token> beforeCursor, final String prefix, final SymbolIndex symbols) {
         var importIndex = -1;
         for (var index = beforeCursor.size() - 1; index >= 0; index--) {
             final var type = beforeCursor.get(index).type();
@@ -121,13 +118,62 @@ final class LspFeatures {
         if (qualifiedNamespace.isEmpty() || !expectIdentifier) return null;
 
         final var resolution = snapshot.resolution().orElse(null);
+        final var unit = symbols.unitFor(path);
         if (resolution == null) return List.of();
+        final var namespaceTarget = unit == null ? null
+                : resolveNamespaceTarget(qualifiedNamespace.toString(), unit, snapshot.units(), resolution);
+        final var packageTarget = isKnownPackage(qualifiedNamespace.toString(), snapshot.units())
+                ? qualifiedNamespace.toString() : null;
         final var items = new LinkedHashMap<String, CompletionItem>();
+        if (namespaceTarget != null || packageTarget != null) {
+            final var wildcard = new CompletionItem("*");
+            wildcard.setKind(CompletionItemKind.Keyword);
+            wildcard.setInsertText("*");
+            items.put("*", wildcard);
+        }
+        if (namespaceTarget != null) {
+            final var separator = namespaceTarget.lastIndexOf('.');
+            final var packageName = separator < 0 ? "" : namespaceTarget.substring(0, separator);
+            final var memberNamespace = separator < 0 ? namespaceTarget
+                    : namespaceTarget.substring(separator + 1);
+            for (final var candidates : symbols.byName.values()) {
+                for (final var symbol : candidates) {
+                    if ((symbol.isPublic() || symbol.packageName().equals(unit.packageName()))
+                            && symbol.packageName().equals(packageName)
+                            && Objects.equals(symbol.namespaceName(), memberNamespace)
+                            && symbol.kind() != CompletionItemKind.Method
+                            && symbol.kind() != CompletionItemKind.Property
+                            && symbol.name().startsWith(prefix)) {
+                        items.putIfAbsent(symbol.qualifiedName(), completionItem(symbol));
+                    }
+                }
+            }
+        }
         for (final var extension : resolution.extensions()) {
             final var qualifiedName = resolution.functionNamesByDeclaration().get(extension.name());
-            if (qualifiedName == null
-                    || !qualifiedName.startsWith(qualifiedNamespace + ".")
+            final var separator = qualifiedName == null ? -1 : qualifiedName.lastIndexOf('.');
+            final var extensionNamespace = separator < 0 ? null : qualifiedName.substring(0, separator);
+            final var namespaceSeparator = namespaceTarget == null ? -1 : namespaceTarget.lastIndexOf('.');
+            final var namespacePackage = namespaceSeparator < 0 ? ""
+                    : namespaceTarget.substring(0, namespaceSeparator);
+            final var namespaceMatch = namespaceTarget != null
+                    && namespaceTarget.equals(extensionNamespace);
+            final var packageMatch = namespaceTarget == null && packageTarget != null
+                    && extensionNamespace != null && extensionNamespace.startsWith(packageTarget + ".");
+            if ((!namespaceMatch && !packageMatch)
+                    || !extension.isPublic() && (!namespaceMatch || unit == null
+                    || !namespacePackage.equals(unit.packageName()))
                     || !extension.name().lexeme().startsWith(prefix)) continue;
+            if (items.containsKey(extension.name().lexeme())) continue;
+            if (extension.property()) {
+                final var item = new CompletionItem(extension.name().lexeme());
+                item.setDetail(TypeFormatter.format(extension.typeDescriptor().returnType()));
+                item.setKind(CompletionItemKind.Property);
+                item.setInsertText(extension.name().lexeme());
+                item.setSortText("1" + extension.name().lexeme());
+                items.putIfAbsent(qualifiedName, item);
+                continue;
+            }
             final var methodType = extension.typeDescriptor();
             final var parameters = methodType.parameters().isEmpty()
                     ? List.<TypeDescriptor>of() : methodType.parameters().subList(1, methodType.parameters().size());
@@ -142,7 +188,9 @@ final class LspFeatures {
             item.setDetail(TypeFormatter.format(visibleType.returnType()));
             item.setKind(CompletionItemKind.Method);
             item.setSortText("1" + extension.name().lexeme());
-            items.putIfAbsent(qualifiedName, item);
+            items.putIfAbsent(qualifiedName == null
+                    ? "extension:" + extension.receiverType().name() + "." + extension.name().lexeme()
+                    : qualifiedName, item);
         }
         return List.copyOf(items.values());
     }
@@ -225,7 +273,8 @@ final class LspFeatures {
         final var items = new LinkedHashMap<String, CompletionItem>();
         for (final var member : concat(view.directMembers(), view.contractMembers(), view.extensions())) {
             if (member.kind() == PublicMemberCatalog.MemberKind.CONSTRUCTOR
-                    || !member.name().startsWith(prefix) || !extensionIsActive(member, unit)) continue;
+                    || !member.name().startsWith(prefix)
+                    || !extensionIsActive(member, unit, resolution)) continue;
             final var item = memberCompletionItem(member);
             final var visibleName = extensionName(member, unit);
             item.setLabel(member.kind() == PublicMemberCatalog.MemberKind.PROPERTY
@@ -273,8 +322,13 @@ final class LspFeatures {
                     descriptor.raisedEffects());
             final var visibleParameterNames = extension.parameters().isEmpty()
                     ? List.<Token>of() : extension.parameters().subList(1, extension.parameters().size());
-            final var item = completionItemForMethod(
-                    extension.name().lexeme(), visibleType, visibleParameterNames);
+            final var item = extension.property()
+                    ? new CompletionItem(extension.name().lexeme())
+                    : completionItemForMethod(extension.name().lexeme(), visibleType, visibleParameterNames);
+            if (extension.property()) {
+                item.setKind(CompletionItemKind.Property);
+                item.setDetail(TypeFormatter.format(extension.typeDescriptor().returnType()));
+            }
             item.setSortText("2" + extension.name().lexeme());
             items.putIfAbsent(extension.name().lexeme(), item);
         }
@@ -294,9 +348,65 @@ final class LspFeatures {
         if (qualifiedName == null) return false;
         final var separator = qualifiedName.lastIndexOf('.');
         final var namespace = separator < 0 ? "" : qualifiedName.substring(0, separator);
-        return unit.imports().stream().anyMatch(imported -> imported.onDemand()
-                ? namespace.equals(imported.qualifiedName())
-                : qualifiedName.equals(imported.qualifiedName()));
+        return unit.imports().stream().anyMatch(imported -> {
+            if (!imported.onDemand()) return qualifiedName.equals(imported.qualifiedName());
+            final var namespaceTarget = resolveNamespaceTarget(
+                    imported.qualifiedName(), unit, symbols.snapshot.units(), resolution);
+            final var packageSeparator = namespace.lastIndexOf('.');
+            final var extensionPackage = packageSeparator < 0 ? "" : namespace.substring(0, packageSeparator);
+            return namespaceTarget != null
+                    ? namespace.equals(namespaceTarget) && extension.isPublic()
+                    : extensionPackage.equals(imported.qualifiedName());
+        });
+    }
+
+    private static boolean extensionIsActive(final PublicMemberCatalog.Member member,
+                                             final CompilationUnit unit,
+                                             final ResolutionResult resolution) {
+        if (member.origin() != PublicMemberCatalog.MemberOrigin.EXTENSION) return true;
+        if (unit == null || member.activationImport() == null) return false;
+        return unit.imports().stream().anyMatch(imported -> {
+            if (!imported.onDemand()) return member.activationImport().equals(imported.qualifiedName());
+            final var separator = member.activationImport().lastIndexOf('.');
+            final var namespace = separator < 0 ? "" : member.activationImport().substring(0, separator);
+            final var namespaceTarget = resolveNamespaceTarget(imported.qualifiedName(), unit, List.of(), resolution);
+            if (namespaceTarget != null) return namespace.equals(namespaceTarget);
+            final var packageSeparator = namespace.lastIndexOf('.');
+            final var extensionPackage = packageSeparator < 0 ? "" : namespace.substring(0, packageSeparator);
+            return extensionPackage.equals(imported.qualifiedName());
+        });
+    }
+
+    private static String resolveNamespaceTarget(final String target, final CompilationUnit unit,
+                                                 final List<CompilationUnit> units,
+                                                 final ResolutionResult resolution) {
+        final Set<String> namespaces = new LinkedHashSet<>();
+        for (final var candidate : units) {
+            for (final var member : NamespaceMembers.flatten(candidate.declarations())) {
+                if (member.namespaceName() != null) {
+                    namespaces.add(candidate.packageName().isEmpty()
+                            ? member.namespaceName()
+                            : candidate.packageName() + "." + member.namespaceName());
+                }
+            }
+        }
+        if (resolution != null) {
+            for (final var extension : resolution.extensions()) {
+                final var qualifiedName = resolution.functionNamesByDeclaration().get(extension.name());
+                if (qualifiedName != null) {
+                    final var separator = qualifiedName.lastIndexOf('.');
+                    if (separator > 0) namespaces.add(qualifiedName.substring(0, separator));
+                }
+            }
+        }
+        if (namespaces.contains(target)) return target;
+        final var localNamespace = unit.packageName().isEmpty()
+                ? target : unit.packageName() + "." + target;
+        return namespaces.contains(localNamespace) ? localNamespace : null;
+    }
+
+    private static boolean isKnownPackage(final String name, final List<CompilationUnit> units) {
+        return units.stream().anyMatch(unit -> unit.packageName().equals(name));
     }
 
     private static boolean sameTypeName(final TypeDescriptor receiverType, final String typeName) {
@@ -629,15 +739,6 @@ final class LspFeatures {
         return members;
     }
 
-    private static boolean extensionIsActive(final PublicMemberCatalog.Member member,
-                                             final CompilationUnit unit) {
-        if (member.origin() != PublicMemberCatalog.MemberOrigin.EXTENSION) return true;
-        if (unit == null || member.activationImport() == null) return false;
-        return unit.imports().stream().anyMatch(imported -> imported.onDemand()
-                ? member.activationImport().startsWith(imported.qualifiedName() + ".")
-                : imported.qualifiedName().equals(member.activationImport()));
-    }
-
     private static String extensionName(final PublicMemberCatalog.Member member,
                                         final CompilationUnit unit) {
         if (member.origin() != PublicMemberCatalog.MemberOrigin.EXTENSION || unit == null) return member.name();
@@ -884,9 +985,13 @@ final class LspFeatures {
             if (!declarations.isEmpty()) return declarations.getFirst();
 
             final var visiblePackages = new LinkedHashSet<String>();
+            final var resolution = snapshot.resolution().orElse(null);
             for (final var imported : unit.imports()) {
                 if (imported.onDemand()) {
-                    visiblePackages.add(imported.qualifiedName());
+                    if (resolveNamespaceTarget(imported.qualifiedName(), unit,
+                            snapshot.units(), resolution) == null) {
+                        visiblePackages.add(imported.qualifiedName());
+                    }
                 } else if (imported.localName().equals(name)) {
                     final var separator = imported.qualifiedName().lastIndexOf('.');
                     if (separator >= 0) visiblePackages.add(imported.qualifiedName().substring(0, separator));
@@ -965,20 +1070,39 @@ final class LspFeatures {
             final var packageName = unit.packageName();
             final var explicitImports = new LinkedHashMap<String, String>();
             final var onDemand = new ArrayList<String>(List.of("zeron.lang", "zeron.io"));
+            final var importedNamespaces = new LinkedHashSet<String>();
+            final var resolution = snapshot.resolution().orElse(null);
             for (final var imported : unit.imports()) {
-                if (imported.onDemand()) onDemand.add(imported.qualifiedName());
+                if (imported.onDemand()) {
+                    final var namespace = resolveNamespaceTarget(imported.qualifiedName(), unit,
+                            snapshot.units(), resolution);
+                    if (namespace == null) {
+                        onDemand.add(imported.qualifiedName());
+                    } else {
+                        importedNamespaces.add(namespace);
+                    }
+                }
                 else explicitImports.put(imported.localName(), imported.qualifiedName());
             }
             final var visible = new LinkedHashMap<String, Symbol>();
             for (final var candidates : byName.values()) {
                 for (final var symbol : candidates) {
-                    if (symbol.namespaceName() != null
-                            || symbol.kind() == CompletionItemKind.Method
+                    if (symbol.kind() == CompletionItemKind.Method
                             || symbol.kind() == CompletionItemKind.Property) continue;
+                    final var qualifiedNamespace = symbol.namespaceName() == null ? null
+                            : qualify(symbol.packageName(), symbol.namespaceName());
                     final var importedName = explicitImports.get(symbol.name());
-                    final var accessible = symbol.packageName().equals(packageName)
+                    final var samePackageTopLevel = symbol.packageName().equals(packageName)
+                            && symbol.namespaceName() == null;
+                    final var samePackageNamespace = symbol.packageName().equals(packageName)
+                            && qualifiedNamespace != null && importedNamespaces.contains(qualifiedNamespace);
+                    final var importedNamespaceMember = symbol.isPublic() && qualifiedNamespace != null
+                            && importedNamespaces.contains(qualifiedNamespace);
+                    final var accessible = samePackageTopLevel || samePackageNamespace
                             || symbol.isPublic() && Objects.equals(importedName, symbol.qualifiedName())
-                            || symbol.isPublic() && onDemand.stream().anyMatch(packagePrefix ->
+                            || importedNamespaceMember
+                            || symbol.namespaceName() == null && symbol.isPublic()
+                                    && onDemand.stream().anyMatch(packagePrefix ->
                                     symbol.packageName().equals(packagePrefix))
                             || symbol.isPublic() && symbol.packageName().equals("zeron.lang")
                                     || symbol.isPublic() && symbol.packageName().equals("zeron.io");
@@ -1003,11 +1127,17 @@ final class LspFeatures {
             if (unit == null) return List.of();
             final var packageName = unit.packageName();
             final var imported = unit.imports();
+            final var resolution = snapshot.resolution().orElse(null);
             return byName.values().stream().flatMap(List::stream)
                     .filter(symbol -> Objects.equals(symbol.namespaceName(), namespaceName))
                     .filter(symbol -> symbol.packageName().equals(packageName)
                             || symbol.isPublic() && imported.stream().anyMatch(entry -> entry.onDemand()
-                                    ? symbol.packageName().equals(entry.qualifiedName())
+                                    ? Objects.equals(resolveNamespaceTarget(entry.qualifiedName(), unit,
+                                            snapshot.units(), resolution),
+                                            qualify(symbol.packageName(), namespaceName))
+                                            || resolveNamespaceTarget(entry.qualifiedName(), unit,
+                                                    snapshot.units(), resolution) == null
+                                                    && symbol.packageName().equals(entry.qualifiedName())
                                     : entry.qualifiedName().equals(symbol.qualifiedName())))
                     .toList();
         }

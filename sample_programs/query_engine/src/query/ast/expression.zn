@@ -1,0 +1,19 @@
+package query.ast;
+
+import query.value.Value;
+
+public type Expr =
+      Column(name: String)
+    | Literal(value: Value)
+    | Equal(left: Expr, right: Expr)
+    | GreaterThan(left: Expr, right: Expr);
+
+public fn column(name: String): Expr = Expr.Column(name);
+
+public fn literal(value: Value): Expr = Expr.Literal(value);
+
+public extension Expr {
+    public fn eq(other: Expr): Expr = Expr.Equal(this, other);
+
+    public fn gt(other: Expr): Expr = Expr.GreaterThan(this, other);
+}

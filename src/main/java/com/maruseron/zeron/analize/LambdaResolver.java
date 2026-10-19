@@ -14,7 +14,7 @@ import static com.maruseron.zeron.analize.Resolver.*;
 final class LambdaResolver {
     static FunctionDescriptor instantiateLambdaScheme(final ResolutionContext context, final FunctionDescriptor scheme,
                                                         final FunctionDescriptor expectedType,
-                                                        final Token where) {
+                                                        final Expr.Variable reference, final Token where) {
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         if (TypeSubstitution.containsTypeParameter(expectedType)) {
             unifyFunctionReferenceType(context, scheme, expectedType, substitutions, where);
@@ -27,7 +27,15 @@ final class LambdaResolver {
                         "Cannot infer type parameter '" + parameter.name()
                                 + "' for polymorphic lambda at this use."));
             }
+            final var actual = substitutions.get(parameter);
+            for (final var bound : parameter.bounds()) {
+                final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
+                ensureLambdaSchemeBound(context, requiredBound, actual, where,
+                        reference.resolvedValueDeclaration());
+            }
         }
+        reference.setEvidenceArguments(TypeClassEvidence.selectArguments(
+                context, scheme.typeParameters(), substitutions, where));
         final var specialized = TypeDescriptor.functionWithEffectsOf(scheme.name(),
                 TypeSubstitution.substitute(scheme.returnType(), substitutions),
                 scheme.parameters().stream()
@@ -38,6 +46,36 @@ final class LambdaResolver {
             ensureAssignable(context, expectedType, specialized, where);
         }
         return specialized;
+    }
+
+    static void ensureLambdaSchemeBound(final ResolutionContext context,
+                                       final TypeDescriptor requiredBound,
+                                       final TypeDescriptor actual,
+                                       final Token where,
+                                       final Stmt.Var binding) {
+        try {
+            if (TypeClassEvidence.hasEvidence(context, requiredBound, actual, where)) return;
+        } catch (final ResolutionError evidenceError) {
+            if (binding == null) throw evidenceError;
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    where, lambdaBoundFailureMessage(binding, requiredBound, actual,
+                            evidenceError.getMessage())));
+        }
+        if (binding != null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    where, lambdaBoundFailureMessage(binding, requiredBound, actual,
+                            "No matching contract evidence is available.")));
+        }
+        ensureAssignable(context, requiredBound, actual, where);
+    }
+
+    private static String lambdaBoundFailureMessage(final Stmt.Var binding,
+                                                    final TypeDescriptor requiredBound,
+                                                    final TypeDescriptor actual,
+                                                    final String detail) {
+        return "Lambda binding '" + binding.name().lexeme() + "' requires "
+                + TypeFormatter.format(requiredBound) + " for " + TypeFormatter.format(actual)
+                + " at this use. " + detail;
     }
 
     static FunctionDescriptor resolveFunctionReference(final ResolutionContext context, final Expr.Variable reference,
@@ -235,62 +273,80 @@ final class LambdaResolver {
         }
     }
 
-        static FunctionDescriptor generalizeLambda(final ResolutionContext context, final Expr.Lambda lambda,
-                            final FunctionDescriptor inferredType) {
-            if (inferredType.parameters().stream().anyMatch(type -> containsFunctionScheme(context, type))
+    static FunctionDescriptor resolveConstrainedLambda(final ResolutionContext context,
+                                                       final Expr.Lambda lambda) {
+        final var scheme = LambdaConstraintCollector.collect(context, lambda);
+        if (scheme == null) return null;
+        final var expectedType = TypeDescriptor.functionWithEffectsOf("", TypeDescriptor.ofInfer(),
+                scheme.parameterTypes(), scheme.typeParameters(), List.of());
+        return resolveLambda(context, lambda, expectedType, true);
+    }
+
+    static FunctionDescriptor generalizeLambda(final ResolutionContext context, final Expr.Lambda lambda,
+                                               final FunctionDescriptor inferredType) {
+        if (inferredType.parameters().stream().anyMatch(type -> containsFunctionScheme(context, type))
                 || containsFunctionScheme(context, inferredType.returnType())) return null;
         final var unresolvedParameters = new HashSet<String>();
         for (int i = 0; i < lambda.params.size(); i++) {
             if (containsInfer(context, inferredType.parameters().get(i))) {
-            unresolvedParameters.add(lambda.params.get(i).lexeme());
+                unresolvedParameters.add(lambda.params.get(i).lexeme());
             }
         }
-        if (unresolvedParameters.isEmpty() && !containsInfer(context, inferredType.returnType())) return null;
+        final boolean hasUnresolvedReturn = containsInfer(context, inferredType.returnType());
+        if (unresolvedParameters.isEmpty() && !hasUnresolvedReturn) return null;
 
-        if (lambda.body.size() != 1 || !(lambda.body.getFirst() instanceof Stmt.Return returnStmt)) {
+        final var returnStmt = lambda.body.size() == 1 && lambda.body.getFirst() instanceof Stmt.Return returned
+                ? returned : null;
+        if (inferredType.typeParameters().isEmpty() && returnStmt == null) {
             return null;
         }
-        final var returnedParameter = returnStmt.value() instanceof Expr.Variable variable
+        final var returnedParameter = returnStmt != null && returnStmt.value() instanceof Expr.Variable variable
             ? lambda.params.stream().filter(parameter -> parameter.lexeme().equals(variable.name.lexeme()))
                 .findFirst().orElse(null)
             : null;
-        if (containsInfer(context, inferredType.returnType()) && returnedParameter == null) return null;
-        if (returnStmt.value() != null && returnedParameter == null
+        if (hasUnresolvedReturn && returnedParameter == null) return null;
+        if (inferredType.typeParameters().isEmpty() && returnStmt.value() != null && returnedParameter == null
             && referencesAnyVariable(context, returnStmt.value(), unresolvedParameters)) return null;
 
         final var scopeId = LAMBDA_TYPE_SCOPES.incrementAndGet();
-        final var typeParameters = new ArrayList<TypeParameterDescriptor>();
+        final var typeParameters = new ArrayList<>(inferredType.typeParameters());
         final var parameterTypes = new ArrayList<TypeDescriptor>(lambda.params.size());
         final var quantifiedParameters = new HashMap<String, TypeParameterDescriptor>();
         for (int i = 0; i < lambda.params.size(); i++) {
+            if (inferredType.parameters().get(i) instanceof TypeParameterDescriptor parameter) {
+                quantifiedParameters.put(lambda.params.get(i).lexeme(), parameter);
+            }
+        }
+        for (int i = 0; i < lambda.params.size(); i++) {
             final var parameterType = inferredType.parameters().get(i);
             if (!containsInfer(context, parameterType)) {
-            parameterTypes.add(parameterType);
-            continue;
+                parameterTypes.add(parameterType);
+                continue;
             }
             if (!(parameterType instanceof InferDescriptor)) return null;
             final var typeParameter = new TypeParameterDescriptor(scopeId,
-                "LambdaT" + i);
-            typeParameters.add(typeParameter);
+                    "LambdaT" + i);
+            if (typeParameters.stream().noneMatch(existing -> existing.equals(typeParameter))) {
+                typeParameters.add(typeParameter);
+            }
             quantifiedParameters.put(lambda.params.get(i).lexeme(), typeParameter);
             parameterTypes.add(typeParameter);
         }
 
         final TypeDescriptor returnType;
-        if (containsInfer(context, inferredType.returnType())) {
-            final var typeParameter = quantifiedParameters.get(returnedParameter.lexeme());
-            if (typeParameter == null) return null;
-            returnType = typeParameter;
+        if (hasUnresolvedReturn) {
+            final var parameterIndex = lambda.params.indexOf(returnedParameter);
+            returnType = parameterTypes.get(parameterIndex);
         } else {
             returnType = inferredType.returnType();
         }
 
-        if (typeParameters.isEmpty()) return null;
-        final var generalized = TypeDescriptor.genericFunctionOf("", returnType,
-            parameterTypes, typeParameters);
+        if (typeParameters.size() == inferredType.typeParameters().size()) return null;
+        final var generalized = TypeDescriptor.functionWithEffectsOf("", returnType,
+                parameterTypes, typeParameters, inferredType.raisedEffects());
         lambda.setType(generalized);
         return generalized;
-        }
+    }
 
     private static boolean containsFunctionScheme(
             final ResolutionContext context, final TypeDescriptor descriptor) {
@@ -406,6 +462,12 @@ final class LambdaResolver {
 
     static FunctionDescriptor resolveLambda(final ResolutionContext context, final Expr.Lambda lambda,
                                              final FunctionDescriptor expectedType) {
+        return resolveLambda(context, lambda, expectedType, false);
+    }
+
+    private static FunctionDescriptor resolveLambda(final ResolutionContext context, final Expr.Lambda lambda,
+                                                     final FunctionDescriptor expectedType,
+                                                     final boolean inferRaisedEffects) {
         final var lambdaArity = lambda.params.size();
         if (lambdaArity != expectedType.arity()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
@@ -442,10 +504,19 @@ final class LambdaResolver {
                 ensureAssignable(context, expectedType.returnType(), returnType, lambda.arrow);
             }
 
-            final var resolvedType = expectedType.returnType() instanceof InferDescriptor || unresolvedReturn
-                    ? expectedType.toReturnType(returnType)
-                    : expectedType;
-            RaisedEffectFlow.verifyCallable(context, expectedType.raisedEffects(), lambda.arrow);
+            final var parameterTypes = new ArrayList<TypeDescriptor>(lambda.params.size());
+            for (final var parameter : lambda.params) {
+                parameterTypes.add(context.symbols.getSymbol(parameter).type());
+            }
+            final var resolvedType = TypeDescriptor.functionWithEffectsOf(expectedType.name(),
+                    expectedType.returnType() instanceof InferDescriptor || unresolvedReturn
+                            ? returnType : expectedType.returnType(),
+                    parameterTypes, expectedType.typeParameters(),
+                    inferRaisedEffects ? List.copyOf(context.frame.raisedEffects)
+                            : expectedType.raisedEffects());
+            if (!inferRaisedEffects) {
+                RaisedEffectFlow.verifyCallable(context, expectedType.raisedEffects(), lambda.arrow);
+            }
             lambda.setType(resolvedType);
             return resolvedType;
         } finally {

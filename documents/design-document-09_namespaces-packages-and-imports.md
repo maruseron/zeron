@@ -87,7 +87,8 @@ Package membership is declared in source and defines identity. In project-root b
 directory relative to its configured root must match the package path; standalone file compilation
 does not impose a directory convention. The default package remains available for root-level project
 sources and standalone scripts. Explicit and star imports resolve public classes, contracts, functions, and
-immutable values.
+immutable values. A star import whose target resolves to a namespace imports that namespace's public
+members, including extension methods and properties declared there.
 
 Implemented package, import, and namespace syntax:
 
@@ -136,12 +137,15 @@ Namespace blocks may be reopened by source files in the same package. They do no
 code permission to add members. An explicit rule sealing a namespace against contributions beyond
 their owning library is a separate deferred feature; it is not part of the namespace model.
 Public namespace members can be addressed by their qualified namespace path or imported individually
-with an explicit member import. Wildcard imports select public declarations in a package, not all
-members of a namespace as a separate operation.
+with an explicit member import. A namespace wildcard imports public members of one named namespace;
+package wildcards remain package-scoped.
 
 Imports resolve class, contract, function, and immutable value targets, including namespace members.
-Star imports enumerate public Zeron declarations in a known package; Java package enumeration is
-unsupported. Non-entry functions
+A star import target is interpreted as a namespace when it resolves to one; otherwise it is
+interpreted as a package. If a type and namespace share a qualified name, the namespace is selected.
+If the same target names both a namespace and a package, the import is rejected as ambiguous.
+Package star imports enumerate public Zeron
+declarations in a known package; Java package enumeration is unsupported. Non-entry functions
 require explicit return types so their signatures are available before bodies are resolved.
 Every project top-level value requires an initializer. Project-local values are predeclared for
 cross-unit resolution; inferred values can depend on earlier inferred values and on explicit-type
@@ -188,7 +192,7 @@ an explicit import or alias disambiguates it. In a type annotation, explicitly i
 multiple star-imported packages are in scope so its qualified type identity is unambiguous. Star
 imports are not re-exports. Dot remains the receiver-member operator.
 
-Extension method families are imported explicitly with the package of the extension declaration,
+Extension method families may be imported explicitly with the package of the extension declaration,
 the receiver type's simple name, and the method name:
 
 ```zeron
@@ -202,10 +206,22 @@ public extension<T> List<T> {
 }
 ```
 
-A consumer may explicitly import each method family, or use a package star import to activate its
-public extension families. A package star import also considers extension groups nested under
-receiver-type namespaces, but does not recurse into subpackages. Explicit imports rename the
-extension name used after the receiver dot:
+A consumer may explicitly import selected methods or properties, use a package star import to
+activate public declarations throughout a package, or use a namespace star import to load the public
+members declared in one namespace:
+
+```zeron
+import geometry.Point.*;
+```
+
+Namespace wildcard imports expose public ordinary functions and immutable values by their
+unqualified names and activate public extensions in that namespace for receiver syntax. Extension
+declarations are grouped by their declaration namespace, not by their receiver type. For example,
+`import geometry.Point.*` activates extensions declared in `geometry.Point`, but not extensions for
+`geometry.Point` declared in another package. This permits same-receiver extension groups to remain
+independently selectable. Package star imports still consider public extensions nested under
+receiver-type namespaces and do not recurse into subpackages.
+Explicit imports rename the extension name used after the receiver dot:
 
 ```zeron
 import collections.extensions.List.firstOr as first;
@@ -213,19 +229,22 @@ import collections.extensions.List.firstOr as first;
 let value = values.first(defaultValue);
 ```
 
-Importing the receiver type does not activate extensions. An extension import does not make the
-function callable as a top-level function. Public use across packages requires both a public
+Importing the receiver type does not activate extensions. An extension namespace wildcard activates
+the extension for receiver syntax but does not make the extension callable as a top-level function.
+Public use across packages requires both a public
 extension declaration and a public extension method; omitted visibility is package-visible.
 
 Member lookup first resolves a visible class or contract instance method, including a contract
 default method. Zeron classes and contracts cannot declare two methods with the same name. A
 declared instance method takes precedence over a same-named imported extension; otherwise resolution
-considers the matching local extension, then an explicitly imported extension, then star-imported
-extensions. A tier may contain same-named extensions for different receiver types; only receiver
-applicability selects a declaration. If multiple declarations in the first applicable tier match the
-receiver, the call is ambiguous, with no receiver-specificity ranking. An explicit import alias can
-select a different extension family, but does not make argument types, generic inference, bounds,
-optional arguments, or return type participate in selection. Those are checked only after one
+considers the matching local extension, then explicit extension imports and namespace wildcard
+imports in the same tier, then package-star-imported extensions. A tier may contain same-named
+extensions for different receiver types; only receiver applicability selects a declaration. If
+multiple distinct declarations in the first applicable tier match the receiver, the call is
+ambiguous, with no receiver-specificity ranking. The same declaration imported explicitly and
+through a namespace wildcard is considered once. An explicit import alias can select a
+different extension name, but does not make argument types, generic inference, bounds, optional
+arguments, or return type participate in selection. Those are checked only after one
 receiver-applicable declaration has been selected. An alias changes only the extension method name
 recognized at the receiver dot. Two extensions with the same qualified method name and equivalent
 receiver types are duplicate declarations. Distinct receiver declarations are also rejected when
@@ -239,8 +258,9 @@ members, do not gain private access even in the receiver's package, and add no v
 The compiler lowers each extension to a receiver-first static function. Read-only extension
 properties use the same lowering as zero-argument getter functions; they require an explicit type
 and getter, and cannot have an initializer, setter, or `mut` modifier. Extensions may target Zeron
-classes, contracts, and nominal sums, and the intrinsic receivers `Unit`, `Int`, `Float`, `Boolean`,
-`String`, and `Array<T>`. Other pseudo-types, Java receivers, and nullable receivers are not extension targets.
+classes, contracts, and nominal sums, and the intrinsic receivers `Unit`, `Int`, `Long`, `Byte`,
+`ByteArray`, `Float`, `Boolean`, `String`, and `Array<T>`. Other pseudo-types, Java receivers, and
+nullable receivers are not extension targets.
 When a class implements a contract, an extension declared for that contract is also applicable to
 the concrete class, with generic contract arguments substituted from the class declaration. This is
 a compile-time projection and still emits a static call to the imported extension. If more than one
@@ -345,7 +365,8 @@ The following are acceptance criteria for the source naming and import model:
 - Same-simple-name classes/contracts in different packages have distinct source identities and generated binary names.
 - Same-package declarations are available without imports; only public declarations are imported across packages.
 - Explicit and star imports resolve public classes, contracts, and top-level functions; ambiguous star-import uses fail deterministically, and explicit imports disambiguate them.
-- Extension methods are available only through explicit imports, resolve statically after applicable
-  instance methods, enforce receiver mutability, and cannot access private members.
+- Extension methods and properties are available through explicit, package-star, and
+  namespace wildcard imports; they resolve statically after applicable instance methods,
+  enforce receiver mutability, and cannot access private members.
 - Package-qualified type identity propagates through generic substitution, contract projection, and `FunctionShapeKey`.
 - Imports and aliases are compile-time bindings; they do not by themselves load code or change source identity.

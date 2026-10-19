@@ -1,0 +1,16 @@
+package query.value;
+
+public type Value =
+      Integer(value: Int)
+    | Text(value: String)
+    | Flag(value: Boolean)
+    | Null;
+
+public extension Value {
+    public fn render(): String = match (this) {
+        case Value.Integer(number) -> "Integer(" + number + ")";
+        case Value.Text(text) -> "Text(" + text + ")";
+        case Value.Flag(flag) -> if (flag) then "Flag(true)" else "Flag(false)";
+        case Value.Null() -> "Null";
+    };
+}

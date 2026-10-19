@@ -1,0 +1,7 @@
+[project]
+entry = "src/query/demo/main.zn"
+source-roots = ["src"]
+output = "dist"
+
+[platform]
+stdlib = "source"

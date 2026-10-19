@@ -6,7 +6,10 @@ Zeron has an implemented first slice of generic named functions. Calls support i
 explicit type arguments, generic signatures are substituted during resolution, and the compiler
 erases type variables to JVM reference types. Callback parameters and callback return values,
 including nested callbacks, nullable callback values, and mutable function views, are adapted through
-generated bridge helpers.
+generated bridge helpers. Each specialized function-shape interface also extends the corresponding
+fully erased `Object`-parameter/`Object`-result shape with a default bridge method. This lets a
+specialized lambda remain callable after passing through a generic value or container whose runtime
+function type has been erased.
 
 Generic methods on classes and contracts support inferred or explicit type arguments at member calls,
 including multiple contract bounds on method type parameters. Contract
@@ -19,7 +22,10 @@ Invariant generic classes/contracts and callback adaptation across their erased 
 are also implemented; see [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md)
 and [design-document-03_lambda-lowering.md](design-document-03_lambda-lowering.md). Generic named
 functions can be specialized as monomorphic function values. Immutable let-bound lambdas support a
-limited rank-1 scheme slice. A first slice of multiple contract bounds on generic function and
+constraint-aware rank-1 scheme for direct immutable `let` initializers. Direct contract-member use
+and substituted bounds of generic callees contribute applied-contract constraints, which are checked
+independently at each use and lowered into per-activation cached closure specializations. These local
+schemes are not serialized in the library API index. A first slice of multiple contract bounds on generic function and
 generic method type parameters is implemented. Variance, nested schemes, explicit
 `forall`, and polymorphic values stored in mutable bindings remain deferred. This is not a complete
 generic type system.
@@ -71,6 +77,27 @@ conflicting constructor-argument inferences. No common supertype is inferred, an
 parameter absent from both argument constraints and the expected type requires an explicit class
 type argument. Constructor calls that collide with a namespace function are ambiguous when both
 candidates accept the call.
+
+### Higher-kinded constructor bounds
+
+Higher-kinded contract parameters use the first-order constructor kind `F<_>` and may be applied as
+`F<A>` in signatures. A bound such as `F<_>: Functor<F>` exposes statically selected
+constructor-family operations through hidden method-handle evidence. A method whose first parameter
+is marked `this: F<A>` may be called as `source.map(transform)`; the equivalent constructor-bound
+form `F.map(source, transform)` remains available. The receiver marker changes only call syntax,
+not evidence lookup or runtime dispatch. HKT contracts are compile-time abstractions, not runtime
+instance interfaces.
+
+Concrete constructor evidence may be supplied by a constructor witness, or declared on a generic
+class with a matching `is Functor<Class<_>>` entry and `implementation Functor<Class<_>> { ... }`
+block. A receiver-marked implementation names its receiver first, for example
+`fn map<A, B>(this: Class<A>, transform: (A) -> B): Class<B>`. Such declaration-site helpers are
+emitted inside the implementing class so their bodies may access private class state; they remain
+static helpers rather than ordinary instance methods. The implementation and receiver metadata are
+exported through the versioned library API index as constructor evidence. Constructor patterns
+support one open slot and fixed remaining arguments, for example `Result<_, E>`. See
+[ZEP-0019](zeps/ZEP-0019.md) for the accepted syntax, kind rules, and initial `zeron.control`
+contracts.
 
 The implemented let-bound lambda generalization currently covers unresolved identity and
 constant-result forms. The accepted extension in
@@ -212,14 +239,14 @@ shape matrix and broader adapter reuse still need coverage.
   be bounded; instances retain evidence for class methods and contract defaults. Mutating methods,
   operator constraints, variance, and broader inference remain deferred. See
   [design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
-6. **Let-bound polymorphic lambdas: implemented first slice; constrained extension accepted, pending.**
-    Immutable identity and constant-result lambdas generalize unresolved parameters into rank-1
-    schemes; each use instantiates independently. ZEP-0003 extends this only to direct immutable
-    `let` lambda initializers, inferring applied-contract requirements from body member use and
-    substituted generic-callee bounds. It requires use-site evidence diagnostics with the binding
-    location, captured-environment restrictions, monomorphic closure specialization, and per-
-    activation reuse of each distinct specialization. Mutable bindings, nested schemes, and operator
-    constraints remain deferred.
+6. **Let-bound polymorphic lambdas: constrained rank-1 generalization implemented.** Immutable
+    identity and constant-result lambdas retain their existing scheme behavior. Direct immutable
+    `let` lambda initializers can additionally infer applied-contract requirements from body member
+    use and substituted generic-callee bounds. Each use resolves evidence independently; generated
+    templates capture the lexical environment and cache an erased closure for each specialization
+    during that binding's activation. Constrained schemes are local and are not serialized by the
+    library API index. Mutable bindings, nested schemes, and operator constraints remain deferred; see
+    [ZEP-0003](zeps/ZEP-0003.md).
 
 ## Acceptance Criteria for the Current Slice
 

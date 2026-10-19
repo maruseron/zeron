@@ -15,9 +15,11 @@ final class TopLevelValuePlanner {
     record SourceValue(CompilationUnit unit, Stmt.Var declaration, String namespaceName) {}
 
     private final Map<String, Stmt.Var> topLevelValues;
+    private final Set<String> namespaces;
 
-    TopLevelValuePlanner(final Map<String, Stmt.Var> topLevelValues) {
+    TopLevelValuePlanner(final Map<String, Stmt.Var> topLevelValues, final Set<String> namespaces) {
         this.topLevelValues = topLevelValues;
+        this.namespaces = namespaces;
     }
 
     List<SourceValue> resolutionOrder(final List<CompilationUnit> units) {
@@ -78,12 +80,19 @@ final class TopLevelValuePlanner {
         }
         final var starCandidates = unit.imports().stream()
                 .filter(ImportDeclaration::onDemand)
-                .map(imported -> qualify(imported.qualifiedName(), simpleName))
+                .map(imported -> onDemandTarget(unit, imported.qualifiedName()))
+                .map(target -> qualify(target, simpleName))
                 .filter(topLevelValues::containsKey)
                 .filter(candidate -> topLevelValues.get(candidate).isPublic())
                 .distinct()
                 .toList();
         return starCandidates.size() == 1 ? starCandidates.getFirst() : null;
+    }
+
+    private String onDemandTarget(final CompilationUnit unit, final String target) {
+        if (namespaces.contains(target)) return target;
+        final var localNamespace = qualify(unit.packageName(), target);
+        return namespaces.contains(localNamespace) ? localNamespace : target;
     }
 
     private void visit(final Stmt.Var declaration,

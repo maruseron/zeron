@@ -5,6 +5,7 @@ import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.JavaClassPath;
+import com.maruseron.zeron.domain.BuiltinTypes;
 
 import java.util.*;
 
@@ -16,33 +17,42 @@ final class ImportResolver {
                              Map<String, String> functions,
                              Map<String, String> values,
                              Map<String, String> extensions,
-                             List<String> onDemandPackages) {}
+                             List<String> onDemandPackages,
+                             List<String> onDemandNamespaces) {}
 
-    private static final Set<String> BUILTIN_TYPES = Set.of(
-            "Never", "Any", "Infer", "Unit", "Int", "Byte", "ByteArray",
-            "Float", "Boolean", "String", "Array");
-
+    private final Set<String> types;
     private final Map<String, Stmt.ClassDecl> classes;
     private final Map<String, Stmt.ContractDecl> contracts;
+    private final Map<String, Stmt.SumDecl> sums;
     private final Map<String, Stmt.FunctionDeclaration> functions;
     private final Map<String, List<Stmt.ExtensionMethod>> extensionMethods;
     private final Map<String, Stmt.Var> topLevelValues;
     private final Map<String, String> declarationPackages;
+    private final Map<String, String> namespaceMemberPackages;
+    private final Set<String> namespaces;
     private final JavaClassPath javaClassPath;
 
-    ImportResolver(    final Map<String, Stmt.ClassDecl> classes,
+    ImportResolver(final Set<String> types,
+    final Map<String, Stmt.ClassDecl> classes,
     final Map<String, Stmt.ContractDecl> contracts,
+    final Map<String, Stmt.SumDecl> sums,
     final Map<String, Stmt.FunctionDeclaration> functions,
     final Map<String, List<Stmt.ExtensionMethod>> extensionMethods,
     final Map<String, Stmt.Var> topLevelValues,
                    final Map<String, String> declarationPackages,
+                   final Map<String, String> namespaceMemberPackages,
+                   final Set<String> namespaces,
                    final JavaClassPath javaClassPath) {
+        this.types = types;
         this.classes = classes;
         this.contracts = contracts;
+        this.sums = sums;
         this.functions = functions;
         this.extensionMethods = extensionMethods;
         this.topLevelValues = topLevelValues;
         this.declarationPackages = declarationPackages;
+        this.namespaceMemberPackages = namespaceMemberPackages;
+        this.namespaces = namespaces;
         this.javaClassPath = javaClassPath;
     }
 
@@ -52,6 +62,7 @@ final class ImportResolver {
         final var importedValues = new LinkedHashMap<String, String>();
         final var importedExtensions = new LinkedHashMap<String, String>();
         final var onDemandPackages = new ArrayList<String>();
+        final var onDemandNamespaces = new ArrayList<String>();
         final var localTypeNames = new HashSet<String>();
         final var localValueNames = new HashSet<String>();
         final var errors = new ArrayList<ResolutionError>();
@@ -71,6 +82,28 @@ final class ImportResolver {
             try {
             final var target = importDeclaration.qualifiedName();
             if (importDeclaration.onDemand()) {
+                final var namespaceTarget = resolveNamespaceTarget(target, unit.packageName());
+                if (namespaceTarget != null) {
+                    if (packageExists(target)) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                                importDeclaration.location(),
+                                "Star import target '" + target
+                                        + "' is both a namespace and a package."));
+                    }
+                    if (onDemandNamespaces.contains(namespaceTarget)) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                                importDeclaration.location(),
+                                "Duplicate namespace wildcard import for '" + namespaceTarget + "'."));
+                    }
+                    if (!namespaceTargetPackage(namespaceTarget).equals(unit.packageName())
+                            && !hasPublicNamespaceMember(namespaceTarget)) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                                importDeclaration.location(),
+                                "Namespace '" + namespaceTarget + "' has no public members."));
+                    }
+                    onDemandNamespaces.add(namespaceTarget);
+                    continue;
+                }
                 if (onDemandPackages.contains(target)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
                             importDeclaration.location(),
@@ -120,7 +153,7 @@ final class ImportResolver {
                             importDeclaration.location(),
                             "Generic Java classes are not supported by the current interop slice."));
                 }
-                if (BUILTIN_TYPES.contains(importDeclaration.localName())) {
+                if (BuiltinTypes.NAMES.contains(importDeclaration.localName())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
                             importDeclaration.location(),
                             "Type import alias cannot shadow a built-in type."));
@@ -189,9 +222,45 @@ final class ImportResolver {
             }
         }
         return new Validation(new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions),
-                Map.copyOf(importedValues), Map.copyOf(importedExtensions), List.copyOf(onDemandPackages)),
+                Map.copyOf(importedValues), Map.copyOf(importedExtensions), List.copyOf(onDemandPackages),
+                List.copyOf(onDemandNamespaces)),
                 List.copyOf(errors),
                 Set.copyOf(invalidAliases));
+    }
+
+    private String resolveNamespaceTarget(final String target, final String packageName) {
+        if (isKnownNamespace(target)) return target;
+        final var localNamespace = qualify(packageName, target);
+        return isKnownNamespace(localNamespace) ? localNamespace : null;
+    }
+
+    private boolean isKnownNamespace(final String namespaceName) {
+        return namespaces.contains(namespaceName)
+                || namespaceMemberPackages.entrySet().stream()
+                        .anyMatch(member -> namespaceOfMember(member.getKey()).equals(namespaceName)
+                                && !namespaceName.equals(member.getValue()));
+    }
+
+    private boolean hasPublicNamespaceMember(final String namespaceName) {
+        return namespaceMemberPackages.keySet().stream()
+                .filter(memberName -> namespaceOfMember(memberName).equals(namespaceName))
+                .anyMatch(memberName -> {
+                    final var function = functions.get(memberName);
+                    if (function != null) return function.isPublic();
+                    final var extensions = extensionMethods.getOrDefault(memberName, List.of());
+                    if (!extensions.isEmpty()) return extensions.stream().anyMatch(Stmt.ExtensionMethod::isPublic);
+                    final var value = topLevelValues.get(memberName);
+                    return value != null && value.isPublic();
+                });
+    }
+
+    private static String namespaceOfMember(final String memberName) {
+        final var separator = memberName.lastIndexOf('.');
+        return separator < 0 ? "" : memberName.substring(0, separator);
+    }
+
+    private static String namespaceTargetPackage(final String namespaceName) {
+        return packageOf(namespaceName);
     }
 
     private boolean packageExists(final String packageName) {
@@ -208,5 +277,9 @@ final class ImportResolver {
     private static String simpleName(final String qualifiedName) {
         final var separator = qualifiedName.lastIndexOf('.');
         return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
+    }
+
+    private static String qualify(final String packageName, final String name) {
+        return packageName.isEmpty() ? name : packageName + "." + name;
     }
 }

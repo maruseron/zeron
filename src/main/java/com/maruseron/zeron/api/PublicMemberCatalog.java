@@ -774,7 +774,13 @@ public final class PublicMemberCatalog {
     private static TypeDescriptor copyType(final TypeDescriptor type) {
         return switch (type) {
             case TypeParameterDescriptor parameter -> new TypeParameterDescriptor(parameter.scopeId(),
-                    parameter.name(), parameter.bounds().stream().map(PublicMemberCatalog::copyType).toList());
+                    parameter.name(), parameter.bounds().stream().map(PublicMemberCatalog::copyType).toList(),
+                    parameter.isHigherKinded());
+            case AppliedConstructorDescriptor applied -> new AppliedConstructorDescriptor(
+                    (TypeParameterDescriptor) copyType(applied.constructor()), copyType(applied.argument()));
+            case TypeConstructorDescriptor constructor -> new TypeConstructorDescriptor(
+                    new NominalDescriptor(constructor.baseType().name()),
+                    constructor.arguments().stream().map(PublicMemberCatalog::copyType).toList());
             case NominalDescriptor nominal -> new NominalDescriptor(nominal.name());
             case GenericDescriptor generic -> TypeDescriptor.genericOf(
                     new NominalDescriptor(generic.baseType().name()),

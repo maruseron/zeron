@@ -44,6 +44,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $stageRoot "bin") -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $stageRoot "lib") -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $stageRoot "share\zeron\errorcode") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $stageRoot "share\zeron\stdlib") -Force | Out-Null
 
     Copy-Item -LiteralPath $builtCompilerJar -Destination $compilerJar
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "distribution\bin\zeron") `
@@ -52,6 +53,15 @@ try {
         -Destination (Join-Path $stageRoot "bin\zeron.cmd")
     Copy-Item -Path (Join-Path $repositoryRoot "src\main\resources\errorcode\*.md") `
         -Destination (Join-Path $stageRoot "share\zeron\errorcode")
+    Copy-Item -Path (Join-Path $repositoryRoot "src\main\resources\stdlib\*") `
+        -Destination (Join-Path $stageRoot "share\zeron\stdlib") -Recurse
+    $expectedSourceCount = (Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "src\main\resources\stdlib") `
+        -Filter "*.zn" -File -Recurse | Measure-Object).Count
+    $bundledSourceCount = (Get-ChildItem -LiteralPath (Join-Path $stageRoot "share\zeron\stdlib") `
+        -Filter "*.zn" -File -Recurse | Measure-Object).Count
+    if ($bundledSourceCount -ne $expectedSourceCount) {
+        throw "Expected $expectedSourceCount standard-library source files but bundled $bundledSourceCount."
+    }
 
     & java -jar $compilerJar --build-stdlib (Join-Path $stageRoot "lib\stdlib") `
         --jar-output $standardLibraryJar
@@ -131,6 +141,7 @@ output = "output-source"
                 "$packageName/lib/zeron.jar",
                 "$packageName/lib/$standardLibraryJarName",
                 "$packageName/share/zeron/errorcode/ZR2014.md",
+                "$packageName/share/zeron/stdlib/zeron/lang/option.zn",
                 "$packageName/bin/zeron",
                 "$packageName/bin/zeron.cmd")) {
             if ($entryNames -notcontains $requiredEntry) {

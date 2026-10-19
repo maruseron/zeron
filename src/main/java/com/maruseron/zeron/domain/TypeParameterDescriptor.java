@@ -7,23 +7,32 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
     private final int scopeId;
     private final String name;
     private final List<TypeDescriptor> bounds;
+    private final boolean higherKinded;
 
     public TypeParameterDescriptor(final int scopeId, final String name) {
-        this(scopeId, name, List.of());
+        this(scopeId, name, List.of(), false);
     }
 
     public TypeParameterDescriptor(final int scopeId,
                                    final String name,
                                    final TypeDescriptor bound) {
-        this(scopeId, name, bound == null ? List.of() : List.of(bound));
+        this(scopeId, name, bound == null ? List.of() : List.of(bound), false);
     }
 
     public TypeParameterDescriptor(final int scopeId,
                                    final String name,
                                    final List<TypeDescriptor> bounds) {
+        this(scopeId, name, bounds, false);
+    }
+
+    public TypeParameterDescriptor(final int scopeId,
+                                   final String name,
+                                   final List<TypeDescriptor> bounds,
+                                   final boolean higherKinded) {
         this.scopeId = scopeId;
         this.name = Objects.requireNonNull(name);
         this.bounds = List.copyOf(bounds);
+        this.higherKinded = higherKinded;
     }
 
     public int scopeId() {
@@ -36,6 +45,10 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
 
     public List<TypeDescriptor> bounds() {
         return bounds;
+    }
+
+    public boolean isHigherKinded() {
+        return higherKinded;
     }
 
     @Override
@@ -53,12 +66,13 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
         return this == other
                 || other instanceof TypeParameterDescriptor that
                 && scopeId == that.scopeId
-                && name.equals(that.name);
+                && name.equals(that.name)
+                && higherKinded == that.higherKinded;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(scopeId, name);
+        return Objects.hash(scopeId, name, higherKinded);
     }
 
     @Override

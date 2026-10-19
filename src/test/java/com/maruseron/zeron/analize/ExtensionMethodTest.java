@@ -366,6 +366,180 @@ public final class ExtensionMethodTest {
     }
 
     @Test
+    public void namespaceWildcardsImportMembersAndExtensionsByDeclarationNamespace() throws Exception {
+        final var output = Files.createTempDirectory("zeron-namespace-wildcard-import");
+        try {
+            final var model = unit("""
+                    package model;
+                    public class Box<T> {
+                        public constructor new;
+                    }
+                    public class Other {
+                        public constructor new;
+                    }
+                    namespace Box {
+                        public fn namespaceValue(): Int = 4;
+                        public let namespaceConstant: Int = 5;
+                    }
+                    """, "Box.zn");
+            final var extensions = unit("""
+                    package extras;
+                    import model.Box;
+                    import model.Other;
+                    public extension<T> Box<T> {
+                        public fn generic(): Int = 1;
+                        public property marker: Int {
+                            get = 2;
+                        }
+                    }
+                    public extension Box<Int> {
+                        public fn applied(): Int = 3;
+                    }
+                    public extension Other {
+                        public fn unrelated(): Int = 100;
+                    }
+                    """, "Extensions.zn");
+            final var app = unit("""
+                    package app;
+                    import model.Box;
+                    import extras.Box.applied as appliedAlias;
+                    import model.Box.*;
+                    import extras.Box.*;
+                    let importedConstant: Int = namespaceConstant;
+                    fn result(): Int {
+                        let box = Box<Int>.new();
+                        return box.generic() + box.applied() + box.appliedAlias() + box.marker
+                                + namespaceValue() + namespaceConstant + importedConstant;
+                    }
+                    """, "App.zn");
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(app, extensions, model), "app.NamespaceWildcardImport", "app",
+                    List.of(), false, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(23, loader.loadClass("app.NamespaceWildcardImport")
+                        .getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void namespaceWildcardDoesNotLoadSameReceiverExtensionsFromAnotherNamespace() {
+        final var model = unit("""
+                package model;
+                public class Box {
+                    public constructor new;
+                }
+                namespace Box {
+                    public fn namespaceMember(): Int = 1;
+                }
+                """, "Box.zn");
+        final var extensions = unit("""
+                package extras;
+                import model.Box;
+                public extension Box {
+                    public fn outside(): Int = 2;
+                }
+                """, "Extensions.zn");
+        final var app = unit("""
+                package app;
+                import model.Box;
+                import model.Box.*;
+                fn result(): Int = Box.new().outside();
+                """, "App.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
+                List.of(app, extensions, model));
+
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .anyMatch(error -> error.message().contains("Unknown method")));
+    }
+
+    @Test
+    public void namespaceWildcardsRejectUnknownTargets() {
+        final var app = unit("""
+                package app;
+                import Never.*;
+                fn result(): Unit {}
+                """, "App.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(app));
+
+        assertTrue(!result.errors().isEmpty());
+    }
+
+    @Test
+    public void namespaceWildcardsRemainAmbiguousForDistinctExtensions() {
+        final var model = unit("""
+                package model;
+                public class Box {
+                    public constructor new;
+                }
+                """, "Box.zn");
+        final var first = unit("""
+                package first;
+                import model.Box;
+                public extension Box {
+                    public fn label(): Int = 1;
+                }
+                """, "First.zn");
+        final var second = unit("""
+                package second;
+                import model.Box;
+                public extension Box {
+                    public fn label(): Int = 2;
+                }
+                """, "Second.zn");
+        final var app = unit("""
+                package app;
+                import model.Box;
+                import first.Box.*;
+                import second.Box.*;
+                fn result(): Int = Box.new().label();
+                """, "App.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
+                List.of(app, first, second, model));
+
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .anyMatch(error -> error.message().contains("Ambiguous extension method")));
+    }
+
+    @Test
+    public void namespaceWildcardsDoNotExposePackagePrivateExtensions() {
+        final var model = unit("""
+                package model;
+                public class Box {
+                    public constructor new;
+                }
+                """, "Box.zn");
+        final var extensions = unit("""
+                package extras;
+                import model.Box;
+                public extension Box {
+                    public fn visible(): Int = 1;
+                    fn hidden(): Int = 2;
+                }
+                """, "Extensions.zn");
+        final var app = unit("""
+                package app;
+                import model.Box;
+                import extras.Box.*;
+                fn result(): Int = Box.new().hidden();
+                """, "App.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
+                List.of(app, extensions, model));
+
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .anyMatch(error -> error.message().contains("Unknown method")));
+    }
+
+    @Test
     public void rejectsAmbiguousStarImportedExtensionsAtCallSite() {
         final var model = unit("""
                 package model;
@@ -947,10 +1121,9 @@ public final class ExtensionMethodTest {
                     package app;
                     import model.Box;
                     import model.Container;
-                    import extras.Box.increment;
-                    import extras.Container.readValue;
-                    import extras.Int.absoluteValue;
-                    import extras.Container.sum;
+                    import extras.Box.*;
+                    import extras.Container.*;
+                    import extras.Int.*;
                     fn result(): Int {
                         let box = Box.new(4);
                         box.increment();

@@ -665,8 +665,7 @@ final class ExpressionFlowResolver {
                 final var binding = context.symbols.getSymbol(resolvedSymbol);
                 final var resolvedType = effectiveType(context, binding);
                 context.recordReference(name, binding.name(), resolvedType);
-                if (binding.declaration() instanceof Stmt.Var value
-                        && context.topLevelTokensByDeclaration.containsKey(value)) {
+                if (binding.declaration() instanceof Stmt.Var value) {
                     variable.setResolvedValue(resolvedSymbol, value);
                 }
                 variable.setType(resolvedType);
@@ -816,7 +815,8 @@ final class ExpressionFlowResolver {
                 context, call, valueType, displayType);
         if (resolved == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                    binary.operator, "No Display witness is in scope for '" + valueType + "'."));
+                    binary.operator, "No Display witness is in scope for '"
+                            + TypeFormatter.format(valueType) + "'."));
         }
         binary.setDisplayCall(call);
         return TypeDescriptor.ofString();
@@ -831,7 +831,8 @@ final class ExpressionFlowResolver {
                 ? nullable.baseType() : operandBaseType;
         final var comparableType = nullableBaseType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : nullableBaseType;
-        if (comparableType instanceof IntDescriptor || comparableType instanceof LongDescriptor
+        if (comparableType instanceof IntDescriptor || comparableType instanceof CharDescriptor
+                || comparableType instanceof LongDescriptor
                 || comparableType instanceof FloatDescriptor
                 || comparableType instanceof BooleanDescriptor || comparableType instanceof StringDescriptor
                 || comparableType instanceof UnitDescriptor) {
@@ -857,7 +858,8 @@ final class ExpressionFlowResolver {
         }
         if (!TypeClassEvidence.hasEvidence(context, equalityType, equalityTarget, binary.operator)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                    binary.operator, "No Eq witness is in scope for '" + equalityTarget + "'."));
+                    binary.operator, "No Eq witness is in scope for '"
+                            + TypeFormatter.format(equalityTarget) + "'."));
         }
         final var equalityEvidence = TypeClassEvidence.selectEqualityMethod(
                 context, equalityTarget, binary.operator);
@@ -899,7 +901,8 @@ final class ExpressionFlowResolver {
                 List.of(binary.right), List.of(), TypeDescriptor.ofInfer());
         if (!TypeClassEvidence.hasEvidence(context, comparableContractType, comparableType, binary.operator)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                    binary.operator, "No Comparable<" + comparableType + "> witness is in scope."));
+                    binary.operator, "No Comparable<" + TypeFormatter.format(comparableType)
+                            + "> witness is in scope."));
         }
         final TypeDescriptor returnType;
         if (comparableType instanceof TypeParameterDescriptor
@@ -1286,6 +1289,7 @@ final class ExpressionFlowResolver {
 
     private static boolean isLiteralPatternType(final TypeDescriptor type) {
         return type instanceof IntDescriptor
+                || type instanceof CharDescriptor
                 || type instanceof LongDescriptor
                 || type instanceof BooleanDescriptor
                 || type instanceof StringDescriptor;
@@ -2090,7 +2094,8 @@ final class ExpressionFlowResolver {
         final var baseType = type instanceof NullableDescriptor nullable
                 ? nullable.baseType()
                 : type;
-        return baseType instanceof IntDescriptor || baseType instanceof LongDescriptor
+        return baseType instanceof IntDescriptor || baseType instanceof CharDescriptor
+                || baseType instanceof LongDescriptor
                 || baseType instanceof FloatDescriptor
                 || baseType instanceof BooleanDescriptor;
     }

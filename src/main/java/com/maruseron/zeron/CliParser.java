@@ -33,6 +33,9 @@ final class CliParser {
                 case "build", "run" -> {
                     return parseProjectCommand(args);
                 }
+                case "fmt" -> {
+                    return parseFormatCommand(args);
+                }
                 case "lsp" -> {
                     return parseLspCommand(args);
                 }
@@ -69,6 +72,23 @@ final class CliParser {
             }
         }
         return parseStandalone(args);
+    }
+
+    private static ParseResult parseFormatCommand(final String[] args) {
+        var check = false;
+        final var paths = new ArrayList<Path>();
+        for (var index = 1; index < args.length; index++) {
+            final var argument = args[index];
+            if (argument.equals("--check")) {
+                if (check) return invalid("The fmt --check option may only be specified once.");
+                check = true;
+            } else if (argument.startsWith("-")) {
+                return invalid("Unknown fmt option: " + argument);
+            } else {
+                paths.add(Paths.get(argument));
+            }
+        }
+        return parsed(new Format(paths, check));
     }
 
     private static ParseResult parseProjectCommand(final String[] args) {
@@ -430,7 +450,7 @@ final class CliParser {
     record InvalidArguments(String message) implements ParseResult {}
 
     sealed interface Invocation permits Initialize, ProjectCommand, LspCommand, Explain, Help, Dump,
-            BuildStandardLibrary, Repl, Compile {
+            BuildStandardLibrary, Repl, Compile, Format {
         boolean debug();
     }
 
@@ -476,5 +496,14 @@ final class CliParser {
             libraries = List.copyOf(libraries);
             javaClassPathRoots = List.copyOf(javaClassPathRoots);
         }
+    }
+
+    record Format(List<Path> paths, boolean check) implements Invocation {
+        Format {
+            paths = List.copyOf(paths);
+        }
+
+        @Override
+        public boolean debug() { return false; }
     }
 }

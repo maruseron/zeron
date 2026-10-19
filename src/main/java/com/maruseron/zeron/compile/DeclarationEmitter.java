@@ -34,6 +34,8 @@ final class DeclarationEmitter {
                     generateTopLevelValueMethods(context, classBuilder, (Stmt.Var) declaration, type);
                 }
                 case Stmt.FunctionDeclaration function -> {
+                    if (function instanceof Stmt.Function source
+                            && context.metadata.isClassHktImplementationHelper(source)) continue;
                     final var name = function.name();
                     final var parameters = function.parameters();
                     final var typeDescriptor = function.typeDescriptor();
@@ -131,6 +133,11 @@ final class DeclarationEmitter {
                                 });
                     }
                     emitDefaultArgumentWrappers(context, classBuilder, function, functionType);
+                    if (sourceFunction != null) {
+                        generateHktImplementationBridge(context, classBuilder,
+                                ClassDesc.of(context.currentHolderName), sourceFunction,
+                                context.metadata.hktBridgeSignature(sourceFunction));
+                    }
                 }
                 default -> {}
             }
@@ -175,12 +182,29 @@ final class DeclarationEmitter {
                     final var functionType = (FunctionDescriptor) lambda.getType();
                     final var implementationParameters = new ArrayList<TypeDescriptor>();
                     implementationParameters.addAll(context.lambdaPlan.captureTypes(lambda));
+                    final var evidenceFields = BytecodeEmitter.evidenceFields(
+                            context, functionType.typeParameters(), "lambda",
+                            context.lambdaPlan.lambdaMethodName(lambda));
+                    implementationParameters.addAll(Collections.nCopies(evidenceFields.size(),
+                            TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
                     implementationParameters.addAll(functionType.parameters());
                     classBuilder.withMethodBody(
                         context.lambdaPlan.lambdaMethodName(lambda),
                         toJavaMethodDescriptor(functionType, implementationParameters),
                         ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                         composer -> LambdaSupportEmitter.emitLambdaImplementation(context, composer, lambda));
+                }
+
+                if (entryHolder) for (final var lambda : context.lambdaPlan.lambdaImplementations()) {
+                    final var factoryName = context.lambdaPlan.lambdaTemplateFactoryName(lambda);
+                    if (factoryName == null) continue;
+                    classBuilder.withMethodBody(factoryName,
+                            MethodTypeDesc.of(ConstantDescs.CD_Object,
+                                    ConstantDescs.CD_Object.arrayType(),
+                                    ClassDesc.of("java.lang.invoke.MethodHandle").arrayType()),
+                            ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                            composer -> LambdaSupportEmitter.emitLambdaTemplateFactory(
+                                    context, composer, lambda));
                 }
 
                 if (entryHolder) for (final var adapter : context.lambdaPlan.adapters()) {
@@ -216,6 +240,100 @@ final class DeclarationEmitter {
                                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                                 composer -> LambdaSupportEmitter.emitFunctionReferenceImplementation(context, composer, reference));
                     }
+    }
+
+    static void generateClassHktImplementationHelper(final CompilationContext context,
+                                                    final ClassBuilder classBuilder,
+                                                    final Stmt.Function function) {
+        final var typeDescriptor = function.typeDescriptor();
+        final var witnessSlots = BytecodeEmitter.witnessSlots(context, typeDescriptor);
+        final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
+                toJavaMethodDescriptor(typeDescriptor), witnessSlots.size());
+        classBuilder.withMethod(function.name().lexeme(), methodDescriptor,
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                methodBuilder -> {
+                    final var signature = ClassSignatureEmitter.methodSignature(typeDescriptor);
+                    if (signature != null && witnessSlots.isEmpty()) {
+                        methodBuilder.with(SignatureAttribute.of(
+                                methodBuilder.constantPool().utf8Entry(signature)));
+                    }
+                    methodBuilder.withCode(composer -> {
+                        beginScope(context);
+                        final var previousReturnType = context.currentReturnType;
+                        context.currentReturnType = typeDescriptor.returnType();
+                        for (int i = 0; i < function.parameters().size(); i++) {
+                            final var parameter = function.parameters().get(i);
+                            context.symbols.declareSymbol(function, parameter,
+                                    typeDescriptor.parameters().get(i), BindingMutability.IMMUTABLE);
+                            context.symbols.define(parameter);
+                        }
+                        for (final var witnessToken : witnessSlots) {
+                            context.symbols.declareSymbol(function, witnessToken,
+                                    TypeDescriptor.ofName("java.lang.invoke.MethodHandle"),
+                                    BindingMutability.IMMUTABLE);
+                            context.symbols.define(witnessToken);
+                        }
+                        StatementEmitter.emitStmts(context, composer, function.body());
+                        if (typeDescriptor.returnType() instanceof UnitDescriptor) {
+                            emitUnitValue(context, composer);
+                            composer.areturn();
+                        }
+                        endScope(context);
+                        context.currentReturnType = previousReturnType;
+                    });
+                });
+        if (!witnessSlots.isEmpty()) {
+            final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(typeDescriptor);
+            classBuilder.withMethod(function.name().lexeme(), toJavaMethodDescriptor(bridgeType),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                    methodBuilder -> methodBuilder.withCode(BytecodeEmitter::emitEvidenceUnavailable));
+        }
+        generateHktImplementationBridge(context, classBuilder,
+                ClassDesc.of(context.metadata.functionOwner(function)), function,
+                context.metadata.hktBridgeSignature(function));
+        emitDefaultArgumentWrappers(context, classBuilder, function, typeDescriptor);
+    }
+
+    private static void generateHktImplementationBridge(final CompilationContext context,
+                                                        final ClassBuilder classBuilder,
+                                                        final ClassDesc owner,
+                                                        final Stmt.Function implementation,
+                                                        final FunctionDescriptor contractType) {
+        if (contractType == null) return;
+        final var implementationType = implementation.typeDescriptor();
+        final var erasedContractType = (FunctionDescriptor) TypeSubstitution.erase(contractType);
+        final var contractSlots = BytecodeEmitter.witnessSlots(context, contractType);
+        final var implementationSlots = BytecodeEmitter.witnessSlots(context, implementationType);
+        if (contractSlots.size() != implementationSlots.size()) {
+            throw new IllegalStateException("HKT contract and implementation evidence arities do not match.");
+        }
+        final var bridgeDescriptor = BytecodeEmitter.withEvidenceParameters(
+                toJavaMethodDescriptor(erasedContractType), contractSlots.size());
+        final var implementationDescriptor = BytecodeEmitter.withEvidenceParameters(
+                toJavaMethodDescriptor(implementationType), implementationSlots.size());
+        if (bridgeDescriptor.equals(implementationDescriptor)) return;
+        classBuilder.withMethodBody(implementation.name().lexeme(), bridgeDescriptor,
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                code -> {
+                    var slot = 0;
+                    for (int index = 0; index < contractType.arity(); index++) {
+                        final var sourceType = TypeSubstitution.erase(contractType.parameters().get(index));
+                        final var targetType = implementationType.parameters().get(index);
+                        NominalTypeEmitter.loadLocal(context, code, slot, sourceType);
+                        emitConversion(context, code, sourceType, targetType);
+                        slot += sourceType.isDoubleWidth() ? 2 : 1;
+                    }
+                    final var handleType = TypeDescriptor.ofName("java.lang.invoke.MethodHandle");
+                    for (int index = 0; index < contractSlots.size(); index++) {
+                        NominalTypeEmitter.loadLocal(context, code, slot, handleType);
+                        slot++;
+                    }
+                    code.invokestatic(owner, implementation.name().lexeme(), implementationDescriptor);
+                    final var erasedReturn = erasedContractType.returnType();
+                    emitConversion(context, code, implementationType.returnType(), erasedReturn);
+                    code.return_(TypeKind.fromDescriptor(
+                            TypeDescriptor.toJavaClassDesc(erasedReturn).descriptorString()));
+                });
     }
 
     private static void emitDefaultArgumentWrappers(final CompilationContext context,

@@ -779,7 +779,7 @@ final class ExpressionFlowEmitter {
         final var literal = pattern.literal();
         loadPipelineValue(context, composer, value, value.type());
         switch (literal.getType()) {
-            case IntDescriptor _ -> {
+            case IntDescriptor _, CharDescriptor _ -> {
                 composer.ldc((Integer) literal.value);
                 composer.if_icmpne(failure);
             }
@@ -883,7 +883,12 @@ final class ExpressionFlowEmitter {
     static void emitTypeTest(CompilationContext context, final CodeBuilder composer, final Expr.TypeTest test) {
         emitExpr(context, composer, test.value);
         emitBox(context, composer, context.lastEmittedType);
-        composer.instanceOf(runtimeTypeTestClass(context, test.resolvedTargetType()));
+        if (test.resolvedTargetType() instanceof CharDescriptor) {
+            composer.invokestatic(ClassDesc.of("zeron.runtime.StringUnicode"), "isCharValue",
+                    MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
+        } else {
+            composer.instanceOf(runtimeTypeTestClass(context, test.resolvedTargetType()));
+        }
         context.lastEmittedType = TypeDescriptor.ofBoolean();
     }
 
@@ -912,7 +917,12 @@ final class ExpressionFlowEmitter {
             final var failed = composer.newLabel();
             final var done = composer.newLabel();
             composer.dup();
-            composer.instanceOf(targetClass);
+            if (cast.targetType instanceof CharDescriptor) {
+                composer.invokestatic(ClassDesc.of("zeron.runtime.StringUnicode"), "isCharValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
+            } else {
+                composer.instanceOf(targetClass);
+            }
             composer.ifeq(failed);
             composer.checkcast(targetClass);
             composer.goto_(done);
@@ -924,7 +934,7 @@ final class ExpressionFlowEmitter {
             return;
         }
 
-        if (cast.targetType instanceof IntDescriptor
+        if (cast.targetType instanceof IntDescriptor || cast.targetType instanceof CharDescriptor
                 || cast.targetType instanceof LongDescriptor
                 || cast.targetType instanceof FloatDescriptor
                 || cast.targetType instanceof BooleanDescriptor) {
@@ -937,7 +947,7 @@ final class ExpressionFlowEmitter {
 
     private static ClassDesc runtimeTypeTestClass(CompilationContext context, final TypeDescriptor type) {
         return switch (type) {
-            case IntDescriptor _ -> ConstantDescs.CD_Integer;
+            case IntDescriptor _, CharDescriptor _ -> ConstantDescs.CD_Integer;
             case LongDescriptor _ -> ConstantDescs.CD_Long;
             case FloatDescriptor _ -> ConstantDescs.CD_Double;
             case BooleanDescriptor _ -> ConstantDescs.CD_Boolean;

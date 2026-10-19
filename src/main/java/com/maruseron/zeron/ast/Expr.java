@@ -754,6 +754,7 @@ public sealed interface Expr {
         public final List<TypeDescriptor> explicitTypeArguments;
         private TypeDescriptor type;
         private FunctionDescriptor genericFunctionType;
+        private FunctionDescriptor specializedFunctionType;
         private String resolvedFunctionName;
         private Stmt.FunctionDeclaration resolvedFunctionDeclaration;
         private Token resolvedSymbolToken;
@@ -782,6 +783,10 @@ public sealed interface Expr {
 
         public FunctionDescriptor genericFunctionType() {
             return genericFunctionType;
+        }
+        public FunctionDescriptor specializedFunctionType() { return specializedFunctionType; }
+        public void setSpecializedFunctionType(final FunctionDescriptor functionType) {
+            specializedFunctionType = functionType;
         }
 
         public String resolvedFunctionName() { return resolvedFunctionName; }

@@ -46,6 +46,14 @@ final class TypeClassEvidence {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     witness.name(), "A witness must be declared in the contract or target type package."));
         }
+        if (contract.higherKinded()) {
+            registerConstructorWitness(context, witness, packageName, contract);
+            return;
+        }
+        if (witness.targetType() instanceof TypeConstructorDescriptor) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    witness.name(), "Constructor patterns are only valid as HKT witness targets."));
+        }
 
         final var targetParameters = target != null ? target.typeParameters()
                 : sumTarget != null ? sumTarget.typeParameters() : List.<TypeParameterDescriptor>of();
@@ -146,6 +154,63 @@ final class TypeClassEvidence {
         }
 
         context.typeClassWitnesses.add(new WitnessEntry(witness, packageName));
+    }
+
+    private static void registerConstructorWitness(final ResolutionContext context,
+                                                   final Stmt.Witness witness,
+                                                   final String packageName,
+                                                   final Stmt.ContractDecl contract) {
+        final var contractArguments = typeArguments(witness.contractType());
+        if (!witness.higherKinded()
+                || !(witness.targetType() instanceof TypeConstructorDescriptor)
+                || contractArguments.size() != 1
+                || !witness.targetType().equals(contractArguments.getFirst())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    witness.name(), "An HKT witness must use the same constructor pattern in its contract and target."));
+            return;
+        }
+        final var targetConstructor = (TypeConstructorDescriptor) witness.targetType();
+        if (!witness.mappings().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    witness.name(), "HKT witnesses cannot map class constructors."));
+        }
+        if (context.classes.get(targetConstructor.baseType().name()) == null
+                && context.sums.get(targetConstructor.baseType().name()) == null
+                && context.products.get(targetConstructor.baseType().name()) == null
+                && !targetConstructor.baseType().name().equals("Array")) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    witness.name(), "An HKT witness target must be a declared Zeron type constructor."));
+        }
+        for (final var parameter : witness.typeParameters()) {
+            if (targetConstructor.arguments().stream().noneMatch(argument ->
+                    containsTypeParameter(argument, parameter))) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                        witness.name(), "HKT witness type parameter '" + parameter.name()
+                                + "' must occur in its constructor pattern."));
+            }
+        }
+        validateWitnessMethods(context, witness, contract, Map.of(), contractArguments);
+        context.typeClassWitnesses.add(new WitnessEntry(witness, packageName));
+    }
+
+    private static boolean containsTypeParameter(final TypeDescriptor type,
+                                                 final TypeParameterDescriptor parameter) {
+        if (type.equals(parameter)) return true;
+        return switch (type) {
+            case AppliedConstructorDescriptor applied ->
+                    containsTypeParameter(applied.argument(), parameter);
+            case TypeConstructorDescriptor constructor -> constructor.arguments().stream()
+                    .anyMatch(argument -> containsTypeParameter(argument, parameter));
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .anyMatch(argument -> containsTypeParameter(argument, parameter));
+            case NullableDescriptor nullable -> containsTypeParameter(nullable.baseType(), parameter);
+            case ReferenceDescriptor reference -> containsTypeParameter(reference.baseType(), parameter);
+            case ArrayDescriptor array -> containsTypeParameter(array.elementType(), parameter);
+            case FunctionDescriptor function -> containsTypeParameter(function.returnType(), parameter)
+                    || function.parameters().stream()
+                            .anyMatch(argument -> containsTypeParameter(argument, parameter));
+            default -> false;
+        };
     }
 
     static void registerDerived(final ResolutionContext context, final Stmt declaration,
@@ -333,7 +398,9 @@ final class TypeClassEvidence {
         TypeResolver.validateType(context, type, where);
         final var base = type instanceof ReferenceDescriptor reference ? reference.baseType() : type;
         if (!(base instanceof NominalDescriptor || base instanceof GenericDescriptor
-                || base instanceof IntDescriptor || base instanceof LongDescriptor || base instanceof FloatDescriptor
+                || base instanceof TypeConstructorDescriptor
+                || base instanceof IntDescriptor || base instanceof CharDescriptor
+                || base instanceof LongDescriptor || base instanceof FloatDescriptor
                 || base instanceof BooleanDescriptor || base instanceof StringDescriptor
                 || base instanceof UnitDescriptor)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
@@ -408,6 +475,12 @@ final class TypeClassEvidence {
                         method.requirementName(), "Unknown contract method requirement."));
             }
             final var required = requiredSlot.method();
+            if (Stmt.hasReceiverParameter(required.parameters())
+                    != Stmt.hasReceiverParameter(method.methodSignature().parameters())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                        method.requirementName(),
+                        "The implementation receiver marker must match the contract operation."));
+            }
             if (required.isMutating()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                         method.requirementName(), "Witnesses cannot implement mutating contract methods."));
@@ -444,6 +517,7 @@ final class TypeClassEvidence {
     private static boolean matchPattern(final TypeDescriptor pattern, final TypeDescriptor actual,
                                         final List<TypeParameterDescriptor> parameters,
                                         final Map<TypeParameterDescriptor, TypeDescriptor> substitutions) {
+        if (pattern instanceof InferDescriptor) return true;
         if (pattern instanceof TypeParameterDescriptor parameter && parameters.contains(parameter)) {
             final var previous = substitutions.putIfAbsent(parameter, actual);
             return previous == null || previous.equals(actual);
@@ -468,6 +542,33 @@ final class TypeClassEvidence {
             }
             return true;
         }
+        if (pattern instanceof TypeConstructorDescriptor patternConstructor
+                && actual instanceof TypeConstructorDescriptor actualConstructor) {
+            if (!patternConstructor.baseType().equals(actualConstructor.baseType())
+                    || patternConstructor.arguments().size() != actualConstructor.arguments().size()) return false;
+            for (int index = 0; index < patternConstructor.arguments().size(); index++) {
+                if (!matchPattern(patternConstructor.arguments().get(index),
+                        actualConstructor.arguments().get(index), parameters, substitutions)) return false;
+            }
+            return true;
+        }
+        if (pattern instanceof TypeConstructorDescriptor patternConstructor
+                && actual instanceof GenericDescriptor actualGeneric) {
+            if (!patternConstructor.baseType().equals(actualGeneric.baseType())
+                    || patternConstructor.arguments().size() != actualGeneric.typeParameters().size()) return false;
+            for (int index = 0; index < patternConstructor.arguments().size(); index++) {
+                if (!matchPattern(patternConstructor.arguments().get(index),
+                        actualGeneric.typeParameters().get(index), parameters, substitutions)) return false;
+            }
+            return true;
+        }
+        if (pattern instanceof TypeConstructorDescriptor patternConstructor
+                && patternConstructor.baseType().name().equals("Array")
+                && actual instanceof ArrayDescriptor actualArray) {
+            return patternConstructor.arguments().size() == 1
+                    && matchPattern(patternConstructor.arguments().getFirst(),
+                            actualArray.elementType(), parameters, substitutions);
+        }
         return pattern.equals(actual);
     }
 
@@ -478,7 +579,9 @@ final class TypeClassEvidence {
 
     private static String packageOfTarget(final TypeDescriptor target) {
         final var base = target instanceof ReferenceDescriptor reference ? reference.baseType() : target;
-        if (base instanceof IntDescriptor || base instanceof LongDescriptor
+        if (base instanceof TypeConstructorDescriptor constructor
+                && constructor.baseType().name().equals("Array")) return "zeron.collections";
+        if (base instanceof IntDescriptor || base instanceof CharDescriptor || base instanceof LongDescriptor
                 || base instanceof FloatDescriptor || base instanceof BooleanDescriptor
                 || base instanceof StringDescriptor || base instanceof UnitDescriptor) return "zeron.lang";
         return packageOf(nominalName(base));
@@ -525,7 +628,7 @@ final class TypeClassEvidence {
                 final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
                         method.typeDescriptor(), slot.applied().substitutions());
                 final var methodParameters = new ArrayList<TypeDescriptor>();
-                methodParameters.add(parameter);
+                if (!slot.applied().declaration().higherKinded()) methodParameters.add(parameter);
                 methodParameters.addAll(descriptor.parameters());
                 final var methodType = TypeDescriptor.functionWithEffectsOf(method.name().lexeme(),
                         descriptor.returnType(), methodParameters,
@@ -556,6 +659,12 @@ final class TypeClassEvidence {
                     if (slot.constructorIndex() >= methods.size()) continue;
                     final var methodSlot = methods.get(slot.constructorIndex());
                     final var appliedBound = appliedType(methodSlot.applied(), substitutions);
+                    if (methodSlot.applied().declaration().higherKinded()) {
+                        evidence.add(selectMethodEvidence(context, parameter, slot.boundIndex(),
+                                slot.constructorIndex(), appliedBound, actual,
+                                methodSlot.method(), where));
+                        continue;
+                    }
                     evidence.add(selectMethodEvidence(context, parameter, slot.boundIndex(),
                             slot.constructorIndex(), appliedBound, actual,
                             methodSlot.method(), where));
@@ -677,6 +786,39 @@ final class TypeClassEvidence {
             final TypeDescriptor requiredBound, final TypeDescriptor actualType,
             final Stmt.ContractMethod requirement,
             final com.maruseron.zeron.scan.Token where) {
+        final var requiredContract = context.contracts.get(nominalName(requiredBound));
+        if (requiredContract != null && requiredContract.higherKinded()) {
+            if (actualType instanceof TypeParameterDescriptor actualParameter
+                    && actualParameter.isHigherKinded()) {
+                for (int boundIndex = 0; boundIndex < actualParameter.bounds().size(); boundIndex++) {
+                    final var bound = actualParameter.bounds().get(boundIndex);
+                    if (!entails(context, bound, requiredBound)) continue;
+                    final var use = contractUse(bound);
+                    if (use == null) continue;
+                    final var slots = ContractComposition.methods(context, use);
+                    for (final var slot : slots) {
+                        if (!slot.method().name().lexeme().equals(requirement.name().lexeme())
+                                || !slot.applied().declaration().higherKinded()) continue;
+                        final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                                slot.method().typeDescriptor(), slot.applied().substitutions());
+                        return new Expr.EvidenceArgument(actualParameter, boundIndex, slot.index(),
+                                null, null, descriptor,
+                                Expr.methodEvidenceToken(actualParameter, boundIndex, slot.index()), true);
+                    }
+                }
+            }
+            final var selected = selectMethod(context, actualType, requiredBound,
+                    requirement.name().lexeme(), where);
+            if (selected == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
+                        "No HKT witness provides '" + requirement.name().lexeme() + "' for '"
+                                + TypeFormatter.format(actualType) + "'."));
+            }
+            final var helperName = selected.method().implementation().name().lexeme();
+            return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
+                    selected.helperQualifiedName(), helperName,
+                    requirement.typeDescriptor(), null, true, Expr.EvidenceHandleKind.STATIC);
+        }
         if (actualType instanceof TypeParameterDescriptor actualParameter) {
             for (int boundIndex = 0; boundIndex < actualParameter.bounds().size(); boundIndex++) {
                 final var boundUse = contractUse(actualParameter.bounds().get(boundIndex));
@@ -785,7 +927,7 @@ final class TypeClassEvidence {
                 targetParameter, targetBoundIndex, targetMethodIndex, where);
         if (productEquality != null) return productEquality;
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
-                "No method witness satisfies bound '" + requiredBound + "'."));
+                "No method witness satisfies bound '" + TypeFormatter.format(requiredBound) + "'."));
         throw new IllegalStateException("Unreachable");
     }
 
@@ -808,7 +950,7 @@ final class TypeClassEvidence {
         }
         if (selected.size() > 1) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
-                    "Ambiguous derived contract witness for '" + requiredBound + "'."));
+                    "Ambiguous derived contract witness for '" + TypeFormatter.format(requiredBound) + "'."));
         }
         if (selected.isEmpty()) return null;
         final var witness = selected.getFirst().getKey();
@@ -906,7 +1048,13 @@ final class TypeClassEvidence {
         final String method;
         final Expr.EvidenceHandleKind kind;
         final FunctionDescriptor signature;
-        if (concrete instanceof IntDescriptor || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
+        if (concrete instanceof CharDescriptor) {
+            owner = "zeron.runtime.StringUnicode";
+            method = "charToString";
+            kind = Expr.EvidenceHandleKind.STATIC;
+            signature = TypeDescriptor.functionOf(method, TypeDescriptor.ofString(), concrete);
+        } else if (concrete instanceof IntDescriptor || concrete instanceof LongDescriptor
+                || concrete instanceof FloatDescriptor
                 || concrete instanceof BooleanDescriptor) {
             owner = "java.lang.String";
             method = "valueOf";
@@ -939,7 +1087,8 @@ final class TypeClassEvidence {
                     ? reference.baseType() : arguments.getFirst();
         return nominalName(contractType).equals("zeron.lang.Display")
                 && arguments.size() == 1 && displayTarget.equals(concrete)
-                && (concrete instanceof IntDescriptor || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
+                && (concrete instanceof IntDescriptor || concrete instanceof CharDescriptor
+                    || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
                     || concrete instanceof BooleanDescriptor || concrete instanceof StringDescriptor
                     || concrete instanceof UnitDescriptor);
     }
@@ -961,11 +1110,12 @@ final class TypeClassEvidence {
     private static String builtinEqualityMethod(final TypeDescriptor concrete) {
         if (concrete instanceof NullableDescriptor nullable) {
             final var base = nullable.baseType();
-            if (base instanceof IntDescriptor || base instanceof LongDescriptor || base instanceof FloatDescriptor
+            if (base instanceof IntDescriptor || base instanceof CharDescriptor
+                    || base instanceof LongDescriptor || base instanceof FloatDescriptor
                     || base instanceof BooleanDescriptor || base instanceof StringDescriptor
                     || base instanceof UnitDescriptor) return "eqNullable";
         }
-        if (concrete instanceof IntDescriptor) return "eqInt";
+        if (concrete instanceof IntDescriptor || concrete instanceof CharDescriptor) return "eqInt";
         if (concrete instanceof LongDescriptor) return "eqLong";
         if (concrete instanceof FloatDescriptor) return "eqFloat";
         if (concrete instanceof BooleanDescriptor) return "eqBoolean";
@@ -983,12 +1133,14 @@ final class TypeClassEvidence {
                 : arguments.getFirst() instanceof ReferenceDescriptor reference
                     ? reference.baseType() : arguments.getFirst();
         final var isBuiltInType = concrete instanceof NullableDescriptor nullable
-                ? nullable.baseType() instanceof IntDescriptor || nullable.baseType() instanceof LongDescriptor
+                ? nullable.baseType() instanceof IntDescriptor || nullable.baseType() instanceof CharDescriptor
+                    || nullable.baseType() instanceof LongDescriptor
                     || nullable.baseType() instanceof FloatDescriptor
                     || nullable.baseType() instanceof BooleanDescriptor
                     || nullable.baseType() instanceof StringDescriptor
                     || nullable.baseType() instanceof UnitDescriptor
-                : concrete instanceof IntDescriptor || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
+                : concrete instanceof IntDescriptor || concrete instanceof CharDescriptor
+                    || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
                     || concrete instanceof BooleanDescriptor || concrete instanceof StringDescriptor
                     || concrete instanceof UnitDescriptor;
         return nominalName(contractType).equals("zeron.lang.Eq")
@@ -1004,7 +1156,7 @@ final class TypeClassEvidence {
                 || !requirement.name().lexeme().equals("hash")
                 || !(requirement.typeDescriptor().returnType() instanceof IntDescriptor)
                 || !requirement.typeDescriptor().parameters().isEmpty()) return null;
-        final var method = concrete instanceof IntDescriptor ? "hashInt"
+        final var method = concrete instanceof IntDescriptor || concrete instanceof CharDescriptor ? "hashInt"
                 : concrete instanceof LongDescriptor ? "hashLong"
                 : concrete instanceof FloatDescriptor ? "hashFloat"
                 : concrete instanceof BooleanDescriptor ? "hashBoolean"
@@ -1026,7 +1178,8 @@ final class TypeClassEvidence {
                     ? reference.baseType() : arguments.getFirst();
         return nominalName(contractType).equals("zeron.lang.Hashable")
                 && arguments.size() == 1 && target.equals(concrete)
-                && (concrete instanceof IntDescriptor || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
+                && (concrete instanceof IntDescriptor || concrete instanceof CharDescriptor
+                    || concrete instanceof LongDescriptor || concrete instanceof FloatDescriptor
                     || concrete instanceof BooleanDescriptor || concrete instanceof StringDescriptor
                     || concrete instanceof UnitDescriptor);
     }
@@ -1250,7 +1403,7 @@ final class TypeClassEvidence {
             }
             if (explicitWitnesses.size() > 1) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
-                        "Ambiguous constructor witness for bound '" + requiredBound + "'."));
+                        "Ambiguous constructor witness for bound '" + TypeFormatter.format(requiredBound) + "'."));
             }
             final var explicitMapping = explicitWitnesses.isEmpty() ? null
                     : explicitWitnesses.getFirst().getKey().declaration().mappings().stream()
@@ -1281,8 +1434,10 @@ final class TypeClassEvidence {
         }
         if (matches.size() != 1) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
-                    matches.isEmpty() ? "No constructor witness satisfies bound '" + requiredBound + "'."
-                            : "Ambiguous constructor witness for bound '" + requiredBound + "'."));
+                    matches.isEmpty() ? "No constructor witness satisfies bound '"
+                            + TypeFormatter.format(requiredBound) + "'."
+                            : "Ambiguous constructor witness for bound '"
+                                    + TypeFormatter.format(requiredBound) + "'."));
         }
         return matches.getFirst();
     }
@@ -1294,11 +1449,27 @@ final class TypeClassEvidence {
         return selectMethod(context, actualType, null, methodName, where);
     }
 
+    static WitnessMethodSelection selectMemberMethod(final ResolutionContext context,
+                                                     final TypeDescriptor actualType,
+                                                     final String methodName,
+                                                     final com.maruseron.zeron.scan.Token where) {
+        return selectMethod(context, actualType, null, methodName, where, true);
+    }
+
     static WitnessMethodSelection selectMethod(final ResolutionContext context,
                                                final TypeDescriptor actualType,
                                                final TypeDescriptor requiredContractType,
                                                final String methodName,
                                                final com.maruseron.zeron.scan.Token where) {
+        return selectMethod(context, actualType, requiredContractType, methodName, where, false);
+    }
+
+    private static WitnessMethodSelection selectMethod(final ResolutionContext context,
+                                               final TypeDescriptor actualType,
+                                               final TypeDescriptor requiredContractType,
+                                               final String methodName,
+                                               final com.maruseron.zeron.scan.Token where,
+                                               final boolean receiverMember) {
         final var actual = actualType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : actualType;
         final var matches = new ArrayList<WitnessMethodSelection>();
@@ -1311,8 +1482,11 @@ final class TypeClassEvidence {
                     context, entry.declaration(), substitutions, requiredContractType)) continue;
             if (!prerequisitesAvailable(context, entry.declaration(), substitutions,
                 where, new HashSet<>())) continue;
+            final var contract = context.contracts.get(nominalName(entry.declaration().contractType()));
             for (final var method : entry.declaration().methods()) {
                 if (!method.requirementName().lexeme().equals(methodName)) continue;
+                if (receiverMember && contract != null && contract.higherKinded()
+                        && !Stmt.hasReceiverParameter(method.methodSignature().parameters())) continue;
                 final var helperType = (FunctionDescriptor) TypeSubstitution.substitute(
                         method.implementation().typeDescriptor(), substitutions);
                 matches.add(new WitnessMethodSelection(method,
@@ -1322,7 +1496,8 @@ final class TypeClassEvidence {
         }
         if (matches.size() > 1) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
-                    "Ambiguous witness method '" + methodName + "' for type '" + actualType + "'."));
+                    "Ambiguous witness method '" + methodName + "' for type '"
+                            + TypeFormatter.format(actualType) + "'."));
         }
         return matches.isEmpty() ? null : matches.getFirst();
     }

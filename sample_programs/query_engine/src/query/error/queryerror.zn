@@ -1,0 +1,7 @@
+package query.error;
+
+public type QueryError =
+      UnknownTable(name: String)
+    | MissingColumn(name: String)
+    | InvalidComparison
+    | InvalidPredicate;

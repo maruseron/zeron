@@ -7,8 +7,10 @@ import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.diagnostic.DiagnosticLabel;
 import com.maruseron.zeron.diagnostic.SourceSpan;
 import com.maruseron.zeron.domain.NominalDescriptor;
+import com.maruseron.zeron.domain.AppliedConstructorDescriptor;
 import com.maruseron.zeron.domain.GenericDescriptor;
 import com.maruseron.zeron.domain.ArrayDescriptor;
+import com.maruseron.zeron.domain.TypeConstructorDescriptor;
 import com.maruseron.zeron.domain.BooleanDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.ByteArrayDescriptor;
@@ -22,6 +24,7 @@ import com.maruseron.zeron.domain.StringDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.UnitDescriptor;
+import com.maruseron.zeron.domain.BuiltinTypes;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 import com.maruseron.zeron.scan.ScanResult;
@@ -361,7 +364,15 @@ public final class Parser {
             final var contractType = collectType();
             consume(FOR, "Expect 'for' between witness contract and target type.");
             final var targetType = collectType();
-            consume(LEFT_BRACE, "Expect '{' before witness members.");
+        final var higherKinded = targetType instanceof TypeConstructorDescriptor
+                && contractType instanceof GenericDescriptor generic
+                && generic.typeParameters().size() == 1
+                && generic.typeParameters().getFirst() instanceof TypeConstructorDescriptor;
+        if ((targetType instanceof TypeConstructorDescriptor) != higherKinded) {
+            error(name, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    "A constructor witness must use an HKT contract and matching constructor patterns.");
+        }
+        consume(LEFT_BRACE, "Expect '{' before witness members.");
             final var mappings = new ArrayList<Stmt.WitnessFactoryMapping>();
             final var methods = new ArrayList<Stmt.WitnessMethod>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
@@ -383,6 +394,10 @@ public final class Parser {
                     } finally {
                         activeTypeParameters = enclosingMethodTypeParameters;
                     }
+                    if (parsed.receiverParameter() && !higherKinded) {
+                        error(methodName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "Only HKT witness methods may declare a receiver parameter.");
+                    }
                     final var sourceMethod = new Stmt.Function(methodName, parsed.parameters(),
                             parsed.typeDescriptor(), parsed.body(), false, parsed.defaultValues(),
                             parsed.parameters().size() - (parsed.variadic() ? 1 : 0)
@@ -391,10 +406,12 @@ public final class Parser {
                             "$zeron$witness$" + name.span().start().offset() + "$" + methodName.lexeme(),
                             null, methodName.span());
                     final var helperParameters = new ArrayList<Token>();
-                    helperParameters.add(new Token(THIS, "this", null, methodName.span()));
+                    if (!higherKinded) {
+                        helperParameters.add(new Token(THIS, "this", null, methodName.span()));
+                    }
                     helperParameters.addAll(parsed.parameters());
                     final var helperTypes = new ArrayList<TypeDescriptor>();
-                    helperTypes.add(targetType);
+                    if (!higherKinded) helperTypes.add(targetType);
                     helperTypes.addAll(parsed.typeDescriptor().parameters());
                     final var helperTypeParameters = new ArrayList<TypeParameterDescriptor>(typeParameters.values());
                     helperTypeParameters.addAll(methodTypeParameters.values());
@@ -403,7 +420,8 @@ public final class Parser {
                             parsed.typeDescriptor().raisedEffects());
                     final var implementation = new Stmt.Function(helperName, helperParameters, helperType,
                             parsed.body(), false, parsed.defaultValues(),
-                            1 + parsed.parameters().size() - (parsed.variadic() ? 1 : 0)
+                            (higherKinded ? 0 : 1) + parsed.parameters().size()
+                                    - (parsed.variadic() ? 1 : 0)
                                     - parsed.defaultValues().size(), parsed.variadic());
                     methods.add(new Stmt.WitnessMethod(methodName, sourceMethod, implementation));
                     continue;
@@ -423,7 +441,7 @@ public final class Parser {
             }
             consume(RIGHT_BRACE, "Expect '}' after witness members.");
             return new Stmt.Witness(name, List.copyOf(typeParameters.values()), contractType,
-                    targetType, mappings, methods);
+                    targetType, mappings, methods, false, List.of(), higherKinded);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -518,6 +536,10 @@ public final class Parser {
                 try {
                     final var parsed = methodSignature(methodName, false,
                             List.copyOf(methodTypeParameters.values()));
+                    if (parsed.receiverParameter()) {
+                        error(methodName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "Extension methods already have an implicit receiver.");
+                    }
                     final var functionParameters = new ArrayList<TypeDescriptor>();
                     final TypeDescriptor callReceiverType = isMutating
                             ? new ReferenceDescriptor(receiverType) : receiverType;
@@ -551,15 +573,7 @@ public final class Parser {
     }
 
     private static boolean isSupportedBuiltinExtensionReceiver(final TypeDescriptor receiverType) {
-        return receiverType instanceof ArrayDescriptor
-                || receiverType instanceof ByteDescriptor
-                || receiverType instanceof ByteArrayDescriptor
-                || receiverType instanceof UnitDescriptor
-                || receiverType instanceof IntDescriptor
-                || receiverType instanceof LongDescriptor
-                || receiverType instanceof FloatDescriptor
-                || receiverType instanceof BooleanDescriptor
-                || receiverType instanceof StringDescriptor;
+        return BuiltinTypes.supportsExtensionReceiver(receiverType);
     }
 
     private Stmt letDeclaration() {
@@ -844,7 +858,17 @@ public final class Parser {
                 error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
                         "Method type parameters cannot shadow enclosing type parameters.");
             }
-            var descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme());
+            var higherKinded = false;
+            if (match(LESS)) {
+                final var kindSlot = consume(IDENTIFIER, "Expect '_' in a higher-kinded type parameter.");
+                if (!kindSlot.lexeme().equals("_")) {
+                    error(kindSlot, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                            "The only supported higher-kinded parameter syntax is F<_>.");
+                }
+                consume(GREATER, "Expect '>' after the higher-kinded type parameter.");
+                higherKinded = true;
+            }
+            var descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), List.of(), higherKinded);
             parameters.put(parameter.lexeme(), descriptor);
             if (match(COLON)) {
                 if (!allowBounds) {
@@ -859,7 +883,7 @@ public final class Parser {
                     bounds.add(collectType());
                 } while (match(PLUS));
                 activeTypeParameters = enclosingTypeParameters;
-                descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bounds);
+                descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bounds, higherKinded);
                 parameters.put(parameter.lexeme(), descriptor);
             }
         } while (match(COMMA));
@@ -888,6 +912,7 @@ public final class Parser {
         activeTypeParameters = typeParameters;
         try {
             final var contractUses = new ArrayList<Stmt.ContractUse>();
+            final var higherKindedContractUses = new ArrayList<Stmt.ContractUse>();
             if (match(IS)) {
                 do {
                         final var contractName = qualifyTypeToken(
@@ -897,7 +922,12 @@ public final class Parser {
                             ? collectTypeArguments()
                             : List.<TypeDescriptor>of();
                     if (hasTypeArguments) consume(GREATER, "Expect '>' after contract type arguments.");
-                    contractUses.add(new Stmt.ContractUse(contractName, typeArguments));
+                    final var contractUse = new Stmt.ContractUse(contractName, typeArguments);
+                    if (typeArguments.stream().anyMatch(TypeConstructorDescriptor.class::isInstance)) {
+                        higherKindedContractUses.add(contractUse);
+                    } else {
+                        contractUses.add(contractUse);
+                    }
                 } while (match(COMMA));
             }
             final var derivedContracts = parseDerivedContracts();
@@ -908,10 +938,13 @@ public final class Parser {
             final var namedConstructors = new ArrayList<Stmt.NamedConstructor>();
             final var methods = new ArrayList<Stmt.Method>();
             final var patterns = new ArrayList<Stmt.Pattern>();
+            final var higherKindedImplementations = new ArrayList<Stmt.Witness>();
             final var storedStateOrder = new ArrayList<Token>();
             Stmt.Constructor constructor = null;
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
-                if (match(PUBLIC, PRIVATE)) {
+                if (matchSoftKeyword("implementation")) {
+                    higherKindedImplementations.add(higherKindedImplementation());
+                } else if (match(PUBLIC, PRIVATE)) {
                     final var isPublic = previous().type() == PUBLIC;
                     if (match(CONSTRUCTOR)) {
                         final var constructorName = consume(IDENTIFIER, "Expect constructor name after 'constructor'.");
@@ -977,10 +1010,65 @@ public final class Parser {
             return new Stmt.ClassDecl(name, List.copyOf(typeParameters.values()), List.copyOf(contractUses),
                     List.copyOf(fields), List.copyOf(properties), constructor,
                     List.copyOf(namedConstructors), List.copyOf(methods), List.copyOf(patterns),
-                    isTopLevelPublic, isEffect, derivedContracts, storedStateOrder);
+                    isTopLevelPublic, isEffect, derivedContracts, storedStateOrder,
+                    higherKindedContractUses, higherKindedImplementations);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
+    }
+
+    private Stmt.Witness higherKindedImplementation() {
+        final var keyword = previous();
+        final var contractType = collectType();
+        if (!(contractType instanceof GenericDescriptor generic)
+                || generic.typeParameters().size() != 1
+                || !(generic.typeParameters().getFirst() instanceof TypeConstructorDescriptor)) {
+            error(keyword, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    "An implementation block requires an HKT contract applied to a constructor pattern.");
+        }
+        final var targetType = (TypeConstructorDescriptor) ((GenericDescriptor) contractType)
+                .typeParameters().getFirst();
+        final var witnessTypeParameters = activeTypeParameters.values().stream()
+                .filter(TypeParameterDescriptor.class::isInstance)
+                .map(TypeParameterDescriptor.class::cast)
+                .filter(parameter -> targetType.arguments().contains(parameter))
+                .toList();
+        final var implementationName = new Token(IDENTIFIER,
+                "$zeron$witness$implementation$" + keyword.span().start().offset(), null, keyword.span());
+        consume(LEFT_BRACE, "Expect '{' before HKT implementation methods.");
+        final var methods = new ArrayList<Stmt.WitnessMethod>();
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            consume(FN, "Expect 'fn' before an HKT implementation method.");
+            final var methodName = consumeMemberName("Expect HKT operation name.");
+            final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
+            final var enclosingMethodTypeParameters = activeTypeParameters;
+            activeTypeParameters = new LinkedHashMap<>(enclosingMethodTypeParameters);
+            activeTypeParameters.putAll(methodTypeParameters);
+            final ParsedMethod parsed;
+            try {
+                parsed = methodSignature(methodName, false, List.copyOf(methodTypeParameters.values()));
+            } finally {
+                activeTypeParameters = enclosingMethodTypeParameters;
+            }
+            final var sourceMethod = new Stmt.Function(methodName, parsed.parameters(),
+                    parsed.typeDescriptor(), parsed.body(), false, parsed.defaultValues(),
+                    parsed.parameters().size() - (parsed.variadic() ? 1 : 0)
+                            - parsed.defaultValues().size(), parsed.variadic());
+            final var helperName = new Token(IDENTIFIER,
+                    implementationName.lexeme() + "$" + methodName.lexeme(), null, methodName.span());
+            final var helperTypeParameters = new ArrayList<TypeParameterDescriptor>(witnessTypeParameters);
+            helperTypeParameters.addAll(methodTypeParameters.values());
+            final var helperType = TypeDescriptor.functionWithEffectsOf(helperName.lexeme(),
+                    parsed.typeDescriptor().returnType(), parsed.typeDescriptor().parameters(),
+                    helperTypeParameters, parsed.typeDescriptor().raisedEffects());
+            final var implementation = new Stmt.Function(helperName, parsed.parameters(), helperType,
+                    parsed.body(), false, parsed.defaultValues(), sourceMethod.minimumArity(),
+                    parsed.variadic());
+            methods.add(new Stmt.WitnessMethod(methodName, sourceMethod, implementation));
+        }
+        consume(RIGHT_BRACE, "Expect '}' after HKT implementation methods.");
+        return new Stmt.Witness(implementationName, witnessTypeParameters, contractType, targetType,
+                List.of(), methods, false, List.of(), true);
     }
 
     private Stmt.Pattern classPattern(final boolean isPublic) {
@@ -1018,6 +1106,10 @@ public final class Parser {
         try {
             final var signature = methodSignature(name, false,
                     List.copyOf(methodTypeParameters.values()));
+            if (signature.receiverParameter()) {
+                error(name, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Class methods do not declare receiver parameters.");
+            }
             return new Stmt.Method(name, signature.parameters(), signature.typeDescriptor(),
                     isPublic, isMutating, signature.body(), signature.defaultValues(),
                     signature.parameters().size() - (signature.variadic() ? 1 : 0)
@@ -1028,7 +1120,7 @@ public final class Parser {
     }
 
     private boolean isClassMethodStart() {
-        if (!(check(IDENTIFIER) || check(GET) || check(SET))) return false;
+        if (!check(IDENTIFIER)) return false;
         return checkNext(LEFT_PAREN) || checkNext(LESS);
     }
 
@@ -1045,11 +1137,11 @@ public final class Parser {
             levelMarker = new LevelMarker(levelMarker);
             try {
                 while (!check(RIGHT_BRACE) && !isAtEnd()) {
-                    if (match(GET)) {
+                    if (matchSoftKeyword("get")) {
                         if (getterBody != null) error(previous(), DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
                                 "Duplicate property getter.");
                         getterBody = accessorBody("getter");
-                    } else if (match(SET)) {
+                    } else if (matchSoftKeyword("set")) {
                         if (setterBody != null) error(previous(), DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
                                 "Duplicate property setter.");
                         consume(LEFT_PAREN, "Expect '(' after 'set'.");
@@ -1162,6 +1254,14 @@ public final class Parser {
                                                   final boolean isSealed) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect contract name."));
         final var typeParameters = typeParameterDeclaration(name, true);
+        final var higherKindedParameters = typeParameters.values().stream()
+                .filter(TypeParameterDescriptor::isHigherKinded).count();
+        if (higherKindedParameters > 0
+                && (higherKindedParameters != 1 || typeParameters.size() != 1)) {
+            error(name, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                    "An HKT contract must declare exactly one higher-kinded parameter.");
+        }
+        final var isHigherKinded = higherKindedParameters == 1;
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
@@ -1204,6 +1304,8 @@ public final class Parser {
                 final var isDefault = match(DEFAULT);
                 final var isMutating = match(MUT);
                 if (match(CONSTRUCTOR)) {
+                    if (isHigherKinded) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            "HKT contracts declare constructor-family methods, not contract constructors.");
                     if (isMutating) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
                             "Contract constructors cannot be marked mut.");
                     if (isDefault) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
@@ -1219,6 +1321,8 @@ public final class Parser {
                     continue;
                 }
                 if (match(PROPERTY)) {
+                    if (isHigherKinded) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            "HKT contracts cannot declare instance properties.");
                     if (isDefault) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
                             "Contract properties cannot have default implementations.");
                     final var propertyName = consume(IDENTIFIER, "Expect property name.");
@@ -1228,6 +1332,10 @@ public final class Parser {
                     continue;
                 }
                 final var methodName = consumeMemberName("Expect contract method name.");
+                if (isHigherKinded && (isDefault || isMutating)) {
+                    error(methodName, DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            "HKT contract methods cannot be default or mutating.");
+                }
                 final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
                 final var enclosingMethodTypeParameters = activeTypeParameters;
                 activeTypeParameters = new LinkedHashMap<>(enclosingMethodTypeParameters);
@@ -1235,6 +1343,10 @@ public final class Parser {
                 try {
                     final var signature = methodSignature(methodName, !isDefault,
                             List.copyOf(methodTypeParameters.values()));
+                    if (signature.receiverParameter() && !isHigherKinded) {
+                        error(methodName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "Only HKT contract methods may declare a receiver parameter.");
+                    }
                     methods.add(new Stmt.ContractMethod(methodName, signature.parameters(),
                             signature.typeDescriptor(), isMutating, isDefault,
                             isDefault ? signature.body() : List.of(), signature.defaultValues(),
@@ -1248,7 +1360,7 @@ public final class Parser {
                 return new Stmt.ContractDecl(name, List.copyOf(typeParameters.values()),
                         List.copyOf(requiredContracts), List.copyOf(namedConstructors),
                         List.copyOf(methods), List.copyOf(properties), isTopLevelPublic, isSealed,
-                        permittedClasses);
+                        isHigherKinded, permittedClasses);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -1288,7 +1400,8 @@ public final class Parser {
 
     private record ParsedMethod(List<Token> parameters,
                                 com.maruseron.zeron.domain.FunctionDescriptor typeDescriptor,
-                                List<Stmt> body, List<Expr> defaultValues, boolean variadic) {}
+                                List<Stmt> body, List<Expr> defaultValues, boolean variadic,
+                                boolean receiverParameter) {}
 
     private ParsedMethod methodSignature(final Token name,
                                          final boolean isContract,
@@ -1299,6 +1412,7 @@ public final class Parser {
         final var defaultValues = new ArrayList<Expr>();
         var hasDefault = false;
         var variadic = false;
+        var receiverParameter = false;
         if (!check(RIGHT_PAREN)) {
             do {
                 if (variadic) {
@@ -1307,10 +1421,23 @@ public final class Parser {
                 }
                 if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                         "Can't have more than 254 parameters.");
-                parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
+                if (match(THIS)) {
+                    if (!parameterNames.isEmpty()) {
+                        error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "The receiver parameter must be first.");
+                    }
+                    receiverParameter = true;
+                    parameterNames.add(previous());
+                } else {
+                    parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
+                }
                 consume(COLON, "Expect ':' after parameter name.");
                 final var parameterType = collectType();
                 variadic = match(ELLIPSIS);
+                if (receiverParameter && (variadic || check(EQUAL))) {
+                    error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "The receiver parameter cannot be variadic or have a default.");
+                }
                 parameterTypes.add(variadic ? TypeDescriptor.arrayOf(parameterType) : parameterType);
                 if (variadic && check(EQUAL)) {
                     throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
@@ -1338,7 +1465,7 @@ public final class Parser {
         if (isContract) {
             consume(SEMICOLON, "Expect ';' after contract method signature.");
             return new ParsedMethod(List.copyOf(parameterNames), descriptor, List.of(),
-                    List.copyOf(defaultValues), variadic);
+                    List.copyOf(defaultValues), variadic, receiverParameter);
         }
 
         levelMarker = new LevelMarker(levelMarker);
@@ -1350,14 +1477,14 @@ public final class Parser {
             return new ParsedMethod(List.copyOf(parameterNames),
                     TypeDescriptor.functionWithEffectsOf(name.lexeme(), returnType,
                             parameterTypes, typeParameters, raisedEffects),
-                    body, List.copyOf(defaultValues), variadic);
+                    body, List.copyOf(defaultValues), variadic, receiverParameter);
         }
 
         consume(LEFT_BRACE, "Expect '{' before method body.");
         body = block();
         levelMarker = levelMarker.enclosing();
         return new ParsedMethod(List.copyOf(parameterNames), descriptor, body,
-                List.copyOf(defaultValues), variadic);
+                List.copyOf(defaultValues), variadic, receiverParameter);
     }
 
     private TypeDescriptor collectType() {
@@ -1401,7 +1528,15 @@ public final class Parser {
                     : null;
                 if (type == null) type = TypeDescriptor.of(qualifiedTypeName.lexeme());
             if (isGeneric) {
-                if (type.name().equals("Array")) {
+                if (type instanceof TypeParameterDescriptor parameter && parameter.isHigherKinded()) {
+                    if (inner.size() != 1) {
+                        error(firstTypeName, DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                                "A higher-kinded type parameter takes exactly one type argument.");
+                    }
+                    type = new AppliedConstructorDescriptor(parameter, inner.getFirst());
+                } else if (type instanceof NominalDescriptor nominal && inner.contains(TypeDescriptor.ofInfer())) {
+                    type = new TypeConstructorDescriptor(nominal, inner);
+                } else if (type.name().equals("Array")) {
                     if (inner.size() != 1) error(firstTypeName, DiagnosticCatalog.INVALID_ARRAY_TYPE_OR_LITERAL,
                             "Array expects one element type.");
                     type = TypeDescriptor.arrayOf(inner.getFirst());
@@ -1426,7 +1561,12 @@ public final class Parser {
     private List<TypeDescriptor> collectTypeArguments() {
         final var typeArgs = new ArrayList<TypeDescriptor>();
         do {
-            typeArgs.add(collectType());
+            if (check(IDENTIFIER) && peek().lexeme().equals("_")) {
+                advance();
+                typeArgs.add(TypeDescriptor.ofInfer());
+            } else {
+                typeArgs.add(collectType());
+            }
         } while (match(COMMA));
         return typeArgs;
     }
@@ -1477,9 +1617,7 @@ public final class Parser {
 
     private String qualifyTypeReference(final String name) {
         if (name.indexOf('.') >= 0
-                || Set.of("Never", "Any", "Infer", "Unit", "Int", "Long", "Byte", "ByteArray",
-                        "Float", "Boolean", "String", "Array")
-                        .contains(name)
+                || BuiltinTypes.NAMES.contains(name)
                 || activeTypeParameters.containsKey(name)) return name;
         if (localTypeNames.contains(name)) {
             return packageName.isEmpty() ? name : packageName + "." + name;
@@ -2042,6 +2180,12 @@ public final class Parser {
     }
 
     private Expr finishMemberCall(final Expr.Property property, final List<TypeDescriptor> explicitTypeArguments) {
+        if (property.receiver instanceof Expr.Variable variable) {
+            final var typeParameter = activeTypeParameters.get(variable.name.lexeme());
+            if (typeParameter != null && typeParameter.isHigherKinded()) {
+                variable.setType(typeParameter);
+            }
+        }
         final var arguments = new ArrayList<Expr>();
         if (!check(RIGHT_PAREN)) {
             do {
@@ -2125,6 +2269,10 @@ public final class Parser {
                     previous().type() == DOUBLE
                             ? TypeDescriptor.ofFloat()
                             : TypeDescriptor.ofString());
+        }
+
+        if (match(CHAR)) {
+            return new Expr.Literal(previous().literal(), TypeDescriptor.ofChar());
         }
 
         if (match(IF)) {
@@ -2475,8 +2623,10 @@ public final class Parser {
                 }
                 return literalPattern(keyword, magnitude.longValueExact(), TypeDescriptor.ofLong(), root);
             }
-            if (match(STRING)) {
-                return literalPattern(keyword, previous().literal(), TypeDescriptor.ofString(), root);
+            if (match(STRING, CHAR)) {
+                final var token = previous();
+                return literalPattern(keyword, token.literal(),
+                        token.type() == CHAR ? TypeDescriptor.ofChar() : TypeDescriptor.ofString(), root);
             }
             if (match(TRUE)) return literalPattern(keyword, true, TypeDescriptor.ofBoolean(), root);
             if (match(FALSE)) return literalPattern(keyword, false, TypeDescriptor.ofBoolean(), root);
@@ -2675,10 +2825,6 @@ public final class Parser {
 
     private Token consumeMemberName(final String message) {
         if (match(IDENTIFIER)) return previous();
-        if (match(GET, SET)) {
-            final var token = previous();
-            return new Token(IDENTIFIER, token.lexeme(), null, token.span());
-        }
         throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX, message);
     }
 

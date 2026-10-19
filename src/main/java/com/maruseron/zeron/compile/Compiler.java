@@ -28,7 +28,8 @@ public final class Compiler {
                 context.topLevelDeclarations);
         diagnostics.addAll(context.initializationPlan.diagnostics());
         for (final var contract : context.resolution.contracts().values()) {
-            if (context.metadata.metadataTypeNames().contains(contract.name().lexeme())) continue;
+            if (contract.higherKinded()
+                    || context.metadata.metadataTypeNames().contains(contract.name().lexeme())) continue;
             if (contract.name().lexeme().equals(context.mainClassName)) {
                 diagnostics.add(Diagnostic.atToken(DiagnosticCatalog.GENERATED_PROGRAM_NAME_CONFLICT,
                         contract.name(), context.sourcePath(contract.name()),

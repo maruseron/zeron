@@ -11,6 +11,21 @@ public final class TypeSubstitution {
         return switch (type) {
             case TypeParameterDescriptor parameter ->
                     substitutions.getOrDefault(parameter, parameter);
+            case AppliedConstructorDescriptor applied -> {
+                final var constructor = substitutions.get(applied.constructor());
+                if (constructor instanceof TypeConstructorDescriptor typeConstructor) {
+                    yield typeConstructor.apply(substitute(applied.argument(), substitutions));
+                }
+                final var resolvedConstructor = constructor instanceof TypeParameterDescriptor parameter
+                        && parameter.isHigherKinded()
+                        ? parameter
+                        : applied.constructor();
+                yield new AppliedConstructorDescriptor(resolvedConstructor,
+                        substitute(applied.argument(), substitutions));
+            }
+            case TypeConstructorDescriptor constructor -> new TypeConstructorDescriptor(
+                    constructor.baseType(), constructor.arguments().stream()
+                            .map(argument -> substitute(argument, substitutions)).toList());
             case NullableDescriptor nullable ->
                     substitute(nullable.baseType(), substitutions).toNullable();
             case ReferenceDescriptor reference ->
@@ -31,7 +46,7 @@ public final class TypeSubstitution {
                             .map(parameter -> new TypeParameterDescriptor(parameter.scopeId(), parameter.name(),
                                     parameter.bounds().stream()
                                             .map(bound -> substitute(bound, substitutions))
-                                            .toList()))
+                                            .toList(), parameter.isHigherKinded()))
                             .toList(),
                     function.raisedEffects().stream()
                             .map(effect -> substitute(effect, substitutions))
@@ -43,6 +58,8 @@ public final class TypeSubstitution {
     public static TypeDescriptor erase(final TypeDescriptor type) {
         return switch (type) {
             case TypeParameterDescriptor _ -> TypeDescriptor.ofName("java.lang.Object");
+            case AppliedConstructorDescriptor _ -> TypeDescriptor.ofName("java.lang.Object");
+            case TypeConstructorDescriptor _ -> TypeDescriptor.ofName("java.lang.Object");
             case NullableDescriptor nullable -> erase(nullable.baseType()).toNullable();
             case ReferenceDescriptor reference -> new ReferenceDescriptor(erase(reference.baseType()));
             case ArrayDescriptor array -> TypeDescriptor.arrayOf(erase(array.elementType()));
@@ -58,6 +75,10 @@ public final class TypeSubstitution {
     public static boolean containsTypeParameter(final TypeDescriptor type) {
         return switch (type) {
             case TypeParameterDescriptor _ -> true;
+            case AppliedConstructorDescriptor applied -> containsTypeParameter(applied.constructor())
+                    || containsTypeParameter(applied.argument());
+            case TypeConstructorDescriptor constructor -> constructor.arguments().stream()
+                    .anyMatch(TypeSubstitution::containsTypeParameter);
             case NullableDescriptor nullable -> containsTypeParameter(nullable.baseType());
             case ReferenceDescriptor reference -> containsTypeParameter(reference.baseType());
             case ArrayDescriptor array -> containsTypeParameter(array.elementType());

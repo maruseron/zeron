@@ -1,10 +1,12 @@
 package com.maruseron.zeron;
 
 import com.maruseron.zeron.domain.ArrayDescriptor;
+import com.maruseron.zeron.domain.AppliedConstructorDescriptor;
 import com.maruseron.zeron.domain.AnyDescriptor;
 import com.maruseron.zeron.domain.BooleanDescriptor;
 import com.maruseron.zeron.domain.ByteArrayDescriptor;
 import com.maruseron.zeron.domain.ByteDescriptor;
+import com.maruseron.zeron.domain.CharDescriptor;
 import com.maruseron.zeron.domain.FloatDescriptor;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.GenericDescriptor;
@@ -18,6 +20,7 @@ import com.maruseron.zeron.domain.NullableDescriptor;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.StringDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.TypeConstructorDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
 import com.maruseron.zeron.domain.UnitDescriptor;
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
@@ -282,9 +285,8 @@ public final class ZeronLibraryIndexDump {
     private static String formatTypeParameters(final List<TypeParameterDescriptor> parameters) {
         if (parameters.isEmpty()) return "";
         return parameters.stream()
-                .map(parameter -> parameter.name() + (parameter.bounds().isEmpty()
-                        ? ""
-                        : ": " + parameter.bounds().stream()
+                .map(parameter -> parameter.name() + (parameter.isHigherKinded() ? "<_>" : "")
+                        + (parameter.bounds().isEmpty() ? "" : ": " + parameter.bounds().stream()
                                 .map(ZeronLibraryIndexDump::formatType)
                                 .collect(Collectors.joining(" + "))))
                 .collect(Collectors.joining(", ", "<", ">"));
@@ -318,6 +320,7 @@ public final class ZeronLibraryIndexDump {
             case AnyDescriptor _ -> "Any";
             case UnitDescriptor _ -> "Unit";
             case IntDescriptor _ -> "Int";
+            case CharDescriptor _ -> "Char";
             case LongDescriptor _ -> "Long";
             case ByteDescriptor _ -> "Byte";
             case ByteArrayDescriptor _ -> "ByteArray";
@@ -327,7 +330,14 @@ public final class ZeronLibraryIndexDump {
             case NullDescriptor _ -> "null";
             case InferDescriptor _ -> "<inferred>";
             case NominalDescriptor nominal -> nominal.name();
-            case TypeParameterDescriptor parameter -> parameter.name();
+            case TypeParameterDescriptor parameter ->
+                    parameter.name() + (parameter.isHigherKinded() ? "<_>" : "");
+            case AppliedConstructorDescriptor applied -> applied.constructor().name()
+                    + "<" + formatType(applied.argument()) + ">";
+            case TypeConstructorDescriptor constructor -> constructor.baseType().name()
+                    + constructor.arguments().stream().map(argument ->
+                            argument instanceof InferDescriptor ? "_" : formatType(argument))
+                            .collect(Collectors.joining(", ", "<", ">"));
             case ArrayDescriptor array -> "Array<" + formatType(array.elementType()) + ">";
             case GenericDescriptor generic -> generic.baseType().name()
                     + formatTypeArguments(generic.typeParameters());

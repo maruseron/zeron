@@ -14,6 +14,10 @@ import java.util.List;
 public sealed interface Stmt {
     String ANONYMOUS_CAPTURE_PREFIX = "$zeron$capture$";
 
+    static boolean hasReceiverParameter(final List<Token> parameters) {
+        return !parameters.isEmpty() && parameters.getFirst().lexeme().equals("this");
+    }
+
     static String anonymousCaptureFieldName(final String sourceName) {
         return ANONYMOUS_CAPTURE_PREFIX + sourceName;
     }
@@ -227,12 +231,13 @@ public sealed interface Stmt {
         private final List<WitnessMethod> methods;
         private final boolean derived;
         private final List<WitnessRequirement> requirements;
+        private final boolean higherKinded;
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
                        final TypeDescriptor contractType, final TypeDescriptor targetType,
                        final List<WitnessFactoryMapping> mappings,
                        final List<WitnessMethod> methods, final boolean derived,
-                       final List<WitnessRequirement> requirements) {
+                       final List<WitnessRequirement> requirements, final boolean higherKinded) {
             this.name = name;
             this.typeParameters = List.copyOf(typeParameters);
             this.contractType = contractType;
@@ -241,13 +246,23 @@ public sealed interface Stmt {
             this.methods = new ArrayList<>(methods);
             this.derived = derived;
             this.requirements = List.copyOf(requirements);
+            this.higherKinded = higherKinded;
         }
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
                        final TypeDescriptor contractType, final TypeDescriptor targetType,
                        final List<WitnessFactoryMapping> mappings,
                        final List<WitnessMethod> methods) {
-            this(name, typeParameters, contractType, targetType, mappings, methods, false, List.of());
+            this(name, typeParameters, contractType, targetType, mappings, methods, false, List.of(), false);
+        }
+
+        public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
+                       final TypeDescriptor contractType, final TypeDescriptor targetType,
+                       final List<WitnessFactoryMapping> mappings,
+                       final List<WitnessMethod> methods, final boolean derived,
+                       final List<WitnessRequirement> requirements) {
+            this(name, typeParameters, contractType, targetType, mappings, methods,
+                    derived, requirements, false);
         }
 
         public Witness(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -264,6 +279,7 @@ public sealed interface Stmt {
         public List<WitnessMethod> methods() { return List.copyOf(methods); }
         public boolean derived() { return derived; }
         public List<WitnessRequirement> requirements() { return requirements; }
+        public boolean higherKinded() { return higherKinded; }
         public void addMethod(final WitnessMethod method) { methods.add(method); }
     }
 
@@ -282,11 +298,25 @@ public sealed interface Stmt {
                      Constructor constructor, List<NamedConstructor> namedConstructors,
                      List<Method> methods, List<Pattern> patterns,
                      boolean isPublic, boolean isEffect,
-                     List<Token> derivedContracts, List<Token> storedStateOrder) implements Stmt, Decl {
+                     List<Token> derivedContracts, List<Token> storedStateOrder,
+                     List<ContractUse> higherKindedContractUses,
+                     List<Witness> higherKindedImplementations) implements Stmt, Decl {
         public ClassDecl {
             patterns = List.copyOf(patterns);
             derivedContracts = List.copyOf(derivedContracts);
             storedStateOrder = List.copyOf(storedStateOrder);
+            higherKindedContractUses = List.copyOf(higherKindedContractUses);
+            higherKindedImplementations = List.copyOf(higherKindedImplementations);
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, List<Pattern> patterns,
+                         boolean isPublic, boolean isEffect,
+                         List<Token> derivedContracts, List<Token> storedStateOrder) {
+            this(name, typeParameters, contractUses, fields, properties, constructor, namedConstructors,
+                    methods, patterns, isPublic, isEffect, derivedContracts, storedStateOrder, List.of(), List.of());
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -332,7 +362,8 @@ public sealed interface Stmt {
         }
 
         public List<Token> contractNames() {
-            return contractUses.stream().map(ContractUse::name).toList();
+            return java.util.stream.Stream.concat(contractUses.stream(), higherKindedContractUses.stream())
+                    .map(ContractUse::name).toList();
         }
 
         public List<TypeDescriptor> canonicalConstructorTypes() {
@@ -430,7 +461,7 @@ public sealed interface Stmt {
                         List<ContractUse> requiredContracts,
                         List<NamedContractConstructor> namedConstructors,
                         List<ContractMethod> methods, List<ContractProperty> properties,
-                        boolean isPublic, boolean isSealed,
+                        boolean isPublic, boolean isSealed, boolean higherKinded,
                         List<ContractUse> permittedClasses) implements Stmt, Decl {
         public ContractDecl {
             requiredContracts = List.copyOf(requiredContracts);
@@ -457,7 +488,16 @@ public sealed interface Stmt {
                             List<ContractMethod> methods, List<ContractProperty> properties,
                             boolean isPublic) {
             this(name, typeParameters, List.of(), namedConstructors, methods, properties,
-                    isPublic, false, List.of());
+                    isPublic, false, false, List.of());
+        }
+
+        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                            List<ContractUse> requiredContracts,
+                            List<NamedContractConstructor> namedConstructors,
+                            List<ContractMethod> methods, List<ContractProperty> properties,
+                            boolean isPublic, boolean isSealed, List<ContractUse> permittedClasses) {
+            this(name, typeParameters, requiredContracts, namedConstructors, methods, properties,
+                    isPublic, isSealed, false, permittedClasses);
         }
     }
 

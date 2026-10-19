@@ -71,6 +71,7 @@ public class Zeron {
         return switch (invocation) {
             case CliParser.Initialize _ -> initializeProject(Paths.get("."));
             case CliParser.ProjectCommand command -> runProjectCommand(command);
+            case CliParser.Format command -> FormatCommandRunner.run(command);
             case CliParser.LspCommand command -> com.maruseron.zeron.lsp.LspServer.run(command.manifest());
             case CliParser.Explain explain -> explainDiagnostic(explain.code());
             case CliParser.Help help -> {

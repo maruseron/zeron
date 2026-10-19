@@ -28,6 +28,7 @@ final class ResolutionContext {
     final IdentityHashMap<Token, String> functionNamesByDeclaration = new IdentityHashMap<>();
     final IdentityHashMap<Stmt.ExternalFunction, FunctionBindingRegistry.Binding>
             externalFunctionBindings = new IdentityHashMap<>();
+    final IdentityHashMap<Stmt.Function, String> higherKindedImplementationOwners = new IdentityHashMap<>();
     final Map<Token, TypeDescriptor> iterationElementTypes = new IdentityHashMap<>();
     final Map<Token, Resolver.IterationProtocol> iterationProtocols = new IdentityHashMap<>();
     final Map<Token, Resolver.SinkProtocol> sinkProtocols = new IdentityHashMap<>();
@@ -39,6 +40,7 @@ final class ResolutionContext {
     final IdentityHashMap<Stmt, String> sourcePathsByDeclaration = new IdentityHashMap<>();
     final IdentityHashMap<Stmt, String> namespaceNamesByDeclaration = new IdentityHashMap<>();
     final Map<String, String> namespaceMemberPackages = new LinkedHashMap<>();
+    final Set<String> namespaces = new LinkedHashSet<>();
     final Map<String, String> declarationPackages = new LinkedHashMap<>();
     final IdentityHashMap<Token, String> sourcePathsByToken = new IdentityHashMap<>();
     final TypeCompatibility typeCompatibility = new TypeCompatibility(classes, contracts);
@@ -53,7 +55,7 @@ final class ResolutionContext {
     String packageName;
     String entrySourcePath;
     ImportResolver.ImportEnvironment currentImports =
-            new ImportResolver.ImportEnvironment(Map.of(), Map.of(), Map.of(), Map.of(), List.of());
+            new ImportResolver.ImportEnvironment(Map.of(), Map.of(), Map.of(), Map.of(), List.of(), List.of());
     Set<String> invalidImportAliases = Set.of();
     String currentSourcePath;
     String currentNamespaceName;
@@ -63,9 +65,9 @@ final class ResolutionContext {
                       final FunctionBindingRegistry functionBindings) {
         this.packageName = packageName == null ? "" : packageName;
         this.javaClassPath = Objects.requireNonNull(javaClassPath);
-        importResolver = new ImportResolver(classes, contracts, functions, extensionMethods, topLevelValues,
-                declarationPackages, javaClassPath);
-        topLevelValuePlanner = new TopLevelValuePlanner(topLevelValues);
+        importResolver = new ImportResolver(types, classes, contracts, sums, functions, extensionMethods,
+                topLevelValues, declarationPackages, namespaceMemberPackages, namespaces, javaClassPath);
+        topLevelValuePlanner = new TopLevelValuePlanner(topLevelValues, namespaces);
         declarationRegistrar = new DeclarationRegistry(
                 types, classes, externalClasses, contracts, sums, products, newtypes, functions, extensionMethods,
                 topLevelValues, topLevelValueSymbols,

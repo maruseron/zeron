@@ -45,6 +45,7 @@ public final class FunctionShapeKey {
         final var readable = switch (type) {
             case AnyDescriptor _ -> "Any";
             case IntDescriptor _ -> "Int";
+            case CharDescriptor _ -> "Char";
             case LongDescriptor _ -> "Long";
             case ByteDescriptor _ -> "Byte";
             case ByteArrayDescriptor _ -> "ByteArray";
@@ -54,7 +55,14 @@ public final class FunctionShapeKey {
             case UnitDescriptor _ -> "Unit";
             case NeverDescriptor _ -> "Never";
             case NullDescriptor _ -> "Null";
-            case TypeParameterDescriptor parameter -> parameter.name();
+            case TypeParameterDescriptor parameter -> parameter.name()
+                    + (parameter.isHigherKinded() ? "$Constructor" : "");
+            case AppliedConstructorDescriptor applied -> applied.constructor().name()
+                    + "$" + readableType(applied.argument());
+            case TypeConstructorDescriptor constructor -> simpleName(constructor.baseType().name())
+                    + constructor.arguments().stream().map(argument ->
+                            argument instanceof InferDescriptor ? "Hole" : readableType(argument))
+                            .collect(java.util.stream.Collectors.joining("$", "$", ""));
             case NominalDescriptor nominal -> simpleName(nominal.name());
             case NullableDescriptor nullable -> "Nullable$" + readableType(nullable.baseType());
             case FunctionDescriptor function -> "Function" + function.arity();
@@ -92,6 +100,7 @@ public final class FunctionShapeKey {
         switch (type) {
             case AnyDescriptor _ -> encoding.append("y;");
             case IntDescriptor _ -> encoding.append("i;");
+            case CharDescriptor _ -> encoding.append("h;");
             case LongDescriptor _ -> encoding.append("j;");
             case ByteDescriptor _ -> encoding.append("c;");
             case ByteArrayDescriptor _ -> encoding.append("A;");
@@ -102,8 +111,23 @@ public final class FunctionShapeKey {
             case NeverDescriptor _ -> encoding.append("v;");
             case NullDescriptor _ -> encoding.append("z;");
             case TypeParameterDescriptor parameter -> {
-                encoding.append('p').append(parameter.scopeId()).append(':');
+                encoding.append('p').append(parameter.scopeId())
+                        .append(parameter.isHigherKinded() ? 'h' : 't').append(':');
                 appendNominalName(encoding, parameter.name());
+            }
+            case AppliedConstructorDescriptor applied -> {
+                encoding.append('k');
+                appendType(encoding, applied.constructor());
+                appendType(encoding, applied.argument());
+            }
+            case TypeConstructorDescriptor constructor -> {
+                encoding.append('c').append(constructor.arguments().size()).append('(');
+                appendNominal(encoding, constructor.baseType());
+                for (final var argument : constructor.arguments()) {
+                    if (argument instanceof InferDescriptor) encoding.append("_;");
+                    else appendType(encoding, argument);
+                }
+                encoding.append(')');
             }
             case NominalDescriptor nominal -> appendNominal(encoding, nominal);
             case NullableDescriptor nullable -> {

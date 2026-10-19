@@ -1,5 +1,29 @@
 package zeron.lang;
 
+import zeron.collections.Iterable;
+import zeron.collections.Iterator;
+import zeron.collections.Stream;
+
+class StringCodePoints is Iterable<Char> {
+    value: String;
+
+    public iterator(): &Iterator<Char> {
+        let text = value;
+        return object : Iterator<Char> {
+            value: String = text;
+            offset: Int = 0;
+
+            public mut next(): Option<Char> {
+                if (this.offset >= stringLength(this.value)) return Option<Char>.None();
+                let value = stringCodePointAtOffset(this.value, this.offset);
+                this.offset = this.offset
+                        + stringCodePointWidthAtOffset(this.value, this.offset);
+                return Option.Some(value);
+            }
+        };
+    }
+}
+
 public extension String {
     public fn length(): Int = stringLength(this);
     public fn isEmpty(): Boolean = stringIsEmpty(this);
@@ -15,6 +39,88 @@ public extension String {
         if (result == null) return Option<String>.None();
         return Option.Some(result);
     }
+
+    public fn codePointLength(): Int = stringCodePointLength(this);
+
+    public fn codePointAt(index: Int): Option<Char> {
+        let value = stringCodePointAt(this, index);
+        if (value < 0) return Option<Char>.None();
+        return Option.Some(intToChar(value));
+    }
+
+    public fn substringByCodePoints(start: Int, end: Int): Option<String> {
+        let result = stringSubstringByCodePoints(this, start, end);
+        if (result == null) return Option<String>.None();
+        return Option.Some(result);
+    }
+
+    public fn indexOfCodePoint(value: Char): Int = stringIndexOfCodePoint(this, value);
+
+    public fn codePoints(): Stream<Char> =
+        Stream<Char>.from(StringCodePoints.new(this));
+
+    public fn singleChar(): Option<Char> {
+        if (this.codePointLength() != 1) return Option<Char>.None();
+        return this.codePointAt(0);
+    }
+
+    public fn codePointLengthStrict(): Result<Int, UnicodeError> {
+        let malformedOffset = stringFirstMalformedOffset(this);
+        if (malformedOffset >= 0) {
+            return Result<Int, UnicodeError>.Err(
+                UnicodeError.MalformedSurrogate(malformedOffset));
+        }
+        return Result<Int, UnicodeError>.Ok(this.codePointLength());
+    }
+
+    public fn codePointAtStrict(index: Int): Result<Option<Char>, UnicodeError> {
+        let malformedOffset = stringFirstMalformedOffset(this);
+        if (malformedOffset >= 0) {
+            return Result<Option<Char>, UnicodeError>.Err(
+                UnicodeError.MalformedSurrogate(malformedOffset));
+        }
+        return Result<Option<Char>, UnicodeError>.Ok(this.codePointAt(index));
+    }
+
+    public fn substringByCodePointsStrict(
+        start: Int,
+        end: Int
+    ): Result<Option<String>, UnicodeError> {
+        let malformedOffset = stringFirstMalformedOffset(this);
+        if (malformedOffset >= 0) {
+            return Result<Option<String>, UnicodeError>.Err(
+                UnicodeError.MalformedSurrogate(malformedOffset));
+        }
+        return Result<Option<String>, UnicodeError>.Ok(
+            this.substringByCodePoints(start, end));
+    }
+
+    public fn indexOfCodePointStrict(value: Char): Result<Int, UnicodeError> {
+        let malformedOffset = stringFirstMalformedOffset(this);
+        if (malformedOffset >= 0) {
+            return Result<Int, UnicodeError>.Err(
+                UnicodeError.MalformedSurrogate(malformedOffset));
+        }
+        return Result<Int, UnicodeError>.Ok(this.indexOfCodePoint(value));
+    }
+
+    public fn codePointsStrict(): Result<Stream<Char>, UnicodeError> {
+        let malformedOffset = stringFirstMalformedOffset(this);
+        if (malformedOffset >= 0) {
+            return Result<Stream<Char>, UnicodeError>.Err(
+                UnicodeError.MalformedSurrogate(malformedOffset));
+        }
+        return Result<Stream<Char>, UnicodeError>.Ok(this.codePoints());
+    }
+
+    public fn singleCharStrict(): Result<Option<Char>, UnicodeError> {
+        let malformedOffset = stringFirstMalformedOffset(this);
+        if (malformedOffset >= 0) {
+            return Result<Option<Char>, UnicodeError>.Err(
+                UnicodeError.MalformedSurrogate(malformedOffset));
+        }
+        return Result<Option<Char>, UnicodeError>.Ok(this.singleChar());
+    }
 }
 
 external fn stringLength(value: String?): Int;
@@ -24,3 +130,10 @@ external fn stringLastIndexOf(value: String?, search: String?): Int;
 external fn stringStartsWith(value: String?, prefix: String?): Boolean;
 external fn stringEndsWith(value: String?, suffix: String?): Boolean;
 external fn stringSubstring(value: String?, start: Int, end: Int): String?;
+external fn stringCodePointLength(value: String?): Int;
+external fn stringCodePointAt(value: String?, index: Int): Int;
+external fn stringSubstringByCodePoints(value: String?, start: Int, end: Int): String?;
+external fn stringIndexOfCodePoint(value: String?, codePoint: Char): Int;
+external fn stringFirstMalformedOffset(value: String?): Int;
+external fn stringCodePointAtOffset(value: String?, offset: Int): Char;
+external fn stringCodePointWidthAtOffset(value: String?, offset: Int): Int;

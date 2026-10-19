@@ -420,6 +420,7 @@ final class DeclarationResolver {
             }
 
         }
+        validateHigherKindedConformances(context, declaration, contractNames);
 
         final var previousClass = context.frame.currentClassName;
         final var previousInitializerFields = context.frame.initializerVisibleFields;
@@ -450,6 +451,58 @@ final class DeclarationResolver {
         } finally {
             context.frame.currentClassName = previousClass;
             context.frame.initializerVisibleFields = previousInitializerFields;
+        }
+    }
+
+    private static void validateHigherKindedConformances(final ResolutionContext context,
+                                                         final Stmt.ClassDecl declaration,
+                                                         final Set<String> contractNames) {
+        final var declared = new LinkedHashMap<TypeDescriptor, Stmt.ContractUse>();
+        for (final var use : declaration.higherKindedContractUses()) {
+            final var contract = context.contracts.get(use.name().lexeme());
+            if (!contractNames.add(use.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        use.name(), "Duplicate contract conformance."));
+            }
+            if (contract == null || !contract.higherKinded()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        use.name(), "Constructor-level conformance requires an HKT contract."));
+            }
+            ensureTypeAccessible(context, use.name().lexeme(), use.name(), contract.isPublic());
+            if (contract.typeParameters().size() != 1 || use.typeArguments().size() != 1
+                    || !(use.typeArguments().getFirst() instanceof TypeConstructorDescriptor constructor)
+                    || !constructor.baseType().name().equals(declaration.name().lexeme())
+                    || constructor.arguments().size() != declaration.typeParameters().size()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        use.name(), "A class HKT conformance must use its own constructor pattern."));
+            }
+            final var conformanceType = TypeDescriptor.genericOf(
+                    TypeDescriptor.ofName(use.name().lexeme()), use.typeArguments());
+            TypeResolver.validateType(context, conformanceType, use.name());
+            if (declared.putIfAbsent(conformanceType, use) != null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        use.name(), "Duplicate constructor-level contract conformance."));
+            }
+        }
+
+        final var implemented = new HashSet<TypeDescriptor>();
+        for (final var witness : declaration.higherKindedImplementations()) {
+            final var contractType = witness.contractType();
+            if (!declared.containsKey(contractType)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        witness.name(), "An HKT implementation block must match a class-header conformance."));
+            }
+            if (!implemented.add(contractType)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        witness.name(), "Duplicate HKT implementation block."));
+            }
+        }
+        for (final var entry : declared.entrySet()) {
+            if (!implemented.contains(entry.getKey())) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        entry.getValue().name(), "A class HKT conformance requires an implementation block."));
+            }
         }
     }
 

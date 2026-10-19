@@ -11,6 +11,9 @@
     "directory": "editors/vscode"
   },
   "main": "./extension.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "activationEvents": [
     "onLanguage:zeron"
   ],
@@ -59,6 +62,7 @@
   "files": [
     "README.md",
     "extension.js",
+    "stdlib-documents.js",
     "language-configuration.json",
     "node_modules/**",
     "syntaxes/**"

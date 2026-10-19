@@ -2,6 +2,7 @@
 
 const vscode = require("vscode");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
+const { createContentProvider, createDefinitionMiddleware } = require("./stdlib-documents");
 
 let client;
 
@@ -18,6 +19,8 @@ async function activate(context) {
     const workspaceFolder = workspaceFolders[0];
     const outputChannel = vscode.window.createOutputChannel("Zeron Language Server");
     context.subscriptions.push(outputChannel);
+    context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(
+        "zeron-stdlib", createContentProvider(vscode)));
 
     const configuredExecutable = vscode.workspace.getConfiguration("zeron").get("server.path", "zeron");
     if (typeof configuredExecutable !== "string" || configuredExecutable.trim().length === 0) {
@@ -43,7 +46,8 @@ async function activate(context) {
     const clientOptions = {
         documentSelector: [{ scheme: "file", language: "zeron" }],
         workspaceFolder,
-        outputChannel
+        outputChannel,
+        middleware: createDefinitionMiddleware(vscode)
     };
 
     client = new LanguageClient("zeron", "Zeron Language Server", serverOptions, clientOptions);

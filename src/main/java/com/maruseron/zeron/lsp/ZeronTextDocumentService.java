@@ -34,8 +34,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicLong;
 
 final class ZeronTextDocumentService implements TextDocumentService, AutoCloseable {
@@ -53,6 +56,7 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
     private final Map<Path, OpenDocument> openDocuments = new HashMap<>();
     private final Object lock = new Object();
     private volatile CompletableFuture<RevisionSnapshot> currentAnalysis;
+    private volatile Future<?> currentAnalysisTask;
     private volatile long currentAnalysisRevision = -1;
     private volatile LanguageClient client;
 
@@ -177,14 +181,29 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
             return CompletableFuture.completedFuture(empty);
         }
         final var analysis = analysisForCurrentRevision();
-        return analysis.handle((result, failure) -> {
+        final var response = new CompletableFuture<T>();
+        analysis.whenComplete((result, failure) -> {
             if (failure != null) {
-                log("Project analysis failed: " + failure.getMessage());
-                return empty;
+                final var cause = failure.getCause() == null ? failure : failure.getCause();
+                if (cause instanceof CancellationException) {
+                    response.cancel(false);
+                } else {
+                    log("Project analysis failed: " + cause.getMessage());
+                    response.complete(empty);
+                }
+                return;
             }
-            if (result.revision() != revision.get() || !isOpen(path)) return empty;
-            return operation.apply(result.snapshot());
+            if (result.revision() != revision.get() || !isOpen(path)) {
+                response.complete(empty);
+                return;
+            }
+            try {
+                response.complete(operation.apply(result.snapshot()));
+            } catch (final RuntimeException | Error exception) {
+                response.completeExceptionally(exception);
+            }
         });
+        return response;
     }
 
     private CompletableFuture<RevisionSnapshot> scheduleAnalysis() {
@@ -207,19 +226,24 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
     }
 
     private CompletableFuture<RevisionSnapshot> startAnalysis(final long requestedRevision) {
+        cancelCurrentAnalysis();
         final Map<Path, ProjectAnalysisWorkspace.Overlay> overlays;
         final var copy = new HashMap<Path, ProjectAnalysisWorkspace.Overlay>();
         openDocuments.forEach((path, document) -> copy.put(path,
                 new ProjectAnalysisWorkspace.Overlay(document.version(), document.text())));
         overlays = Map.copyOf(copy);
-        final var future = CompletableFuture.supplyAsync(() -> {
+        final var future = new CompletableFuture<RevisionSnapshot>();
+        final var task = new FutureTask<Void>(() -> {
             try {
-                return new RevisionSnapshot(requestedRevision, workspace.analyze(overlays));
-            } catch (final IOException | RuntimeException exception) {
-                throw new java.util.concurrent.CompletionException(exception);
+                future.complete(new RevisionSnapshot(requestedRevision, workspace.analyze(overlays)));
+            } catch (final IOException | RuntimeException | Error exception) {
+                future.completeExceptionally(exception);
+                throw exception;
             }
-        }, analysisExecutor);
+            return null;
+        });
         currentAnalysis = future;
+        currentAnalysisTask = task;
         currentAnalysisRevision = requestedRevision;
         future.whenComplete((result, failure) -> {
             if (failure != null) {
@@ -231,7 +255,16 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
                 publishDiagnostics(result.snapshot());
             }
         });
+        analysisExecutor.execute(task);
         return future;
+    }
+
+    private void cancelCurrentAnalysis() {
+        final var previous = currentAnalysis;
+        if (previous == null) return;
+        previous.cancel(true);
+        final var task = currentAnalysisTask;
+        if (task != null) task.cancel(true);
     }
 
     private void publishDiagnostics(final ProjectAnalysisWorkspace.Snapshot snapshot) {
@@ -325,6 +358,7 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
 
     @Override
     public void close() {
+        cancelCurrentAnalysis();
         analysisExecutor.shutdownNow();
     }
 

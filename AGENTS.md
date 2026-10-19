@@ -2,50 +2,40 @@
 
 ## Environment and Build
 
-- Use JDK 25 or later. The project targets stable Java 25 and does not require preview features.
-- `pom.xml` targets Java 25. Use Maven to build when it is available:
+- Use JDK 25 or later; `pom.xml` targets stable Java 25 without preview features. Use Maven:
+  `mvn compile` to compile and `mvn test` to run the test suite. The project depends on
+  Maven-managed libraries, so do not use a direct `javac` fallback.
+- Before compiling Zeron source (including tests that generate Zeron programs), remove `dist/` so
+  stale generated classes and interfaces do not accumulate. The compiler recreates it as needed;
+  do not remove Maven's `target/` directory for this cleanup.
+- Use `zeron build` and `zeron run` for project workflows. See
+  [`guide/25-configuration-releases-and-roadmap.md`](./guide/25-configuration-releases-and-roadmap.md)
+  for project configuration, [`guide/23-java-interoperability.md`](./guide/23-java-interoperability.md)
+  for Java interop, and
+  [`guide/24-libraries-and-separate-compilation.md`](./guide/24-libraries-and-separate-compilation.md)
+  for compiled libraries and API-index inspection.
 
-  ```powershell
-  mvn compile
-  ```
+## Code Navigation
 
-- If Maven is unavailable, this direct compiler command has been verified:
+See [NAVIGATION.md](./NAVIGATION.md) for the compiler pipeline and resolver/compiler module
+responsibilities.
 
-  ```powershell
-  $sourceFiles = Get-ChildItem -Recurse -Path src/main/java -Filter *.java | ForEach-Object { $_.FullName }
-  javac --release 25 -d target/classes $sourceFiles
-  ```
+## Feature Roadmap and Shipping
 
-- Compile the sample Zeron source with:
+- For feature work requiring a proposal, draft and resolve a ZEP before implementation. Follow
+  `documents/zeps/ZEP-0000.md` and `ZEP-0001.md`, and register it in `documents/zeps/ZEP.md`.
+- Implement the accepted design, then update `CHANGELOG.md`, relevant design references, and the
+  ZEP proposal status. Keep the tracker synchronized whenever proposal status or title changes.
+- Update `README.md` and/or relevant `guide/` chapters to document user-facing behavior.
 
-  ```powershell
-  java -cp target/classes com.maruseron.zeron.Zeron src/main/resources/test.zn
-  ```
+## Release Cycle and Process
 
-  This runs the compiler and emits `dist/test.class`, generated lambda-shape interfaces, the `zeron.lang.Unit` singleton class, and the versioned public API index at `dist/META-INF/zeron/api-v<schema-version>.bin`. File compilation uses the source filename without its extension for the main class name. It does not execute the generated Zeron program.
-- Before every compilation of Zeron source (including tests that generate Zeron programs), remove the existing `dist/` directory so stale generated classes and interfaces do not accumulate. The compiler recreates it as needed; do not remove Maven's `target/` directory for this cleanup.
-- Pass `--debug` (or `-d`) to print parser, resolver, and compiler traces to stderr; normal compilation is quiet.
-- Pass one or more `--library <class-directory-or-jar>` arguments with source files or project options to load compiled Zeron APIs from the artifact's `META-INF/zeron/api-v<schema-version>.bin`. Generated programs using an external library also need that library on their runtime classpath.
-- Pass one or more `--java-classpath <class-directory>` arguments with source files or project options to resolve the initial Java interop subset. Expanded Java varargs calls are supported when their component type is supported; signature-only top-level `external fn` declarations use compiler-configured typed bindings. Prepacked/ordinary Java arrays, JARs, Java generics, fields, inherited members, JDK module discovery, and SAM conversions are not implemented. Generated programs also need those class directories on their runtime classpath.
-- Build the bundled standard library as a separate class directory with `java -cp target/classes com.maruseron.zeron.Zeron --build-stdlib target/zeron-stdlib`. To build the standard library into a JAR, add `--jar-output target/zeron-stdlib.jar`. Consumers can opt in with `--stdlib compiled --library target/zeron-stdlib.jar`; the default remains bundled source mode. The artifact includes the compiler-known `zeron.lang.Unit` singleton class. Keep this output separate from `dist/` so normal Zeron-source cleanup does not remove it.
-- Inspect a library API index file, class directory, or JAR with `java -cp target/classes com.maruseron.zeron.ZeronLibraryIndexDump target/zeron-stdlib.jar` (or pass the generated index from `target/zeron-stdlib/META-INF/zeron/` directly).
-- To exercise the generated sample program, invoke its public zero-argument `main` method through JShell:
-
-  ```powershell
-  @('Class.forName("test").getMethod("main").invoke(null);', '/exit') | jshell --class-path dist --execution local --feedback concise
-  ```
-
-## Code Organization
-
-- The pipeline is scanner (`scan`) -> parser/AST (`ast`) -> resolver (`analize`) -> bytecode compiler (`compile`). Keep language semantics in the resolver and descriptors; keep JVM representation decisions in the compiler.
-- Resolution entry point and orchestration live in `src/main/java/com/maruseron/zeron/analize/ResolutionService.java` and `Resolver.java`. `ResolutionService` creates a per-run `ResolutionContext`, and `Resolver` performs unit/declaration orchestration and returns a `ResolutionResult`; it is not the home for detailed expression or statement rules.
-- Resolver responsibilities are split by phase and language construct: `DeclarationRegistry` registers symbols and declarations; `ImportResolver` validates per-unit imports; `TopLevelValuePlanner` orders top-level value resolution; `DeclarationResolver` handles declarations; `StatementResolver` handles statements and control flow; `ExpressionFlowResolver` handles expression typing and flow-sensitive state; `CallResolver`, `MemberInteropResolver`, `LambdaResolver`, `TypeResolver`, and `IntrinsicResolver` handle their respective expression/type domains. `ResolutionContext` owns per-run symbols, type/declaration maps, import environment, diagnostics, and resolver collaborators; `ResolutionDiagnostics` collects errors for the returned result. Pass the context explicitly between resolver modules, and keep semantic decisions here rather than in bytecode generation.
-- Compilation entry point is `src/main/java/com/maruseron/zeron/compile/CompilationService.java`. It owns one `CompilationContext` across `resolve()` and `compile()` so resolution output, planning data, configuration, and method-emission state remain scoped to one compilation. `Compiler` is a stateless phase facade; its static methods accept that context.
-- Compiler emission modules are organized by responsibility: `InitializationPlanner` orders top-level initializers; `CompilationMetadata` indexes declaration owners and generated-holder metadata; `RuntimeSupportEmitter` emits `Unit` and function-shape support classes; `DeclarationEmitter` emits top-level declarations and file-holder methods; `NominalTypeEmitter` emits classes/contracts, constructors, properties, and bridges; `StatementEmitter` emits statements and loops; `ExpressionFlowEmitter` emits expression control-flow constructs (logical/coalescing expressions, conditionals, matches, type tests, casts, and comparisons); `LambdaSupportEmitter` emits lambda bodies, references, and adapters; `ClassSignatureEmitter` encodes JVM generic signatures. `BytecodeEmitter` coordinates file emission and retains the remaining expression, call, conversion, and shared bytecode operations.
-- Keep cross-module emission operations static and pass `CompilationContext` explicitly. Put new code in the narrowest responsible module; avoid reintroducing compiler instance state or broad callback/operations bridges. Preserve the distinction between resolver expression-flow logic (`analize/ExpressionFlowResolver`) and compiler expression-flow bytecode lowering (`compile/ExpressionFlowEmitter`).
-- Type descriptors model Zeron types. Do not make structural function types depend on the generated JVM interface name for semantic equality or resolution.
-- Current lambda lowering emits one SAM interface per function shape, one private static helper per lambda body, and uses `LambdaMetafactory` at `invokedynamic` call sites. See `documents/design-document-03_lambda-lowering.md` before changing this behavior.
-- `target/` contains Maven build output, and `dist/` contains generated Zeron program artifacts. Do not edit generated class files as source; regenerate them from Java/Zeron sources.
+- Follow `documents/zeps/ZEP-0012.md` for artifact versioning. Bump the project version in
+  `pom.xml`, then run `powershell -ExecutionPolicy Bypass -File scripts/release.ps1` from the
+  repository root.
+- `API_INDEX_SCHEMA_VERSION` and `STANDARD_LIBRARY_API_VERSION` in `ZeronVersions.java` can each
+  be bumped only once per release cycle. Consolidate required API and schema changes before
+  incrementing either version.
 
 ## Validation
 

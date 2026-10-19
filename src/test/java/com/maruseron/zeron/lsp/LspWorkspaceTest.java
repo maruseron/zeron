@@ -12,12 +12,26 @@ import org.junit.rules.TemporaryFolder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.Assert.*;
 
 public class LspWorkspaceTest {
     @Rule
     public final TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+    @Test
+    public void interruptedAnalysisStopsAtCancellationCheckpoint() throws Exception {
+        final var project = project("fn main() {}\n");
+        final var workspace = ProjectAnalysisWorkspace.open(project.manifest());
+        Thread.currentThread().interrupt();
+        try {
+            assertThrows(CancellationException.class, () -> workspace.analyze(Map.of()));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
 
     @Test
     public void overlaysProduceDiagnosticsWithoutWritingBuildOutput() throws Exception {

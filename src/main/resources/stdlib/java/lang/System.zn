@@ -4,5 +4,7 @@ import java.io.PrintStream;
 
 public external class System = "java.lang.System" {
     public static property out: &PrintStream?;
+    public static getenv(name: String?): String?;
     public static nanoTime(): Long;
+    public static exit(status: Int): Unit;
 }

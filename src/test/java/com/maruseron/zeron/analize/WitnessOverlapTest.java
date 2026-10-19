@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -76,6 +77,67 @@ public final class WitnessOverlapTest {
     }
 
     @Test
+    public void rejectsIntersectingPartiallyAppliedHigherKindedConstructors() {
+        final var source = """
+                contract Functor<F<_>> {}
+                class Pair<A, B> { public constructor new; }
+                witness<T> Functor<Pair<T, _>> for Pair<T, _> {}
+                witness Functor<Pair<Int, _>> for Pair<Int, _> {}
+                """;
+
+        final var error = assertThrows(ResolutionError.class,
+                () -> new ResolutionService().resolve(parse(source)));
+
+        assertTrue(error.getMessage().contains("Witness patterns overlap"));
+    }
+
+    @Test
+    public void permitsDisjointHigherKindedConstructorsWithDifferentOpenSlots() {
+        final var source = """
+                contract Functor<F<_>> {}
+                class Pair<A, B> { public constructor new; }
+                witness Functor<Pair<_, Int>> for Pair<_, Int> {}
+                witness Functor<Pair<String, _>> for Pair<String, _> {}
+                """;
+
+        new ResolutionService().resolve(parse(source));
+    }
+
+    @Test
+    public void alphaRenamesAndUnifiesAppliedHigherKindedParameters() {
+        final var source = """
+                contract Marker<T> {}
+                class Box<A, B> {}
+                class Pair<A, B> {}
+                witness<F<_>, A, B> Marker<F<B>> for Box<F<A>, F<B>> {}
+                witness Marker<Pair<Int, String>> for Box<Pair<Int, Int>, Pair<Int, String>> {}
+                """;
+        final var witnesses = parse(source).stream()
+                .filter(Stmt.Witness.class::isInstance)
+                .map(Stmt.Witness.class::cast)
+                .toList();
+
+        assertTrue(WitnessPatternUnifier.overlaps(witnesses.getFirst(), witnesses.getLast()));
+    }
+
+    @Test
+    public void rejectsAppliedHigherKindedPatternsWithNoCommonInstantiation() {
+        final var source = """
+                contract Marker<T> {}
+                class Box<A, B> {}
+                class Pair<A, B> {}
+                witness<F<_>, A, B> Marker<F<B>> for Box<F<A>, F<B>> {}
+                witness Marker<Pair<Int, String>> for Box<Pair<Int, Int>, Pair<String, Int>> {}
+                """;
+        final var witnesses = parse(source).stream()
+                .filter(Stmt.Witness.class::isInstance)
+                .map(Stmt.Witness.class::cast)
+                .toList();
+
+        assertFalse(WitnessPatternUnifier.overlaps(witnesses.getFirst(), witnesses.getLast()));
+    }
+
+    @Test
     public void checksAllWitnessesActiveInConsumerIncludingCompiledLibraryMetadata() throws Exception {
         final var firstLibrary = parseUnit("WitnessA.zn", """
                 package overlap.a;
@@ -109,6 +171,46 @@ public final class WitnessOverlapTest {
                     """);
             final var compilation = new ArrayList<CompilationUnit>(restoredLibrary
                     .toCompilationUnits("witness-library"));
+            compilation.add(consumer);
+
+            final var error = assertThrows(ResolutionError.class,
+                    () -> new ResolutionService().resolveUnits(compilation));
+
+            assertTrue(error.getMessage().contains("Witness patterns overlap"));
+        } finally {
+            Files.deleteIfExists(indexPath);
+        }
+    }
+
+    @Test
+    public void checksHigherKindedOverlapsAfterLibraryMetadataRoundTrip() throws Exception {
+        final var firstLibrary = parseUnit("HigherKindedWitnessA.zn", """
+                package overlap.hkt;
+                public contract Functor<F<_>> {}
+                witness<T> Functor<overlap.types.Pair<T, _>> for overlap.types.Pair<T, _> {}
+                """);
+        final var secondLibrary = parseUnit("HigherKindedWitnessB.zn", """
+                package overlap.types;
+                public class Pair<A, B> { public constructor new; }
+                witness overlap.hkt.Functor<Pair<Int, _>> for Pair<Int, _> {}
+                """);
+        final var libraries = List.of(firstLibrary, secondLibrary);
+
+        new ResolutionService().resolveUnits(libraries);
+
+        final var index = ZeronLibraryIndex.fromCompilation(libraries,
+                _ -> null, function -> function.typeDescriptor(), _ -> null, _ -> null, "HktWitnessLibrary", false);
+        final var indexPath = Files.createTempFile("zeron-hkt-witness-overlap", ".bin");
+        try {
+            index.writeTo(indexPath);
+            final var restoredLibrary = ZeronLibraryIndex.readFrom(indexPath);
+            final var consumer = parseUnit("HigherKindedWitnessConsumer.zn", """
+                    package client;
+                    import overlap.hkt.*;
+                    import overlap.types.*;
+                    """);
+            final var compilation = new ArrayList<CompilationUnit>(restoredLibrary
+                    .toCompilationUnits("hkt-witness-library"));
             compilation.add(consumer);
 
             final var error = assertThrows(ResolutionError.class,

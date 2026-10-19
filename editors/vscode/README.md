@@ -4,6 +4,9 @@ This extension associates `.zn` files with Zeron and provides TextMate syntax hi
 toggling, bracket matching, and quote/bracket insertion behavior. It also connects VS Code to the
 Zeron language server for diagnostics, completion, hover, and definition navigation.
 
+Go-to-definition results targeting bundled standard-library sources open in a read-only virtual
+document. Project source files continue to open normally and remain editable.
+
 ## Requirements
 
 - Install the Zeron 0.2.0 or later distribution and ensure `zeron` is available on `PATH`.

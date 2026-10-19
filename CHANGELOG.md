@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Compiler and language work
+
+- Refined the witness overlap checker to take Higher-Kinded Types into consideration.
+
+### Compiler and tooling
+
+- Open bundled standard-library definition targets as read-only virtual documents in the VS Code
+  extension.
+
+### Standard Library
+
+- Added read-only environment-variable lookup and current-process working-directory and exit APIs.
+
 ## [0.4.0] - 2026, 19 OCT
 
 ### Compiler and language work

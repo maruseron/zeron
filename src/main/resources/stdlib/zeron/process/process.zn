@@ -1,0 +1,9 @@
+package zeron.process;
+
+import java.lang.System;
+import zeron.fs.Path;
+
+public fn workingDirectory(): Path =
+    Path.from(".").toAbsolute().normalize();
+
+public fn exit(status: Int): Unit = System.exit(status);

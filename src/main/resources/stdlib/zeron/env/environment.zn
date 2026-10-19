@@ -1,0 +1,10 @@
+package zeron.env;
+
+import java.lang.System;
+import zeron.lang.Option;
+
+public fn lookup(name: String): Option<String> {
+    let value = System.getenv(name);
+    if (value == null) return Option<String>.None();
+    return Option.Some(value);
+}

@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeSet;
+import java.util.concurrent.CancellationException;
 
 public final class ProjectAnalysisWorkspace {
     public record Overlay(int version, String text) {
@@ -109,8 +110,10 @@ public final class ProjectAnalysisWorkspace {
 
     public Snapshot analyze(final Map<Path, Overlay> overlays) throws IOException {
         Objects.requireNonNull(overlays);
+        checkCancellation();
         final var normalizedOverlays = new HashMap<Path, Overlay>();
         for (final var entry : overlays.entrySet()) {
+            checkCancellation();
             final var path = entry.getKey().toAbsolutePath().normalize();
             if (isInSourceRoots(path) && path.getFileName().toString().endsWith(".zn")) {
                 normalizedOverlays.put(path, entry.getValue());
@@ -119,11 +122,15 @@ public final class ProjectAnalysisWorkspace {
 
         final var paths = new TreeSet<Path>();
         for (final var root : roots) {
+            checkCancellation();
             try (final var files = Files.walk(root)) {
                 files.filter(Files::isRegularFile)
                         .filter(path -> path.getFileName().toString().endsWith(".zn"))
                         .map(path -> path.toAbsolutePath().normalize())
-                        .forEach(paths::add);
+                        .forEach(path -> {
+                            checkCancellation();
+                            paths.add(path);
+                        });
             }
         }
         paths.addAll(normalizedOverlays.keySet());
@@ -144,6 +151,7 @@ public final class ProjectAnalysisWorkspace {
         final var sourceText = new LinkedHashMap<Path, String>();
         final var filesByCompilerPath = new LinkedHashMap<String, Path>();
         for (final var path : orderedPaths) {
+            checkCancellation();
             final var rootIndex = sourceRootIndex(path);
             final var relative = roots.get(rootIndex).relativize(path);
             final var relativeDirectory = relative.getParent() == null
@@ -208,7 +216,9 @@ public final class ProjectAnalysisWorkspace {
         final var compiler = CompilationService.forCompilationUnits(
                 compilerUnits, "ZeronLanguageServer", entryUnit.packageName(), libraries,
                 false, project.javaClassPathRoots());
+        checkCancellation();
         final var resolution = compiler.resolveWithDiagnostics();
+        checkCancellation();
         for (final var diagnostic : resolution.errors()) {
             final var file = diagnostic.primarySpan().sourcePath() == null
                     ? null : filesByCompilerPath.get(diagnostic.primarySpan().sourcePath());
@@ -218,6 +228,12 @@ public final class ProjectAnalysisWorkspace {
         final var catalog = PublicMemberCatalog.fromSource(resolution);
         return new Snapshot(diagnostics, tokenLists, sourceText, filesByCompilerPath,
                 units, unassociatedDiagnostics, Optional.of(resolution), Optional.of(catalog));
+    }
+
+    private static void checkCancellation() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new CancellationException("Project analysis was cancelled.");
+        }
     }
 
     private Path absoluteEntry() {

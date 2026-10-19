@@ -5,6 +5,5 @@ import zeron.io.IoFailure;
 public external class InputStream = "java.io.InputStream" {
     public mut read(buffer: ByteArray, offset: Int, length: Int): Int
         throws java.io.IOException -> IoFailure::fromIOException;
-    public mut close(): Unit
-        throws java.io.IOException -> IoFailure::fromIOException;
+    public mut close(): Unit throws java.io.IOException -> IoFailure::fromIOException;
 }

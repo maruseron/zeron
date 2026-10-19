@@ -1,6 +1,7 @@
 package zeron.time;
 
 import java.lang.System;
+
 import zeron.lang.Comparable;
 import zeron.lang.Eq;
 import zeron.lang.Hashable;

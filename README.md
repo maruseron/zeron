@@ -44,10 +44,10 @@ The implemented language includes:
   selected Java interoperability.
 
 Zeron is currently **alpha**. Some areas are intentionally partial: the Java interop surface is
-curated rather than general, generic bounds are not supported on generic classes or contracts,
-generic type arguments are erased at runtime, and several features and type-system extensions
-remain under development. The guide and design documents describe feature-specific rules and
-limitations.
+curated rather than general, generic variance and some inference cases are unsupported, and
+generic type arguments are erased at runtime. Witness-overlap analysis and pattern exhaustiveness
+also have documented limits. The guide and design documents describe feature-specific rules and
+limitations. Zeron 0.4.1 targets stable Java 25 or later.
 
 ## Get started
 
@@ -67,8 +67,13 @@ Run the test suite:
 mvn test
 ```
 
-The [language overview](documents/design-document-00.md) summarizes the implemented foundations and
-planned work. The [design documents](documents/) contain deeper specifications and implementation
+The project includes a compiler-backed language server for diagnostics, completion, hover, and
+definition navigation, a project-aware `zeron fmt` formatter with `--check` mode, and a portable
+launcher distribution workflow. The language server currently supports single-project workspaces;
+see the [VS Code extension](editors/vscode/README.md) for setup and its current limitations.
+
+The [language overview](documents/design-document-00.md) summarizes implemented features and
+remaining work. The [design documents](documents/) contain deeper specifications and implementation
 notes.
 
 ## License
@@ -83,11 +88,13 @@ the Apache License 2.0.
 
 ## VS Code syntax highlighting
 
-The repository includes a grammar-only VS Code extension in [editors/vscode](editors/vscode/README.md).
-It associates `.zn` files with Zeron and provides TextMate syntax highlighting, comment toggling,
-and bracket matching; it does not yet provide compiler diagnostics or language-server features.
-From the repository root, start an Extension Development Host with:
+The VS Code extension in [editors/vscode](editors/vscode/README.md) provides TextMate syntax
+highlighting, comment toggling, bracket matching, and a language client for the Zeron language
+server. The server provides diagnostics, completion, hover, and definition navigation. To try it
+from a source checkout, install the extension dependencies and open a sample project in an
+Extension Development Host:
 
-```sh
-code --extensionDevelopmentPath=editors/vscode .
+```powershell
+npm --prefix editors/vscode install
+code --extensionDevelopmentPath=editors/vscode sample_programs/list_monad
 ```

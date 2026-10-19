@@ -4,12 +4,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.charset.CodingErrorAction;
-import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+
 import zeron.fs.Path;
+import zeron.io.IoFailure;
 import zeron.io.Reader;
 import zeron.io.Writer;
-import zeron.io.IoFailure;
 import zeron.io.allocateByteArray;
 import zeron.io.openReader;
 import zeron.io.openWriter;

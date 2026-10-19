@@ -1,3 +1,3 @@
 package zeron.lang;
 
-public type Pair<A, B> = (fst: A, snd: B);
+public type Pair<A, B> =(fst: A, snd: B);

@@ -4,7 +4,6 @@ import java.nio.file.Path;
 
 public external class File = "java.io.File" {
     public constructor new(path: String);
-
     public toPath(): &Path;
     public exists(): Boolean;
     public isFile(): Boolean;

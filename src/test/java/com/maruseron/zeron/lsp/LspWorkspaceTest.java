@@ -105,8 +105,13 @@ public class LspWorkspaceTest {
         assertEquals(1, definition.getLeft().size());
         final var target = Path.of(java.net.URI.create(definition.getLeft().getFirst().getUri()));
         assertTrue(target.toString(), target.endsWith(Path.of("stdlib", "zeron", "lang", "option.zn")));
-        assertTrue(Files.readString(target).contains("public type Option<T>"));
-        assertEquals(24, definition.getLeft().getFirst().getRange().getStart().getLine());
+        final var targetSource = Files.readString(target);
+        assertTrue(targetSource.contains("public type Option<T>"));
+        final var mapDeclaration = targetSource.indexOf("public fn map<B>");
+        assertTrue(mapDeclaration >= 0);
+        final var expectedPosition = DocumentCoordinates.positionAt(targetSource, mapDeclaration);
+        assertEquals(expectedPosition.getLine(),
+                definition.getLeft().getFirst().getRange().getStart().getLine());
     }
 
     @Test

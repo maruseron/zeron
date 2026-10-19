@@ -1,4 +1,4 @@
-# 16. For-expressions
+# For-expressions
 
 A `for` expression starts with a source to visit, then applies a series of stages to its values.
 It uses the same iteration support as a `for` loop, but each stage transforms, skips, limits, or

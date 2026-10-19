@@ -11,7 +11,9 @@ public extension Float {
     }
 
     public fn isNaN(): Boolean = floatIsNaN(this);
+
     public fn isFinite(): Boolean = floatIsFinite(this);
+
     public fn toInt(): Option<Int> = floatToInt(this);
 }
 

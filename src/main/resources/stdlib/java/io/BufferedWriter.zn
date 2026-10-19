@@ -5,6 +5,5 @@ import zeron.io.IoFailure;
 public external class BufferedWriter = "java.io.BufferedWriter" {
     public mut write(value: String, offset: Int, length: Int): Unit
         throws java.io.IOException -> IoFailure::fromIOException;
-    public mut close(): Unit
-        throws java.io.IOException -> IoFailure::fromIOException;
+    public mut close(): Unit throws java.io.IOException -> IoFailure::fromIOException;
 }

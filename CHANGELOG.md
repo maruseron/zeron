@@ -2,14 +2,18 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026, 19 OCT
+
 ### Compiler and language work
 
-- Refined the witness overlap checker to take Higher-Kinded Types into consideration.
+- Corrected generic witness overlap checking for higher-kinded types.
 
 ### Compiler and tooling
 
 - Open bundled standard-library definition targets as read-only virtual documents in the VS Code
   extension.
+- Correct formatter handling for unary minus, keyword spacing, match cases, nested calls, and
+  declaration layout.
 
 ### Standard Library
 

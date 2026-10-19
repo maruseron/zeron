@@ -6,6 +6,7 @@ public contract Functor<F<_>> {
 
 public contract Applicative<F<_>> requires Functor<F> {
     pure<A>(value: A): F<A>;
+
     ap<A, B>(this: F<(A) -> B>, values: F<A>): F<B>;
 }
 

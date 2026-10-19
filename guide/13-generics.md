@@ -1,4 +1,4 @@
-# 13. Generics
+# Generics
 
 Suppose you want a function that returns the first item in an array. You could write one version
 for integers and another for strings:

@@ -1,12 +1,13 @@
 package zeron.collections;
 
-import zeron.lang.Hashable;
+import zeron.internal.generateArray;
 import zeron.lang.Eq;
+import zeron.lang.Hashable;
 import zeron.lang.Option;
 import zeron.lang.Pair;
-import zeron.internal.generateArray;
 
 fn hashKey<T: Hashable<T>>(key: T): Int = key.hash();
+
 fn equalKeys<T: Eq<T>>(left: T, right: T): Boolean = left == right;
 
 class MapEntry<K, V> {
@@ -50,7 +51,6 @@ class MapIterator<K, V> is Iterator<Pair<K, V>> {
                 this.current = entry;
             }
         }
-
         let entry = this.current;
         if (entry === null) return Option<Pair<K, V>>.None();
         this.current = entry.next();
@@ -79,7 +79,6 @@ class MapKeyIterator<K, V> is Iterator<K> {
                 this.current = entry;
             }
         }
-
         let entry = this.current;
         if (entry === null) return Option<K>.None();
         this.current = entry.next();
@@ -95,10 +94,16 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
 
     private constructor new;
 
-    public constructor withOperations(hashFunction: (K) -> Int,
-                                      equalityFunction: (K, K) -> Boolean) =
-        Map<K, V>.new(generateArray<MapEntry<K, V>?>(8, (_) -> null),
-                0, hashFunction, equalityFunction);
+    public constructor withOperations(
+        hashFunction: (K) -> Int,
+        equalityFunction: (K, K) -> Boolean
+    ) =
+        Map<K, V>.new(
+            generateArray<MapEntry<K, V>?>(8, (_) -> null),
+            0,
+            hashFunction,
+            equalityFunction
+        );
 
     public constructor empty() =
         Map<K, V>.withOperations(hashKey::<K>, equalKeys::<K>);
@@ -132,18 +137,24 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
         until (entry === null) {
             if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
                 let previousValue = entry.value();
-                let mut rebuilt = MapEntry<K, V>.of(
-                        entry.key(), value, hash, entry.next());
+                let mut rebuilt =
+                    MapEntry<K, V>.of(entry.key(), value, hash, entry.next());
                 until (prefix === null) {
                     let previous = prefix;
-                    rebuilt = MapEntry<K, V>.of(
-                            previous.key(), previous.value(), previous.hash(), rebuilt);
+                    rebuilt =
+                        MapEntry<K, V>.of(
+                            previous.key(),
+                            previous.value(),
+                            previous.hash(),
+                            rebuilt
+                        );
                     prefix = previous.next();
                 }
                 this.buckets[index] = rebuilt;
                 return Option.Some(previousValue);
             }
-            prefix = MapEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), prefix);
+            prefix =
+                MapEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), prefix);
             entry = entry.next();
         }
         return Option<V>.None();
@@ -159,14 +170,20 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
                 let mut rebuilt = entry.next();
                 until (prefix === null) {
                     let previous = prefix;
-                    rebuilt = MapEntry<K, V>.of(
-                            previous.key(), previous.value(), previous.hash(), rebuilt);
+                    rebuilt =
+                        MapEntry<K, V>.of(
+                            previous.key(),
+                            previous.value(),
+                            previous.hash(),
+                            rebuilt
+                        );
                     prefix = previous.next();
                 }
                 this.buckets[index] = rebuilt;
                 return Option.Some(removedValue);
             }
-            prefix = MapEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), prefix);
+            prefix =
+                MapEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), prefix);
             entry = entry.next();
         }
         return Option<V>.None();
@@ -182,8 +199,8 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
                 if (entry === null) break;
                 let next = entry.next();
                 let index = this.bucketIndex(entry.hash(), capacity);
-                expanded[index] = MapEntry<K, V>.of(
-                        entry.key(), entry.value(), entry.hash(), expanded[index]);
+                expanded[index] =
+                    MapEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), expanded[index]);
                 entry = next;
             }
             bucket = bucket + 1;
@@ -217,11 +234,10 @@ public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
             let index = this.bucketIndex(hash, this.buckets.length);
             return this.replaceEntry(index, key, value, hash);
         }
-
         if (this.count + 1 > this.buckets.length - this.buckets.length / 4) this.resize();
-
         let index = this.bucketIndex(hash, this.buckets.length);
-        this.buckets[index] = MapEntry<K, V>.of(key, value, hash, this.buckets[index]);
+        this.buckets[index] =
+            MapEntry<K, V>.of(key, value, hash, this.buckets[index]);
         this.count = this.count + 1;
         return Option<V>.None();
     }

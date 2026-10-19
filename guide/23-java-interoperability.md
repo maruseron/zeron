@@ -1,4 +1,4 @@
-# 23. Java interoperability
+# Java interoperability
 
 Zeron can resolve a deliberately small Java API surface from explicit class-directory/JAR roots and
 from public classes in JDK packages exported to the generated unnamed module. In a manifest project,

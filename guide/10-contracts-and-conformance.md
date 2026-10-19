@@ -1,4 +1,4 @@
-# 10. Contracts and conformance
+# Contracts and conformance
 
 Imagine a program that can work with many kinds of shapes. Each shape stores different
 information: a rectangle has a width and height, while a circle has a radius. But the program

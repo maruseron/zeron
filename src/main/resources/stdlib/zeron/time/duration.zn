@@ -12,6 +12,7 @@ public class Duration is Comparable<Duration> deriving Eq, Hashable {
     private constructor new;
 
     public constructor fromNanoseconds(value: Long) = Duration.new(value);
+
     public constructor zero() = Duration.new(0L);
 
     public property nanoseconds: Long {

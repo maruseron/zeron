@@ -1,7 +1,7 @@
 package zeron.ranges;
 
-import zeron.collections.Iterator;
 import zeron.collections.Iterable;
+import zeron.collections.Iterator;
 import zeron.lang.Option;
 
 public class IntIterator is Iterator<Int> {
@@ -39,11 +39,9 @@ public class IntRange is Iterable<Int> {
 
     private constructor new;
 
-    public constructor ascending(start: Int, end: Int) =
-        IntRange.new(start, end, 1);
+    public constructor ascending(start: Int, end: Int) = IntRange.new(start, end, 1);
 
-    public constructor descending(start: Int, end: Int) =
-        IntRange.new(start, end, -1);
+    public constructor descending(start: Int, end: Int) = IntRange.new(start, end, -1);
 
     public constructor closed(start: Int, end: Int) =
         IntRange.new(start, end, if (start <= end) then 1 else -1);

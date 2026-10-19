@@ -150,13 +150,19 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     Arrays support nullable element types, while broader nullable collection behavior remains limited.
 - Generic functions and methods support multiple contract bounds per type parameter. Generic
     function references can be specialized explicitly with `name::<Type>` or inferred from an
-    expected function type; these are monomorphic values, not polymorphic lambdas. Variance, generic
-    class/contract bounds, and first-class generic function values without specialization remain
-    unsupported. Class-side witness declarations and applied factory evidence are implemented;
-    complete generic-pattern overlap analysis remains future work. See
+    expected function type; these are monomorphic values, not polymorphic lambdas. Variance and
+    first-class generic function values without specialization remain unsupported. Applied contract
+    bounds are supported on generic functions, methods, classes, and contracts; class and contract
+    evidence is carried through instances for member and default-method dispatch. Class-side factory
+    evidence and non-nominal witness dispatch are implemented. Generic witness overlap analysis
+    remains incomplete. See
     [design-document-15](design-document-15_type-class-witnesses-and-generic-bounds.md).
-    Generic callback adaptation works across top-level functions, specialized function references,
-    and nominal members; broader shape coverage and adapter reuse remain.
+      Generic callback adaptation works across top-level functions, specialized function references,
+      and nominal members; broader shape coverage and adapter reuse remain.
+- Class-defined extractor patterns, nested patterns, OR-patterns, literal patterns, and product
+    destructuring are implemented. Direct matching on a concrete class root without a literal test
+    remains pending; see
+    [design-document-16](design-document-16_patterns-and-pattern-matching.md).
 
 #### Planned language features
 
@@ -202,15 +208,6 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     denotes a zero-parameter lambda. Multiline call chains and nested trailing lambdas need
     readability evaluation; ordinary parenthesized lambdas remain an escape hatch. Multiple
     trailing lambdas per call are out of scope.
-- Generic bounds over applied contracts and coherent type-class witnesses. Declared nominal
-    conformance supplies instance-method evidence; explicit witness mappings may select or remap
-    class-side factories, whose result is `&Self`. Evidence is passed implicitly to generic
-    implementations, with compile-time selection independent of imports. Non-nominal witnesses and
-    witness-method dispatch are supported; complete generic-pattern overlap analysis remains future
-    work. See
-    [design-document-15](design-document-15_type-class-witnesses-and-generic-bounds.md).
-- Class-defined extractor patterns for match expressions, including refutable patterns, nesting,
-    and OR-patterns; see [design-document-16](design-document-16_patterns-and-pattern-matching.md).
 - Low priority: anonymous objects that explicitly implement a named contract, for one-off adapters
     and test doubles. Anonymous record values are excluded because they would introduce structural
     typing; capture, identity, and lowering rules remain to be designed.
@@ -228,15 +225,12 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     not implicitly lifted. This sequences value-level failures and does not handle declared
     `raises` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
 - Low priority: compiler-recognized type-admissibility constraints on generic type parameters, such
-    as `NonNull` to exclude nullable type arguments, `Numeric` to admit only `Int`, `Long`, and
-    `Float`, or
-    `Stable` to admit only values whose equality- and hash-relevant state cannot change while used as
-    keys in hash-based collections. A sound `Stable` guarantee may need to ensure aliasable reachable
-    state is deeply copied; ordinary immutable views alone do not rule out mutation through another
-    alias. This could require substantially more analysis and runtime support, so its enforcement
-    strategy remains open. These constraints restrict which types may be supplied but do not expose
-    operations; generic operator support remains a separate operator-witness design. Define constraint
-    inference, forwarding, and compiled-library representation before implementation.
+    as `NonNull` to exclude nullable type arguments or `Numeric` to admit only `Int`, `Long`, and
+    `Float`. These constraints restrict which types may be supplied but do not expose operations;
+    generic operator support remains a separate operator-witness design. Constraint inference,
+    forwarding, and compiled-library representation would need definition before implementation.
+    `Stable<T>` for hash-key admissibility was rejected in
+    [ZEP-0014](zeps/ZEP-0014.md); reconsider it only if a sound, useful guarantee can be enforced.
 - Low priority: type-predicate return types such as `isSome(): this is Option.Some`, which connect a
     successful Boolean check to flow refinement of a stable receiver. Define how predicate bodies
     are verified so the refinement is sound, which receivers may be narrowed, and how generic

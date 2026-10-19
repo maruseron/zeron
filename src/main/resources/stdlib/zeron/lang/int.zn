@@ -3,9 +3,9 @@ package zeron.lang;
 public extension Int {
     public property sign: Int {
         get {
-                 if (this == 0) return  0;
-            else if (this  < 0) return -1;
-            else                return  1;
+            if (this == 0) return 0;
+            else if (this < 0) return -1;
+            else return 1;
         }
     }
 

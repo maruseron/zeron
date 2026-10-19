@@ -1,4 +1,4 @@
-# 26. Resource management
+# Resource management
 
 Use a lexical `using` scope for a resource that must be disposed when control leaves a block. A
 resource implements `zeron.resource.Disposable`; the bundled contract declares a mutating

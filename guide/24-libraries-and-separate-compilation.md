@@ -1,4 +1,4 @@
-# 24. Libraries and separate compilation
+# Libraries and separate compilation
 
 Zeron libraries have both compile-time metadata and runtime classes. The compiler emits a
 versioned API index alongside generated classes; a consumer reads that index to resolve exported

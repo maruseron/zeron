@@ -1,4 +1,4 @@
-# 2. Your first program
+# Your first program
 
 The project created in [subject 1](01-install-and-create-a-project.md) contains an entry file,
 `src/main.zn`. A Zeron program starts from a zero-argument `main` function in that entry unit:

@@ -9,8 +9,7 @@ public class Set<T: Hashable<T>> is Iterable<T>, Sink<T> {
 
     public constructor withMap(values: &Map<T, Unit>) = Set<T>.new(values);
 
-    public constructor empty() =
-        Set<T>.withMap(Map.empty<T, Unit>());
+    public constructor empty() = Set<T>.withMap(Map.empty<T, Unit>());
 
     public constructor of(elements: T...) {
         let mut result = Set.empty<T>();

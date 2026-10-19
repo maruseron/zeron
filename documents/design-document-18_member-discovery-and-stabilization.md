@@ -3,9 +3,9 @@
 ## Status
 
 The public member discovery API described here is implemented following accepted ZEP-0009. A
-protocol-independent LSP direction is separately accepted in ZEP-0021; its implementation and
-release timing are not committed by this document. The stabilization milestone below remains a
-proposed, bounded next step; its scope and timebox should be agreed before work begins.
+protocol-independent LSP direction is separately accepted and implemented in ZEP-0021, with
+diagnostics, completion, hover, and definition navigation. The stabilization milestone below
+remains a proposed, bounded next step; its scope and timebox should be agreed before work begins.
 
 ## Implemented API
 
@@ -26,7 +26,7 @@ identity and signature parity.
 ## Motivation
 
 Third-party tools need a supported way to discover Zeron's public API. Documentation generators,
-API browsers, build integrations, and eventually editors should not have to inspect compiler
+API browsers, build integrations, and editor integrations should not have to inspect compiler
 internals or parse generated JVM classes to learn which members a Zeron type exposes.
 
 Member discovery is a semantic capability, not syntax coloring. The initial objective is a stable
@@ -62,7 +62,8 @@ for source-level names, imports, visibility, and lookup.
 
 ## Non-goals for the first increment
 
-- Implementing an LSP, VS Code semantic extension, or editor-specific protocol.
+- Implementing LSP or editor-specific behavior as part of the member-discovery API. The separate
+  server and VS Code integration are tracked by ZEP-0021.
 - Querying arbitrary source positions, recovering completion candidates from incomplete syntax, or
   incrementally reanalyzing changed documents.
 - Reflectively discovering arbitrary JVM members. Java interop remains limited to the compiler's
@@ -209,5 +210,6 @@ extend the cycle once or reduce the release scope; do not silently turn it into 
 freeze. The duration is a planning proposal, not a release-date commitment.
 
 At the end of the cycle, review the remaining issue list and select the next bounded milestone.
-The type-level member discovery API is already implemented. LSP implementation remains a separate
-workstream under accepted ZEP-0021; it is not part of this catalog stabilization milestone.
+The type-level member discovery API is already implemented. The LSP server is implemented as a
+separate workstream under ZEP-0021; its editor-specific behavior is not part of this catalog
+stabilization milestone.

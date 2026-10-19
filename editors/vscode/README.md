@@ -9,7 +9,7 @@ document. Project source files continue to open normally and remain editable.
 
 ## Requirements
 
-- Install the Zeron 0.2.0 or later distribution and ensure `zeron` is available on `PATH`.
+- Install the Zeron 0.3.0 or later distribution and ensure `zeron` is available on `PATH`.
 - Install the Java runtime required by that Zeron distribution.
 - Open a single-project Zeron workspace containing its `zeron.toml` manifest.
 

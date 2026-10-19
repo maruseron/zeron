@@ -1,4 +1,4 @@
-# 22. Raised effects
+# Raised effects
 
 Some operations cannot finish their usual job. A function that loads a user may discover that the
 user does not exist; a command may be rejected because the caller lacks permission. The function

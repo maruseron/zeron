@@ -1,4 +1,4 @@
-# 4. Values, types, and variables
+# Values, types, and variables
 
 A value is a piece of data the program can use. The number `3`, the text `"hello"`, and the
 Boolean value `true` are all values. A type describes what kind of value something is and which

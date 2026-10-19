@@ -1,4 +1,4 @@
-# 15. Collections and iteration
+# Collections and iteration
 
 Arrays are useful when a program needs to keep several values of the same type. You can visit
 each item in an array with a `for` loop:

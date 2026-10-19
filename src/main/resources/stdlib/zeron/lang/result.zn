@@ -6,49 +6,55 @@ import zeron.control.Monad;
 
 fn applyResultFunction<A, B>(transform: (A) -> B, value: A): B = transform(value);
 
-public type Result<T, E> = Ok(value: T) | Err(error: E);
+public type Result<T, E> =
+      Ok(value: T)
+    | Err(error: E);
 
 namespace Result {
     public fn ok<T, E>(value: T): Result<T, E> = Result<T, E>.Ok(value);
-
     public fn err<T, E>(error: E): Result<T, E> = Result<T, E>.Err(error);
 }
 
 public extension<T, E> Result<T, E> {
-    public fn isOk(): Boolean = match (this) {
-        case Result.Ok(_) -> true;
-        case Result.Err(_) -> false;
-    };
+    public fn isOk(): Boolean =
+        match (this) {
+            case Result.Ok(_) -> true;
+            case Result.Err(_) -> false;
+        };
 
-    public fn isErr(): Boolean = match (this) {
-        case Result.Ok(_) -> false;
-        case Result.Err(_) -> true;
-    };
+    public fn isErr(): Boolean =
+        match (this) {
+            case Result.Ok(_) -> false;
+            case Result.Err(_) -> true;
+        };
 
-    public fn fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R = match (this) {
-        case Result.Ok(value) -> ifOk(value);
-        case Result.Err(error) -> ifErr(error);
-    };
+    public fn fold<R>(ifOk: (T) -> R, ifErr: (E) -> R): R =
+        match (this) {
+            case Result.Ok(value) -> ifOk(value);
+            case Result.Err(error) -> ifErr(error);
+        };
 
-    public fn map<U>(transform: (T) -> U): Result<U, E> = match (this) {
-        case Result.Ok(value) -> Result<U, E>.Ok(transform(value));
-        case Result.Err(error) -> Result<U, E>.Err(error);
-    };
+    public fn map<U>(transform: (T) -> U): Result<U, E> =
+        match (this) {
+            case Result.Ok(value) -> Result<U, E>.Ok(transform(value));
+            case Result.Err(error) -> Result<U, E>.Err(error);
+        };
 
-    public fn mapError<F>(transform: (E) -> F): Result<T, F> = match (this) {
-        case Result.Ok(value) -> Result<T, F>.Ok(value);
-        case Result.Err(error) -> Result<T, F>.Err(transform(error));
-    };
+    public fn mapError<F>(transform: (E) -> F): Result<T, F> =
+        match (this) {
+            case Result.Ok(value) -> Result<T, F>.Ok(value);
+            case Result.Err(error) -> Result<T, F>.Err(transform(error));
+        };
 
-    public fn andThen<U>(transform: (T) -> Result<U, E>): Result<U, E> = match (this) {
-        case Result.Ok(value) -> transform(value);
-        case Result.Err(error) -> Result<U, E>.Err(error);
-    };
+    public fn andThen<U>(transform: (T) -> Result<U, E>): Result<U, E> =
+        match (this) {
+            case Result.Ok(value) -> transform(value);
+            case Result.Err(error) -> Result<U, E>.Err(error);
+        };
 }
 
 witness<E> Monad<Result<_, E>> for Result<_, E> {
-    fn map<A, B>(this: Result<A, E>, transform: (A) -> B): Result<B, E> =
-        this.map(transform);
+    fn map<A, B>(this: Result<A, E>, transform: (A) -> B): Result<B, E> = this.map(transform);
 
     fn pure<A>(value: A): Result<A, E> = Result<A, E>.Ok(value);
 
@@ -61,15 +67,14 @@ witness<E> Monad<Result<_, E>> for Result<_, E> {
             case Result.Err(error) -> Result<B, E>.Err(error);
         };
 
-    fn flatMap<A, B>(
-        this: Result<A, E>,
-        transform: (A) -> Result<B, E>
-    ): Result<B, E> = this.andThen(transform);
+    fn flatMap<A, B>(this: Result<A, E>, transform: (A) -> Result<B, E>): Result<B, E> =
+        this.andThen(transform);
 }
 
 witness<E> Foldable<Result<_, E>> for Result<_, E> {
-    fn foldLeft<A, B>(this: Result<A, E>, initial: B, combine: (B, A) -> B): B = match (this) {
-        case Result.Ok(value) -> combine(initial, value);
-        case Result.Err(_) -> initial;
-    };
+    fn foldLeft<A, B>(this: Result<A, E>, initial: B, combine: (B, A) -> B): B =
+        match (this) {
+            case Result.Ok(value) -> combine(initial, value);
+            case Result.Err(_) -> initial;
+        };
 }

@@ -6,8 +6,7 @@ import zeron.lang.Option;
 // These private self-calls are compiler intrinsics lowered to direct array operations.
 fn allocateArray<T>(size: Int): &Array<T> = allocateArray<T>(size);
 
-fn clearArraySlot<T>(values: &Array<T>, index: Int): Unit =
-    clearArraySlot<T>(values, index);
+fn clearArraySlot<T>(values: &Array<T>, index: Int): Unit = clearArraySlot<T>(values, index);
 
 class ListIterator<T> is Iterator<T> {
     values: List<T>;

@@ -1,4 +1,4 @@
-# 8. References and mutation
+# References and mutation
 
 An array is an object that can be referred to by a name. Assigning that reference to another
 name does not make a second array; both names can refer to the same one. This is called sharing

@@ -1,4 +1,4 @@
-# 18. Pattern matching
+# Pattern matching
 
 Programs often need to make a decision based on what kind of value they have. Zeron provides
 type-test operators for simple checks, and `match` expressions for describing several possible

@@ -1,4 +1,4 @@
-# 5. Expressions and control flow
+# Expressions and control flow
 
 An expression is a piece of code that produces a value. Literals such as `12`, `"hello"`, and
 `true` are expressions. So are calculations, comparisons, and calls:

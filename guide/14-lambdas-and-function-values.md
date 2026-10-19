@@ -1,4 +1,4 @@
-# 14. Lambdas and function values
+# Lambdas and function values
 
 Sometimes a function needs to do its main job while letting the caller choose one small part of
 the work. For example, a program may need to apply different calculations to a number. Writing a

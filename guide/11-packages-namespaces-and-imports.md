@@ -1,4 +1,4 @@
-# 11. Packages, namespaces, and imports
+# Packages, namespaces, and imports
 
 As a program grows, its declarations need a clear home. Packages group related source files and
 give their declarations longer, distinct names. Imports provide convenient shorter names in files

@@ -3,6 +3,7 @@ package zeron.fs;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path as JavaPath;
+
 import zeron.io.IoFailure;
 import zeron.lang.Display;
 import zeron.lang.Eq;
@@ -19,13 +20,11 @@ public class Path is Eq<Path>, Display<Path> {
 
     public toString(): String = this.value;
 
-    public eq(other: Path): Boolean =
-        this.toJavaPath().equals(other.toJavaPath());
+    public eq(other: Path): Boolean = this.toJavaPath().equals(other.toJavaPath());
 
     public isAbsolute(): Boolean = this.toJavaPath().isAbsolute();
 
-    public normalize(): Path =
-        Path.from(this.toJavaPath().normalize().toString());
+    public normalize(): Path = Path.from(this.toJavaPath().normalize().toString());
 
     public toAbsolute(): Path =
         Path.from(this.toJavaPath().toAbsolutePath().toString());

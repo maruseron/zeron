@@ -2,5 +2,6 @@ package zeron.collections;
 
 public contract Sink<T> {
     constructor empty();
+
     mut add(value: T): Boolean;
 }

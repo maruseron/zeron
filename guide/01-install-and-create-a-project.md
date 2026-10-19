@@ -1,4 +1,4 @@
-# 1. Install Zeron and create a project
+# Install Zeron and create a project
 
 This guide assumes JDK 25 or later. Check that Java is available:
 

@@ -1,4 +1,4 @@
-# 12. Extension methods
+# Extension methods
 
 Sometimes an operation takes a value as its first input. For example, one function might greet a
 name and another might add an exclamation mark:

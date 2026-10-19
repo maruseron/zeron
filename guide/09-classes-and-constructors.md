@@ -1,4 +1,4 @@
-# 9. Classes and constructors
+# Classes and constructors
 
 A class describes a kind of object. It says what information each object remembers and what
 operations can be performed on it. For example, a program that works with counters can make a

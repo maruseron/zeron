@@ -1,4 +1,4 @@
-# 7. Strings and arrays
+# Strings and arrays
 
 ## Text with `String`
 

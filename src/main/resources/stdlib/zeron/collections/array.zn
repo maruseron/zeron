@@ -3,7 +3,7 @@ package zeron.collections;
 import zeron.control.Foldable;
 import zeron.lang.Eq;
 
-public extension <T> Array<T> {
+public extension<T> Array<T> {
     public fn foldLeft<R>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         for (let item in this) result = combine(result, item);
@@ -24,7 +24,7 @@ witness Foldable<Array<_>> for Array<_> {
         this.foldLeft(initial, combine);
 }
 
-public extension <T: Eq<T>> Array<T> {
+public extension<T: Eq<T>> Array<T> {
     public fn contains(item: T): Boolean = this.indexOf(item) >= 0;
 
     public fn indexOf(item: T): Int {

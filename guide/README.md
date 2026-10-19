@@ -41,3 +41,8 @@
 1. [Java interoperability](23-java-interoperability.md)
 1. [Libraries and separate compilation](24-libraries-and-separate-compilation.md)
 1. [Configuration, releases, and the roadmap](25-configuration-releases-and-roadmap.md)
+
+## Part VI — Editor and CLI tools
+
+1. [VS Code and the language server](28-vscode-and-language-server.md)
+1. [Formatting and diagnostics](29-formatting-and-diagnostics.md)

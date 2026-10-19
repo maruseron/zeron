@@ -1,3 +1,4 @@
 package zeron.lang;
 
-public type UnicodeError = MalformedSurrogate(utf16Offset: Int);
+public type UnicodeError =
+      MalformedSurrogate(utf16Offset: Int);

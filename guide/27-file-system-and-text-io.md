@@ -1,4 +1,4 @@
-# 27. File system and text I/O
+# File system and text I/O
 
 The standard library provides `zeron.fs.Path` for path values and `zeron.io.text` for synchronous
 whole-file text operations. A path is a lexical location; creating a `Path` does not check whether

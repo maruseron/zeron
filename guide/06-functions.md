@@ -1,4 +1,4 @@
-# 6. Functions
+# Functions
 
 A function is a named piece of a program that does one job. Give it a name, describe any
 information it needs, and then call it whenever you need that job done. For example, this

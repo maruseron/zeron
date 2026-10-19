@@ -1,4 +1,4 @@
-# 19. Option and Result
+# Option and Result
 
 Some functions cannot produce a useful value for every input. A search might not find what it is
 looking for, or a calculation might fail for certain values. The function still needs to tell its

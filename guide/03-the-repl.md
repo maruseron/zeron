@@ -1,4 +1,4 @@
-# 3. The REPL
+# The REPL
 
 Run `zeron` with no arguments to start the interactive prompt. Enter an expression to compile and
 evaluate it:

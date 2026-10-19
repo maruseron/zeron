@@ -1,4 +1,4 @@
-# 20. Generic bounds and witnesses
+# Generic bounds and witnesses
 
 A generic type parameter lets a function accept many types, but inside the function a type like
 `T` may not be specific enough. The function can pass a `T` around, but it cannot assume that every
@@ -108,14 +108,16 @@ preserve witness metadata for consumers.
 
 The current implementation has several boundaries:
 
-- Bounds are supported on generic functions and methods, but not on generic classes or contracts.
+- Applied contract bounds are supported on generic functions, methods, classes, and contracts.
+  Class-bound evidence is selected during construction and carried by instances; bounded contract
+  defaults use evidence carried by implementing instances.
 - Mutating methods through bounds and `mut` witness requirements are unsupported.
 - A witness cannot override the instance methods of a nominally conforming class.
 - Generic arguments are erased at runtime. An ordinary erased Java-callable descriptor has no
   witness context and throws `UnsupportedOperationException`; Zeron-generated calls use the
   evidence-bearing descriptor.
-- Overlap checking for generic witness patterns is not a complete theorem prover, so some complex
-  overlaps remain future hardening.
+- Overlap checking rejects patterns it can identify as overlapping, but it is not a complete
+  theorem prover for every complex generic pattern.
 
 For the full rules and implementation details, see the
 [type-class witnesses and generic bounds design document](../documents/design-document-15_type-class-witnesses-and-generic-bounds.md).

@@ -1,4 +1,4 @@
-# 21. Equality and ordering
+# Equality and ordering
 
 Most Zeron types cannot use comparison operators automatically. A class does not become
 comparable just because it has fields, and the compiler does not guess how two values should be
@@ -42,8 +42,11 @@ scalar values.
 Nullable values use lifted equality: two nulls are equal, one null and one non-null value are not,
 and two non-null values are compared using `Eq<T>` for their underlying type. Structural equality
 for products compares their components; for sums, values must first be from the same case, then
-their payloads are compared. This does not automatically provide hashing—`Hashable<T>` is a
-separate capability and is not yet fully supported.
+their payloads are compared. Hashing is a separate capability: `Hashable<T>` requires `Eq<T>`.
+The standard library supports it for scalar types and nullable values, and generic code can require
+it with a bound. Products, sums, classes, and newtypes can opt into derived `Eq` and `Hashable`
+implementations; derivation is explicit, not automatic. `Map` and `Set` use `Hashable` keys or
+elements, which must not be mutated in ways that change their equality or hash while stored.
 
 ## Ordering with `Comparable<T>`
 

@@ -1,0 +1,19 @@
+package zeron.algebra;
+
+public contract Add<T: mut> {
+    add(other: T): T;
+    zero(): T;
+}
+
+public contract Addition<T: mut> requires Add<T> {
+    negate(): T;
+}
+
+public contract Mult<T: mut> {
+    multiply(other: T): T;
+    one(): T;
+}
+
+public contract Multiplication<T: mut> requires Mult<T> {
+    reciprocal(): T;
+}

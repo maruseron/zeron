@@ -11,6 +11,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 
@@ -61,6 +62,57 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void manifestlessWorkspaceAnalyzesOpenDocumentsWithoutAnEntryPoint() throws Exception {
+        final var root = temporaryFolder.newFolder().toPath();
+        final var workspace = ProjectAnalysisWorkspace.openSourceWorkspace(root);
+        final var source = root.resolve("Main.zn");
+        final var text = """
+                import zeron.lang.Option;
+                fn answer(value: Option<Int>): Int = 42;
+                """;
+
+        final var snapshot = workspace.analyze(Map.of(source,
+                new ProjectAnalysisWorkspace.Overlay(1, text)));
+
+        assertEquals(1, snapshot.units().size());
+        assertTrue(snapshot.resolution().isPresent());
+        assertTrue(snapshot.resolution().orElseThrow().errors().isEmpty());
+        assertEquals(text, snapshot.sourceText().get(source));
+    }
+
+    @Test
+    public void directlyOpenedStandardLibraryRootIsNotBundledAgain() throws Exception {
+        final var root = temporaryFolder.newFolder().toPath();
+        final var source = standardLibraryOptionSource(root);
+
+        final var workspace = ProjectAnalysisWorkspace.openSourceWorkspace(root);
+        final var snapshot = workspace.analyze(Map.of());
+
+        assertEquals(List.of(root.toAbsolutePath().normalize()), workspace.sourceRoots());
+        assertEquals(1, snapshot.units().size());
+        assertTrue(snapshot.resolution().isPresent());
+        assertTrue(snapshot.resolution().orElseThrow().errors().isEmpty());
+        assertTrue(snapshot.unassociatedDiagnostics().isEmpty());
+        assertTrue(snapshot.sourceText().containsKey(source));
+    }
+
+    @Test
+    public void repositoryRootSelectsNestedStandardLibrarySources() throws Exception {
+        final var root = temporaryFolder.newFolder().toPath();
+        final var standardLibraryRoot = root.resolve(Path.of("src", "main", "resources", "stdlib"));
+        final var source = standardLibraryOptionSource(standardLibraryRoot);
+
+        final var workspace = ProjectAnalysisWorkspace.openSourceWorkspace(root);
+        final var snapshot = workspace.analyze(Map.of());
+
+        assertEquals(List.of(standardLibraryRoot.toAbsolutePath().normalize()), workspace.sourceRoots());
+        assertEquals(1, snapshot.units().size());
+        assertTrue(snapshot.resolution().isPresent());
+        assertTrue(snapshot.resolution().orElseThrow().errors().isEmpty());
+        assertTrue(snapshot.sourceText().containsKey(source));
+    }
+
+    @Test
     public void hoverAndDefinitionUseResolverReferences() throws Exception {
         final var source = """
                 fn add(value: Int): Int = value + 1;
@@ -106,8 +158,8 @@ public class LspWorkspaceTest {
         final var target = Path.of(java.net.URI.create(definition.getLeft().getFirst().getUri()));
         assertTrue(target.toString(), target.endsWith(Path.of("stdlib", "zeron", "lang", "option.zn")));
         final var targetSource = Files.readString(target);
-        assertTrue(targetSource.contains("public type Option<T>"));
-        final var mapDeclaration = targetSource.indexOf("public fn map<B>");
+        assertTrue(targetSource.contains("public type Option<T: nullable + mut>"));
+        final var mapDeclaration = targetSource.indexOf("public fn map<B: mut>");
         assertTrue(mapDeclaration >= 0);
         final var expectedPosition = DocumentCoordinates.positionAt(targetSource, mapDeclaration);
         assertEquals(expectedPosition.getLine(),
@@ -132,6 +184,36 @@ public class LspWorkspaceTest {
         assertNotNull(hover);
         assertTrue(hover.getContents().getRight().getValue().contains("(Int) -> Int"));
         assertFalse(hover.getContents().getRight().getValue().contains(">(Int)"));
+    }
+
+    @Test
+    public void completionFormatsHandlerTypesInMemberSignatures() throws Exception {
+        final var source = """
+                effect Failure {}
+                handler catchFailure {
+                    case Failure -> "";
+                }
+                public class HandlerApi {
+                    public constructor new;
+                    public apply(policy: String ~> {Failure} raises {}): Unit {}
+                }
+                fn main() {
+                    let api = HandlerApi.new();
+                    api.apply(catchFailure);
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        assertTrue(snapshot.diagnostics().toString(),
+                snapshot.diagnostics().get(project.entry()).isEmpty());
+        final var offset = source.indexOf("api.ap") + "api.ap".length();
+        final var completion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, offset));
+        final var apply = completion.getItems().stream()
+                .filter(item -> item.getLabel().startsWith("apply("))
+                .findFirst().orElseThrow(() -> new AssertionError(completion.getItems().toString()));
+
+        assertEquals("apply(policy: String ~> {Failure})", apply.getLabel());
     }
 
     @Test
@@ -172,6 +254,84 @@ public class LspWorkspaceTest {
 
         assertNotNull(hover);
         assertTrue(hover.getContents().getRight().getValue().contains("sum List<T>"));
+    }
+
+    @Test
+    public void hoverDescribesContractsClassesEffectsAndNamedHandlers() throws Exception {
+        final var source = """
+                contract Marker<T> {}
+                contract Named<T> requires Marker<T> {}
+                public class Widget<T> is Marker<T> {}
+                public effect Failure {}
+                public handler Recover {
+                    case Failure -> "";
+                }
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var contractHover = hoverAt(snapshot, project.entry(), source, "Named<T>");
+        final var classHover = hoverAt(snapshot, project.entry(), source, "Widget<T>");
+        final var effectHover = hoverAt(snapshot, project.entry(), source, "Failure");
+        final var handlerHover = hoverAt(snapshot, project.entry(), source, "Recover");
+
+        assertTrue(contractHover, contractHover.contains("contract Named<T> : Marker<T>"));
+        assertTrue(classHover, classHover.contains("class Widget<T> : {Marker<T>}"));
+        assertTrue(effectHover, effectHover.contains("effect Failure"));
+        assertTrue(handlerHover, handlerHover.contains("handler Recover"));
+    }
+
+    @Test
+    public void definitionNavigatesFromImportedTypeReferencesToTheirDeclaration() throws Exception {
+        final var project = project("import model.Widget;\n"
+                + "fn echo(value: Widget): Widget = value;\n");
+        final var modelDirectory = Files.createDirectories(project.entry().getParent().resolve("model"));
+        final var model = modelDirectory.resolve("Widget.zn");
+        Files.writeString(model, """
+                package model;
+                public class Widget {}
+                """);
+        final var source = Files.readString(project.entry());
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        assertTrue(snapshot.sourceText().keySet().toString(),
+                snapshot.sourceText().containsKey(model.toAbsolutePath().normalize()));
+        assertTrue(snapshot.units().toString(),
+                snapshot.units().stream().anyMatch(unit -> unit.packageName().equals("model")));
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+        final var typeUseOffset = source.indexOf("Widget):");
+        final var typeHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, typeUseOffset)));
+        assertNotNull(typeHover);
+        assertTrue(typeHover.getContents().getRight().getValue(),
+                typeHover.getContents().getRight().getValue().contains("class Widget"));
+        assertTrue(snapshot.filesByCompilerPath().toString(),
+                snapshot.filesByCompilerPath().containsValue(model.toAbsolutePath().normalize()));
+        final var definition = LspFeatures.definition(snapshot, project.entry(),
+                new DefinitionParams(document, DocumentCoordinates.positionAt(source, typeUseOffset)));
+
+        assertTrue(definition.isLeft());
+        assertEquals(1, definition.getLeft().size());
+        assertEquals(model.toUri().toString(), definition.getLeft().getFirst().getUri());
+        assertEquals(1, definition.getLeft().getFirst().getRange().getStart().getLine());
+    }
+
+    @Test
+    public void truncatesLongSumTypeHoverAtTheConfiguredCharacterLimit() throws Exception {
+        final var cases = java.util.stream.IntStream.range(0, 40)
+                .mapToObj(index -> "Case" + index)
+                .collect(java.util.stream.Collectors.joining(" | "));
+        final var source = "type Huge = " + cases + ";\nfn main() {}\n";
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+        final var hover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("Huge"))));
+
+        assertNotNull(hover);
+        final var line = hover.getContents().getRight().getValue().lines()
+                .filter(value -> value.startsWith("sum Huge")).findFirst().orElseThrow();
+        assertEquals(180, line.length());
+        assertTrue(line.endsWith("..."));
     }
 
     @Test
@@ -222,7 +382,7 @@ public class LspWorkspaceTest {
         final var content = hover == null ? "" : hover.getContents().getRight().getValue();
 
         assertNotNull(hover);
-        assertTrue(content, content.contains("witness method toString"));
+        assertTrue(content, content.contains("extension on Box via Render<Box>"));
         assertTrue(content, content.contains("String"));
     }
 
@@ -341,20 +501,167 @@ public class LspWorkspaceTest {
         final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
         final var thisHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
                 DocumentCoordinates.positionAt(source, source.indexOf("this"))));
+        final var valueHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("this.value") + "this.".length())));
         final var constructorHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
                 DocumentCoordinates.positionAt(source, source.lastIndexOf("new"))));
 
         assertNotNull(thisHover);
         assertTrue(thisHover.getContents().getRight().getValue().contains("Box<T>"));
+        assertNotNull(valueHover);
+        assertTrue(valueHover.getContents().getRight().getValue().contains("T"));
         assertNotNull(constructorHover);
-        assertTrue(constructorHover.getContents().getRight().getValue()
-                .contains("fn new(Int) -> &Box<Int>"));
+        assertTrue(constructorHover.getContents().getRight().getValue(),
+                constructorHover.getContents().getRight().getValue()
+                        .contains("constructor new(Int) -> &Box<Int>"));
         final var constructorCompletion = LspFeatures.completion(snapshot, project.entry(),
                 DocumentCoordinates.positionAt(source,
                         source.lastIndexOf("Box<Int>.new") + "Box<Int>.ne".length()));
         final var constructorItem = constructorCompletion.getItems().stream()
                 .filter(item -> item.getLabel().equals("new(value: T)")).findFirst().orElseThrow();
         assertEquals("&Box<T>", constructorItem.getDetail());
+    }
+
+    @Test
+    public void hoverShowsSumCasesGenericParametersRaisesAndExternalModifiers() throws Exception {
+        final var source = """
+                public effect Failure {
+                    public property message: String;
+                }
+                public type Outcome<T, E> = Good(value: T) | Bad(error: E);
+                public class Box<T> {
+                    value: T;
+                    public constructor new;
+                    public constructor start() raises Failure = raise Failure.new("failed");
+                    public map<R>(transform: (T) -> R): Box<R> raises Failure =
+                        Box<R>.new(transform(this.value));
+                }
+                external fn native(value: Int): Int;
+                public external class JavaThing = "java.lang.String" {
+                    public constructor new();
+                }
+                fn useJavaThing(value: JavaThing): Unit {}
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+
+        final var sumHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("Outcome"))));
+        final var sumCaseHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("Good("))));
+        final var constructorHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("start()"))));
+        final var methodHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("map<R>"))));
+        final var functionHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("native"))));
+        final var externalClassHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.lastIndexOf("JavaThing"))));
+        final var externalClassDefinition = LspFeatures.definition(snapshot, project.entry(),
+                new DefinitionParams(document, DocumentCoordinates.positionAt(source,
+                        source.indexOf("JavaThing):"))));
+
+        assertNotNull(sumHover);
+        assertTrue(sumHover.getContents().getRight().getValue()
+                .contains("sum Outcome<T, E> = Good(T) | Bad(E)"));
+        assertNotNull(sumCaseHover);
+        assertTrue(sumCaseHover.getContents().getRight().getValue()
+                .contains("constructor Good<T, E>(T) -> Outcome<T, E>"));
+        assertNotNull(constructorHover);
+        assertTrue(constructorHover.getContents().getRight().getValue(),
+                constructorHover.getContents().getRight().getValue()
+                        .contains("constructor start() -> &Box<T> raises {Failure}"));
+        assertNotNull(methodHover);
+        assertTrue(methodHover.getContents().getRight().getValue()
+                .contains("fn map<R>"));
+        assertTrue(methodHover.getContents().getRight().getValue()
+                .contains("raises {Failure}"));
+        assertNotNull(functionHover);
+        assertTrue(functionHover.getContents().getRight().getValue().contains("external fn native"));
+        assertNotNull(externalClassHover);
+        assertTrue(externalClassHover.getContents().getRight().getValue()
+                .contains("external class JavaThing = java.lang.String"));
+        assertTrue(externalClassDefinition.isLeft());
+        assertEquals(DocumentCoordinates.positionAt(source, source.lastIndexOf("JavaThing ="))
+                        .getLine(),
+                externalClassDefinition.getLeft().getFirst().getRange().getStart().getLine());
+    }
+
+    @Test
+    public void qualifiedJavaTypeCompletionDoesNotSuggestSameNamedZeronType() throws Exception {
+        final var source = """
+                package zeron.math;
+                public class BigInteger {}
+                fn use(value: java.math.Big): Unit {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var completion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, source.indexOf("Big):") + "Big".length()));
+
+        assertFalse(completion.getItems().toString(), completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("BigInteger")));
+    }
+
+    @Test
+    public void hoverAndDefinitionSupportHigherKindedImplementationMethods() throws Exception {
+        final var source = """
+                contract Mapper<F<_>> {
+                    map<A, B>(this: F<A>, transform: (A) -> B): F<B>;
+                }
+                class Box<T> is Mapper<Box<_>> {
+                    value: T;
+                    public constructor new;
+                    implementation Mapper<Box<_>> {
+                        fn map<A, B>(this: Box<A>, transform: (A) -> B): Box<B> =
+                            Box<B>.new(transform(this.value));
+                    }
+                }
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+        final var methodOffset = source.indexOf("fn map") + "fn ".length();
+        final var hover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, methodOffset)));
+        final var definition = LspFeatures.definition(snapshot, project.entry(),
+                new DefinitionParams(document, DocumentCoordinates.positionAt(source, methodOffset)));
+
+        assertNotNull(hover);
+        final var content = hover.getContents().getRight().getValue();
+        assertTrue(content, content.contains("extension on Box<_> via Mapper<Box<_>>"));
+        assertTrue(content, content.contains("fn map"));
+        assertTrue(definition.isLeft());
+        assertEquals(1, definition.getLeft().size());
+        assertEquals(DocumentCoordinates.positionAt(source, methodOffset).getLine(),
+                definition.getLeft().getFirst().getRange().getStart().getLine());
+    }
+
+    @Test
+    public void hoverPrefersLocalBindingOverSameNamedTopLevelFunction() throws Exception {
+        final var source = """
+                fn row(): String = "global";
+                class Row {
+                    public constructor new;
+                    public render(): String = "local";
+                }
+                fn inspect(rows: Array<Row>) {
+                    for (let row in rows) row.render();
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+        final var hover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.lastIndexOf("row.render"))));
+        final var content = hover == null ? "" : hover.getContents().getRight().getValue();
+
+        assertNotNull(hover);
+        assertTrue(content, content.contains("Row"));
+        assertFalse(content, content.contains("fn row"));
     }
 
     @Test
@@ -377,7 +684,7 @@ public class LspWorkspaceTest {
                 DocumentCoordinates.positionAt(source, source.lastIndexOf("echo"))));
 
         assertNotNull(hover);
-        assertTrue(hover.getContents().getRight().getValue().contains("fn echo(Int) -> Int"));
+        assertTrue(hover.getContents().getRight().getValue().contains("fn echo<T>(Int) -> Int"));
     }
 
     @Test
@@ -650,6 +957,25 @@ public class LspWorkspaceTest {
                 stdlib = "source"
                 """);
         return new ProjectFiles(root, entry, manifest);
+    }
+
+    private Path standardLibraryOptionSource(final Path standardLibraryRoot) throws Exception {
+        final var source = standardLibraryRoot.resolve(Path.of("zeron", "lang", "option.zn"));
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, """
+                package zeron.lang;
+                public type Option<T: nullable> = Some(value: T) | None;
+                """);
+        return source.toAbsolutePath().normalize();
+    }
+
+    private static String hoverAt(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                  final Path path, final String source, final String searchedText) {
+        final var offset = source.indexOf(searchedText);
+        final var hover = LspFeatures.hover(snapshot, path, new HoverParams(
+                new TextDocumentIdentifier(path.toUri().toString()),
+                DocumentCoordinates.positionAt(source, offset)));
+        return hover == null ? "" : hover.getContents().getRight().getValue();
     }
 
     private record ProjectFiles(Path root, Path entry, Path manifest) {}

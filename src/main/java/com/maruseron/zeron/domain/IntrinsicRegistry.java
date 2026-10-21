@@ -2,6 +2,7 @@ package com.maruseron.zeron.domain;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -49,8 +50,10 @@ public final class IntrinsicRegistry {
     }
 
     private static IntrinsicRegistry createStandard() {
-        final var element = new TypeParameterDescriptor(Integer.MIN_VALUE, "Element");
-        final var optionValue = new TypeParameterDescriptor(Integer.MIN_VALUE + 1, "OptionValue");
+        final var element = new TypeParameterDescriptor(Integer.MIN_VALUE, "Element", List.of(), false,
+                TypeParameterDescriptor.Variance.INVARIANT, true, false, true);
+        final var optionValue = new TypeParameterDescriptor(Integer.MIN_VALUE + 1, "OptionValue", List.of(), false,
+                TypeParameterDescriptor.Variance.INVARIANT, true, false, true);
         final var array = TypeDescriptor.arrayOf(element);
         final var typeParameters = java.util.List.of(element);
         return new IntrinsicRegistry(java.util.List.of(
@@ -168,6 +171,11 @@ public final class IntrinsicRegistry {
                                 java.util.List.of(TypeDescriptor.ofInt()), TypeDescriptor.ofChar(), false), null),
                 new IntrinsicDefinition(IntrinsicId.CHAR_TO_STRING,
                         new IntrinsicSignature(java.util.List.of(),
-                                java.util.List.of(TypeDescriptor.ofChar()), TypeDescriptor.ofString(), false), null)));
+                                java.util.List.of(TypeDescriptor.ofChar()), TypeDescriptor.ofString(), false), null),
+                new IntrinsicDefinition(IntrinsicId.BIG_INTEGER_FROM_LITERAL_TEXT,
+                        new IntrinsicSignature(java.util.List.of(),
+                                java.util.List.of(TypeDescriptor.ofString()),
+                                new ReferenceDescriptor(TypeDescriptor.ofName("java.math.BigInteger")),
+                                false), null)));
     }
 }

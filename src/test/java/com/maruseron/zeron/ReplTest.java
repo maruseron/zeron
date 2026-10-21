@@ -105,9 +105,9 @@ public final class ReplTest {
         try {
             System.setIn(new ByteArrayInputStream(
                     ("import zeron.collections.List;\n"
-                            + "for [1, 2, 3, 4, 5] map i -> i * 2 collect List<Int>.empty();\n"
-                            + "let mapped = for [1, 2, 3, 4, 5] map i -> i * 2 "
-                            + "collect List<Int>.empty();\nmapped.size\n:quit\n")
+                            + "for i in [1, 2, 3, 4, 5] collect i * 2 into List<Int>.empty();\n"
+                            + "let mapped = for i in [1, 2, 3, 4, 5] "
+                            + "collect i * 2 into List<Int>.empty();\nmapped.size\n:quit\n")
                             .getBytes(StandardCharsets.UTF_8)));
             System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(error, true, StandardCharsets.UTF_8));

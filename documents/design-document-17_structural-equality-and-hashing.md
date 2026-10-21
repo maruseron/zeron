@@ -198,7 +198,7 @@ Zeron value equality as a Java hash key must not be implied.
 
 `Hashable<T> requires Eq<T>` is the intended relationship once hashing is added. The settled
 composition syntax and semantics—including transitive applied requirements, inherited defaults,
-constructor requirements, witness forwarding, cycles, and JVM interface inheritance—are documented
+witness forwarding, cycles, and JVM interface inheritance—are documented
 in [design-document-05_classes-and-contracts.md](design-document-05_classes-and-contracts.md).
 
 ## Compatibility and migration

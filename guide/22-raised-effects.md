@@ -75,6 +75,50 @@ propagating. If no case matches, the same effect propagates to the surrounding h
 Effects raised by a handler arm also propagate unless that handler is itself inside another handler
 or the enclosing callable declares them.
 
+## Reusable and first-class handlers
+
+When a policy should be reused, declare a named handler. It is an immutable value and can be
+imported from a compiled library:
+
+```zeron
+public handler MissingUserText {
+    case MissingUser(_) -> "No user found";
+}
+
+fn displayUser(id: Int): String =
+    handle (findUser(id)) with MissingUserText;
+```
+
+For a one-off policy, write an anonymous handler expression. It can capture immutable locals just
+like a lambda:
+
+```zeron
+fn displayUser(id: Int): String {
+    let prefix = "Missing user: ";
+    let policy = handler {
+        case MissingUser as missing -> prefix + missing.id;
+    };
+    return handle (findUser(id)) with policy;
+}
+```
+
+A handler type records what a handler can do:
+
+```zeron
+String ~> {MissingUser}
+```
+
+The type before `~>` is the normal result type of the protected computation. The first set lists
+effects that the handler completely handles, and the optional `raises` set lists effects that its
+cases may raise. Omitting it means the handler cases raise no effects; an explicit `raises {}` is
+equivalent and remains accepted. Both sets are finite and may be empty. Effect names are exact
+concrete types; assignment requires the same result and the same two effect sets.
+
+Applying a handler removes its fully handled effects from the protected expression and adds its
+case-raised effects. Guarded or refutable cases do not count as complete coverage. If a case does not
+match at runtime, the original raised effect continues outward. Handler composition is not supported;
+use nested `handle` expressions when distinct policies must be applied in sequence.
+
 When a `using` scope raises an effect and disposal also fails, the original effect stays primary and
 the cleanup failures are attached as suppressed outcomes. A handler arm can inspect them explicitly:
 
@@ -112,9 +156,9 @@ when an external-class method explicitly maps a declared checked exception to an
 boundary.
 
 Effects are synchronous, nominal, and non-generic in the current implementation. There is no
-effect inheritance, wildcard handler, asynchronous effect propagation, or automatic Java-exception
-translation. An unhandled effect escaping generated `main` propagates across the host boundary;
-the compiler does not currently add a launcher that formats it.
+effect inheritance, wildcard handler, asynchronous effect propagation, handler composition, or
+automatic Java-exception translation. An unhandled effect escaping generated `main` propagates
+across the host boundary; the compiler does not currently add a launcher that formats it.
 
 For declaration, checking, and runtime details, see the
 [typed raised effects design document](../documents/design-document-13_typed-raised-effects.md).

@@ -1,6 +1,6 @@
 package zeron.collections;
 
-public contract Iterable<T> {
+public contract Iterable<T: nullable + mut> {
     iterator(): &Iterator<T>;
 
     default forEach(consumer: (T) -> Unit): Unit {

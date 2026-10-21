@@ -31,10 +31,14 @@ final class BytecodeEmitter {
         Files.createDirectories(context.outputDirectory);
         RuntimeSupportEmitter.emitUnitClass(context.outputDirectory);
         RuntimeSupportEmitter.emitRaisedEffectClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitEffectSupportClasses(context.outputDirectory);
         RuntimeSupportEmitter.emitResourceSupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitEqualitySupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitHashSupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitStringUnicodeSupportClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitBigIntegerSupportClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitJavaArraySupportClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitHttpSupportClasses(context.outputDirectory);
         final var signatureDeclarations = context.compilationUnits.stream()
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
                 .map(NamespaceMembers.Member::declaration).toList();
@@ -475,6 +479,7 @@ final class BytecodeEmitter {
                         composer.getfield(ClassDesc.of(target.owner()), target.name(),
                                 ClassDesc.ofDescriptor(target.descriptor()));
                     }
+                    if (target.descriptor().equals("F")) composer.f2d();
                     context.lastEmittedType = property.getType();
                     break;
                 } else if (property.safeNavigation()) {
@@ -546,7 +551,10 @@ final class BytecodeEmitter {
             }
             case Expr.CoalesceAssignment assignment -> ExpressionFlowEmitter.emitCoalesceAssignment(context, composer, assignment);
             case Expr.Binary binary -> {
-                if (binary.synthesizedEqualityEvidence() != null) {
+                if (binary.operatorCall() != null) {
+                    emitMemberCall(context, composer, binary.operatorCall());
+                    context.lastEmittedType = binary.getType();
+                } else if (binary.synthesizedEqualityEvidence() != null) {
                     emitEqualityEvidenceCall(context, composer, binary);
                     if (binary.operator.type() == TokenType.BANG_EQUAL) {
                         composer.iconst_1();
@@ -640,6 +648,9 @@ final class BytecodeEmitter {
             case Expr.Match match -> ExpressionFlowEmitter.emitMatchExpression(context, composer, match);
             case Expr.Raise raise -> ExpressionFlowEmitter.emitRaise(context, composer, raise);
             case Expr.Handle handle -> ExpressionFlowEmitter.emitHandle(context, composer, handle);
+            case Expr.HandlerLiteral handler -> emitExpr(context, composer, handler.implementation);
+            case Expr.HandlerDispatch dispatch ->
+                    ExpressionFlowEmitter.emitHandlerDispatch(context, composer, dispatch);
             case Expr.Logical logical -> ExpressionFlowEmitter.emitLogical(context, composer, logical);
             case Expr.Coalesce coalesce -> ExpressionFlowEmitter.emitCoalesce(context, composer, coalesce);
             case Expr.TypeTest test -> ExpressionFlowEmitter.emitTypeTest(context, composer, test);
@@ -711,6 +722,10 @@ final class BytecodeEmitter {
                     samMethodType));
                 context.lastEmittedType = lambda.getType();
             }
+            case Expr.SuffixedLiteral literal -> {
+                emitMemberCall(context, composer, literal.factoryCall());
+                context.lastEmittedType = literal.getType();
+            }
             case Expr.Literal literal -> {
                 switch (literal.value) {
                     case String s -> {
@@ -746,7 +761,10 @@ final class BytecodeEmitter {
                 }
             }
             case Expr.Unary unary -> {
-                if (unary.operator.type() == TokenType.NOT) {
+                if (unary.operatorCall() != null) {
+                    emitMemberCall(context, composer, unary.operatorCall());
+                    context.lastEmittedType = unary.getType();
+                } else if (unary.operator.type() == TokenType.NOT) {
                     emitExpr(context, composer, unary.right);
                     composer.iconst_1();
                     composer.ixor();
@@ -1026,12 +1044,6 @@ final class BytecodeEmitter {
                 if (contract == null) continue;
                 final var contractUse = ContractComposition.fromType(bound);
                 if (contractUse == null) continue;
-                for (final var constructor : ContractComposition.constructors(
-                        context.resolution.contracts(), contractUse)) {
-                    final var token = Expr.evidenceToken(parameter, boundIndex, constructor.index());
-                    fields.add(new EvidenceField(token, evidenceFieldName(namespace, ownerKey,
-                            parameterIndex, boundIndex, "constructor", constructor.index())));
-                }
                 for (final var method : ContractComposition.methods(
                         context.resolution.contracts(), contractUse)) {
                     final var token = Expr.methodEvidenceToken(parameter, boundIndex, method.index());
@@ -1566,6 +1578,7 @@ final class BytecodeEmitter {
                 composer.getfield(ClassDesc.of(target.owner()), target.name(),
                         ClassDesc.ofDescriptor(target.descriptor()));
             }
+            if (target.descriptor().equals("F")) composer.f2d();
             context.lastEmittedType = property.getType();
             return;
         }
@@ -1708,71 +1721,78 @@ final class BytecodeEmitter {
                 : descriptor.parameterCount();
         for (int i = 0; i < fixedParameterCount; i++) {
             emitExpr(context, composer, call.arguments.get(i));
-            emitConversion(context, composer, context.lastEmittedType, call.resolvedDescriptor().parameters().get(i));
-            if (descriptor.parameterType(i).descriptorString().equals("[Ljava/lang/Object;")) {
-                emitJavaObjectArrayCopy(context, composer);
-            }
+            final var resolvedParameter = call.resolvedDescriptor().parameters().get(i);
+            emitConversion(context, composer, context.lastEmittedType, resolvedParameter);
+            emitJavaErasedArgumentConversion(context, composer, resolvedParameter,
+                    descriptor.parameterType(i));
+            emitJavaArrayArgumentCopy(context, composer, descriptor.parameterType(i));
         }
         if (target.varArgs()) {
             emitJavaVarargsArray(context, composer, call, fixedParameterCount,
                     descriptor.parameterType(fixedParameterCount).componentType());
         }
-        if (!target.exceptionMappings().isEmpty()) {
-            final var start = composer.newLabel();
-            final var end = composer.newLabel();
-            final var done = composer.newLabel();
-            composer.labelBinding(start);
-            emitJavaInvocation(composer, target, owner, descriptor);
-            composer.labelBinding(end);
-            if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
-                    && descriptor.returnType().equals(ConstantDescs.CD_void)) {
-                emitUnitValue(context, composer);
-            }
-            composer.goto_(done);
-            for (final var mapping : target.exceptionMappings()) {
-                final var handler = composer.newLabel();
-                final var rethrow = composer.newLabel();
-                composer.labelBinding(handler);
-                composer.dup();
-                composer.instanceOf(ClassDesc.of("java.lang.RuntimeException"));
-                composer.ifne(rethrow);
-                composer.dup();
-                composer.instanceOf(ClassDesc.of("java.lang.Error"));
-                composer.ifne(rethrow);
-                final var exceptionType = ClassDesc.of(mapping.exceptionType());
-                final var effectType = ClassDesc.of(mapping.effectType());
-                if (mapping.canonicalConstructor()) {
-                    composer.new_(effectType);
-                    composer.dup_x1();
-                    composer.swap();
-                    composer.invokespecial(effectType, "<init>",
-                            MethodTypeDesc.of(ConstantDescs.CD_void, exceptionType));
-                } else {
-                    composer.invokestatic(effectType, mapping.constructorName(),
-                            MethodTypeDesc.of(effectType, exceptionType));
-                }
-                final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
-                composer.new_(carrier);
-                composer.dup_x1();
-                composer.swap();
-                composer.invokespecial(carrier, "<init>",
-                        MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
-                composer.athrow();
-                composer.labelBinding(rethrow);
-                composer.athrow();
-                composer.exceptionCatch(start, end, handler, exceptionType);
-            }
-            composer.labelBinding(done);
-        } else {
-            emitJavaInvocation(composer, target, owner, descriptor);
-            if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
-                    && descriptor.returnType().equals(ConstantDescs.CD_void)) {
-                emitUnitValue(context, composer);
-            }
+        emitJavaExceptionTranslation(composer, target.exceptionMappings(),
+                () -> emitJavaInvocation(composer, target, owner, descriptor));
+        if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
+                && descriptor.returnType().equals(ConstantDescs.CD_void)) {
+            emitUnitValue(context, composer);
+        }
+        if (target.kind() != JavaCallTarget.InvocationKind.CONSTRUCTOR
+                && !descriptor.returnType().equals(ConstantDescs.CD_void)) {
+            emitJavaReturnAdaptation(context, composer, call, descriptor.returnType());
         }
         context.lastEmittedType = call.safeNavigation() && call.resolvedDescriptor() != null
                 ? call.resolvedDescriptor().returnType()
                 : call.getType();
+    }
+
+    private static void emitJavaExceptionTranslation(
+            final CodeBuilder composer,
+            final List<JavaCallTarget.ExceptionMapping> mappings,
+            final Runnable invocation) {
+        if (mappings.isEmpty()) {
+            invocation.run();
+            return;
+        }
+        final var start = composer.newLabel();
+        final var end = composer.newLabel();
+        final var done = composer.newLabel();
+        composer.labelBinding(start);
+        invocation.run();
+        composer.labelBinding(end);
+        composer.goto_(done);
+        for (final var mapping : mappings) {
+            final var handler = composer.newLabel();
+            final var rethrow = composer.newLabel();
+            composer.labelBinding(handler);
+            composer.dup();
+            composer.instanceOf(ClassDesc.of("java.lang.RuntimeException"));
+            composer.ifne(rethrow);
+            composer.dup();
+            composer.instanceOf(ClassDesc.of("java.lang.Error"));
+            composer.ifne(rethrow);
+            final var effectType = ClassDesc.of(mapping.effectType());
+            final var constructorDescriptor = MethodTypeDesc.ofDescriptor(mapping.constructorDescriptor());
+            if (mapping.canonicalConstructor()) {
+                composer.new_(effectType);
+                composer.dup_x1();
+                composer.swap();
+                composer.invokespecial(effectType, "<init>", constructorDescriptor);
+            } else {
+                composer.invokestatic(effectType, mapping.constructorName(), constructorDescriptor);
+            }
+            final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+            composer.new_(carrier);
+            composer.dup_x1();
+            composer.swap();
+            composer.invokespecial(carrier, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
+            composer.athrow();
+            composer.labelBinding(rethrow);
+            composer.athrow();
+            composer.exceptionCatch(start, end, handler, ClassDesc.of(mapping.exceptionType()));
+        }
+        composer.labelBinding(done);
     }
 
     private static void emitJavaInvocation(final CodeBuilder composer,
@@ -1787,18 +1807,118 @@ final class BytecodeEmitter {
         }
     }
 
-    private static void emitJavaObjectArrayCopy(final CompilationContext context,
-                                                final CodeBuilder composer) {
-        final var unchanged = composer.newLabel();
-        composer.dup();
-        composer.ifnull(unchanged);
-        composer.dup();
-        composer.arraylength();
-        composer.invokestatic(ClassDesc.of("java.util.Arrays"), "copyOf",
-                MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType(),
-                        ConstantDescs.CD_Object.arrayType(), ConstantDescs.CD_int));
-        composer.labelBinding(unchanged);
-        context.lastEmittedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable()).toNullable();
+    private static void emitJavaArrayArgumentCopy(final CompilationContext context,
+                                                  final CodeBuilder composer,
+                                                  final ClassDesc javaType) {
+        final var descriptor = javaType.descriptorString();
+        final var method = switch (descriptor) {
+            case "[Ljava/lang/Object;" -> "copyObjectArray";
+            case "[I" -> "toJavaIntArray";
+            case "[J" -> "toJavaLongArray";
+            case "[D" -> "toJavaDoubleArray";
+            case "[Z" -> "toJavaBooleanArray";
+            default -> null;
+        };
+        if (method == null) return;
+        final var returnType = javaType;
+        composer.invokestatic(ClassDesc.of("zeron.runtime.JavaArraySupport"), method,
+                MethodTypeDesc.of(returnType, ConstantDescs.CD_Object.arrayType()));
+        context.lastEmittedType = descriptor.equals("[Ljava/lang/Object;")
+                ? TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable()).toNullable()
+                : JavaTypeMapping.toZeronParameterType(javaType);
+    }
+
+    private static void emitJavaErasedArgumentConversion(final CompilationContext context,
+                                                         final CodeBuilder composer,
+                                                         final TypeDescriptor resolvedType,
+                                                         final ClassDesc erasedJavaType) {
+        final var erasedType = JavaTypeMapping.toZeronMethodType(erasedJavaType);
+        if (erasedType == null || resolvedType.equals(erasedType)) return;
+        final var resolvedJavaType = TypeDescriptor.toJavaClassDesc(resolvedType);
+        final var targetJavaType = TypeDescriptor.toJavaClassDesc(erasedType);
+        final var resolvedDescriptor = resolvedJavaType.descriptorString();
+        final var targetDescriptor = targetJavaType.descriptorString();
+        if ((resolvedDescriptor.equals("I") || resolvedDescriptor.equals("J")
+                || resolvedDescriptor.equals("B") || resolvedDescriptor.equals("D")
+                || resolvedDescriptor.equals("Z"))
+                && targetDescriptor.startsWith("L")) {
+            emitBox(context, composer, resolvedType);
+            if (!targetDescriptor.equals("Ljava/lang/Object;")
+                    && !targetDescriptor.equals(boxedDescriptor(resolvedDescriptor))) {
+                composer.checkcast(targetJavaClass(context, erasedType));
+            }
+            context.lastEmittedType = erasedType;
+            return;
+        }
+        emitConversion(context, composer, resolvedType, erasedType);
+    }
+
+    private static String boxedDescriptor(final String primitiveDescriptor) {
+        return switch (primitiveDescriptor) {
+            case "I" -> "Ljava/lang/Integer;";
+            case "J" -> "Ljava/lang/Long;";
+            case "B" -> "Ljava/lang/Byte;";
+            case "D" -> "Ljava/lang/Double;";
+            case "Z" -> "Ljava/lang/Boolean;";
+            default -> throw new IllegalArgumentException(
+                    "Unsupported Java generic primitive descriptor: " + primitiveDescriptor);
+        };
+    }
+
+    private static void emitJavaReturnAdaptation(final CompilationContext context,
+                                                 final CodeBuilder composer,
+                                                 final Expr.MemberCall call,
+                                                 final ClassDesc javaType) {
+        final var declaredType = call.resolvedDescriptor() == null
+                ? call.getType() : call.resolvedDescriptor().returnType();
+        emitJavaReturnAdaptation(context, composer, javaType, declaredType);
+    }
+
+    private static void emitJavaReturnAdaptation(final CompilationContext context,
+                                                 final CodeBuilder composer,
+                                                 final ClassDesc javaType,
+                                                 final TypeDescriptor declaredType) {
+        final var descriptor = javaType.descriptorString();
+        final var mappedType = JavaTypeMapping.toZeronReturnType(javaType);
+        if (mappedType != null && mappedType.isNullable() && declaredType != null
+                && !declaredType.isNullable() && descriptor.startsWith("[")) {
+            composer.invokestatic(ClassDesc.of("zeron.runtime.JavaArraySupport"), "requireNonNull",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+            composer.checkcast(javaType);
+        }
+        final var method = switch (descriptor) {
+            case "[Ljava/lang/Object;" -> "copyObjectArray";
+            case "[I" -> "fromJavaIntArray";
+            case "[J" -> "fromJavaLongArray";
+            case "[D" -> "fromJavaDoubleArray";
+            case "[Z" -> "fromJavaBooleanArray";
+            default -> null;
+        };
+        if (method != null) {
+            composer.invokestatic(ClassDesc.of("zeron.runtime.JavaArraySupport"), method,
+                    MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType(), javaType));
+        } else if (descriptor.equals("F")) {
+            composer.f2d();
+        } else if (mappedType != null && mappedType.isNullable() && declaredType != null
+                && !declaredType.isNullable() && descriptor.startsWith("L")) {
+            composer.invokestatic(ClassDesc.of("zeron.runtime.JavaArraySupport"), "requireNonNull",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+            composer.checkcast(javaType);
+        }
+        if (descriptor.startsWith("L") && declaredType != null
+                && (declaredType instanceof IntDescriptor || declaredType instanceof LongDescriptor
+                || declaredType instanceof ByteDescriptor || declaredType instanceof FloatDescriptor
+                || declaredType instanceof BooleanDescriptor)) {
+            emitUnboxOrCast(context, composer, declaredType);
+            context.lastEmittedType = declaredType;
+            return;
+        }
+        if (descriptor.startsWith("L") && declaredType != null) {
+            final var targetType = TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(declaredType));
+            if (targetType.descriptorString().startsWith("L") && !targetType.equals(javaType)) {
+                composer.checkcast(targetJavaClass(context, declaredType));
+            }
+        }
     }
 
     private static void emitSafeProperty(CompilationContext context, final CodeBuilder composer, final Expr.Property property ){
@@ -1886,6 +2006,22 @@ final class BytecodeEmitter {
         final var target = binding.target();
         if (target instanceof FunctionBindingRegistry.IntrinsicBinding intrinsicBinding) {
             emitExternalFunctionArguments(context, composer, signature);
+            final var bigIntegerMethod = bigIntegerIntrinsicMethod(intrinsicBinding.id());
+            if (bigIntegerMethod != null) {
+                final var descriptor = MethodTypeDesc.of(
+                        TypeDescriptor.toJavaClassDesc(signature.returnType()),
+                        signature.parameters().stream().map(TypeDescriptor::toJavaClassDesc).toList());
+                composer.invokestatic(ClassDesc.of("zeron.runtime.BigIntegerSupport"), bigIntegerMethod, descriptor);
+                switch (TypeDescriptor.toJavaClassDesc(signature.returnType()).descriptorString()) {
+                    case "I", "B", "Z" -> composer.ireturn();
+                    case "J" -> composer.lreturn();
+                    case "D" -> composer.dreturn();
+                    case "V" -> composer.return_();
+                    default -> composer.areturn();
+                }
+                context.lastEmittedType = signature.returnType();
+                return;
+            }
             final var unicodeMethod = stringUnicodeIntrinsicMethod(intrinsicBinding.id());
             if (unicodeMethod != null) {
                 final var descriptor = MethodTypeDesc.of(
@@ -1939,17 +2075,20 @@ final class BytecodeEmitter {
         final MethodTypeDesc methodDescriptor;
         if (target instanceof FunctionBindingRegistry.StaticMethod staticMethod) {
             methodDescriptor = staticMethod.descriptor();
-            emitExternalFunctionArguments(context, composer, signature);
-            composer.invokestatic(staticMethod.owner(), staticMethod.methodName(), methodDescriptor);
+            emitExternalJavaArguments(context, composer, signature, methodDescriptor, 0);
+            emitJavaExceptionTranslation(composer, binding.exceptionMappings(),
+                    () -> composer.invokestatic(staticMethod.owner(), staticMethod.methodName(), methodDescriptor));
         } else if (target instanceof FunctionBindingRegistry.InstanceMethod instanceMethod) {
             methodDescriptor = instanceMethod.descriptor();
-            emitExternalFunctionArguments(context, composer, signature);
-            composer.invokevirtual(instanceMethod.owner(), instanceMethod.methodName(), methodDescriptor);
+            emitExternalJavaArguments(context, composer, signature, methodDescriptor, 1);
+            emitJavaExceptionTranslation(composer, binding.exceptionMappings(),
+                    () -> composer.invokevirtual(instanceMethod.owner(), instanceMethod.methodName(), methodDescriptor));
         } else if (target instanceof FunctionBindingRegistry.StaticFieldInstanceMethod fieldMethod) {
             methodDescriptor = fieldMethod.methodDescriptor();
             composer.getstatic(fieldMethod.fieldOwner(), fieldMethod.fieldName(), fieldMethod.fieldType());
-            emitExternalFunctionArguments(context, composer, signature);
-            composer.invokevirtual(fieldMethod.methodOwner(), fieldMethod.methodName(), methodDescriptor);
+            emitExternalJavaArguments(context, composer, signature, methodDescriptor, 0);
+            emitJavaExceptionTranslation(composer, binding.exceptionMappings(),
+                    () -> composer.invokevirtual(fieldMethod.methodOwner(), fieldMethod.methodName(), methodDescriptor));
         } else {
             throw new IllegalStateException("Unsupported external function binding target.");
         }
@@ -1957,7 +2096,9 @@ final class BytecodeEmitter {
             emitUnitValue(context, composer);
             composer.areturn();
         } else {
-            composer.return_(TypeKind.fromDescriptor(methodDescriptor.returnType().descriptorString()));
+            emitJavaReturnAdaptation(context, composer, methodDescriptor.returnType(), signature.returnType());
+            composer.return_(TypeKind.fromDescriptor(
+                    TypeDescriptor.toJavaClassDesc(signature.returnType()).descriptorString()));
         }
         context.lastEmittedType = signature.returnType();
     }
@@ -1974,6 +2115,13 @@ final class BytecodeEmitter {
             case CHAR_TO_INT -> "charToInt";
             case INT_TO_CHAR -> "intToChar";
             case CHAR_TO_STRING -> "charToString";
+            default -> null;
+        };
+    }
+
+    private static String bigIntegerIntrinsicMethod(final IntrinsicId id) {
+        return switch (id) {
+            case BIG_INTEGER_FROM_LITERAL_TEXT -> "fromLiteralText";
             default -> null;
         };
     }
@@ -2056,6 +2204,27 @@ final class BytecodeEmitter {
         for (final var parameter : signature.parameters()) {
             NominalTypeEmitter.loadLocal(context, composer, slot, parameter);
             final var descriptor = TypeDescriptor.toJavaClassDesc(parameter).descriptorString();
+            slot += descriptor.equals("D") || descriptor.equals("J") ? 2 : 1;
+        }
+    }
+
+    private static void emitExternalJavaArguments(final CompilationContext context,
+                                                  final CodeBuilder composer,
+                                                  final FunctionDescriptor signature,
+                                                  final MethodTypeDesc methodDescriptor,
+                                                  final int signatureParameterOffset) {
+        var slot = 0;
+        if (signatureParameterOffset == 1) {
+            final var receiverType = signature.parameters().getFirst();
+            NominalTypeEmitter.loadLocal(context, composer, slot, receiverType);
+            final var receiverDescriptor = TypeDescriptor.toJavaClassDesc(receiverType).descriptorString();
+            slot += receiverDescriptor.equals("D") || receiverDescriptor.equals("J") ? 2 : 1;
+        }
+        for (int index = 0; index < methodDescriptor.parameterCount(); index++) {
+            final var parameterType = signature.parameters().get(index + signatureParameterOffset);
+            NominalTypeEmitter.loadLocal(context, composer, slot, parameterType);
+            emitJavaArrayArgumentCopy(context, composer, methodDescriptor.parameterType(index));
+            final var descriptor = TypeDescriptor.toJavaClassDesc(parameterType).descriptorString();
             slot += descriptor.equals("D") || descriptor.equals("J") ? 2 : 1;
         }
     }

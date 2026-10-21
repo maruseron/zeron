@@ -20,9 +20,10 @@ first-class union types. Flow typing is static type checking, not general error 
 - `Unit` uses a shared generated `zeron.lang.Unit` singleton in compiler output and the bundled
   standard-library artifact, so `Unit` remains distinct from
   `null` and can widen to `Any`.
-- Classes are final and can conform to multiple contracts. Invariant generic classes/contracts are
-  supported with raw JVM erasure. There is no class inheritance, general subtype lattice, or
-  source-level union type; parameterized runtime type tests remain unsupported.
+- Classes are final and can conform to multiple contracts. Generic classes/contracts use raw JVM
+  erasure. There is no class inheritance, general subtype lattice, or source-level union type.
+  Statically justified generic nominal targets are supported for `is` and `as?` as specified in
+  [ZEP-0053](./zeps/ZEP-0053.md).
 - Arrays lower to `Object[]`; their element type is not represented in the JVM array class. A runtime
   test cannot validate `Array<Int>` versus `Array<String>` from the array object alone.
 - Expression-level `is Type`, checked `as T`, safe `as? T`, and short-circuit `and`/`or`/`not`
@@ -47,19 +48,22 @@ A test such as `value is Person` can narrow an `Any` or contract-typed value to 
 against a contract checks the generated JVM interface. Class and contract type identity remains
 source-level identity; a generated binary name is only the runtime representation.
 
-Parameterized runtime tests are deferred. In particular, `value is Array<Int>` must not claim to
-check an element type that the JVM array class does not retain. Generic nominal types and function
-shapes need separate reifiability rules before they become valid test targets.
+Parameterized runtime tests are limited to statically justified Zeron generic class/contract targets
+in `is` and `as?`. The runtime check remains erased; source-level generic arguments must be
+determined from declared relationships, or the target must be a safe projected view. In particular,
+`value is Array<Int>` must not claim to check an element type that the JVM array class does not
+retain. Java generic relationship proofs, checked `as` targets, function-shape tests, and
+array-element tests remain unsupported.
 
 ## Implemented Syntax
 
-The parser implements `is Type` and `is not Type` at comparison precedence and casts at unary/cast
-precedence. `is not Type` is parsed as `not (value is Type)`, using the same Boolean and flow
-semantics. `as` is a keyword; `?` selects a safe cast:
+The parser implements `is Type`, `is not Type`, `is null`, and `is not null` at comparison
+precedence and casts at unary/cast precedence. The negated forms are parsed as `not (value is ...)`,
+using the same Boolean and flow semantics. `as` is a keyword; `?` selects a safe cast:
 
 ```text
 equality   ::= typeTest { ("==" | "!=") typeTest }
-typeTest   ::= comparison [ "is" [ "not" ] Type ]
+typeTest   ::= comparison [ "is" [ "not" ] (Type | "null") ]
 comparison ::= cast { (">" | ">=" | "<" | "<=") cast }
 cast       ::= unary { "as" [ "?" ] Type }
 ```
@@ -85,6 +89,13 @@ False outcomes may initially retain only facts already known on entry. `is not T
 false flow outcomes of `is T`; it does not infer a negative type fact or prove non-null, since null
 also fails `is T`.
 
+`value is null` returns true exactly for a null value, and `value is not null` is its complement.
+These built-in null tests do not resolve a contract member or use runtime type reflection. A direct
+stable local or parameter read receives null/non-null flow facts on the respective branches;
+properties, array slots, and call results are tested without refining a later reevaluation. Testing
+a statically non-null value is valid and yields false for `is null` or true for `is not null` without
+a diagnostic.
+
 ### Checked cast: `as`
 
 `value as T` evaluates to `T` after a runtime check. A non-null source with an incompatible runtime
@@ -107,7 +118,10 @@ result/error type can represent that distinction if needed.
 Neither cast changes the flow facts for the original binding. For example, after `let candidate =
 value as? Person`, `candidate` has type `Person?`, while `value` retains its declared type unless
 another condition proves otherwise. Targets must be runtime-testable: built-ins, classes, contracts,
-and `Any` are supported; generic, array-element, and function-shape targets are rejected.
+and `Any` are supported. Generic nominal targets are allowed only for `is` and `as?` when static
+Zeron type relationships prove their applied arguments, or when the target is a safe projected
+view. Checked `as` continues to reject generic targets. Array-element and function-shape targets
+remain unsupported.
 
 ## Flow Facts
 
@@ -235,6 +249,6 @@ error-handling feature rather than quietly making casts catchable.
 
 - Runtime coverage across Unit, all primitive checked/safe cast pairs, classes, contracts, nulls, and
   checked failure propagation is implemented.
-- Keep erased generic, array-element, and function-shape targets rejected unless a sound runtime check
-  exists.
+- Keep generic nominal checks erased and restricted to the static-proof rules in ZEP-0053; do not
+  reify arguments. Array-element and function-shape targets remain rejected.
 - Consider redundant `checkcast` elimination as an optimization, not a semantic requirement.

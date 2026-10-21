@@ -10,6 +10,7 @@ import com.maruseron.zeron.domain.JavaFieldTarget;
 import com.maruseron.zeron.domain.ResolvedIntrinsicOperation;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
+import com.maruseron.zeron.scan.SuffixableNumber;
 
 import java.util.List;
 import java.util.Objects;
@@ -112,6 +113,7 @@ public sealed interface Expr {
         public final Token paren;
         public final List<Expr> arguments;
         public final List<TypeDescriptor> explicitTypeArguments;
+        private List<TypeDescriptor> explicitOwnerTypeArguments = List.of();
         private final boolean safeNavigation;
         private TypeDescriptor type;
         private FunctionDescriptor resolvedDescriptor;
@@ -134,6 +136,7 @@ public sealed interface Expr {
         private String witnessMethodOwner;
         private String witnessMethodName;
         private FunctionDescriptor witnessMethodType;
+        private TypeDescriptor requiredContractType;
         private List<EvidenceArgument> evidenceArguments = List.of();
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
@@ -156,6 +159,10 @@ public sealed interface Expr {
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
         public boolean safeNavigation() { return safeNavigation; }
+        public List<TypeDescriptor> explicitOwnerTypeArguments() { return explicitOwnerTypeArguments; }
+        public void setExplicitOwnerTypeArguments(final List<TypeDescriptor> typeArguments) {
+            explicitOwnerTypeArguments = List.copyOf(typeArguments);
+        }
         public FunctionDescriptor resolvedDescriptor() { return resolvedDescriptor; }
         public void setResolvedDescriptor(FunctionDescriptor descriptor) { resolvedDescriptor = descriptor; }
         public Stmt.Method resolvedSourceMethod() { return resolvedSourceMethod; }
@@ -206,6 +213,10 @@ public sealed interface Expr {
         public String witnessMethodOwner() { return witnessMethodOwner; }
         public String witnessMethodName() { return witnessMethodName; }
         public FunctionDescriptor witnessMethodType() { return witnessMethodType; }
+        public TypeDescriptor requiredContractType() { return requiredContractType; }
+        public void setRequiredContractType(final TypeDescriptor contractType) {
+            requiredContractType = contractType;
+        }
         public void setWitnessMethod(final String owner, final String methodName,
                                      final FunctionDescriptor methodType) {
             witnessMethodOwner = owner;
@@ -419,6 +430,7 @@ public sealed interface Expr {
         private TypeDescriptor type;
         private MemberCall displayCall;
         private MemberCall comparisonCall;
+        private MemberCall operatorCall;
         private EvidenceArgument synthesizedEqualityEvidence;
         private boolean builtInStringification;
         private boolean nullableStringification;
@@ -438,6 +450,8 @@ public sealed interface Expr {
         public void setDisplayCall(final MemberCall call) { displayCall = call; }
         public MemberCall comparisonCall() { return comparisonCall; }
         public void setComparisonCall(final MemberCall call) { comparisonCall = call; }
+        public MemberCall operatorCall() { return operatorCall; }
+        public void setOperatorCall(final MemberCall call) { operatorCall = call; }
         public EvidenceArgument synthesizedEqualityEvidence() { return synthesizedEqualityEvidence; }
         public void setSynthesizedEqualityEvidence(final EvidenceArgument evidence) {
             synthesizedEqualityEvidence = evidence;
@@ -477,13 +491,26 @@ public sealed interface Expr {
         public final Expr value;
         public final Token operator;
         public final TypeDescriptor targetType;
+        public final boolean nullTest;
         private TypeDescriptor type = TypeDescriptor.ofBoolean();
         private TypeDescriptor resolvedTargetType;
 
         public TypeTest(final Expr value, final Token operator, final TypeDescriptor targetType) {
+            this(value, operator, targetType, false);
+        }
+
+        public TypeTest(final Expr value, final Token operator) {
+            this(value, operator, TypeDescriptor.ofNull(), true);
+        }
+
+        private TypeTest(final Expr value,
+                         final Token operator,
+                         final TypeDescriptor targetType,
+                         final boolean nullTest) {
             this.value = value;
             this.operator = operator;
             this.targetType = targetType;
+            this.nullTest = nullTest;
         }
 
         public TypeDescriptor getType() {
@@ -735,16 +762,59 @@ public sealed interface Expr {
         public final Token keyword;
         public final Expr expression;
         public final List<HandleArm> arms;
+        public final Expr handler;
         private TypeDescriptor type = TypeDescriptor.ofInfer();
 
         public Handle(final Token keyword, final Expr expression, final List<HandleArm> arms) {
+            this(keyword, expression, arms, null);
+        }
+
+        public Handle(final Token keyword, final Expr expression, final List<HandleArm> arms,
+                      final Expr handler) {
             this.keyword = keyword;
             this.expression = expression;
+            this.arms = List.copyOf(arms);
+            this.handler = handler;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor type) { this.type = type; }
+    }
+
+    final class HandlerDispatch implements Expr {
+        public final Token keyword;
+        public final Token carrier;
+        public final List<HandleArm> arms;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+
+        public HandlerDispatch(final Token keyword, final Token carrier, final List<HandleArm> arms) {
+            this.keyword = keyword;
+            this.carrier = carrier;
             this.arms = List.copyOf(arms);
         }
 
         public TypeDescriptor getType() { return type; }
         public void setType(final TypeDescriptor type) { this.type = type; }
+    }
+
+    final class HandlerLiteral implements Expr {
+        public final Token keyword;
+        public final List<HandleArm> arms;
+        public final Lambda implementation;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+
+        public HandlerLiteral(final Token keyword, final List<HandleArm> arms,
+                              final Lambda implementation) {
+            this.keyword = keyword;
+            this.arms = List.copyOf(arms);
+            this.implementation = implementation;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor type) {
+            this.type = type;
+            implementation.setType(type);
+        }
     }
 
     final class Call implements Expr {
@@ -1154,11 +1224,34 @@ public sealed interface Expr {
         }
     }
 
+    sealed interface PipelineClause permits PipelineClause.Generator, PipelineClause.Let,
+            PipelineClause.Guard {
+        Token keyword();
+
+        record Generator(Token keyword, Token binding, Expr source) implements PipelineClause {}
+
+        record Let(Token keyword, Token binding, Expr expression) implements PipelineClause {}
+
+        record Guard(Token keyword, Expr condition) implements PipelineClause {}
+    }
+
+    sealed interface PipelineResult permits PipelineResult.Yield, PipelineResult.Collect {
+        Token keyword();
+
+        record Yield(Token keyword, Expr expression) implements PipelineResult {}
+
+        record Collect(Token keyword, Expr expression, Token into, Expr sink) implements PipelineResult {}
+    }
+
     final class Pipeline implements Expr  {
         public final Token keyword;
         public final Expr source;
         public final List<PipelineStage> stages;
         public final boolean isTerminal;
+        private final List<PipelineClause> clauses;
+        private final PipelineResult result;
+        private Expr loweredExpression;
+        private final boolean comprehension;
 
         private TypeDescriptor type = TypeDescriptor.ofInfer();
         private TypeDescriptor sourceElementType = TypeDescriptor.ofInfer();
@@ -1171,10 +1264,29 @@ public sealed interface Expr {
             this.source = source;
             this.stages = List.copyOf(stages);
             this.isTerminal = isTerminal;
+            this.clauses = List.of();
+            this.result = null;
+            this.comprehension = false;
+        }
+
+        public Pipeline(final Token keyword, final List<PipelineClause> clauses,
+                        final PipelineResult result) {
+            this.keyword = keyword;
+            this.clauses = List.copyOf(clauses);
+            this.result = result;
+            this.source = ((PipelineClause.Generator) clauses.getFirst()).source();
+            this.stages = List.of();
+            this.isTerminal = result instanceof PipelineResult.Collect;
+            this.comprehension = true;
         }
 
         public TypeDescriptor getType() { return type; }
         public void setType(final TypeDescriptor resolvedType) { type = resolvedType; }
+        public List<PipelineClause> clauses() { return clauses; }
+        public PipelineResult result() { return result; }
+        public boolean isComprehension() { return comprehension; }
+        public Expr loweredExpression() { return loweredExpression; }
+        public void setLoweredExpression(final Expr expression) { loweredExpression = expression; }
         public TypeDescriptor sourceElementType() { return sourceElementType; }
         public void setSourceElementType(final TypeDescriptor elementType) { sourceElementType = elementType; }
 
@@ -1226,6 +1338,28 @@ public sealed interface Expr {
                     "body="  + body  + ", " +
                     "type="  + type  + ']';
         }
+    }
+
+    final class SuffixedLiteral implements Expr {
+        private final Token number;
+        private final Token suffix;
+        private final SuffixableNumber info;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+        private MemberCall factoryCall;
+
+        public SuffixedLiteral(final Token number, final Token suffix, final SuffixableNumber info) {
+            this.number = number;
+            this.suffix = suffix;
+            this.info = info;
+        }
+
+        public Token number() { return number; }
+        public Token suffix() { return suffix; }
+        public SuffixableNumber info() { return info; }
+        public MemberCall factoryCall() { return factoryCall; }
+        public void setFactoryCall(final MemberCall factoryCall) { this.factoryCall = factoryCall; }
+        @Override public TypeDescriptor getType() { return type; }
+        @Override public void setType(final TypeDescriptor type) { this.type = type; }
     }
 
     final class Literal implements Expr {
@@ -1328,6 +1462,7 @@ public sealed interface Expr {
         public final Token operator;
         public final Expr right;
         private TypeDescriptor type;
+        private MemberCall operatorCall;
 
         public Unary(Token operator, Expr right, TypeDescriptor type) {
             this.operator = operator;
@@ -1342,6 +1477,8 @@ public sealed interface Expr {
         public void setType(TypeDescriptor type) {
             this.type = type;
         }
+        public MemberCall operatorCall() { return operatorCall; }
+        public void setOperatorCall(final MemberCall call) { operatorCall = call; }
 
         public boolean equals(Object obj) {
             if (obj == this) return true;

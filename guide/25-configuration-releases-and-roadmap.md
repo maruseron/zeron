@@ -46,7 +46,8 @@ entry point with the configured runtime classpath. Use `--manifest path/to/zeron
 different file. `zeron help` lists commands and flags; `zeron help run` or `zeron help --manifest`
 shows focused help. `zeron explain ZR0000` displays a terminal-formatted bundled explanation for a
 diagnostic code. `zeron dump <api-index|class-directory|library.jar>` prints the public API index
-for a library artifact.
+for a library artifact. Use `zeron version` (or `zeron --version`) to identify the running
+distribution; it works without a project manifest.
 Compiler diagnostics and explanations use ANSI colors when an interactive terminal is detected.
 Zeron-language examples in explanations are syntax-highlighted. Output falls back to plain text
 when non-interactive, when `NO_COLOR` has a non-empty value, or when `TERM` is `dumb`. REPL

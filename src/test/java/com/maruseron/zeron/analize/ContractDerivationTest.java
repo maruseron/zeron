@@ -37,8 +37,8 @@ public final class ContractDerivationTest {
                 }
                 public type Choice deriving Hashable = Empty | Value(value: Int);
                 public newtype UserId deriving Eq, Hashable = Int;
-                fn same<T: Eq<T>>(left: T, right: T): Boolean = left.eq(right);
-                fn hash<T: Hashable<T>>(value: T): Int = value.hash();
+                fn same<T: mut + Eq<T>>(left: T, right: T): Boolean = left.eq(right);
+                fn hash<T: mut + Hashable<T>>(value: T): Int = value.hash();
                 fn equalRecords(): Boolean =
                     same(Record.new(7, "seven"), Record.new(7, "seven"));
                 fn unequalRecords(): Boolean =
@@ -133,7 +133,7 @@ public final class ContractDerivationTest {
                         package client;
                         import %s.Box;
                         import zeron.lang.Hashable;
-                        fn hashBox<T: Hashable<T>>(value: T): Int = value.hash();
+                        fn hashBox<T: mut + Hashable<T>>(value: T): Int = value.hash();
                         fn result(): Int = hashBox(Box<Int>.new(17));
                         """.formatted(libraryPackage));
                 final var clientCompiler = CompilationService.forCompilationUnits(

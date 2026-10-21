@@ -4,6 +4,7 @@ import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -119,6 +120,46 @@ public final class ScannerLocationTest {
         assertEquals(0, result.tokens().getFirst().literal());
         assertEquals("ZR1004", result.diagnostics().getFirst().code().toString());
         assertEquals(1, result.diagnostics().size());
+    }
+
+    @Test
+    public void scansSeparatedDecimalAndRadixIntegerLiterals() {
+        final var result = Scanner.from("1_000 12_345L 3.141_592 0b1010 0O755 0Xff 0xFF_FF 0b1_0L 012")
+                .scanWithDiagnostics();
+        final var numericTokens = result.tokens().stream()
+                .filter(token -> token.type() != TokenType.EOF).toList();
+
+        assertTrue(result.diagnostics().toString(), result.diagnostics().isEmpty());
+        assertEquals(List.of(TokenType.INT, TokenType.LONG, TokenType.DOUBLE, TokenType.INT, TokenType.INT,
+                        TokenType.INT, TokenType.INT, TokenType.LONG, TokenType.INT),
+                numericTokens.stream().map(Token::type).toList());
+        assertEquals(List.of(1_000, BigInteger.valueOf(12_345), 3.141_592, 10, 493, 255, 65_535,
+                        BigInteger.valueOf(2), 12),
+                numericTokens.stream().map(Token::literal).toList());
+        assertEquals("0xFF_FF", numericTokens.get(6).lexeme());
+    }
+
+    @Test
+    public void reportsMalformedNumericLiteralsWithTheirFullSourceSpans() {
+        for (final var literal : List.of(
+                "1__0", "1_", "1_.0", "1._0", "1.0_", "0b", "0x_FF", "0b102", "0o8",
+                "12_L", "1L_2", "0b10L_2", "0o77L_2", "0xFFL_2")) {
+            final var result = Scanner.from(literal, "src/numeric.zn").scanWithDiagnostics();
+
+            assertEquals(literal, 1, result.diagnostics().size());
+            final var diagnostic = result.diagnostics().getFirst();
+            assertEquals(literal, "ZR1006", diagnostic.code().toString());
+            assertEquals(literal.length(), diagnostic.primarySpan().end().offset().intValue());
+        }
+    }
+
+    @Test
+    public void keepsRadixIntegerRangeErrorsDistinctFromMalformedLiterals() {
+        final var result = Scanner.from("0x80000000 0x8000000000000001L").scanWithDiagnostics();
+
+        assertEquals(2, result.diagnostics().size());
+        assertTrue(result.diagnostics().stream()
+                .allMatch(diagnostic -> diagnostic.code().toString().equals("ZR1004")));
     }
 
     @Test

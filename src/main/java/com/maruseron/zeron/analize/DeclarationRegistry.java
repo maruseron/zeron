@@ -15,6 +15,8 @@ import java.lang.constant.MethodTypeDesc;
 import java.util.*;
 
 final class DeclarationRegistry {
+    private static final ClassDesc HTTP_SUPPORT_OWNER = ClassDesc.of("zeron.runtime.HttpSupport");
+
     private final Set<String> types;
     private final Map<String, Stmt.ClassDecl> classes;
     private final Map<String, Stmt.ExternalClass> externalClasses;
@@ -183,7 +185,7 @@ final class DeclarationRegistry {
             classes.put(caseClassName, caseClass);
         }
         final var sumContract = new Stmt.ContractDecl(sum.name(), sum.typeParameters(), List.of(),
-                List.of(), List.of(), sum.isPublic(), true, permitted);
+                List.of(), List.of(), sum.isPublic(), true, false, permitted);
         contracts.put(sum.name().lexeme(), sumContract);
     }
 
@@ -210,12 +212,7 @@ final class DeclarationRegistry {
                         constructor.name(), "External constructor does not match a unique public Java constructor."));
                 continue;
             }
-            if (javaConstructor.exceptionTypes().stream().anyMatch(this::isCheckedException)) {
-                Zeron.resolutionError(new ResolutionError(
-                        DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
-                        constructor.name(), "Java constructors declaring checked exceptions are not supported "
-                                + "by external facades yet."));
-            }
+            validateExternalExceptionMappings(constructor.name(), constructor.exceptionMappings(), javaConstructor);
         }
         final var methodDescriptors = new HashSet<String>();
         for (final var method : declaration.methods()) {
@@ -235,7 +232,7 @@ final class DeclarationRegistry {
                         method.name(), "External method does not match a unique public Java method."));
                 continue;
             }
-            validateExternalExceptionMappings(method, preferredMethods.getFirst());
+            validateExternalExceptionMappings(method.name(), method.exceptionMappings(), preferredMethods.getFirst());
         }
         final var propertyNames = new HashSet<String>();
         for (final var property : declaration.staticProperties()) {
@@ -252,10 +249,11 @@ final class DeclarationRegistry {
         }
     }
 
-    private void validateExternalExceptionMappings(final Stmt.ExternalMethod method,
+    private void validateExternalExceptionMappings(final Token where,
+                                                   final List<Stmt.ExternalExceptionMapping> exceptionMappings,
                                                    final JavaClassPath.JavaMethod javaMethod) {
         final var mappingsByType = new HashMap<String, Stmt.ExternalExceptionMapping>();
-        for (final var mapping : method.exceptionMappings()) {
+        for (final var mapping : exceptionMappings) {
             if (!(mapping.javaExceptionType() instanceof NominalDescriptor exceptionType)) {
                 Zeron.resolutionError(new ResolutionError(
                         DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
@@ -287,7 +285,7 @@ final class DeclarationRegistry {
                     .noneMatch(mappedType -> javaClassPath.isSubtypeOf(declaredException, mappedType))) {
                 Zeron.resolutionError(new ResolutionError(
                         DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
-                        method.name(), "Declared checked Java exception '" + declaredException
+                        where, "Declared checked Java exception '" + declaredException
                                 + "' must have an explicit Zeron effect mapping."));
             }
         }
@@ -311,26 +309,38 @@ final class DeclarationRegistry {
 
     static boolean matchesExternalConstructor(final Stmt.ExternalConstructor declaration,
                                               final JavaClassPath.JavaMethod method) {
-        final var descriptor = externalConstructorDescriptor(declaration);
-        return declaration.isPublic() && descriptor != null && method.isConstructor()
-                && !method.isStatic() && !method.isVarArgs() && !method.hasGenericSignature()
-                && descriptor.equals(method.descriptor());
+        if (!declaration.isPublic() || !method.isConstructor() || method.isStatic()
+                || method.isVarArgs() || method.hasGenericSignature()
+                || declaration.parameterTypes().size() != method.descriptor().parameterCount()) return false;
+        for (int index = 0; index < declaration.parameterTypes().size(); index++) {
+            if (!matchesExternalParameterType(method.descriptor().parameterType(index),
+                    declaration.parameterTypes().get(index))) return false;
+        }
+        return true;
     }
 
     static boolean matchesExternalMethod(final Stmt.ExternalMethod declaration,
                                          final JavaClassPath.JavaMethod method) {
-        final var descriptor = externalMethodDescriptor(declaration);
-        if (!declaration.isPublic() || descriptor == null || method.isConstructor()
+        if (!declaration.isPublic() || method.isConstructor()
                 || declaration.isStatic() != method.isStatic()
                 || !declaration.name().lexeme().equals(method.name())) return false;
-        if (descriptor.equals(method.descriptor())) {
-            return !method.isVarArgs() && !method.hasGenericSignature();
+        if (method.hasGenericSignature() && !method.isVarArgs()) return false;
+        final var javaDescriptor = method.descriptor();
+        if (!method.isVarArgs()) {
+            if (declaration.typeDescriptor().arity() != javaDescriptor.parameterCount()) return false;
+            for (int index = 0; index < javaDescriptor.parameterCount(); index++) {
+                if (!matchesExternalParameterType(javaDescriptor.parameterType(index),
+                        declaration.typeDescriptor().parameters().get(index))) return false;
+            }
+            return matchesExternalReturnType(javaDescriptor.returnType(),
+                    declaration.typeDescriptor().returnType());
         }
-        if (!method.isVarArgs()
-                || method.descriptor().parameterCount() != descriptor.parameterCount() + 1
-                || !descriptor.returnType().equals(method.descriptor().returnType())) return false;
-        for (int i = 0; i < descriptor.parameterCount(); i++) {
-            if (!descriptor.parameterType(i).equals(method.descriptor().parameterType(i))) return false;
+        if (declaration.typeDescriptor().arity() != javaDescriptor.parameterCount() - 1
+                || !matchesExternalReturnType(javaDescriptor.returnType(),
+                        declaration.typeDescriptor().returnType())) return false;
+        for (int index = 0; index < declaration.typeDescriptor().arity(); index++) {
+            if (!matchesExternalParameterType(javaDescriptor.parameterType(index),
+                    declaration.typeDescriptor().parameters().get(index))) return false;
         }
         return true;
     }
@@ -435,7 +445,7 @@ final class DeclarationRegistry {
                         function.name(),
                         "External function signature does not match its registered implementation binding."));
             }
-            validateExternalFunctionBinding(function.name(), binding);
+            validateExternalFunctionBinding(externalFunction, binding);
             externalBindings.put(externalFunction, binding);
         }
         final var symbolToken = new Token(function.name().type(), qualifiedName,
@@ -483,20 +493,6 @@ final class DeclarationRegistry {
         erased.parameters().subList(0, arity).stream()
                 .map(type -> TypeDescriptor.toJavaClassDesc(type).descriptorString())
                 .forEach(parameters::add);
-        final var witnessCount = extension.typeDescriptor().typeParameters().stream()
-                .flatMap(parameter -> parameter.bounds().stream())
-                .mapToInt(bound -> {
-                    final var contractName = bound instanceof GenericDescriptor generic
-                            ? generic.baseType().name()
-                            : bound instanceof ReferenceDescriptor reference
-                                ? reference.baseType().name() : bound.name();
-                    final var contract = contracts.get(contractName);
-                    return contract == null ? 0 : contract.namedConstructors().size();
-                })
-                .sum();
-        for (int index = 0; index < witnessCount; index++) {
-            parameters.add("Ljava/lang/invoke/MethodHandle;");
-        }
         final var returnType = TypeDescriptor.toJavaClassDesc(erased.returnType()).descriptorString();
         return String.join("", parameters) + "->" + returnType;
     }
@@ -514,8 +510,9 @@ final class DeclarationRegistry {
                 && left.returnType().equals(right.returnType());
     }
 
-    private void validateExternalFunctionBinding(final Token name,
+    private void validateExternalFunctionBinding(final Stmt.ExternalFunction externalFunction,
                                                  final FunctionBindingRegistry.Binding binding) {
+        final var name = externalFunction.name();
         if (binding.signature().isGeneric()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE, name,
                     "External JVM functions cannot be generic."));
@@ -533,31 +530,35 @@ final class DeclarationRegistry {
             return;
         }
         final MethodTypeDesc methodDescriptor;
+        JavaClassPath.JavaMethod boundMethod = null;
         if (target instanceof FunctionBindingRegistry.StaticMethod methodTarget) {
             methodDescriptor = methodTarget.descriptor();
             final var ownerName = binaryName(methodTarget.owner());
-            final var javaClass = javaClassPath.find(ownerName);
-            if (javaClass == null) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
-                        "External JVM owner '" + ownerName
-                                + "' was not found on the configured --java-classpath roots."));
-                return;
-            }
-            if (javaClass.hasTypeParameters()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE, name,
-                        "External JVM functions on generic classes are not supported."));
-                return;
-            }
-            final var matches = javaClass.methods().stream()
-                    .anyMatch(method -> method.name().equals(methodTarget.methodName())
-                            && method.isStatic()
-                            && !method.isConstructor()
-                            && !method.isVarArgs()
-                            && !method.hasGenericSignature()
-                            && method.descriptor().equals(methodDescriptor));
-            if (!matches) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
-                        "Registered JVM static method does not match public class-file metadata."));
+            if (!HTTP_SUPPORT_OWNER.equals(methodTarget.owner())) {
+                final var javaClass = javaClassPath.find(ownerName);
+                if (javaClass == null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
+                            "External JVM owner '" + ownerName
+                                    + "' was not found on the configured --java-classpath roots."));
+                    return;
+                }
+                if (javaClass.hasTypeParameters()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE, name,
+                            "External JVM functions on generic classes are not supported."));
+                    return;
+                }
+                boundMethod = javaClass.methods().stream()
+                        .filter(method -> method.name().equals(methodTarget.methodName())
+                                && method.isStatic()
+                                && !method.isConstructor()
+                                && !method.isVarArgs()
+                                && !method.hasGenericSignature()
+                                && method.descriptor().equals(methodDescriptor))
+                        .findFirst().orElse(null);
+                if (boundMethod == null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
+                            "Registered JVM static method does not match public class-file metadata."));
+                }
             }
         } else if (target instanceof FunctionBindingRegistry.InstanceMethod methodTarget) {
             methodDescriptor = methodTarget.descriptor();
@@ -569,24 +570,34 @@ final class DeclarationRegistry {
                                 + "' was not found on the configured --java-classpath roots."));
                 return;
             }
-            final var matches = javaClass.methods().stream()
-                    .anyMatch(method -> method.name().equals(methodTarget.methodName())
+            boundMethod = javaClass.methods().stream()
+                    .filter(method -> method.name().equals(methodTarget.methodName())
                             && !method.isStatic()
                             && !method.isConstructor()
                             && !method.isVarArgs()
                             && !method.hasGenericSignature()
-                            && method.descriptor().equals(methodDescriptor));
-            if (!matches) {
+                            && method.descriptor().equals(methodDescriptor))
+                    .findFirst().orElse(null);
+            if (boundMethod == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
                         "Registered JVM instance method does not match public class-file metadata."));
             }
             if (binding.signature().arity() != methodDescriptor.parameterCount() + 1
-                    || !matchesExternalType(methodTarget.owner(), binding.signature().parameters().getFirst())) {
+                    || !matchesExternalParameterType(
+                            methodTarget.owner(), binding.signature().parameters().getFirst())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
                         name, "Registered JVM receiver does not match the external function signature."));
             }
         } else if (target instanceof FunctionBindingRegistry.StaticFieldInstanceMethod methodTarget) {
             methodDescriptor = methodTarget.methodDescriptor();
+            final var javaClass = javaClassPath.find(binaryName(methodTarget.methodOwner()));
+            if (javaClass != null) {
+                boundMethod = javaClass.methods().stream()
+                        .filter(method -> method.name().equals(methodTarget.methodName())
+                                && !method.isStatic() && !method.isConstructor()
+                                && method.descriptor().equals(methodDescriptor))
+                        .findFirst().orElse(null);
+            }
         } else {
             throw new IllegalStateException("Unknown external JVM binding target.");
         }
@@ -598,23 +609,50 @@ final class DeclarationRegistry {
             return;
         }
         for (int index = 0; index < methodDescriptor.parameterCount(); index++) {
-            if (!matchesExternalType(methodDescriptor.parameterType(index),
+            if (!matchesExternalParameterType(methodDescriptor.parameterType(index),
                     binding.signature().parameters().get(index + (instanceMethod ? 1 : 0)))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
                         "Registered JVM parameter descriptor does not match the external function signature."));
             }
         }
-        if (!matchesExternalType(methodDescriptor.returnType(), binding.signature().returnType())) {
+        if (!matchesExternalReturnType(methodDescriptor.returnType(), binding.signature().returnType())) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,
                     "Registered JVM return descriptor does not match the external function signature."));
         }
+        if (boundMethod == null && !externalFunction.exceptionMappings().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    name, "Java exception mappings require public class-file method metadata."));
+        } else if (boundMethod != null) {
+            validateExternalExceptionMappings(name, externalFunction.exceptionMappings(), boundMethod);
+        }
     }
 
-    private boolean matchesExternalType(final ClassDesc javaType, final TypeDescriptor zeronType) {
-        final var mappedType = JavaTypeMapping.toZeronType(javaType);
-        if (mappedType != null) return mappedType.equals(zeronType);
-        return zeronType instanceof ArrayDescriptor
-                && javaType.descriptorString().equals("[Ljava/lang/Object;");
+    private static boolean matchesExternalParameterType(final ClassDesc javaType,
+                                                        final TypeDescriptor zeronType) {
+        return matchesExternalType(JavaTypeMapping.toZeronParameterType(javaType), javaType, zeronType);
+    }
+
+    private static boolean matchesExternalReturnType(final ClassDesc javaType,
+                                                     final TypeDescriptor zeronType) {
+        return matchesExternalType(JavaTypeMapping.toZeronReturnType(javaType), javaType, zeronType);
+    }
+
+    private static boolean matchesExternalType(final TypeDescriptor mappedType, final ClassDesc javaType,
+                                               final TypeDescriptor zeronType) {
+        if (mappedType != null) {
+            if (javaType.descriptorString().equals("[Ljava/lang/Object;")
+                    && externalCarrierType(zeronType) instanceof ArrayDescriptor) return true;
+            return externalCarrierType(mappedType).equals(externalCarrierType(zeronType));
+        }
+        return false;
+    }
+
+    private static TypeDescriptor externalCarrierType(final TypeDescriptor type) {
+        return switch (type) {
+            case NullableDescriptor nullable -> externalCarrierType(nullable.baseType());
+            case ReferenceDescriptor reference -> externalCarrierType(reference.baseType());
+            default -> type;
+        };
     }
 
     private String binaryName(final ClassDesc classDescriptor) {

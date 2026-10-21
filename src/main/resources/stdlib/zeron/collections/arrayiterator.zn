@@ -1,8 +1,6 @@
 package zeron.collections;
 
-import zeron.lang.Option;
-
-public class ArrayIterator<T> is Iterator<T> {
+public class ArrayIterator<T: nullable + mut> is Iterator<T> {
     arr: Array<T>;
     current: Int;
 
@@ -10,10 +8,10 @@ public class ArrayIterator<T> is Iterator<T> {
 
     public constructor from(arr: Array<T>) = ArrayIterator<T>.new(arr, 0);
 
-    public mut next(): Option<T> {
-        if (this.current >= this.arr.length) return Option<T>.None();
+    public mut next(): Step<T> {
+        if (this.current >= this.arr.length) return Step<T>.Done();
         let value = this.arr[this.current];
         this.current = this.current + 1;
-        return Option.Some(value);
+        return Step.Yield(value);
     }
 }

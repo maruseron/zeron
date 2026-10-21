@@ -17,10 +17,9 @@ updated; assigning it to `Array<T>` projects that view to read-only. `array[inde
 `array[index] = value` writes through `&Array<T>`, and `array.length` returns the fixed length.
 Indexes are zero-based; compiled
 programs use `Objects.checkIndex` and throw `IndexOutOfBoundsException` for an invalid index.
-Each literal creates a distinct backing array. The standard library exposes
-`zeron.internal.generateArray(length, initializer)`, which initializes each slot before returning. The bundled
-list implementation may use raw allocation internally for private capacity, but never exposes
-unused slots as `T` values.
+Each literal creates a distinct backing array. The `zeron.internal.generateArray(length, initializer)`
+helper initializes each slot before returning. An array-backed collection may use raw allocation
+internally for private capacity, but never exposes unused slots as `T` values.
 
 ## Purpose
 

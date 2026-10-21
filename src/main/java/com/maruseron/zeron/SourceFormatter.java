@@ -129,6 +129,7 @@ final class SourceFormatter {
         private final List<Token> tokens;
         private final CanonicalStyle style;
         private final Set<Integer> genericAngles;
+        private final Set<Integer> handlerEffectSetBraces;
         private final StringBuilder output = new StringBuilder();
         private final Deque<Parenthesis> parentheses = new ArrayDeque<>();
         private final Deque<Integer> declarationBodyDepths = new ArrayDeque<>();
@@ -156,6 +157,7 @@ final class SourceFormatter {
             this.tokens = tokens;
             this.style = style;
             genericAngles = findGenericAngles(tokens);
+            handlerEffectSetBraces = findHandlerEffectSetBraces(tokens);
         }
 
         private String format() {
@@ -201,6 +203,18 @@ final class SourceFormatter {
         private void formatToken(final int index, final Token token) {
             final var type = token.type();
             final var next = nextSignificantType(index + 1);
+            if (handlerEffectSetBraces.contains(index)) {
+                if (type == TokenType.LEFT_BRACE) {
+                    if (needsSpace(previous, type, index)) space();
+                    append(token.lexeme());
+                } else {
+                    trimSpace();
+                    append(token.lexeme());
+                }
+                previous = type;
+                previousIndex = index;
+                return;
+            }
             if (lineLength == 0 && type != TokenType.RIGHT_BRACE
                     && type != TokenType.RIGHT_PAREN && type != TokenType.RIGHT_BRACKET
                     && type != TokenType.SEMICOLON) {
@@ -367,6 +381,7 @@ final class SourceFormatter {
                 return;
             }
             if (isExpressionBreakOperator(type) && !genericAngles.contains(index)
+                    && !isHandlerArrowGreater(index)
                     && !(type == TokenType.IS && isDeclarationConformanceClause(index))
                     && !(type == TokenType.MINUS && unaryPosition())
                     && !(type == TokenType.PLUS && unaryPosition())
@@ -773,6 +788,9 @@ final class SourceFormatter {
         }
 
         private boolean needsSpace(final TokenType before, final TokenType after, final int currentIndex) {
+            if (before == TokenType.SUFFIXABLE_NUMBER && after == TokenType.IDENTIFIER) return false;
+            if (before == TokenType.LEFT_BRACE && handlerEffectSetBraces.contains(previousIndex)) return false;
+            if (after == TokenType.TILDE && isHandlerArrowTilde(currentIndex)) return true;
             if (before == null || before == TokenType.LEFT_PAREN || before == TokenType.LEFT_BRACKET
                     || before == TokenType.DOT || before == TokenType.HUH_DOT
                     || before == TokenType.COLON_COLON || before == TokenType.BANG
@@ -807,6 +825,19 @@ final class SourceFormatter {
                 return true;
             }
             return true;
+        }
+
+        private boolean isHandlerArrowTilde(final int index) {
+            final var next = nextNonCommentIndex(tokens, index + 1);
+            return next < tokens.size() && tokens.get(index).type() == TokenType.TILDE
+                    && tokens.get(next).type() == TokenType.GREATER;
+        }
+
+        private boolean isHandlerArrowGreater(final int index) {
+            var previous = index - 1;
+            while (previous >= 0 && tokens.get(previous).type().isComment()) previous--;
+            return previous >= 0 && tokens.get(index).type() == TokenType.GREATER
+                    && tokens.get(previous).type() == TokenType.TILDE;
         }
 
         private boolean isReferencePrefix(final int tokenIndex) {
@@ -918,6 +949,39 @@ final class SourceFormatter {
                 }
             }
             return Set.copyOf(result);
+        }
+
+        private static Set<Integer> findHandlerEffectSetBraces(final List<Token> tokens) {
+            final var result = new HashSet<Integer>();
+            for (var open = 0; open < tokens.size(); open++) {
+                if (tokens.get(open).type() != TokenType.LEFT_BRACE) continue;
+                var previous = open - 1;
+                while (previous >= 0 && tokens.get(previous).type().isComment()) previous--;
+                if (previous < 0) continue;
+                final var previousType = tokens.get(previous).type();
+                final var isHandlerSet = previousType == TokenType.RAISES
+                        || previousType == TokenType.GREATER
+                        && previousNonCommentType(tokens, previous) == TokenType.TILDE;
+                if (!isHandlerSet) continue;
+                var depth = 0;
+                for (var close = open; close < tokens.size(); close++) {
+                    final var type = tokens.get(close).type();
+                    if (type == TokenType.LEFT_BRACE) depth++;
+                    else if (type == TokenType.RIGHT_BRACE && --depth == 0) {
+                        result.add(open);
+                        result.add(close);
+                        break;
+                    }
+                }
+            }
+            return Set.copyOf(result);
+        }
+
+        private static TokenType previousNonCommentType(final List<Token> tokens, final int index) {
+            for (var previous = index - 1; previous >= 0; previous--) {
+                if (!tokens.get(previous).type().isComment()) return tokens.get(previous).type();
+            }
+            return null;
         }
 
         private static int matchingGenericClose(final List<Token> tokens, final int open) {

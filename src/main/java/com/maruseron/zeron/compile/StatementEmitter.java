@@ -316,8 +316,8 @@ final class StatementEmitter {
             TypeDescriptor.ofName(iteratorName), elementType));
         final var iterableContractType = TypeDescriptor.genericOf(
             TypeDescriptor.ofName(iterableName), elementType);
-        final var optionType = TypeDescriptor.genericOf(
-            TypeDescriptor.ofName("zeron.lang.Option"), elementType);
+        final var stepType = TypeDescriptor.genericOf(
+            TypeDescriptor.ofName("zeron.collections.Step"), elementType);
 
         emitExpr(context, composer, iterable);
         emitConversion(context, composer, context.lastEmittedType, iterableContractType);
@@ -326,7 +326,7 @@ final class StatementEmitter {
         context.lastEmittedType = iteratorType;
         final var iteratorLocal = declareLoopLocal(context, nextLoopTemporary(context, "iterator"), iteratorType);
         composer.astore(iteratorLocal.lvt() + context.localSlotOffset);
-        final var optionLocal = declareLoopLocal(context, nextLoopTemporary(context, "option"), optionType);
+        final var stepLocal = declareLoopLocal(context, nextLoopTemporary(context, "step"), stepType);
         final var valueLocal = declareLoopLocal(context, iterationBind, elementType);
 
         final var loopStart = composer.newLabel();
@@ -334,17 +334,18 @@ final class StatementEmitter {
         composer.labelBinding(loopStart);
         composer.aload(iteratorLocal.lvt() + context.localSlotOffset);
         composer.invokeinterface(ClassDesc.of(iteratorName), "next",
-                MethodTypeDesc.of(ClassDesc.of("zeron.lang.Option")));
-        composer.astore(optionLocal.lvt() + context.localSlotOffset);
+                MethodTypeDesc.of(ClassDesc.of("zeron.collections.Step")));
+        composer.astore(stepLocal.lvt() + context.localSlotOffset);
 
-        composer.aload(optionLocal.lvt() + context.localSlotOffset);
-        final var someClass = ClassDesc.of("zeron.lang.Option$$sum$Some");
-        composer.instanceOf(someClass);
-        composer.ifeq(loopExit);
+        composer.aload(stepLocal.lvt() + context.localSlotOffset);
+        final var doneClass = ClassDesc.of("zeron.collections.Step$$sum$Done");
+        composer.instanceOf(doneClass);
+        composer.ifne(loopExit);
 
-        composer.aload(optionLocal.lvt() + context.localSlotOffset);
-        composer.checkcast(someClass);
-        composer.invokevirtual(someClass, "$zeron$payload$0",
+        composer.aload(stepLocal.lvt() + context.localSlotOffset);
+        final var yieldClass = ClassDesc.of("zeron.collections.Step$$sum$Yield");
+        composer.checkcast(yieldClass);
+        composer.invokevirtual(yieldClass, "$zeron$payload$0",
                 MethodTypeDesc.of(ConstantDescs.CD_Object));
         emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), elementType);
         composer.storeLocal(TypeKind.fromDescriptor(

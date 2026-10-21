@@ -1,0 +1,70 @@
+package zeron.net;
+
+import zeron.lang.Result;
+import zeron.time.Duration;
+
+public type HttpRequestError =
+      InvalidTimeout
+    | InvalidHeader(error: HttpHeaderError);
+
+public class HttpRequest {
+    methodValue: HttpMethod;
+    uriValue: HttpUri;
+    headersValue: HttpHeaders;
+    bodyValue: ByteArray?;
+    responseTimeoutValue: Duration?;
+    bodyReadIdleTimeoutValue: Duration?;
+
+    private constructor new;
+
+    public property method: HttpMethod {
+        get = this.methodValue;
+    }
+
+    public property uri: HttpUri {
+        get = this.uriValue;
+    }
+
+    public property headers: HttpHeaders {
+        get = this.headersValue;
+    }
+
+    public property body: ByteArray? {
+        get = this.bodyValue;
+    }
+
+    public property responseTimeout: Duration? {
+        get = this.responseTimeoutValue;
+    }
+
+    public property bodyReadIdleTimeout: Duration? {
+        get = this.bodyReadIdleTimeoutValue;
+    }
+
+    public constructor from(method: HttpMethod, uri: HttpUri) =
+        HttpRequest.new(method, uri, HttpHeaders.empty(), null, null, null);
+
+    public withHeader(name: String, value: String): Result<HttpRequest, HttpRequestError> {
+        return match (this.headers.add(name, value)) {
+            case Result.Ok(headers) -> Result<HttpRequest, HttpRequestError>.Ok(
+                HttpRequest.new(this.method, this.uri, headers, this.body,
+                    this.responseTimeout, this.bodyReadIdleTimeout));
+            case Result.Err(error) -> Result<HttpRequest, HttpRequestError>.Err(
+                HttpRequestError.InvalidHeader(error));
+        };
+    }
+
+    public withBody(body: ByteArray): HttpRequest =
+        HttpRequest.new(this.method, this.uri, this.headers, body,
+            this.responseTimeout, this.bodyReadIdleTimeout);
+
+    public withTimeouts(responseTimeout: Duration,
+                        bodyReadIdleTimeout: Duration): Result<HttpRequest, HttpRequestError> {
+        if (responseTimeout.nanoseconds <= 0L or bodyReadIdleTimeout.nanoseconds <= 0L) {
+            return Result<HttpRequest, HttpRequestError>.Err(HttpRequestError.InvalidTimeout());
+        }
+        return Result<HttpRequest, HttpRequestError>.Ok(
+            HttpRequest.new(this.method, this.uri, this.headers, this.body,
+                responseTimeout, bodyReadIdleTimeout));
+    }
+}

@@ -68,6 +68,10 @@ final class ClassSignatureEmitter {
             case ByteArrayDescriptor _ -> "[B";
             case GenericDescriptor generic -> classTypeSignature(
                     generic.baseType().name(), generic.typeParameters());
+            case TypeProjectionDescriptor projection -> (typeArgument
+                    ? projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "+" : "-"
+                    : "") + typeSignature(projection.bound(), true);
+            case CapturedTypeDescriptor capture -> typeSignature(capture.upperBound(), typeArgument);
             case FunctionDescriptor function -> referenceDescriptorSignature(
                     TypeDescriptor.toJavaClassDesc((FunctionDescriptor) TypeSubstitution.erase(function))
                             .descriptorString());

@@ -10,6 +10,8 @@ final class CliHelp {
 
             Usage:
               zeron                         Start the REPL
+              zeron version
+              zeron --version
               zeron <source.zn>... [flags]  Compile source files
               zeron --root <dir> --entry <source.zn> [flags]
               zeron init
@@ -19,6 +21,7 @@ final class CliHelp {
               zeron lsp [--manifest <file>]
               zeron explain <ZR0000>
               zeron dump <api-index|class-directory|library.jar>
+              zeron dump --stdlib [package]
               zeron --build-stdlib <dir> [--jar-output <file>]
               zeron help [command|flag]
 
@@ -37,6 +40,16 @@ final class CliHelp {
             """;
 
     private static final Map<String, String> TOPICS = Map.ofEntries(
+            Map.entry("version", """
+                    Usage: zeron version
+
+                    Print the version of the running Zeron distribution.
+                    """),
+            Map.entry("--version", """
+                    Usage: zeron --version
+
+                    Alias for 'zeron version'.
+                    """),
             Map.entry("init", """
                     Usage: zeron init
 
@@ -65,8 +78,11 @@ final class CliHelp {
             Map.entry("lsp", """
                     Usage: zeron lsp [--manifest <file>] [--stdio]
 
-                    Start the Zeron Language Server Protocol server over stdio for the project
-                    described by zeron.toml. The manifest defaults to ./zeron.toml.
+                    Start the Zeron Language Server Protocol server over stdio. When present,
+                    ./zeron.toml is used by default; otherwise the current directory is treated
+                    as a source workspace. The standard-library source root is detected when
+                    opening the repository root or the standard-library directory directly.
+                    An explicit --manifest must name a valid project manifest.
                     --stdio explicitly selects the default stdio transport for language clients.
                     """),
             Map.entry("explain", """
@@ -76,9 +92,12 @@ final class CliHelp {
                     """),
             Map.entry("dump", """
                     Usage: zeron dump <api-index|class-directory|library.jar>
+                           zeron dump --stdlib [package]
 
-                    Print the public API index found in an API index file, class directory,
-                    or Zeron library JAR.
+                    Print a public API index from an API index file, class directory, or Zeron
+                    library JAR. With --stdlib, build and print the bundled standard-library
+                    index; an optional package name filters the output (for example,
+                    'zeron.collections').
                     """),
             Map.entry("help", """
                     Usage: zeron help [command|flag]
@@ -143,7 +162,7 @@ final class CliHelp {
                     """));
 
     private static final Set<String> COMMANDS =
-            Set.of("init", "build", "run", "fmt", "lsp", "explain", "dump", "help");
+            Set.of("version", "init", "build", "run", "fmt", "lsp", "explain", "dump", "help");
 
     private CliHelp() {}
 

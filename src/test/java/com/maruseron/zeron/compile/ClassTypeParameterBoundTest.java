@@ -54,19 +54,6 @@ public final class ClassTypeParameterBoundTest {
                     public constructor new;
                     public key(): K = this.keyValue;
                 }
-                public contract Empty<T> {
-                    constructor empty(value: T);
-                }
-                public class IntCell is Empty<Int> {
-                    value: Int;
-                    public constructor new;
-                    public constructor empty(value: Int) = IntCell.new(value);
-                    public read(): Int = this.value;
-                }
-                public class FactoryBox<C: Empty<Int>> {
-                    public constructor new;
-                    public make(): &C = C.empty(42);
-                }
                 """.formatted(libraryPackage));
 
         try {
@@ -101,8 +88,6 @@ public final class ClassTypeParameterBoundTest {
                     import %s.NamedHashBox;
                     import %s.IntHashCarrier;
                     import %s.GenericHashCarrier;
-                    import %s.IntCell;
-                    import %s.FactoryBox;
                     public fn create(): &HashKey<Int> = HashKey<Int>.new();
                     public fn hashBox(): Int = HashBox<Int>.new(17).hash();
                     public fn hashBoxObject(): &HashBox<Int> = HashBox<Int>.new(41);
@@ -114,11 +99,8 @@ public final class ClassTypeParameterBoundTest {
                     public fn genericHashCarrier<K: Hashable<K>>(value: K): Int =
                             GenericHashCarrier<K>.new(value).keyHash();
                     public fn genericHashCarrierResult(): Int = genericHashCarrier<Int>(31);
-                    public fn classBoundFactory(): &IntCell =
-                            FactoryBox<IntCell>.new().make();
                     """.formatted(clientPackage, libraryPackage, libraryPackage, libraryPackage,
-                            libraryPackage, libraryPackage, libraryPackage, libraryPackage,
-                            libraryPackage));
+                            libraryPackage, libraryPackage, libraryPackage));
             final var validCompiler = CompilationService.forCompilationUnits(
                     List.of(validClient), clientPackage + ".Client", clientPackage, List.of(libraryIndex));
             validCompiler.resolve();
@@ -136,8 +118,6 @@ public final class ClassTypeParameterBoundTest {
                 assertEquals(23, generated.getMethod("forwardedHashResult").invoke(null));
                 assertEquals(29, generated.getMethod("hashCarrier").invoke(null));
                 assertEquals(31, generated.getMethod("genericHashCarrierResult").invoke(null));
-                final var cell = generated.getMethod("classBoundFactory").invoke(null);
-                assertEquals(42, cell.getClass().getMethod("read").invoke(cell));
                 final var boundedClass = loader.loadClass(libraryPackage + ".HashKey");
                 final var javaConstruction = assertThrows(java.lang.reflect.InvocationTargetException.class,
                         () -> boundedClass.getConstructor().newInstance());

@@ -1,7 +1,11 @@
 module ZeronGrammar;
 
-# IDENTIFIER, INT, LONG, DOUBLE, STRING, and CHAR denote scanner token kinds; LONG is an integer literal
-# with an `L` suffix.
+# IDENTIFIER, INT, LONG, DOUBLE, SUFFIXABLE_NUMBER, STRING, and CHAR denote scanner token kinds;
+# LONG is an integer literal with an `L` suffix. SUFFIXABLE_NUMBER preserves a raw numeric spelling
+# when an adjacent identifier may be a custom suffix. Decimal digits may use `_` separators only between digits. Integer literals may
+# use case-insensitive `0b`, `0o`, and `0x` prefixes for binary, octal, and hexadecimal values.
+# Radix-prefixed literals use INT by default and LONG with an `L` suffix; decimal leading zeroes remain
+# decimal, and radix prefixes do not support floating-point literals.
 # CHAR is a single-quoted Unicode scalar literal; its escapes are `\\`, `\'`, `\n`, `\r`, `\t`, and
 # braced hexadecimal `\u{...}`.
 # // and /* */ comments are retained as ranged scanner tokens and exposed by ParseResult,
@@ -13,10 +17,11 @@ module ZeronGrammar;
 program                    : [packageDeclaration] {importDeclaration} {topLevelDeclaration} EOF ;
 packageDeclaration         : "package" qualifiedName ";" ;
 qualifiedName              : IDENTIFIER {"." IDENTIFIER} ;
-importDeclaration          : "import" qualifiedName ["as" IDENTIFIER] ";" ;
+importDeclaration          : "import" [soft("suffix")] qualifiedName ["as" IDENTIFIER] ";" ;
 
 topLevelDeclaration        : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl | typeDecl
                            | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
+                           | handlerDecl | publicHandlerDecl
                            | externalClassDecl | publicExternalClassDecl
                            | effectDecl | publicEffectDecl | extensionDecl | publicExtensionDecl
                            | publicClassDecl | publicContractDecl | publicSealedContractDecl | publicTypeDecl ;
@@ -29,6 +34,8 @@ publicClassDecl            : "public" classDecl ;
 publicContractDecl         : "public" contractDecl ;
 publicSealedContractDecl   : "public" sealedContractDecl ;
 publicTypeDecl             : "public" typeDecl ;
+publicHandlerDecl          : "public" handlerDecl ;
+handlerDecl                : soft("handler") IDENTIFIER handlerBody ;
 sealedContractDecl         : "sealed" contractDecl ;
 typeDecl                   : "type" IDENTIFIER [typeParameters] [derivingClause] "="
                              (productComponents | sumCase {"|" sumCase}) ";" ;
@@ -40,7 +47,7 @@ newtypeDecl                : soft("newtype") IDENTIFIER [derivingClause] "=" bui
 builtinType                : "Int" | "Long" | "Byte" | "Float" | "Boolean" | "String" ;
 sumCase                    : IDENTIFIER ["(" [sumPayload {"," sumPayload}] ")"] ;
 sumPayload                 : IDENTIFIER ":" type ;
-declaration                : varDecl | funDecl | statement ;
+declaration                : varDecl | funDecl | handlerDecl | statement ;
 
 varDecl                    : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
 funDecl                    : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type] [raisesClause]
@@ -68,7 +75,10 @@ extensionMethod            : ["public"] ["mut"] "fn" memberName [typeParameters]
                              ("=" expression ";" | block) ;
 contractUse                : qualifiedName [typeArguments] ;
 classMember                : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl
+                           | suffixDeclaration
                            | methodDecl | patternDecl ;
+suffixDeclaration          : soft("suffix") IDENTIFIER "{" suffixFactory+ "}" ;
+suffixFactory              : (soft("integer") | soft("decimal")) ":" [soft("string")] IDENTIFIER ";" ;
 fieldDecl                  : IDENTIFIER ":" type ";" ;
 propertyDecl               : [visibility] ["mut"] "property" IDENTIFIER ":" type ["=" expression]
                              (";" | "{" propertyAccessor+ "}") ;
@@ -89,12 +99,11 @@ contractDecl               : "contract" IDENTIFIER [typeParameters] [soft("requi
                              {"+" contractUse}] [soft("permits") permittedClass {"," permittedClass}]
                              "{" contractMember* "}" ;
 permittedClass             : qualifiedName [typeArguments] ;
-contractMember             : contractProperty | contractMethod | contractConstructor ;
+contractMember              : contractProperty | contractMethod ;
 contractProperty           : ["mut"] "property" IDENTIFIER ":" type ";" ;
 contractMethod             : ["default"] ["mut"] memberName [typeParameters] "(" parameters ")" ":" type
                              [raisesClause]
                              (";" | "=" expression ";" | block) ;
-contractConstructor        : "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause] ;
 visibility                 : "public" | "private" ;
 memberName                 : IDENTIFIER ;
 
@@ -133,7 +142,7 @@ bitwiseOr                  : bitwiseXor {"|" bitwiseXor} ;
 bitwiseXor                 : bitwiseAnd {"^" bitwiseAnd} ;
 bitwiseAnd                 : equality {"&" equality} ;
 equality                   : typeTest {("!=" | "==" | "===") typeTest} ;
-typeTest                   : comparison ["is" ["not"] type | soft("matches") matchPattern] ;
+typeTest                   : comparison ["is" ["not"] (type | "null") | soft("matches") matchPattern] ;
 comparison                 : shift {(">" | ">=" | "<" | "<=") shift} ;
 shift                      : term {("<<" | ">>" | ">>>") term} ;
 term                       : factor {("-" | "+") factor} ;
@@ -150,7 +159,8 @@ functionValueReference     : IDENTIFIER "::" typeArguments ;
 genericClassFactoryCall    : IDENTIFIER [typeArguments] "." IDENTIFIER arguments ;
 arguments                  : "(" [expression {"," expression}] ")" ;
 typeArguments              : "<" type {"," type} ">" ;
-type                       : ["&"] typeAtom ["?"] ;
+type                       : ["&"] typeAtom ["~>" effectSet ["raises" effectSet]] ["?"] ;
+effectSet                  : "{" [type {"," type}] "}" ;
 typeAtom                   : qualifiedName ["<" typeArgumentsBody ">"]
                            | "(" ")" "->" type [raisesClause]
                            | "(" type ")" ["->" type [raisesClause]]
@@ -160,10 +170,12 @@ typeArgumentsBody          : type {"," type} ;
 primary                    : INT
                            | LONG
                            | DOUBLE
+                           | suffixedNumericLiteral
                            | STRING
                            | CHAR
                            | IDENTIFIER
                            | handleExpr
+                           | handlerLiteral
                            | arrayLiteral
                            | lambda
                            | "true" | "false" | "null" | "this"
@@ -174,7 +186,10 @@ primary                    : INT
                            | "(" ")"
                            | "(" expression ")"
                            | range ;
-handleExpr                 : "handle" "(" expression ")" soft("with") "{" handleArm+ "}" ;
+suffixedNumericLiteral     : SUFFIXABLE_NUMBER IDENTIFIER ;
+handleExpr                 : "handle" "(" expression ")" soft("with") (handlerBody | expression) ;
+handlerLiteral             : soft("handler") handlerBody ;
+handlerBody                : "{" handleArm+ "}" ;
 handleArm                  : "case" matchPattern ["if" expression]
                              [soft("with") soft("suppressed") "as" IDENTIFIER]
                              "->" expression ";" ;
@@ -189,17 +204,12 @@ matchPattern               : patternAlternative {"|" patternAlternative} ;
 patternAlternative         : "_" | IDENTIFIER | type ["." IDENTIFIER "("
                              [patternArgument {"," patternArgument}] ")"] ["as" IDENTIFIER] ;
 patternArgument            : "_" | IDENTIFIER | matchPattern ;
-forExpr                    : "for" expr { forStage } [ collectStage ] ;
-forStage                   : forMapStage | forFlatMapStage | forFilterStage
-                           | forDropStage | forTakeStage | forDropWhileStage | forTakeWhileStage ;
-forMapStage                : soft("map") ( IDENTIFIER | "_" ) "->" expression ;
-forFlatMapStage            : soft("flatMap") ( IDENTIFIER | "_" ) "->" expression ;
-forFilterStage             : soft("filter") ( IDENTIFIER | "_" ) "->" expression ;
-forDropStage               : soft("drop") expression ;
-forTakeStage               : soft("take") expression ;
-forDropWhileStage          : soft("dropWhile") ( IDENTIFIER | "_" ) "->" expression ;
-forTakeWhileStage          : soft("takeWhile") ( IDENTIFIER | "_" ) "->" expression ;
-collectStage               : soft("collect") expression ;
+forExpr                    : "for" IDENTIFIER "in" expression { forClause } forResult ;
+forClause                  : "for" IDENTIFIER "in" expression
+                           | "let" IDENTIFIER "=" expression
+                           | "if" expression ;
+forResult                  : soft("yield") expression
+                           | soft("collect") expression soft("into") expression ;
 lambda                     : IDENTIFIER "->" lambdaBody
                            | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
 lambdaBody                 : expression | block ;
@@ -218,23 +228,19 @@ anonymousObjectMember      : ["public"] ["mut"] "property" IDENTIFIER ":" type
 #   declaration. Ordinary Zeron functions and methods do not overload. Extension methods may share
 #   a name only for non-equivalent receiver types; calls select by receiver applicability alone,
 #   and multiple applicable extensions are ambiguous.
-# - A for-expression evaluates its source once. Without collect, it returns a lazy Stream and creates
-#   stage callbacks and evaluates count expressions in source order; callback bodies run during
-#   traversal. Every traversal requests a new iterator, but the source need not be replayable. Stages
-#   execute in order; filters and drops skip later stages for rejected elements, while take and
-#   takeWhile stop traversal when their limits are reached.
-# - `drop` and `take` accept Int counts; negative counts behave like zero. `dropWhile` skips values
-#   while its predicate is true, then passes all later values. `takeWhile` stops at the first value
-#   for which its predicate is false. Their state spans the complete pipeline, including flatMap output.
-# - A collect expression is the only terminal stage and must evaluate to a mutable reference to a
-#   Sink<T>; the expression returns that sink. Before traversal, evaluate the source and acquire its
-#   iterator for iterable inputs, then evaluate the collector, then evaluate count expressions and
-#   snapshot stage captures in source order. Stage expressions are inlined in the collected loop, and
-#   their bodies run per relevant element during traversal.
-# - A flatMap stage expression must evaluate to an Iterable<T>, fully traversed before the next source
-#   element. Filter, dropWhile, and takeWhile predicates must resolve to Boolean.
-# - Contract constructors are static factory requirements; conforming classes provide compatible
-#   public named constructors, and contract conformance does not add runtime constructor dispatch.
+# - A for-expression has ordered generator, local-binding, and guard clauses, followed by exactly one
+#   final result clause. The result clause is either `yield expression` for a lazy Stream<T> or
+#   `collect expression into sink` for eager collection into a mutable Sink<T>.
+# - Generator expressions are evaluated for each path that reaches them and are traversed in lexical,
+#   depth-first order. Bindings introduced by `for` and `let` clauses are visible to later clauses.
+#   Guards skip the remainder of the current path when false.
+# - A lazy comprehension evaluates its outer source expression once at construction and defers
+#   traversal and per-element clause expressions until values are requested. It does not guarantee
+#   source replayability. Eager collection evaluates the outer source and sink once before traversal;
+#   projected values are added in traversal order, and the expression returns the sink.
+# - The words `yield`, `collect`, and `into` are contextual identifiers used in for-expression result
+#   clauses, not globally reserved keywords.
+# - Contracts describe instance behavior and do not declare class-side constructor requirements.
 # - Contract bounds are permitted only on generic functions and generic methods; class and contract
 #   declaration type parameters remain unbounded. Multiple ordinary contract bounds use `+`.
 # - Sealed contracts require a non-empty permits list. Permitted classes must be in the contract's
@@ -289,6 +295,9 @@ anonymousObjectMember      : ["public"] ["mut"] "property" IDENTIFIER ":" type
 #   method type parameters must name contracts; only non-mutating contract methods are available
 #   through a bounded type parameter. Operator constraints remain unsupported.
 # - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
+# - Generic type applications on Zeron classes/contracts and imported Java generic types may
+#   project an argument as `out Type` or `in Type`. Projections are type-only views; they do not
+#   apply to arrays, generic type constructors, sums, products, or raw Java generic types.
 # - Project compilation uses explicit source roots and an entry file. Cross-package source units may
 #   declare classes, contracts, functions, and immutable top-level values. Selective imports may use
 #   `as` aliases and require public declarations. Compiled libraries export public immutable
@@ -328,12 +337,16 @@ anonymousObjectMember      : ["public"] ["mut"] "property" IDENTIFIER ":" type
 # - Array literals are non-empty. A valueless `return` has type Unit and is rejected in non-Unit functions.
 # - Effects are nominal non-generic payload classes. Effects are supported in callable signatures,
 #   function types, and entry-point `main`, but not in external Java signatures or top-level
-#   initializers. A raised effect must be declared by the enclosing callable or handled by a typed
-#   `handle` case. Handler cases reuse nested and OR `matchPattern` syntax, allow Boolean guards,
-#   and require their OR alternatives to name the same effect type. Only an unguarded, irrefutable
-#   pattern establishes effect coverage; unmatched effects propagate at runtime. Java checked
-#   exceptions can be mapped only by explicit external-class method declarations; there is no
-#   automatic translation. There are no catch-all cases or effect subtyping in this slice.
+#   initializers. Named `handler` declarations are immutable top-level or namespace values; anonymous
+#   `handler { ... }` expressions may capture immutable locals. Handler types use
+#   `R ~> {HandledEffect, ...} [raises {HandlerEffect, ...}]` with finite concrete effect sets.
+#   The optional raised-effect set defaults to empty.
+#   Applying a handler subtracts only completely handled effects and adds effects from its cases.
+#   Handler cases reuse nested and OR `matchPattern` syntax, allow Boolean guards, and require their
+#   OR alternatives to name the same effect type. Only an unguarded, irrefutable pattern establishes
+#   effect coverage; unmatched effects propagate at runtime. Java checked exceptions can be mapped
+#   only by explicit external-class method declarations; there is no automatic translation. There
+#   are no catch-all cases or effect subtyping in this slice.
 #   `Result` remains an ordinary value type.
 # - Sum declarations introduce closed nominal types. Cases are constructed and matched through
 #   qualified calls/patterns; payload positions are positional, and generic case patterns inherit

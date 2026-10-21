@@ -161,7 +161,7 @@ public final class ResolutionDiagnosticsTest {
                     for (let item in 42) { }
                 }
                 fn badSink(): Unit {
-                    let values = for [1] collect 0;
+                    let values = for item in [1] collect item into 0;
                 }
                 """).scanTokens()).parseCompilationUnit("iteration-protocols.zn");
 
@@ -185,5 +185,27 @@ public final class ResolutionDiagnosticsTest {
         assertEquals(List.of(new DiagnosticHelp(
                         "Declare this function or import it from the package that provides it.")),
                 result.errors().getFirst().helps());
+    }
+
+    @Test
+    public void rejectsNumericSuffixesThatWereNotExplicitlyImported() {
+        final var unit = Parser.of(Scanner.from("""
+                class Meter {
+                    value: String;
+                    public constructor fromText(value: String) = Meter.new(value);
+                    suffix m {
+                        integer: string fromText;
+                    }
+                }
+                fn run(): Unit {
+                    let value = 5m;
+                }
+                """, "src/main.zn").scanTokens()).parseCompilationUnit("src/main.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(1, result.errors().size());
+        assertEquals("Unknown or unimported numeric literal suffix 'm'.",
+                result.errors().getFirst().message());
     }
 }

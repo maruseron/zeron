@@ -2,10 +2,8 @@ package zeron.collections;
 
 import zeron.control.Foldable;
 import zeron.control.Monad;
-import zeron.internal.unwrapSome;
-import zeron.lang.Option;
 
-class ArrayStream<T> is Iterable<T> {
+class ArrayStream<T: nullable + mut> is Iterable<T> {
     values: Array<T>;
 
     public iterator(): &Iterator<T> {
@@ -14,17 +12,17 @@ class ArrayStream<T> is Iterable<T> {
             values: Array<T> = array;
             current: Int = 0;
 
-            public mut next(): Option<T> {
-                if (this.current >= this.values.length) return Option<T>.None();
+            public mut next(): Step<T> {
+                if (this.current >= this.values.length) return Step<T>.Done();
                 let value = this.values[this.current];
                 this.current = this.current + 1;
-                return Option.Some(value);
+                return Step.Yield(value);
             }
         };
     }
 }
 
-class MappedStream<T, R> is Iterable<R> {
+class MappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> R;
 
@@ -35,16 +33,17 @@ class MappedStream<T, R> is Iterable<R> {
             source: &Iterator<T> = upstream;
             transform: (T) -> R = mapper;
 
-            public mut next(): Option<R> {
-                let item = this.source.next();
-                if (not item.isSome()) return Option<R>.None();
-                return Option.Some(this.transform(unwrapSome(item)));
+            public mut next(): Step<R> {
+                return match (this.source.next()) {
+                    case Step.Yield(value) -> Step.Yield(this.transform(value));
+                    case Step.Done() -> Step<R>.Done();
+                };
             }
         };
     }
 }
 
-class FlatMappedStream<T, R> is Iterable<R> {
+class FlatMappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> Iterable<R>;
 
@@ -57,22 +56,25 @@ class FlatMappedStream<T, R> is Iterable<R> {
             transform: (T) -> Iterable<R> = flatMapper;
             inner: &Iterator<R> = initialInner;
 
-            public mut next(): Option<R> {
+            public mut next(): Step<R> {
                 let mut item = this.inner.next();
-                while (true) {
-                    if (item.isSome()) return item;
+                loop {
+                    if (item matches Step.Yield(_)) return item;
                     let outerItem = this.source.next();
-                    if (not outerItem.isSome()) return Option<R>.None();
-                    this.inner = this.transform(unwrapSome(outerItem)).iterator();
+                    if (outerItem matches Step.Yield(value)) {
+                        this.inner = this.transform(value).iterator();
+                    } else {
+                        return Step<R>.Done();
+                    }
                     item = this.inner.next();
                 }
-                return Option<R>.None();
+                return Step<R>.Done();
             }
         };
     }
 }
 
-class MonadFlatMappedStream<T, R> is Iterable<R> {
+class MonadFlatMappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> Stream<R>;
 
@@ -85,22 +87,25 @@ class MonadFlatMappedStream<T, R> is Iterable<R> {
             transform: (T) -> Stream<R> = flatMapper;
             inner: &Iterator<R> = initialInner;
 
-            public mut next(): Option<R> {
+            public mut next(): Step<R> {
                 let mut item = this.inner.next();
-                while (true) {
-                    if (item.isSome()) return item;
+                loop {
+                    if (item matches Step.Yield(_)) return item;
                     let outerItem = this.source.next();
-                    if (not outerItem.isSome()) return Option<R>.None();
-                    this.inner = this.transform(unwrapSome(outerItem)).iterator();
+                    if (outerItem matches Step.Yield(value)) {
+                        this.inner = this.transform(value).iterator();
+                    } else {
+                        return Step<R>.Done();
+                    }
                     item = this.inner.next();
                 }
-                return Option<R>.None();
+                return Step<R>.Done();
             }
         };
     }
 }
 
-class AppliedStream<A, B> is Iterable<B> {
+class AppliedStream<A: nullable + mut, B: nullable + mut> is Iterable<B> {
     functions: Iterable<(A) -> B>;
     values: Iterable<A>;
 
@@ -113,23 +118,26 @@ class AppliedStream<A, B> is Iterable<B> {
             values: Iterable<A> = valueSource;
             currentValues: &Iterator<B> = initialValues;
 
-            public mut next(): Option<B> {
+            public mut next(): Step<B> {
                 let mut value = this.currentValues.next();
-                while (true) {
-                    if (value.isSome()) return value;
+                loop {
+                    if (value matches Step.Yield(_)) return value;
                     let function = this.functions.next();
-                    if (not function.isSome()) return Option<B>.None();
-                    this.currentValues =
-                        MappedStream<A, B>.new(this.values, unwrapSome(function)).iterator();
+                    if (function matches Step.Yield(transform)) {
+                        this.currentValues =
+                            MappedStream<A, B>.new(this.values, transform).iterator();
+                    } else {
+                        return Step<B>.Done();
+                    }
                     value = this.currentValues.next();
                 }
-                return Option<B>.None();
+                return Step<B>.Done();
             }
         };
     }
 }
 
-class FilteredStream<T> is Iterable<T> {
+class FilteredStream<T: nullable + mut> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -140,19 +148,23 @@ class FilteredStream<T> is Iterable<T> {
             source: &Iterator<T> = upstream;
             predicate: (T) -> Boolean = test;
 
-            public mut next(): Option<T> {
+            public mut next(): Step<T> {
                 let mut item = this.source.next();
-                while (item.isSome()) {
-                    if (this.predicate(unwrapSome(item))) return item;
+                loop {
+                    if (item matches Step.Yield(value)) {
+                        if (this.predicate(value)) return item;
+                    } else {
+                        return Step<T>.Done();
+                    }
                     item = this.source.next();
                 }
-                return Option<T>.None();
+                return Step<T>.Done();
             }
         };
     }
 }
 
-class TakenStream<T> is Iterable<T> {
+class TakenStream<T: nullable + mut> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
 
@@ -163,8 +175,8 @@ class TakenStream<T> is Iterable<T> {
             source: &Iterator<T> = upstream;
             remaining: Int = limit;
 
-            public mut next(): Option<T> {
-                if (this.remaining <= 0) return Option<T>.None();
+            public mut next(): Step<T> {
+                if (this.remaining <= 0) return Step<T>.Done();
                 this.remaining = this.remaining - 1;
                 return this.source.next();
             }
@@ -172,7 +184,7 @@ class TakenStream<T> is Iterable<T> {
     }
 }
 
-class DroppedStream<T> is Iterable<T> {
+class DroppedStream<T: nullable + mut> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
 
@@ -184,12 +196,12 @@ class DroppedStream<T> is Iterable<T> {
             count: Int = dropCount;
             initialized: Boolean = false;
 
-            public mut next(): Option<T> {
+            public mut next(): Step<T> {
                 if (not this.initialized) {
                     let mut skipped = 0;
                     while (skipped < this.count) {
                         let item = this.source.next();
-                        if (not item.isSome()) {
+                        if (item matches Step.Done()) {
                             this.initialized = true;
                             return item;
                         }
@@ -203,7 +215,7 @@ class DroppedStream<T> is Iterable<T> {
     }
 }
 
-class DroppedWhileStream<T> is Iterable<T> {
+class DroppedWhileStream<T: nullable + mut> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -215,12 +227,15 @@ class DroppedWhileStream<T> is Iterable<T> {
             predicate: (T) -> Boolean = test;
             dropping: Boolean = true;
 
-            public mut next(): Option<T> {
+            public mut next(): Step<T> {
                 while (this.dropping) {
                     let item = this.source.next();
-                    if (not item.isSome()) return item;
-                    if (not this.predicate(unwrapSome(item))) {
-                        this.dropping = false;
+                    if (item matches Step.Yield(value)) {
+                        if (not this.predicate(value)) {
+                            this.dropping = false;
+                            return item;
+                        }
+                    } else {
                         return item;
                     }
                 }
@@ -230,7 +245,7 @@ class DroppedWhileStream<T> is Iterable<T> {
     }
 }
 
-class TakenWhileStream<T> is Iterable<T> {
+class TakenWhileStream<T: nullable + mut> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -242,31 +257,33 @@ class TakenWhileStream<T> is Iterable<T> {
             predicate: (T) -> Boolean = test;
             done: Boolean = false;
 
-            public mut next(): Option<T> {
-                if (this.done) return Option<T>.None();
+            public mut next(): Step<T> {
+                if (this.done) return Step<T>.Done();
                 let item = this.source.next();
-                if (not item.isSome()) {
-                    this.done = true;
-                    return Option<T>.None();
-                }
-                if (this.predicate(unwrapSome(item))) {
-                    return item;
+                if (item matches Step.Yield(value)) {
+                    if (this.predicate(value)) {
+                        return item;
+                    } else {
+                        this.done = true;
+                        return Step<T>.Done();
+                    }
                 } else {
                     this.done = true;
-                    return Option<T>.None();
+                    return Step<T>.Done();
                 }
+                return Step<T>.Done();
             }
         };
     }
 }
 
-fn streamMonadAp<A, B>(functions: Stream<(A) -> B>, values: Stream<A>): Stream<B> =
+fn streamMonadAp<A: mut, B: mut>(functions: Stream<(A) -> B>, values: Stream<A>): Stream<B> =
     Stream<B>.from(AppliedStream<A, B>.new(functions, values));
 
-fn streamMonadFlatMap<A, B>(source: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
+fn streamMonadFlatMap<A: mut, B: mut>(source: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
     Stream<B>.from(MonadFlatMappedStream<A, B>.new(source, transform));
 
-public class Stream<T> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>> {
+public class Stream<T: nullable + mut> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>> {
     source: Iterable<T>;
 
     private constructor new;
@@ -281,32 +298,32 @@ public class Stream<T> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>> {
     public iterator(): &Iterator<T> = source.iterator();
 
     implementation Monad<Stream<_>> {
-        fn map<A, B>(this: Stream<A>, transform: (A) -> B): Stream<B> = this.map(transform);
+        fn map<A: mut, B: mut>(this: Stream<A>, transform: (A) -> B): Stream<B> = this.map(transform);
 
-        fn pure<A>(value: A): Stream<A> = Stream<A>.of(value);
+        fn pure<A: mut>(value: A): Stream<A> = Stream<A>.of(value);
 
-        fn ap<A, B>(this: Stream<(A) -> B>, values: Stream<A>): Stream<B> =
+        fn ap<A: mut, B: mut>(this: Stream<(A) -> B>, values: Stream<A>): Stream<B> =
             streamMonadAp(this, values);
 
-        fn flatMap<A, B>(this: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
+        fn flatMap<A: mut, B: mut>(this: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
             streamMonadFlatMap(this, transform);
     }
 
     implementation Foldable<Stream<_>> {
-        fn foldLeft<A, B>(this: Stream<A>, initial: B, combine: (B, A) -> B): B =
+        fn foldLeft<A: mut, B: mut>(this: Stream<A>, initial: B, combine: (B, A) -> B): B =
             this.fold(initial, combine);
     }
 
-    public map<R>(transform: (T) -> R): Stream<R> =
+    public map<R: mut>(transform: (T) -> R): Stream<R> =
         Stream<R>.new(MappedStream<T, R>.new(source, transform));
 
-    public flatMap<R>(transform: (T) -> Iterable<R>): Stream<R> =
+    public flatMap<R: mut>(transform: (T) -> Iterable<R>): Stream<R> =
         Stream<R>.new(FlatMappedStream<T, R>.new(source, transform));
 
     public filter(predicate: (T) -> Boolean): Stream<T> =
         Stream<T>.new(FilteredStream<T>.new(source, predicate));
 
-    public fold<R>(initial: R, accumulator: (R, T) -> R): R {
+    public fold<R: mut>(initial: R, accumulator: (R, T) -> R): R {
         let mut result = initial;
         for (let item in this) result = accumulator(result, item);
         return result;

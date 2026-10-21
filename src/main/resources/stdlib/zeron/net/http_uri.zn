@@ -1,0 +1,32 @@
+package zeron.net;
+
+import zeron.lang.Option;
+import zeron.lang.Result;
+
+external fn httpValidateUri(value: String?): Int;
+
+public type HttpUriError =
+      InvalidSyntax(value: String)
+    | UnsupportedScheme(value: String)
+    | MissingHost
+    | FragmentNotAllowed;
+
+public newtype HttpUri = String where httpValidateUri(value) == 0;
+
+namespace HttpUri {
+    public fn parse(value: String): Result<HttpUri, HttpUriError> {
+        let validation = httpValidateUri(value);
+        return match (validation) {
+            case 0 -> match (HttpUri.tryNew(value)) {
+                case Option.Some(uri) -> Result<HttpUri, HttpUriError>.Ok(uri);
+                case Option.None() -> Result<HttpUri, HttpUriError>.Err(
+                    HttpUriError.InvalidSyntax(value));
+            };
+            case 2 -> Result<HttpUri, HttpUriError>.Err(
+                HttpUriError.UnsupportedScheme(value));
+            case 3 -> Result<HttpUri, HttpUriError>.Err(HttpUriError.MissingHost());
+            case 4 -> Result<HttpUri, HttpUriError>.Err(HttpUriError.FragmentNotAllowed());
+            case _ -> Result<HttpUri, HttpUriError>.Err(HttpUriError.InvalidSyntax(value));
+        };
+    }
+}

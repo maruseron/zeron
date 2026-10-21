@@ -1,0 +1,45 @@
+package zeron.net;
+
+import zeron.lang.Result;
+
+external fn httpValidateHeader(name: String?, value: String?): Int;
+external fn httpValidateResponseHeaderPairs(entries: Array<String>): Boolean;
+external fn httpEmptyHeaders(): Array<String>;
+external fn httpAppendHeader(entries: Array<String>, name: String?, value: String?): Array<String>;
+external fn httpCopyHeaderPairs(entries: Array<String>): Array<String>;
+external fn httpHeaderValues(entries: Array<String>, name: String?): Array<String>;
+
+public type HttpHeaderError =
+      InvalidName(name: String)
+    | InvalidValue
+    | RestrictedName(name: String);
+
+public class HttpHeaders {
+    entries: Array<String>;
+
+    private constructor new;
+
+    public constructor empty() = HttpHeaders.new(httpEmptyHeaders());
+
+    public constructor fromResponsePairs(entries: Array<String>) raises HttpFailure {
+        if (not httpValidateResponseHeaderPairs(entries)) {
+            raise HttpFailure.new(HttpFailureKind.Protocol(),
+                    "The server returned invalid HTTP header data.", null);
+        }
+        return HttpHeaders.new(httpCopyHeaderPairs(entries));
+    }
+
+    public add(name: String, value: String): Result<HttpHeaders, HttpHeaderError> {
+        return match (httpValidateHeader(name, value)) {
+            case 1 -> Result<HttpHeaders, HttpHeaderError>.Err(HttpHeaderError.InvalidName(name));
+            case 2 -> Result<HttpHeaders, HttpHeaderError>.Err(HttpHeaderError.InvalidValue());
+            case 3 -> Result<HttpHeaders, HttpHeaderError>.Err(HttpHeaderError.RestrictedName(name));
+            case _ -> Result<HttpHeaders, HttpHeaderError>.Ok(
+                HttpHeaders.new(httpAppendHeader(this.entries, name, value)));
+        };
+    }
+
+    public values(name: String): Array<String> = httpHeaderValues(this.entries, name);
+
+    public toPairs(): Array<String> = httpCopyHeaderPairs(this.entries);
+}

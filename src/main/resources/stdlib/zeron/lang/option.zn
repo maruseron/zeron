@@ -4,13 +4,13 @@ import zeron.control.Foldable;
 import zeron.control.Functor;
 import zeron.control.Monad;
 
-fn applyOptionFunction<A, B>(transform: (A) -> B, value: A): B = transform(value);
+fn applyOptionFunction<A: mut, B: mut>(transform: (A) -> B, value: A): B = transform(value);
 
-public type Option<T> =
+public type Option<T: nullable + mut> =
       Some(value: T)
     | None;
 
-public extension<T> Option<T> {
+public extension<T: nullable + mut> Option<T> {
     public fn isSome(): Boolean =
         match (this) {
             case Option.Some(_) -> true;
@@ -20,13 +20,13 @@ public extension<T> Option<T> {
     public fn getOrElse(other: T): T =
         if (this matches Option.Some(value)) then value else other;
 
-    public fn fold<R>(ifSome: (T) -> R, ifNone: () -> R): R =
+    public fn fold<R: mut>(ifSome: (T) -> R, ifNone: () -> R): R =
         match (this) {
             case Option.Some(value) -> ifSome(value);
             case Option.None() -> ifNone();
         };
 
-    public fn map<B>(f: (T) -> B): Option<B> =
+    public fn map<B: mut>(f: (T) -> B): Option<B> =
         match (this) {
             case Option.Some(value) -> Option.Some(f(value));
             case Option.None() -> Option<B>.None();
@@ -40,15 +40,15 @@ public extension<T> Option<T> {
 }
 
 witness Monad<Option<_>> for Option<_> {
-    fn map<A, B>(this: Option<A>, transform: (A) -> B): Option<B> =
+    fn map<A: mut, B: mut>(this: Option<A>, transform: (A) -> B): Option<B> =
         match (this) {
             case Option.Some(value) -> Option.Some(transform(value));
             case Option.None() -> Option<B>.None();
         };
 
-    fn pure<A>(value: A): Option<A> = Option.Some(value);
+    fn pure<A: mut>(value: A): Option<A> = Option.Some(value);
 
-    fn ap<A, B>(this: Option<(A) -> B>, values: Option<A>): Option<B> =
+    fn ap<A: mut, B: mut>(this: Option<(A) -> B>, values: Option<A>): Option<B> =
         match (this) {
             case Option.Some(transform) -> match (values) {
                 case Option.Some(value) -> Option.Some(applyOptionFunction(transform, value));
@@ -57,7 +57,7 @@ witness Monad<Option<_>> for Option<_> {
             case Option.None() -> Option<B>.None();
         };
 
-    fn flatMap<A, B>(this: Option<A>, transform: (A) -> Option<B>): Option<B> =
+    fn flatMap<A: mut, B: mut>(this: Option<A>, transform: (A) -> Option<B>): Option<B> =
         match (this) {
             case Option.Some(value) -> transform(value);
             case Option.None() -> Option<B>.None();
@@ -65,7 +65,7 @@ witness Monad<Option<_>> for Option<_> {
 }
 
 witness Foldable<Option<_>> for Option<_> {
-    fn foldLeft<A, B>(this: Option<A>, initial: B, combine: (B, A) -> B): B =
+    fn foldLeft<A: mut, B: mut>(this: Option<A>, initial: B, combine: (B, A) -> B): B =
         match (this) {
             case Option.Some(value) -> combine(initial, value);
             case Option.None() -> initial;

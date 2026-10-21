@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
 import com.maruseron.zeron.StandardLibrary;
@@ -44,11 +45,19 @@ public final class CliParserTest {
         final var command = (CliParser.LspCommand) parse(
                 "lsp", "--stdio", "--manifest", manifest.toString());
 
-        assertEquals(manifest, command.manifest());
-        assertEquals(manifest.getParent().resolve(Path.of("lsp-src", "Main.zn")),
-                command.project().entry());
+        assertEquals(Optional.of(manifest), command.manifest());
         assertTrue(invalid("lsp", "--stdio", "--stdio").message().contains("only be specified once"));
         assertTrue(invalid("lsp", "--unknown").message().contains("Unknown build option"));
+    }
+
+    @Test
+    public void parsesManifestlessLspCommandWhenNoDefaultManifestExists() {
+        assertFalse(Files.exists(Path.of("zeron.toml")));
+
+        final var command = (CliParser.LspCommand) parse("lsp", "--stdio");
+        assertEquals(Optional.empty(), command.manifest());
+        assertEquals(Optional.empty(), command.manifest());
+        assertTrue(invalid("lsp", "--manifest").message().contains("requires a TOML file"));
     }
 
     @Test
@@ -94,11 +103,53 @@ public final class CliParserTest {
         final var index = createFile(ZeronVersions.API_INDEX_FILE_NAME);
         assertEquals(index,
                 ((CliParser.Dump) parse("dump", index.toString())).source());
+        assertEquals(Optional.empty(),
+                ((CliParser.DumpStandardLibrary) parse("dump", "--stdlib")).packageName());
+        assertEquals(Optional.of("zeron.collections"),
+                ((CliParser.DumpStandardLibrary) parse("dump", "--stdlib", "zeron.collections"))
+                        .packageName());
 
         final var format = (CliParser.Format) parse("fmt", "--check", "src");
         assertTrue(format.check());
         assertEquals(List.of(Path.of("src")), format.paths());
         assertTrue(CliHelp.hasTopic("fmt"));
+    }
+
+    @Test
+    public void parsesVersionCommandsAndReservesOnlyTheBareVersionPath() throws Exception {
+        assertTrue(parse("version") instanceof CliParser.Version);
+        assertTrue(parse("--version") instanceof CliParser.Version);
+        assertTrue(invalid("version", "extra").message().contains("Usage: zeron version"));
+        assertTrue(invalid("--version", "extra").message().contains("Usage: zeron --version"));
+        assertTrue(CliHelp.hasTopic("version"));
+        assertTrue(CliHelp.hasTopic("--version"));
+
+        final var source = createFile("version.zn");
+        assertTrue(parse(source.toString()) instanceof CliParser.Compile);
+    }
+
+    @Test
+    public void printsTheEmbeddedProjectVersionForBothCommands() throws Exception {
+        final var output = new ByteArrayOutputStream();
+        final var originalOut = System.out;
+        try {
+            System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+            assertEquals(0, Zeron.runCli("version"));
+            assertEquals(0, Zeron.runCli("--version"));
+        } finally {
+            System.setOut(originalOut);
+        }
+
+        final var projectPom = Files.readString(Path.of("pom.xml"), StandardCharsets.UTF_8);
+        final var versionMatcher = Pattern.compile(
+                "<artifactId>zeron</artifactId>\\s*<version>([^<]+)</version>").matcher(projectPom);
+        assertTrue("Could not find the Maven project version in pom.xml.", versionMatcher.find());
+        final var projectVersion = versionMatcher.group(1);
+        assertEquals(projectVersion, ZeronVersion.current());
+        assertEquals("zeron " + projectVersion + System.lineSeparator()
+                        + "zeron " + projectVersion + System.lineSeparator(),
+                output.toString(StandardCharsets.UTF_8));
+        assertEquals("development", ZeronVersion.read(null));
     }
 
     @Test
@@ -132,6 +183,8 @@ public final class CliParserTest {
         invalid("help", "build", "run");
         invalid("dump");
         invalid("dump", "index.bin", "extra");
+        invalid("dump", "--stdlib", "not-a-package");
+        invalid("dump", "--stdlib", "zeron.collections", "extra");
         invalid("fmt", "--unknown");
         invalid("fmt", "--check", "--check");
     }
@@ -220,12 +273,17 @@ public final class CliParserTest {
             assertEquals(0, Zeron.runCli("help"));
             assertEquals(0, Zeron.runCli("help", "dump"));
             assertEquals(0, Zeron.runCli("help", "--manifest"));
+            assertEquals(0, Zeron.runCli("help", "version"));
+            assertEquals(0, Zeron.runCli("help", "--version"));
         } finally {
             System.setOut(originalOut);
         }
         final var help = output.toString(StandardCharsets.UTF_8);
         assertTrue(help, help.contains("zeron dump <api-index|class-directory|library.jar>"));
+        assertTrue(help, help.contains("zeron dump --stdlib [package]"));
         assertTrue(help, help.contains("Usage: zeron dump"));
+        assertTrue(help, help.contains("Usage: zeron version"));
+        assertTrue(help, help.contains("Alias for 'zeron version'"));
         assertTrue(help, help.contains("Select the project manifest"));
     }
 
@@ -247,6 +305,28 @@ public final class CliParserTest {
         assertTrue(dump, dump.contains("Format version: " + ZeronVersions.API_INDEX_SCHEMA_VERSION));
         assertTrue(dump, dump.contains("Standard-library API version: "
                 + ZeronVersions.STANDARD_LIBRARY_API_VERSION));
+    }
+
+    @Test
+    public void dumpCommandPrintsAndFiltersBundledStandardLibraryIndex() throws Exception {
+        final var output = new ByteArrayOutputStream();
+        final var originalOut = System.out;
+        try {
+            System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+            assertEquals(0, Zeron.runCli("dump", "--stdlib"));
+            final var allDeclarations = output.toString(StandardCharsets.UTF_8);
+            assertTrue(allDeclarations, allDeclarations.contains("type zeron.collections.Step"));
+            assertTrue(allDeclarations, allDeclarations.contains("type zeron.lang.Option"));
+
+            output.reset();
+            assertEquals(0, Zeron.runCli("dump", "--stdlib", "zeron.collections"));
+            final var filtered = output.toString(StandardCharsets.UTF_8);
+            assertTrue(filtered, filtered.contains("Package filter: zeron.collections"));
+            assertTrue(filtered, filtered.contains("type zeron.collections.Step"));
+            assertFalse(filtered, filtered.contains("type zeron.lang.Option"));
+        } finally {
+            System.setOut(originalOut);
+        }
     }
 
     private static CliParser.Invocation parse(final String... args) {

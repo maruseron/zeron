@@ -20,7 +20,7 @@ public final class HashableTest {
         final var classFile = Path.of("dist", className + ".class");
         final var source = """
                 import zeron.lang.Hashable;
-                fn hashValue<T: Hashable<T>>(value: T): Int = value.hash();
+                fn hashValue<T: nullable + Hashable<T>>(value: T): Int = value.hash();
                 fn hashInt(): Int = hashValue(42);
                 fn hashFloat(value: Float): Int = hashValue(value);
                 fn hashBoolean(value: Boolean): Int = hashValue(value);

@@ -32,7 +32,7 @@ are the values around an operator.
 | Comparison | `<`, `<=`, `>`, `>=` | `age >= 18` produces a Boolean. |
 | Value equality | `==`, `!=` | `name == "Ada"` checks whether values are equal. |
 | Boolean logic | `not`, `and`, `or` | `ready and not finished` combines conditions. |
-| Bitwise and shifts | `&`, `|`, `^`, `~`, `<<`, `>>`, `>>>` | `flags & 1` checks an integer bit. |
+| Bitwise and shifts | `&`, `\|`, `^`, `~`, `<<`, `>>`, `>>>` | `flags & 1` checks an integer bit. |
 | Assignment | `=`, `+=`, `-=`, `*=`, `/=`, `%=` | `total += 1` adds to and updates `total`. |
 
 Comparisons and equality produce `Boolean` values, `true` or `false`. The words `and` and `or`
@@ -40,9 +40,21 @@ combine Boolean conditions and short-circuit: if the left side already determine
 right side is not evaluated. For example, `hasValue and value > 0` does not test `value > 0` when
 `hasValue` is false.
 
-The arithmetic operators work on numeric values. `+` also joins strings, so
-`"Hello, " + "Ada"` produces `"Hello, Ada"`. Not every operator applies to every type: for
-example, adding two numbers is meaningful, but adding a number to a Boolean is not.
+Built-in arithmetic operators work on numeric values. `+` also joins strings, so
+`"Hello, " + "Ada"` produces `"Hello, Ada"`. User-defined types can opt in to `+`, `*`, and unary
+or binary `-` through the standard library's `zeron.algebra` contracts. Import the contract you
+need; generic functions must declare the corresponding bound explicitly:
+
+```zeron
+import zeron.algebra.Addition;
+fn subtract<T: Addition<T>>(left: T, right: T): T = left - right;
+```
+
+`Addition<T>` supplies negation and requires `Add<T>`; binary subtraction adds the negated right
+operand. `Multiplication<T>` adds reciprocal capability to `Mult<T>`, but `/` remains a built-in
+numeric operator. `String + T` keeps its existing display behavior. Not every operator applies to
+every type: for example, adding two numbers is meaningful, but adding a number to a Boolean is not
+unless that type deliberately provides the required contract evidence.
 
 Zeron also has bitwise and shift operators for integer values: `&`, `|`, and `^` combine bits,
 `~` flips them, and `<<`, `>>`, and `>>>` shift them. The unsigned right shift `>>>` fills from

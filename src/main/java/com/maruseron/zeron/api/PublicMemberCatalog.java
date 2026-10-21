@@ -19,7 +19,7 @@ public final class PublicMemberCatalog {
     public enum MemberOrigin { DIRECT, CONTRACT_REQUIREMENT, CONTRACT_DEFAULT, EXTENSION }
 
     public sealed interface TypeRef permits NamedType, GenericType, TypeVariable,
-            ArrayType, NullableType, ReferenceType, FunctionType {
+            ArrayType, NullableType, ReferenceType, FunctionType, HandlerType, ProjectedType {
         static TypeRef named(final String name) {
             return new NamedType(name);
         }
@@ -27,12 +27,20 @@ public final class PublicMemberCatalog {
         private static TypeRef from(final TypeDescriptor descriptor) {
             return switch (descriptor) {
                 case TypeParameterDescriptor parameter -> new TypeVariable(parameter.name(),
-                        parameter.bounds().stream().map(TypeRef::from).toList());
+                        parameter.bounds().stream().map(TypeRef::from).toList(),
+                        parameter.admitsNullableArguments(), parameter.isEffectKind(),
+                        parameter.admitsMutableArguments());
+                case TypeProjectionDescriptor projection -> new ProjectedType(projection.kind(),
+                        TypeRef.from(projection.bound()));
                 case GenericDescriptor generic -> new GenericType(generic.baseType().name(),
                         generic.typeParameters().stream().map(TypeRef::from).toList());
                 case ArrayDescriptor array -> new ArrayType(from(array.elementType()));
                 case NullableDescriptor nullable -> new NullableType(from(nullable.baseType()));
                 case ReferenceDescriptor reference -> new ReferenceType(from(reference.baseType()));
+                case FunctionDescriptor function when function.isHandler() -> new HandlerType(
+                        from(function.returnType()),
+                        function.handledEffects().stream().map(TypeRef::from).toList(),
+                        function.raisedEffects().stream().map(TypeRef::from).toList());
                 case FunctionDescriptor function -> new FunctionType(function.name(),
                         function.typeParameters().stream().map(TypeParameter::from).toList(),
                         function.parameters().stream().map(TypeRef::from).toList(),
@@ -55,10 +63,28 @@ public final class PublicMemberCatalog {
         }
     }
 
-    public record TypeVariable(String name, List<TypeRef> bounds) implements TypeRef {
+    public record TypeVariable(String name, List<TypeRef> bounds,
+                               boolean admitsNullableArguments, boolean effectKind,
+                               boolean admitsMutableArguments) implements TypeRef {
         public TypeVariable {
             Objects.requireNonNull(name);
             bounds = List.copyOf(bounds);
+        }
+
+        public TypeVariable(final String name, final List<TypeRef> bounds) {
+            this(name, bounds, false, false, false);
+        }
+
+        public TypeVariable(final String name, final List<TypeRef> bounds,
+                            final boolean admitsNullableArguments, final boolean effectKind) {
+            this(name, bounds, admitsNullableArguments, effectKind, false);
+        }
+    }
+
+    public record ProjectedType(TypeProjectionDescriptor.Kind kind, TypeRef bound) implements TypeRef {
+        public ProjectedType {
+            Objects.requireNonNull(kind);
+            Objects.requireNonNull(bound);
         }
     }
 
@@ -86,15 +112,37 @@ public final class PublicMemberCatalog {
         }
     }
 
-    public record TypeParameter(String name, List<TypeRef> bounds) {
+    public record HandlerType(TypeRef returnType, List<TypeRef> handledEffects,
+                              List<TypeRef> raisedEffects) implements TypeRef {
+        public HandlerType {
+            Objects.requireNonNull(returnType);
+            handledEffects = List.copyOf(handledEffects);
+            raisedEffects = List.copyOf(raisedEffects);
+        }
+    }
+
+    public record TypeParameter(String name, List<TypeRef> bounds,
+                                boolean admitsNullableArguments, boolean effectKind,
+                                boolean admitsMutableArguments) {
         public TypeParameter {
             Objects.requireNonNull(name);
             bounds = List.copyOf(bounds);
         }
 
+        public TypeParameter(final String name, final List<TypeRef> bounds) {
+            this(name, bounds, false, false, false);
+        }
+
+        public TypeParameter(final String name, final List<TypeRef> bounds,
+                             final boolean admitsNullableArguments, final boolean effectKind) {
+            this(name, bounds, admitsNullableArguments, effectKind, false);
+        }
+
         private static TypeParameter from(final TypeParameterDescriptor parameter) {
             return new TypeParameter(parameter.name(),
-                    parameter.bounds().stream().map(TypeRef::from).toList());
+                    parameter.bounds().stream().map(TypeRef::from).toList(),
+                    parameter.admitsNullableArguments(), parameter.isEffectKind(),
+                    parameter.admitsMutableArguments());
         }
     }
 
@@ -260,12 +308,6 @@ public final class PublicMemberCatalog {
             final var name = qualifySourceName(resolution.typePackages().getOrDefault(
                     declaration.name().lexeme(), resolution.packageName()), declaration.name().lexeme());
             final var members = new ArrayList<MemberSpec>();
-            declaration.namedConstructors().forEach(constructor -> members.add(MemberSpec.callable(
-                    name, constructor.name().lexeme(), MemberKind.CONSTRUCTOR, constructor.typeDescriptor(),
-                    constructor.parameters().stream().map(Token::lexeme).toList(),
-                    constructor.typeDescriptor().arity() - (constructor.variadic() ? 1 : 0),
-                    constructor.variadic(), false, provenance(constructor.name()),
-                    MemberOrigin.CONTRACT_REQUIREMENT)));
             declaration.methods().forEach(method -> members.add(MemberSpec.callable(name,
                     method.name().lexeme(), MemberKind.METHOD, method.typeDescriptor(),
                     method.parameters().stream().map(Token::lexeme).toList(), method.minimumArity(),
@@ -379,12 +421,6 @@ public final class PublicMemberCatalog {
                 }
                 case ZeronLibraryIndex.ContractExport declaration -> {
                     final var members = new ArrayList<MemberSpec>();
-                    declaration.constructors().forEach(constructor -> members.add(MemberSpec.callable(
-                            declaration.qualifiedName(), constructor.name(), MemberKind.CONSTRUCTOR,
-                            constructor.signature(), constructor.parameterNames(),
-                            constructor.signature().arity() - (constructor.variadic() ? 1 : 0),
-                            constructor.variadic(), false, Optional.empty(),
-                            MemberOrigin.CONTRACT_REQUIREMENT)));
                     declaration.methods().forEach(method -> members.add(MemberSpec.callable(
                             declaration.qualifiedName(), method.name(), MemberKind.METHOD,
                             method.signature(), method.parameterNames(), method.minimumArity(),
@@ -641,6 +677,8 @@ public final class PublicMemberCatalog {
                 || required.arity() != implementation.arity()) return false;
         final var methodSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < required.typeParameters().size(); i++) {
+            if (required.typeParameters().get(i).admitsMutableArguments()
+                    != implementation.typeParameters().get(i).admitsMutableArguments()) return false;
             methodSubstitutions.put(required.typeParameters().get(i), implementation.typeParameters().get(i));
         }
         for (int i = 0; i < required.arity(); i++) {
@@ -690,13 +728,45 @@ public final class PublicMemberCatalog {
                     .map(argument -> TypeSubstitution.substitute(argument, substitutions)).toList()),
                     closure, new HashSet<>());
         }
-        final var expectedArguments = expectedType.arguments();
         return closure.values().stream().anyMatch(applied -> applied.spec().qualifiedName()
                 .equals(expectedSpec.qualifiedName())
-                && applied.spec().typeParameters().stream().map(parameter ->
-                        TypeSubstitution.substitute(parameter, applied.substitutions()))
-                        .map(PublicMemberCatalog::canonicalType).toList()
-                        .equals(expectedArguments.stream().map(PublicMemberCatalog::canonicalType).toList()));
+                && genericArgumentsAssignable(expectedSpec,
+                        expectedType.arguments(),
+                        applied.spec().typeParameters().stream().map(parameter ->
+                                TypeSubstitution.substitute(parameter, applied.substitutions())).toList()));
+    }
+
+    private boolean genericArgumentsAssignable(final TypeSpec declaration,
+                                               final List<TypeDescriptor> expectedArguments,
+                                               final List<TypeDescriptor> actualArguments) {
+        if (expectedArguments.size() != actualArguments.size()
+                || expectedArguments.size() != declaration.typeParameters().size()) return false;
+        for (int index = 0; index < expectedArguments.size(); index++) {
+            final var expected = expectedArguments.get(index);
+            final var actual = actualArguments.get(index);
+            if (expected instanceof TypeProjectionDescriptor expectedProjection) {
+                if (actual instanceof TypeProjectionDescriptor actualProjection) {
+                    if (expectedProjection.kind() != actualProjection.kind()) return false;
+                    final var compatible = expectedProjection.kind() == TypeProjectionDescriptor.Kind.OUT
+                            ? isAssignable(expectedProjection.bound(), actualProjection.bound())
+                            : isAssignable(actualProjection.bound(), expectedProjection.bound());
+                    if (!compatible) return false;
+                } else {
+                    final var compatible = expectedProjection.kind() == TypeProjectionDescriptor.Kind.OUT
+                            ? isAssignable(expectedProjection.bound(), actual)
+                            : isAssignable(actual, expectedProjection.bound());
+                    if (!compatible) return false;
+                }
+            } else if (actual instanceof TypeProjectionDescriptor) {
+                return false;
+            } else if (declaration.typeParameters().get(index).variance()
+                    == TypeParameterDescriptor.Variance.COVARIANT) {
+                if (!isAssignable(expected, actual)) return false;
+            } else if (!expected.equals(actual)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static NominalType nominalType(final TypeDescriptor type) {
@@ -713,6 +783,8 @@ public final class PublicMemberCatalog {
                 || required.arity() != implementation.arity()) return false;
         final var methodSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < required.typeParameters().size(); i++) {
+            if (required.typeParameters().get(i).admitsMutableArguments()
+                    != implementation.typeParameters().get(i).admitsMutableArguments()) return false;
             methodSubstitutions.put(required.typeParameters().get(i), implementation.typeParameters().get(i));
         }
         for (int i = 0; i < required.arity(); i++) {
@@ -757,7 +829,12 @@ public final class PublicMemberCatalog {
             case GenericType generic -> TypeDescriptor.genericOf(new NominalDescriptor(generic.name()),
                     generic.arguments().stream().map(PublicMemberCatalog::toDescriptor).toList());
             case TypeVariable variable -> new TypeParameterDescriptor(-1, variable.name(),
-                    variable.bounds().stream().map(PublicMemberCatalog::toDescriptor).toList());
+                    variable.bounds().stream().map(PublicMemberCatalog::toDescriptor).toList(), false,
+                    TypeParameterDescriptor.Variance.INVARIANT,
+                    variable.admitsNullableArguments(), variable.effectKind(),
+                    variable.admitsMutableArguments());
+            case ProjectedType projection -> new TypeProjectionDescriptor(
+                    projection.kind(), toDescriptor(projection.bound()));
             case ArrayType array -> TypeDescriptor.arrayOf(toDescriptor(array.elementType()));
             case NullableType nullable -> toDescriptor(nullable.baseType()).toNullable();
             case ReferenceType reference -> new ReferenceDescriptor(toDescriptor(reference.baseType()));
@@ -766,8 +843,14 @@ public final class PublicMemberCatalog {
                     function.parameters().stream().map(PublicMemberCatalog::toDescriptor).toList(),
                     function.typeParameters().stream().map(parameter -> new TypeParameterDescriptor(-1,
                             parameter.name(), parameter.bounds().stream()
-                                    .map(PublicMemberCatalog::toDescriptor).toList())).toList(),
+                                    .map(PublicMemberCatalog::toDescriptor).toList(), false,
+                            TypeParameterDescriptor.Variance.INVARIANT,
+                            parameter.admitsNullableArguments(), parameter.effectKind(),
+                            parameter.admitsMutableArguments())).toList(),
                     function.raisedEffects().stream().map(PublicMemberCatalog::toDescriptor).toList());
+            case HandlerType handler -> TypeDescriptor.handlerOf(toDescriptor(handler.returnType()),
+                    handler.handledEffects().stream().map(PublicMemberCatalog::toDescriptor).toList(),
+                    handler.raisedEffects().stream().map(PublicMemberCatalog::toDescriptor).toList());
         };
     }
 
@@ -775,7 +858,9 @@ public final class PublicMemberCatalog {
         return switch (type) {
             case TypeParameterDescriptor parameter -> new TypeParameterDescriptor(parameter.scopeId(),
                     parameter.name(), parameter.bounds().stream().map(PublicMemberCatalog::copyType).toList(),
-                    parameter.isHigherKinded());
+                    parameter.isHigherKinded(), parameter.variance(),
+                    parameter.admitsNullableArguments(), parameter.isEffectKind(),
+                    parameter.admitsMutableArguments());
             case AppliedConstructorDescriptor applied -> new AppliedConstructorDescriptor(
                     (TypeParameterDescriptor) copyType(applied.constructor()), copyType(applied.argument()));
             case TypeConstructorDescriptor constructor -> new TypeConstructorDescriptor(
@@ -785,9 +870,15 @@ public final class PublicMemberCatalog {
             case GenericDescriptor generic -> TypeDescriptor.genericOf(
                     new NominalDescriptor(generic.baseType().name()),
                     generic.typeParameters().stream().map(PublicMemberCatalog::copyType).toList());
+            case TypeProjectionDescriptor projection -> new TypeProjectionDescriptor(
+                    projection.kind(), copyType(projection.bound()));
             case ArrayDescriptor array -> TypeDescriptor.arrayOf(copyType(array.elementType()));
             case NullableDescriptor nullable -> copyType(nullable.baseType()).toNullable();
             case ReferenceDescriptor reference -> new ReferenceDescriptor(copyType(reference.baseType()));
+            case FunctionDescriptor function when function.isHandler() -> TypeDescriptor.handlerOf(
+                    copyType(function.returnType()),
+                    function.handledEffects().stream().map(PublicMemberCatalog::copyType).toList(),
+                    function.raisedEffects().stream().map(PublicMemberCatalog::copyType).toList());
             case FunctionDescriptor function -> TypeDescriptor.functionWithEffectsOf(function.name(),
                     copyType(function.returnType()),
                     function.parameters().stream().map(PublicMemberCatalog::copyType).toList(),
@@ -820,8 +911,11 @@ public final class PublicMemberCatalog {
     private static String canonicalSignature(final FunctionDescriptor function, final int minimumArity,
                                              final boolean variadic, final boolean mutating) {
         final var parameters = function.typeParameters().stream()
-                .map(parameter -> parameter.name() + ":" + parameter.bounds().stream()
-                        .map(PublicMemberCatalog::canonicalType).collect(java.util.stream.Collectors.joining("&")))
+                .map(parameter -> parameter.name() + ":"
+                        + (parameter.admitsMutableArguments() ? "mut+" : "")
+                        + parameter.bounds().stream()
+                                .map(PublicMemberCatalog::canonicalType)
+                                .collect(java.util.stream.Collectors.joining("&")))
                 .collect(java.util.stream.Collectors.joining(",", "<", ">"));
         final var args = function.parameters().stream().map(PublicMemberCatalog::canonicalType)
                 .collect(java.util.stream.Collectors.joining(","));
@@ -840,6 +934,9 @@ public final class PublicMemberCatalog {
             case GenericDescriptor generic -> generic.baseType().name() + "<"
                     + generic.typeParameters().stream().map(PublicMemberCatalog::canonicalType)
                             .collect(java.util.stream.Collectors.joining(",")) + ">";
+            case TypeProjectionDescriptor projection ->
+                    (projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "out " : "in ")
+                            + canonicalType(projection.bound());
             case FunctionDescriptor function -> canonicalSignature(function, function.arity(), false, false);
             case NominalDescriptor nominal -> nominal.name();
             default -> type.name();

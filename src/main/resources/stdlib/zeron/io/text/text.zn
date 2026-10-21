@@ -83,4 +83,5 @@ public fn writeText(path: Path, value: String): Unit raises IoFailure, DisposeFa
 }
 
 external fn stringGetBytes(value: String?, charset: &java.nio.charset.Charset?): ByteArray;
-external fn utf8Decoder(): &java.nio.charset.CharsetDecoder?;
+
+fn utf8Decoder(): &java.nio.charset.CharsetDecoder? = StandardCharsets.UTF_8?.newDecoder();

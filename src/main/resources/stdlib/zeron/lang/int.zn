@@ -1,5 +1,19 @@
 package zeron.lang;
 
+import zeron.algebra.Addition;
+import zeron.algebra.Mult;
+
+witness Addition<Int> for Int {
+    fn add(other: Int): Int = this + other;
+    fn zero(): Int = 0;
+    fn negate(): Int = -this;
+}
+
+witness Mult<Int> for Int {
+    fn multiply(other: Int): Int = this * other;
+    fn one(): Int = 1;
+}
+
 public extension Int {
     public property sign: Int {
         get {
@@ -16,9 +30,17 @@ public extension Int {
         return Option.Some(intToByteUnchecked(this));
     }
 
+    public fn toChar(): Option<Char> {
+        if (this < 0 or this > 1114111 or this >= 55296 and this <= 57343) {
+            return Option<Char>.None();
+        }
+        return Option.Some(intToChar(this));
+    }
+
     public fn toLong(): Long = intToLong(this);
 }
 
 external fn intToFloat(value: Int): Float;
 external fn intToByteUnchecked(value: Int): Byte;
+external fn intToChar(value: Int): Char;
 external fn intToLong(value: Int): Long;

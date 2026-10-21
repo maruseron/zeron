@@ -17,6 +17,9 @@ public final class FunctionShapeKey {
 
     public static FunctionShapeKey of(final FunctionDescriptor functionType) {
         Objects.requireNonNull(functionType);
+        if (functionType.isHandler()) {
+            return of(TypeDescriptor.functionOf("", functionType.returnType(), TypeDescriptor.ofAny()));
+        }
         final var encoding = new StringBuilder(ENCODING_VERSION);
         appendFunction(encoding, functionType);
         return new FunctionShapeKey(encoding.toString(), readableSignature(functionType));
@@ -68,6 +71,10 @@ public final class FunctionShapeKey {
             case FunctionDescriptor function -> "Function" + function.arity();
             case ArrayDescriptor array -> "Array$" + readableType(array.elementType());
             case ReferenceDescriptor reference -> "Ref$" + readableType(reference.baseType());
+            case TypeProjectionDescriptor projection ->
+                    (projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "Out$" : "In$")
+                            + readableType(projection.bound());
+            case CapturedTypeDescriptor capture -> readableType(capture.upperBound());
             case GenericDescriptor generic -> {
                 final var name = new StringBuilder(simpleName(generic.baseType().name()));
                 for (final var parameter : generic.typeParameters()) {
@@ -153,6 +160,12 @@ public final class FunctionShapeKey {
                 }
                 encoding.append(')');
             }
+            case TypeProjectionDescriptor projection -> {
+                encoding.append(projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "+(" : "-(");
+                appendType(encoding, projection.bound());
+                encoding.append(')');
+            }
+            case CapturedTypeDescriptor capture -> appendType(encoding, capture.upperBound());
             case InferDescriptor _ ->
                     throw new IllegalArgumentException("Cannot canonicalize an inferred function shape");
         }

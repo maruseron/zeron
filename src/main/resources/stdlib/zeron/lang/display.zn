@@ -6,6 +6,6 @@ package zeron.lang;
  * Display output is intended for presentation, not debugging or serialization.
  * Implementations should avoid exposing runtime representation details.
  */
-public contract Display<T> {
+public contract Display<T: mut> {
     toString(): String;
 }

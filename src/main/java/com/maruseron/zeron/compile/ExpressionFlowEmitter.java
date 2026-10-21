@@ -134,6 +134,11 @@ final class ExpressionFlowEmitter {
     static void emitForExpression(CompilationContext context, final CodeBuilder composer, final Expr.Pipeline pipeline) {
         beginScope(context);
         try {
+            if (pipeline.isComprehension()) {
+                emitExpr(context, composer, pipeline.loweredExpression());
+                context.lastEmittedType = pipeline.getType();
+                return;
+            }
             if (pipeline.isTerminal) {
                 emitCollectedPipeline(context, composer, pipeline);
             } else {
@@ -147,7 +152,7 @@ final class ExpressionFlowEmitter {
     private static final ClassDesc STREAM_CLASS = ClassDesc.of("zeron.collections.Stream");
     private static final ClassDesc ITERABLE_CLASS = ClassDesc.of("zeron.collections.Iterable");
     private static final ClassDesc ITERATOR_CLASS = ClassDesc.of("zeron.collections.Iterator");
-    private static final ClassDesc OPTION_CLASS = ClassDesc.of("zeron.lang.Option");
+    private static final ClassDesc STEP_CLASS = ClassDesc.of("zeron.collections.Step");
     private static final ClassDesc SINK_CLASS = ClassDesc.of("zeron.collections.Sink");
 
     private record PipelineCapture(Token token, TypeDescriptor type, Bind value) {}
@@ -228,7 +233,7 @@ final class ExpressionFlowEmitter {
         final Bind arrayLocal;
         final Bind indexLocal;
         final Bind iteratorLocal;
-        final Bind optionLocal;
+        final Bind stepLocal;
 
         if (isArray) {
             final var arrayType = (ArrayDescriptor) sourceType;
@@ -240,7 +245,7 @@ final class ExpressionFlowEmitter {
             indexLocal = declareLoopLocal(context, nextLoopTemporary(context, "index"), TypeDescriptor.ofInt());
             composer.istore(indexLocal.lvt() + context.localSlotOffset);
             iteratorLocal = null;
-            optionLocal = null;
+            stepLocal = null;
         } else {
             final var iterableType = TypeDescriptor.genericOf(
                     TypeDescriptor.ofName("zeron.collections.Iterable"), sourceElementType);
@@ -251,8 +256,8 @@ final class ExpressionFlowEmitter {
                     new ReferenceDescriptor(TypeDescriptor.genericOf(
                             TypeDescriptor.ofName("zeron.collections.Iterator"), sourceElementType)));
             composer.astore(iteratorLocal.lvt() + context.localSlotOffset);
-            optionLocal = declareLoopLocal(context, nextLoopTemporary(context, "option"),
-                    TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), sourceElementType));
+            stepLocal = declareLoopLocal(context, nextLoopTemporary(context, "step"),
+                    TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.collections.Step"), sourceElementType));
             arrayLocal = null;
             indexLocal = null;
         }
@@ -323,15 +328,16 @@ final class ExpressionFlowEmitter {
             storePipelineValue(context, composer, initialValue, sourceElementType);
         } else {
             composer.aload(iteratorLocal.lvt() + context.localSlotOffset);
-            composer.invokeinterface(ITERATOR_CLASS, "next", MethodTypeDesc.of(OPTION_CLASS));
-            composer.astore(optionLocal.lvt() + context.localSlotOffset);
-            composer.aload(optionLocal.lvt() + context.localSlotOffset);
-            final var someClass = ClassDesc.of("zeron.lang.Option$$sum$Some");
-            composer.instanceOf(someClass);
-            composer.ifeq(loopExit);
-            composer.aload(optionLocal.lvt() + context.localSlotOffset);
-            composer.checkcast(someClass);
-            composer.invokevirtual(someClass, "$zeron$payload$0",
+            composer.invokeinterface(ITERATOR_CLASS, "next", MethodTypeDesc.of(STEP_CLASS));
+            composer.astore(stepLocal.lvt() + context.localSlotOffset);
+            composer.aload(stepLocal.lvt() + context.localSlotOffset);
+            final var doneClass = ClassDesc.of("zeron.collections.Step$$sum$Done");
+            composer.instanceOf(doneClass);
+            composer.ifne(loopExit);
+            composer.aload(stepLocal.lvt() + context.localSlotOffset);
+            final var yieldClass = ClassDesc.of("zeron.collections.Step$$sum$Yield");
+            composer.checkcast(yieldClass);
+            composer.invokevirtual(yieldClass, "$zeron$payload$0",
                     MethodTypeDesc.of(ConstantDescs.CD_Object));
             emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), sourceElementType);
             storePipelineValue(context, composer, initialValue, sourceElementType);
@@ -465,21 +471,22 @@ final class ExpressionFlowEmitter {
                         new ReferenceDescriptor(TypeDescriptor.genericOf(
                                 TypeDescriptor.ofName("zeron.collections.Iterator"), flattenedType)));
                 composer.astore(iteratorLocal.lvt() + context.localSlotOffset);
-                final var optionLocal = declareLoopLocal(context, nextLoopTemporary(context, "flatOption"),
-                        TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), flattenedType));
+                final var stepLocal = declareLoopLocal(context, nextLoopTemporary(context, "flatStep"),
+                        TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.collections.Step"), flattenedType));
                 final var innerStart = composer.newLabel();
                 final var innerExit = composer.newLabel();
                 composer.labelBinding(innerStart);
                 composer.aload(iteratorLocal.lvt() + context.localSlotOffset);
-                composer.invokeinterface(ITERATOR_CLASS, "next", MethodTypeDesc.of(OPTION_CLASS));
-                composer.astore(optionLocal.lvt() + context.localSlotOffset);
-                composer.aload(optionLocal.lvt() + context.localSlotOffset);
-                final var someClass = ClassDesc.of("zeron.lang.Option$$sum$Some");
-                composer.instanceOf(someClass);
-                composer.ifeq(innerExit);
-                composer.aload(optionLocal.lvt() + context.localSlotOffset);
-                composer.checkcast(someClass);
-                composer.invokevirtual(someClass, "$zeron$payload$0",
+                composer.invokeinterface(ITERATOR_CLASS, "next", MethodTypeDesc.of(STEP_CLASS));
+                composer.astore(stepLocal.lvt() + context.localSlotOffset);
+                composer.aload(stepLocal.lvt() + context.localSlotOffset);
+                final var doneClass = ClassDesc.of("zeron.collections.Step$$sum$Done");
+                composer.instanceOf(doneClass);
+                composer.ifne(innerExit);
+                composer.aload(stepLocal.lvt() + context.localSlotOffset);
+                final var yieldClass = ClassDesc.of("zeron.collections.Step$$sum$Yield");
+                composer.checkcast(yieldClass);
+                composer.invokevirtual(yieldClass, "$zeron$payload$0",
                         MethodTypeDesc.of(ConstantDescs.CD_Object));
                 emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), flattenedType);
                 final var flattenedValue =
@@ -812,6 +819,11 @@ final class ExpressionFlowEmitter {
         composer.dup();
         emitExpr(context, composer, raise.effect);
         emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
+        if (raise.effect.getType() instanceof TypeParameterDescriptor parameter && parameter.isEffectKind()) {
+            final var support = ClassDesc.of("zeron.runtime.EffectSupport");
+            composer.invokestatic(support, "requireEffect",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+        }
         composer.invokespecial(carrier, "<init>",
                 MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
         composer.athrow();
@@ -819,6 +831,10 @@ final class ExpressionFlowEmitter {
     }
 
     static void emitHandle(final CompilationContext context, final CodeBuilder composer, final Expr.Handle handle) {
+        if (handle.handler != null) {
+            emitHandlerApplication(context, composer, handle);
+            return;
+        }
         final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
         beginScope(context);
         final var start = composer.newLabel();
@@ -880,10 +896,112 @@ final class ExpressionFlowEmitter {
         context.lastEmittedType = handle.getType();
     }
 
+    private static void emitHandlerApplication(final CompilationContext context,
+                                               final CodeBuilder composer,
+                                               final Expr.Handle handle) {
+        final var handlerType = (FunctionDescriptor) handle.handler.getType();
+        final var handlerValue = declareLoopLocal(context, nextLoopTemporary(context, "handlerValue"),
+                handlerType);
+        emitExpr(context, composer, handle.handler);
+        storePipelineValue(context, composer, handlerValue, handlerType);
+
+        final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+        beginScope(context);
+        final var start = composer.newLabel();
+        final var end = composer.newLabel();
+        final var catchLabel = composer.newLabel();
+        final var done = composer.newLabel();
+        composer.labelBinding(start);
+        emitExpr(context, composer, handle.expression);
+        emitConversion(context, composer, context.lastEmittedType, handle.getType());
+        composer.goto_(done);
+        composer.labelBinding(end);
+        composer.labelBinding(catchLabel);
+        final var exception = declareLoopLocal(context, nextLoopTemporary(context, "handlerException"),
+                TypeDescriptor.ofAny());
+        storePipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        loadPipelineValue(context, composer, handlerValue, handlerType);
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(carrier);
+        composer.invokeinterface(TypeDescriptor.toJavaClassDesc(handlerType), "invoke",
+                toJavaMethodDescriptor(handlerType));
+        emitConversion(context, composer, handlerType.returnType(), handle.getType());
+        composer.labelBinding(done);
+        composer.exceptionCatch(start, end, catchLabel, carrier);
+        endScope(context);
+        context.lastEmittedType = handle.getType();
+    }
+
+    static void emitHandlerDispatch(final CompilationContext context, final CodeBuilder composer,
+                                    final Expr.HandlerDispatch dispatch) {
+        final var exception = declareLoopLocal(context, nextLoopTemporary(context, "handlerCarrier"),
+                TypeDescriptor.ofAny());
+        emitVariable(context, composer, dispatch.carrier);
+        storePipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        emitHandlerCases(context, composer, dispatch.arms, dispatch.getType(), exception);
+        context.lastEmittedType = dispatch.getType();
+    }
+
+    private static void emitHandlerCases(final CompilationContext context, final CodeBuilder composer,
+                                         final List<Expr.HandleArm> arms, final TypeDescriptor resultType,
+                                         final Bind exception) {
+        final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+        final var payload = declareLoopLocal(context, nextLoopTemporary(context, "handlerPayload"),
+                TypeDescriptor.ofAny());
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(carrier);
+        composer.invokevirtual(carrier, "payload", MethodTypeDesc.of(ConstantDescs.CD_Object));
+        storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
+        final var done = composer.newLabel();
+
+        for (final var arm : arms) {
+            final var next = composer.newLabel();
+            beginScope(context);
+            try {
+                declareMatchBindings(context, arm.pattern());
+                emitMatchPattern(context, composer, arm.pattern(), payload, next);
+                if (arm.suppressedBinding() != null) {
+                    final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());
+                    final var suppressed = declareLoopLocal(
+                            context, arm.suppressedBinding(), suppressedType);
+                    loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+                    composer.checkcast(carrier);
+                    composer.invokevirtual(carrier, "suppressedOutcomes",
+                            MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+                    composer.astore(suppressed.lvt() + context.localSlotOffset);
+                }
+                if (arm.guard() != null) {
+                    emitExpr(context, composer, arm.guard());
+                    composer.ifeq(next);
+                }
+                emitExpr(context, composer, arm.expression());
+                emitConversion(context, composer, context.lastEmittedType, resultType);
+            } finally {
+                endScope(context);
+            }
+            composer.goto_(done);
+            composer.labelBinding(next);
+        }
+
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(carrier);
+        composer.athrow();
+        composer.labelBinding(done);
+    }
+
     static void emitTypeTest(CompilationContext context, final CodeBuilder composer, final Expr.TypeTest test) {
         emitExpr(context, composer, test.value);
         emitBox(context, composer, context.lastEmittedType);
-        if (test.resolvedTargetType() instanceof CharDescriptor) {
+        if (test.nullTest) {
+            final var matched = composer.newLabel();
+            final var done = composer.newLabel();
+            composer.ifnull(matched);
+            composer.iconst_0();
+            composer.goto_(done);
+            composer.labelBinding(matched);
+            composer.iconst_1();
+            composer.labelBinding(done);
+        } else if (test.resolvedTargetType() instanceof CharDescriptor) {
             composer.invokestatic(ClassDesc.of("zeron.runtime.StringUnicode"), "isCharValue",
                     MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
         } else {

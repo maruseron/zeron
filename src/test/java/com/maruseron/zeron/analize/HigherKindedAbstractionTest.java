@@ -15,6 +15,7 @@ import java.util.UUID;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public final class HigherKindedAbstractionTest {
     @Test
@@ -149,6 +150,88 @@ public final class HigherKindedAbstractionTest {
     }
 
     @Test
+    public void collectorSupportsCreationAndMutatingReceiverDispatch() throws Exception {
+        final var source = """
+                import zeron.collections.Collector;
+                import zeron.collections.Sink;
+                class Bag<T: nullable + mut> is Sink<T>, Collector<Bag<_>> {
+                    public mut property count: Int = 0;
+                    public constructor empty() = Bag<T>.new();
+                    public mut add(value: T): Boolean {
+                        this.count += 1;
+                        return true;
+                    }
+                    public read(): Int = this.count;
+                    implementation Collector<Bag<_>> {
+                        fn empty<A: nullable + mut>(): &Bag<A> = Bag<A>.empty();
+                        fn add<A: nullable + mut>(this: &Bag<A>, value: A): Boolean {
+                            this.add(value);
+                            this.add(value);
+                            return true;
+                        }
+                    }
+                }
+                fn empty<C<_>: Collector<C>, A: nullable + mut>(): &C<A> = C.empty<A>();
+                fn append<C<_>: Collector<C>, A: nullable + mut>(values: &C<A>, value: A): Boolean =
+                    values.add(value);
+                fn appendWithBoth<A: nullable + mut, C<_>: Sink<A> + Collector<C>>(
+                    values: &C<A>, value: A
+                ): Boolean = values.add(value);
+                fn appendStatically<A: nullable + mut, C<_>: Sink<A> + Collector<C>>(
+                    values: &C<A>, value: A
+                ): Boolean = C.add(values, value);
+                fn run(): Int {
+                    let values = empty<Bag<_>, Int>();
+                    append<Bag<_>, Int>(values, 41);
+                    appendWithBoth<Int, Bag<_>>(values, 42);
+                    appendStatically<Int, Bag<_>>(values, 43);
+                    return values.read();
+                }
+                """;
+        final var program = new CompilationService(parse(source), "CollectorMain");
+
+        try {
+            deleteTree(Path.of("dist"));
+            program.resolve();
+            program.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(5, loader.loadClass("CollectorMain").getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+
+        final var immutableCall = """
+                import zeron.collections.Collector;
+                fn append<C<_>: Collector<C>, A: nullable + mut>(values: C<A>, value: A): Boolean =
+                    values.add(value);
+                """;
+        assertThrows(ResolutionError.class,
+                () -> new CompilationService(parse(immutableCall), "ImmutableCollectorMain").resolve());
+
+        final var immutableBehavioralCall = """
+                import zeron.collections.Collector;
+                import zeron.collections.Sink;
+                fn append<A: nullable, C<_>: Sink<A> + Collector<C>>(
+                    values: C<A>, value: A
+                ): Boolean = values.add(value);
+                """;
+        final var error = assertThrows(ResolutionError.class,
+                () -> new CompilationService(parse(immutableBehavioralCall), "ImmutableSinkMain").resolve());
+        assertTrue(error.getMessage().contains("Mutating methods require"));
+
+        final var immutableStaticCall = """
+                import zeron.collections.Collector;
+                fn append<A: nullable, C<_>: Collector<C>>(
+                    values: C<A>, value: A
+                ): Boolean = C.add(values, value);
+                """;
+        assertThrows(ResolutionError.class,
+                () -> new CompilationService(parse(immutableStaticCall), "ImmutableStaticMain").resolve());
+    }
+
+    @Test
     public void fixedConstructorArgumentsAreSubstitutedThroughWitnessEvidence() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var mainClass = "HktFixedMain" + suffix;
@@ -200,6 +283,22 @@ public final class HigherKindedAbstractionTest {
                 """;
 
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+    }
+
+    @Test
+    public void independentHigherKindedReceiverProvidersAreAmbiguous() {
+        final var source = """
+                contract First<F<_>> {
+                    map<A>(this: F<A>): F<A>;
+                }
+                contract Second<F<_>> {
+                    map<A>(this: F<A>): F<A>;
+                }
+                fn apply<F<_>: First<F> + Second<F>, A>(value: F<A>): F<A> = value.map();
+                """;
+        final var error = assertThrows(ResolutionError.class,
+                () -> new CompilationService(parse(source), "AmbiguousHktMain").resolve());
+        assertTrue(error.getMessage().contains("ambiguous"));
     }
 
     @Test

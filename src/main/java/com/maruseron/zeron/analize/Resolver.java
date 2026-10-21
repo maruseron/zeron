@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class Resolver {
     public record IterationProtocol(String iterableName, String iteratorName) {}
-    public record SinkProtocol(String sinkName, String emptyName, String addName) {}
+    public record SinkProtocol(String sinkName, String addName) {}
 
     public record DefaultMethodSelection(String ownerName, Stmt.ContractMethod method,
                                          FunctionDescriptor instantiatedType) {}
@@ -165,9 +165,37 @@ public final class Resolver {
             context.currentImports = importsByUnit.get(unit);
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
-                if (!(entry.declaration() instanceof Stmt.ExternalClass externalClass)) continue;
-                for (final var method : externalClass.methods()) {
-                    attempt(context, () -> MemberInteropResolver.validateExternalExceptionMappings(context, method));
+                if (entry.declaration() instanceof Stmt.ExternalClass externalClass) {
+                    final var javaClass = context.javaClassPath.find(externalClass.javaBinaryName());
+                    if (javaClass == null) continue;
+                    for (final var method : externalClass.methods()) {
+                        final var javaMethod = javaClass.methods().stream()
+                                .filter(candidate -> DeclarationRegistry.matchesExternalMethod(method, candidate))
+                                .findFirst().orElse(null);
+                        if (javaMethod != null) {
+                            attempt(context, () -> MemberInteropResolver.validateExternalExceptionMappings(
+                                    context, method, javaMethod));
+                        }
+                    }
+                    for (final var constructor : externalClass.constructors()) {
+                        final var javaConstructor = javaClass.methods().stream()
+                                .filter(candidate -> DeclarationRegistry.matchesExternalConstructor(
+                                        constructor, candidate))
+                                .findFirst().orElse(null);
+                        if (javaConstructor != null) {
+                            attempt(context, () -> MemberInteropResolver.validateExternalExceptionMappings(
+                                    context, constructor, javaConstructor));
+                        }
+                    }
+                } else if (entry.declaration() instanceof Stmt.ExternalFunction externalFunction) {
+                    attempt(context, () -> {
+                        final var binding = context.externalFunctionBindings.get(externalFunction);
+                        if (binding == null) return;
+                        final var mappings = MemberInteropResolver.resolveExternalFunctionExceptionMappings(
+                                context, externalFunction);
+                        context.externalFunctionBindings.put(externalFunction,
+                                binding.withExceptionMappings(mappings));
+                    });
                 }
             }
         }
@@ -640,31 +668,13 @@ public final class Resolver {
                     where,
                     "Missing sink protocol contract '" + sinkName + "'."));
         }
-        final var emptyConstructor = sink.namedConstructors().stream()
-                .filter(constructor -> constructor.name().lexeme().equals("empty"))
-                .findFirst()
-                .orElseThrow(() -> new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        where,
-                        "Sink contract must declare empty()."));
         final var addMethod = sink.methods().stream()
                 .filter(method -> method.name().lexeme().equals("add"))
                 .findFirst()
                 .orElseThrow(() -> new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         where,
                         "Sink contract must declare add(T)."));
-        var emptyType = emptyConstructor.typeDescriptor().returnType();
-        // System.out.println("Empty type: " + emptyType);
-        if (emptyType instanceof ReferenceDescriptor reference) emptyType = reference.baseType();
-        final String emptyName = emptyType instanceof GenericDescriptor generic
-                ? generic.baseType().name()
-                : emptyType instanceof NominalDescriptor nominal ? nominal.name() : null;
-        if (emptyName == null) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    where,
-                    "Sink.empty() must return a Sink<T> reference."));
-        }
         var addType = addMethod.typeDescriptor().parameters().getFirst();
-        // System.out.println("Sink.add(T) type: " + addType);
         if (addType instanceof ReferenceDescriptor reference) addType = reference.baseType();
         final String addName = addType instanceof TypeParameterDescriptor typeParameter ? typeParameter.name() : null;
         if (addName == null) {
@@ -672,6 +682,6 @@ public final class Resolver {
                     where,
                     "Sink.add(T) must take a T."));
         }
-        context.sinkProtocols.put(where, new Resolver.SinkProtocol(sinkName, emptyName, addName));
+        context.sinkProtocols.put(where, new Resolver.SinkProtocol(sinkName, addName));
     }
 }

@@ -1,11 +1,13 @@
 package com.maruseron.zeron;
 
+import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.domain.ArrayDescriptor;
 import com.maruseron.zeron.domain.AppliedConstructorDescriptor;
 import com.maruseron.zeron.domain.AnyDescriptor;
 import com.maruseron.zeron.domain.BooleanDescriptor;
 import com.maruseron.zeron.domain.ByteArrayDescriptor;
 import com.maruseron.zeron.domain.ByteDescriptor;
+import com.maruseron.zeron.domain.CapturedTypeDescriptor;
 import com.maruseron.zeron.domain.CharDescriptor;
 import com.maruseron.zeron.domain.FloatDescriptor;
 import com.maruseron.zeron.domain.FunctionDescriptor;
@@ -22,6 +24,7 @@ import com.maruseron.zeron.domain.StringDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.TypeConstructorDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
+import com.maruseron.zeron.domain.TypeProjectionDescriptor;
 import com.maruseron.zeron.domain.UnitDescriptor;
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
 
@@ -29,10 +32,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public final class ZeronLibraryIndexDump {
@@ -53,14 +58,46 @@ public final class ZeronLibraryIndexDump {
         print(index);
     }
 
+    static boolean dumpBundledStandardLibrary(final Optional<String> packageName) throws IOException {
+        final var outputDirectory = Files.createTempDirectory("zeron-stdlib-dump-");
+        try {
+            final var compiler = CompilationService.forStandardLibrary(outputDirectory);
+            final var resolution = compiler.resolveWithDiagnostics();
+            if (!resolution.errors().isEmpty()) {
+                resolution.errors().forEach(Zeron::reportResolutionDiagnostic);
+                return false;
+            }
+            final var compilation = compiler.compileWithDiagnostics();
+            compilation.diagnostics().forEach(Zeron::reportCompilationDiagnostic);
+            if (!compilation.successful()) return false;
+            return print(ZeronLibraryIndex.readFromDirectory(outputDirectory), packageName.orElse(null));
+        } finally {
+            deleteTree(outputDirectory);
+        }
+    }
+
     private static void print(final ZeronLibraryIndex index) {
+        print(index, null);
+    }
+
+    private static boolean print(final ZeronLibraryIndex index, final String packageName) {
+        final var declarations = packageName == null
+                ? index.declarations()
+                : index.declarations().stream()
+                        .filter(declaration -> isInPackage(declaration.qualifiedName(), packageName))
+                        .toList();
+        if (packageName != null && declarations.isEmpty()) {
+            System.err.println("No public declarations found in standard-library package: " + packageName);
+            return false;
+        }
         System.out.println("Zeron public API index");
         System.out.println("  Format version: " + ZeronLibraryIndex.VERSION);
         System.out.println("  Standard-library API version: " + index.standardLibraryApiVersion());
-        System.out.println("  Public declarations: " + index.declarations().size());
+        System.out.println("  Public declarations: " + declarations.size());
+        if (packageName != null) System.out.println("  Package filter: " + packageName);
 
         final var namespacedItems = new LinkedHashMap<String, List<ZeronLibraryIndex.NamespacedDeclaration>>();
-        for (final var declaration : index.declarations()) {
+        for (final var declaration : declarations) {
             if (declaration instanceof ZeronLibraryIndex.NamespacedDeclaration namespaced && namespaced.namespaceName() != null) {
                 namespacedItems.computeIfAbsent(getNamespace(namespaced), _ -> new ArrayList<>())
                         .add(namespaced);
@@ -95,6 +132,10 @@ public final class ZeronLibraryIndexDump {
                                         .map(ZeronLibraryIndexDump::formatType)
                                         .collect(Collectors.joining(", "))
                                 + ")");
+                        for (final var mapping : constructor.exceptionMappings()) {
+                            System.out.println("    throws " + mapping.exceptionType() + " -> "
+                                    + mapping.effectType() + "::" + mapping.constructorName());
+                        }
                     }
                     for (final var method : externalClass.methods()) {
                         System.out.println("  public " + (method.mutating() ? "mut " : "")
@@ -203,14 +244,24 @@ public final class ZeronLibraryIndexDump {
                             + formatTypeParameters(witness.typeParameters()) + " "
                             + formatType(witness.contractType()) + " for "
                             + formatType(witness.targetType()) + " {");
-                    witness.mappings().forEach(mapping -> System.out.println("  "
-                            + mapping.requirementName() + " = " + formatType(mapping.targetType())
-                            + "." + mapping.constructorName() + ";"));
                     System.out.println("}");
                 }
             }
         }
         printNamespacedItems(namespacedItems);
+        return true;
+    }
+
+    private static boolean isInPackage(final String qualifiedName, final String packageName) {
+        return qualifiedName.equals(packageName) || qualifiedName.startsWith(packageName + ".");
+    }
+
+    private static void deleteTree(final Path path) throws IOException {
+        try (final var paths = Files.walk(path)) {
+            for (final var entry : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(entry);
+            }
+        }
     }
 
     private static void printNamespacedItems(
@@ -285,7 +336,9 @@ public final class ZeronLibraryIndexDump {
     private static String formatTypeParameters(final List<TypeParameterDescriptor> parameters) {
         if (parameters.isEmpty()) return "";
         return parameters.stream()
-                .map(parameter -> parameter.name() + (parameter.isHigherKinded() ? "<_>" : "")
+                .map(parameter -> (parameter.variance() == TypeParameterDescriptor.Variance.COVARIANT
+                                ? "out " : "")
+                        + parameter.name() + (parameter.isHigherKinded() ? "<_>" : "")
                         + (parameter.bounds().isEmpty() ? "" : ": " + parameter.bounds().stream()
                                 .map(ZeronLibraryIndexDump::formatType)
                                 .collect(Collectors.joining(" + "))))
@@ -341,8 +394,18 @@ public final class ZeronLibraryIndexDump {
             case ArrayDescriptor array -> "Array<" + formatType(array.elementType()) + ">";
             case GenericDescriptor generic -> generic.baseType().name()
                     + formatTypeArguments(generic.typeParameters());
+            case TypeProjectionDescriptor projection ->
+                    (projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "out " : "in ")
+                            + formatType(projection.bound());
+            case CapturedTypeDescriptor capture -> capture.name();
             case NullableDescriptor nullable -> formatType(nullable.baseType()) + "?";
             case ReferenceDescriptor reference -> "&" + formatType(reference.baseType());
+            case FunctionDescriptor function when function.isHandler() ->
+                    formatType(function.returnType()) + " ~> "
+                            + function.handledEffects().stream().map(ZeronLibraryIndexDump::formatType)
+                            .collect(Collectors.joining(", ", "{", "}")) + " raises "
+                            + function.raisedEffects().stream().map(ZeronLibraryIndexDump::formatType)
+                            .collect(Collectors.joining(", ", "{", "}"));
             case FunctionDescriptor function -> formatTypeParameters(function.typeParameters())
                     + function.parameters().stream().map(ZeronLibraryIndexDump::formatType)
                             .collect(Collectors.joining(", ", "(", ") -> "))

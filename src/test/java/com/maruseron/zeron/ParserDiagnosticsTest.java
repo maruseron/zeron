@@ -50,6 +50,19 @@ public final class ParserDiagnosticsTest {
     }
 
     @Test
+    public void rejectsMutableAdmissibilityForEffectAndHigherKindedParameters() {
+        final var effectResult = Parser.of(Scanner.from(
+                "fn invalid<E: effect + mut>(value: E): E raises E = value;").scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("effect-mut.zn");
+        assertEquals("ZR1105", effectResult.diagnostics().getFirst().code().toString());
+
+        final var higherKindedResult = Parser.of(Scanner.from(
+                "fn invalid<F<_>: mut>(value: Int): Int = value;").scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("hkt-mut.zn");
+        assertEquals("ZR1105", higherKindedResult.diagnostics().getFirst().code().toString());
+    }
+
+    @Test
     public void reportsSyntaxErrorsInsideFunctionBodiesWithoutCrashing() {
         final var result = Parser.of(Scanner.from("""
                 fn main(): Unit {
@@ -142,20 +155,38 @@ public final class ParserDiagnosticsTest {
     }
 
     @Test
-    public void parsesForStageSoftKeywordsAndAllowsThemAsNames() {
+    public void parsesComprehensionSoftKeywordsAndAllowsThemAsNames() {
         final var result = Parser.of(Scanner.from("""
                 fn map(value: Int): Int = value;
                 fn flatMap(value: Int): Int = value;
                 fn filter(value: Int): Int = value;
                 fn collect(value: Int): Int = value;
+                fn yield(value: Int): Int = value;
+                fn into(value: Int): Int = value;
                 fn stages(values: Array<Int>): Stream<Int> =
-                    for values map item -> item
-                    filter item -> item > 0
-                    flatMap item -> [item]
-                    collect ListSink<Int>.empty();
+                    for item in values
+                        let positive = item
+                        if positive > 0
+                        for expanded in [positive]
+                        yield expanded;
+                fn collected(values: Array<Int>) =
+                    for item in values
+                        collect item into ListSink<Int>.empty();
                 """).scanWithDiagnostics())
-                .parseCompilationUnitWithDiagnostics("for-stage-soft-keywords.zn");
+                .parseCompilationUnitWithDiagnostics("comprehension-soft-keywords.zn");
 
         assertEquals(result.diagnostics().toString(), 0, result.diagnostics().size());
+    }
+
+    @Test
+    public void rejectsRemovedOperatorStageForExpressionSyntax() {
+        final var result = Parser.of(Scanner.from("""
+                let values = for [1, 2, 3]
+                    map item -> item * 2;
+                """).scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("removed-for-stages.zn");
+
+        assertFalse(result.diagnostics().isEmpty());
+        assertEquals("ZR1101", result.diagnostics().getFirst().code().toString());
     }
 }

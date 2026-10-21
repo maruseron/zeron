@@ -31,7 +31,10 @@
 ## Part IV — Advanced type-directed behavior
 
 1. [Generic bounds and witnesses](20-generic-bounds-and-witnesses.md)
+1. [Higher-kinded abstractions](30-higher-kinded-abstractions.md)
 1. [Equality and ordering](21-equality-and-ordering.md)
+1. [Operator overloading](31-operator-overloading.md)
+1. [Custom numeric literal suffixes](32-custom-numeric-literal-suffixes.md)
 1. [Raised effects](22-raised-effects.md)
 1. [Resource management](26-resource-management.md)
 

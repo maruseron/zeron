@@ -181,7 +181,8 @@ final class CallResolver {
                                               final FunctionDescriptor genericType) {
         call.setGenericFunctionType(genericType);
         final var typeParameters = genericType.typeParameters();
-        if (!call.explicitTypeArguments.isEmpty()
+        final var hasExplicitTypeArguments = !call.explicitTypeArguments.isEmpty();
+        if (hasExplicitTypeArguments
                 && call.explicitTypeArguments.size() != typeParameters.size()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.callee,
@@ -219,8 +220,10 @@ final class CallResolver {
             final var argument = call.arguments.get(i);
             if (argument instanceof Expr.Lambda || isFunctionReferenceCandidate(argument)) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
-            TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
-                    resolvedArguments[i], substitutions, call.callee);
+            if (!hasExplicitTypeArguments) {
+                TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
+                        resolvedArguments[i], substitutions, call.callee);
+            }
         }
 
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -234,8 +237,10 @@ final class CallResolver {
                         "A function value argument requires a function parameter type."));
             }
             resolvedArguments[i] = MemberInteropResolver.resolveArgument(context, argument, expected);
-            TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
-                    resolvedArguments[i], substitutions, call.callee);
+            if (!hasExplicitTypeArguments) {
+                TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
+                        resolvedArguments[i], substitutions, call.callee);
+            }
         }
 
         for (final var parameter : typeParameters) {
@@ -245,6 +250,8 @@ final class CallResolver {
                         "Cannot infer type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument."));
             }
+            substitutions.put(parameter, TypeResolver.validateTypeArgument(
+                    context, parameter, substitutions.get(parameter), call.callee));
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
                 final var actual = substitutions.get(parameter);

@@ -227,7 +227,6 @@ public sealed interface Stmt {
         private final List<TypeParameterDescriptor> typeParameters;
         private final TypeDescriptor contractType;
         private final TypeDescriptor targetType;
-        private final List<WitnessFactoryMapping> mappings;
         private final List<WitnessMethod> methods;
         private final boolean derived;
         private final List<WitnessRequirement> requirements;
@@ -235,14 +234,12 @@ public sealed interface Stmt {
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
                        final TypeDescriptor contractType, final TypeDescriptor targetType,
-                       final List<WitnessFactoryMapping> mappings,
                        final List<WitnessMethod> methods, final boolean derived,
                        final List<WitnessRequirement> requirements, final boolean higherKinded) {
             this.name = name;
             this.typeParameters = List.copyOf(typeParameters);
             this.contractType = contractType;
             this.targetType = targetType;
-            this.mappings = List.copyOf(mappings);
             this.methods = new ArrayList<>(methods);
             this.derived = derived;
             this.requirements = List.copyOf(requirements);
@@ -251,31 +248,27 @@ public sealed interface Stmt {
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
                        final TypeDescriptor contractType, final TypeDescriptor targetType,
-                       final List<WitnessFactoryMapping> mappings,
                        final List<WitnessMethod> methods) {
-            this(name, typeParameters, contractType, targetType, mappings, methods, false, List.of(), false);
+            this(name, typeParameters, contractType, targetType, methods, false, List.of(), false);
         }
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
                        final TypeDescriptor contractType, final TypeDescriptor targetType,
-                       final List<WitnessFactoryMapping> mappings,
                        final List<WitnessMethod> methods, final boolean derived,
                        final List<WitnessRequirement> requirements) {
-            this(name, typeParameters, contractType, targetType, mappings, methods,
+            this(name, typeParameters, contractType, targetType, methods,
                     derived, requirements, false);
         }
 
         public Witness(Token name, List<TypeParameterDescriptor> typeParameters,
-                       TypeDescriptor contractType, TypeDescriptor targetType,
-                       List<WitnessFactoryMapping> mappings) {
-            this(name, typeParameters, contractType, targetType, mappings, List.of());
+                       TypeDescriptor contractType, TypeDescriptor targetType) {
+            this(name, typeParameters, contractType, targetType, List.of());
         }
 
         public Token name() { return name; }
         public List<TypeParameterDescriptor> typeParameters() { return typeParameters; }
         public TypeDescriptor contractType() { return contractType; }
         public TypeDescriptor targetType() { return targetType; }
-        public List<WitnessFactoryMapping> mappings() { return mappings; }
         public List<WitnessMethod> methods() { return List.copyOf(methods); }
         public boolean derived() { return derived; }
         public List<WitnessRequirement> requirements() { return requirements; }
@@ -284,10 +277,6 @@ public sealed interface Stmt {
     }
 
     record WitnessRequirement(TypeDescriptor contractType, TypeDescriptor targetType) {}
-
-    record WitnessFactoryMapping(Token requirementName, TypeDescriptor targetType,
-                                 Token constructorName) {
-    }
 
     record WitnessMethod(Token requirementName, Function methodSignature,
                          Function implementation) {
@@ -300,13 +289,28 @@ public sealed interface Stmt {
                      boolean isPublic, boolean isEffect,
                      List<Token> derivedContracts, List<Token> storedStateOrder,
                      List<ContractUse> higherKindedContractUses,
-                     List<Witness> higherKindedImplementations) implements Stmt, Decl {
+                     List<Witness> higherKindedImplementations,
+                     List<LiteralSuffix> literalSuffixes) implements Stmt, Decl {
         public ClassDecl {
             patterns = List.copyOf(patterns);
             derivedContracts = List.copyOf(derivedContracts);
             storedStateOrder = List.copyOf(storedStateOrder);
             higherKindedContractUses = List.copyOf(higherKindedContractUses);
             higherKindedImplementations = List.copyOf(higherKindedImplementations);
+            literalSuffixes = List.copyOf(literalSuffixes);
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, List<Pattern> patterns,
+                         boolean isPublic, boolean isEffect,
+                         List<Token> derivedContracts, List<Token> storedStateOrder,
+                         List<ContractUse> higherKindedContractUses,
+                         List<Witness> higherKindedImplementations) {
+            this(name, typeParameters, contractUses, fields, properties, constructor, namedConstructors,
+                    methods, patterns, isPublic, isEffect, derivedContracts, storedStateOrder,
+                    higherKindedContractUses, higherKindedImplementations, List.of());
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -375,6 +379,17 @@ public sealed interface Stmt {
             return List.copyOf(types);
         }
     }
+
+    enum LiteralSuffixCategory { INTEGER, DECIMAL }
+
+    record LiteralSuffix(Token name, List<LiteralSuffixFactory> factories) {
+        public LiteralSuffix {
+            factories = List.copyOf(factories);
+        }
+    }
+
+    record LiteralSuffixFactory(LiteralSuffixCategory category, boolean stringInput,
+                                Token constructorName) {}
 
     record Field(Token name, TypeDescriptor type, Expr initializer) {
         public Field(final Token name, final TypeDescriptor type) {
@@ -459,7 +474,6 @@ public sealed interface Stmt {
 
     record ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                         List<ContractUse> requiredContracts,
-                        List<NamedContractConstructor> namedConstructors,
                         List<ContractMethod> methods, List<ContractProperty> properties,
                         boolean isPublic, boolean isSealed, boolean higherKinded,
                         List<ContractUse> permittedClasses) implements Stmt, Decl {
@@ -468,50 +482,6 @@ public sealed interface Stmt {
             permittedClasses = List.copyOf(permittedClasses);
         }
 
-        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
-                            List<NamedContractConstructor> namedConstructors,
-                            List<ContractMethod> methods, List<ContractProperty> properties,
-                            boolean isPublic, boolean isSealed, List<ContractUse> permittedClasses) {
-            this(name, typeParameters, List.of(), namedConstructors, methods, properties,
-                    isPublic, isSealed, permittedClasses);
-        }
-
-        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters, 
-                            List<NamedContractConstructor> namedConstructors,
-                            List<ContractMethod> methods, boolean isPublic) {
-            this(name, typeParameters, List.of(), namedConstructors, methods, List.of(),
-                    isPublic, false, List.of());
-        }
-
-        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters, 
-                            List<NamedContractConstructor> namedConstructors,
-                            List<ContractMethod> methods, List<ContractProperty> properties,
-                            boolean isPublic) {
-            this(name, typeParameters, List.of(), namedConstructors, methods, properties,
-                    isPublic, false, false, List.of());
-        }
-
-        public ContractDecl(Token name, List<TypeParameterDescriptor> typeParameters,
-                            List<ContractUse> requiredContracts,
-                            List<NamedContractConstructor> namedConstructors,
-                            List<ContractMethod> methods, List<ContractProperty> properties,
-                            boolean isPublic, boolean isSealed, List<ContractUse> permittedClasses) {
-            this(name, typeParameters, requiredContracts, namedConstructors, methods, properties,
-                    isPublic, isSealed, false, permittedClasses);
-        }
-    }
-
-    record NamedContractConstructor(Token name, List<Token> parameters,
-                            FunctionDescriptor typeDescriptor, boolean variadic) {
-        public NamedContractConstructor {
-            parameters = List.copyOf(parameters);
-            Stmt.validateVariadic(parameters, typeDescriptor, variadic);
-        }
-
-        public NamedContractConstructor(Token name, List<Token> parameters,
-                                FunctionDescriptor typeDescriptor) {
-            this(name, parameters, typeDescriptor, false);
-        }
     }
 
     record ContractMethod(Token name, List<Token> parameters,
@@ -622,10 +592,12 @@ public sealed interface Stmt {
     record ExternalFunction(Token name, List<Token> parameters,
                             FunctionDescriptor typeDescriptor, boolean isPublic,
                             List<Expr> defaultValues,
-                            int minimumArity, boolean variadic) implements FunctionDeclaration {
+                            int minimumArity, boolean variadic,
+                            List<ExternalExceptionMapping> exceptionMappings) implements FunctionDeclaration {
         public ExternalFunction {
             parameters = List.copyOf(parameters);
             defaultValues = List.copyOf(defaultValues);
+            exceptionMappings = List.copyOf(exceptionMappings);
             Stmt.validateVariadic(parameters, typeDescriptor, variadic);
             final var fixedArity = Stmt.fixedArity(parameters, variadic);
             if (minimumArity < 0 || minimumArity > fixedArity
@@ -636,19 +608,19 @@ public sealed interface Stmt {
 
         public ExternalFunction(Token name, List<Token> parameters,
                                 FunctionDescriptor typeDescriptor, boolean isPublic) {
-            this(name, parameters, typeDescriptor, isPublic, List.of(), parameters.size(), false);
+            this(name, parameters, typeDescriptor, isPublic, List.of(), parameters.size(), false, List.of());
         }
 
         public ExternalFunction(Token name, List<Token> parameters,
                                 FunctionDescriptor typeDescriptor, boolean isPublic,
                                 List<Expr> defaultValues) {
             this(name, parameters, typeDescriptor, isPublic, defaultValues,
-                    Stmt.minimumArity(parameters, defaultValues), false);
+                    Stmt.minimumArity(parameters, defaultValues), false, List.of());
         }
 
         public ExternalFunction(Token name, List<Token> parameters, FunctionDescriptor typeDescriptor,
                                 boolean isPublic, List<Expr> defaultValues, int minimumArity) {
-            this(name, parameters, typeDescriptor, isPublic, defaultValues, minimumArity, false);
+            this(name, parameters, typeDescriptor, isPublic, defaultValues, minimumArity, false, List.of());
         }
     }
 
@@ -665,13 +637,19 @@ public sealed interface Stmt {
     }
 
     record ExternalConstructor(Token name, List<Token> parameters, List<TypeDescriptor> parameterTypes,
-                               boolean isPublic) {
+                               boolean isPublic, List<ExternalExceptionMapping> exceptionMappings) {
         public ExternalConstructor {
             parameters = List.copyOf(parameters);
             parameterTypes = List.copyOf(parameterTypes);
+            exceptionMappings = List.copyOf(exceptionMappings);
             if (parameters.size() != parameterTypes.size()) {
                 throw new IllegalArgumentException("External constructor parameter names and types must align.");
             }
+        }
+
+        public ExternalConstructor(Token name, List<Token> parameters, List<TypeDescriptor> parameterTypes,
+                                   boolean isPublic) {
+            this(name, parameters, parameterTypes, isPublic, List.of());
         }
     }
 

@@ -2,6 +2,7 @@ package zeron.lang;
 
 import zeron.collections.Iterable;
 import zeron.collections.Iterator;
+import zeron.collections.Step;
 import zeron.collections.Stream;
 
 class StringCodePoints is Iterable<Char> {
@@ -13,12 +14,12 @@ class StringCodePoints is Iterable<Char> {
             value: String = text;
             offset: Int = 0;
 
-            public mut next(): Option<Char> {
-                if (this.offset >= stringLength(this.value)) return Option<Char>.None();
+            public mut next(): Step<Char> {
+                if (this.offset >= stringLength(this.value)) return Step<Char>.Done();
                 let value = stringCodePointAtOffset(this.value, this.offset);
                 this.offset =
                     this.offset + stringCodePointWidthAtOffset(this.value, this.offset);
-                return Option.Some(value);
+                return Step.Yield(value);
             }
         };
     }

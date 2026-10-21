@@ -2,11 +2,11 @@ package zeron.internal;
 
 import zeron.lang.Option;
 
-fn allocateArray<T>(size: Int): &Array<T> = allocateArray<T>(size);
+fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
 
-public fn unwrapSome<T>(option: Option<T>): T = unwrapSome<T>(option);
+public fn unwrapSome<T: nullable + mut>(option: Option<T>): T = unwrapSome<T>(option);
 
-public fn generateArray<T>(length: Int, initialize: (Int) -> T): &Array<T> {
+public fn generateArray<T: nullable + mut>(length: Int, initialize: (Int) -> T): &Array<T> {
     let mut values = allocateArray<T>(length);
     let mut index = 0;
     while (index < length) {

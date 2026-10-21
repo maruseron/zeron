@@ -20,14 +20,22 @@
 
 Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, F#, Zig, Haxe, Julia, CoffeeScript (see until!)
 
-### Wishlist
+### Current implementation and roadmap
 
 #### Implemented foundations
 
 - Core scalar types, `Unit`, function declarations, and type inference for ordinary bindings and
     function results.
-- `Long` signed 64-bit literals (with the `L` suffix), arithmetic, bitwise and shift operators,
-    plus checked `Long.toInt(): Option<Int>` and widening `Int.toLong()` conversions.
+- `Int` decimal, binary (`0b`), octal (`0o`), and hexadecimal (`0x`) integer literals, with digit
+    separators (`_`) allowed only between digits. `Long` literals use the `L` suffix and support the
+    same integer radices; decimal leading zeroes remain decimal. Existing signed 32-bit `Int` and
+    signed 64-bit `Long` ranges, arithmetic, bitwise and shift operators, plus checked
+    `Long.toInt(): Option<Int>` and widening `Int.toLong()` conversions remain unchanged.
+- Class-owned custom numeric literal suffixes are explicitly imported and resolve to typed
+    constructor factories. The bundled `BigInteger` uses an integer suffix that preserves the exact
+    literal spelling.
+- The `zeron.algebra` contracts provide explicit evidence for `+`, `*`, unary `-`, and binary `-`.
+    Built-in arithmetic retains precedence; generic code declares the required algebraic bound.
 - `zeron.time.Duration` provides signed nanoseconds with checked arithmetic; `Instant` uses a
     monotonic clock for elapsed-time measurement. Wall-clock time remains out of scope.
 - Remainder for `Int`, `Long`, and `Float`, 32-bit `Int` and 64-bit `Long` bitwise and shift operators,
@@ -53,9 +61,11 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     different receiver types and resolve only by receiver applicability, with overlap reported as
     ambiguous. Instance and contract-default methods take precedence over same-named extensions.
     Mutating extensions require `&T`.
-- Invariant generic classes and contracts with inferred or explicit constructor arguments, member
-    substitution, declaration-site conformance, raw JVM erasure, erased-signature bridges, and callback
-    adaptation across erased nominal fields and members.
+- Generic classes and contracts with invariant defaults and checked declaration-site covariance,
+    inferred or explicit constructor arguments, member substitution, declaration-site conformance,
+    raw JVM erasure, erased-signature bridges, and callback adaptation across erased nominal fields
+    and members. Use-site `in` and `out` projections are implemented for supported Zeron and Java
+    generic types; see [ZEP-0052](zeps/ZEP-0052.md).
 - Fixed-size `Array<T>` values with non-empty and contextually typed empty literals, indexed reads
   and writes, and a `length` property; writes require a mutable reference view.
 - `for` loops over arrays, inline integer ranges, and user-defined types conforming to the bundled
@@ -69,8 +79,10 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     writer cleanup uses `Disposable`.
 - `zeron.lang.Option<T>` as the nominal sum `Some(value: T) | None`. Cases are constructed and
     matched through `Option.Some(value)` and `Option<T>.None()`. Public extension operations provide
-    `isSome`, `getOrElse`, `fold`, `map`, and `filter`. `Iterator<T>.next()` returns this type,
-    using `Option<T>.None()` for exhaustion and `Option.Some(value)` for yielded values.
+    `isSome`, `getOrElse`, `fold`, `map`, and `filter`.
+- `zeron.collections.Step<T>` as the iterator result sum `Yield(value: T) | Done`.
+    `Iterator<T>.next()` returns `Step<T>`, keeping iterator exhaustion distinct from optional
+    values, including `Option.Some(null)`.
 - Higher-kinded `Functor<F<_>>`, `Applicative<F<_>>`, `Monad<F<_>>`, and `Foldable<F<_>>` contracts
     in `zeron.control`. `Stream` implements lazy `Monad` and `Foldable` operations; `Option` and
     `Result` provide `Monad` and `Foldable` witnesses. `List` and intrinsic `Array` expose eager
@@ -106,29 +118,15 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
 - Basic nullable types: a non-null value can be widened to `T?`, and `null` can initialize an
     explicitly nullable binding or parameter.
 - Single-expression function bodies and range-literal syntax.
-- For-expressions support ordered `map`, `flatMap`, `filter`, `drop`, `take`, `dropWhile`, and
-    `takeWhile` stages. A `flatMap` expression must return an `Iterable<T>`; each produced iterable is
-    traversed before advancing to the next source element. `drop` and `take` accept `Int` counts;
-    negative counts behave like zero. `dropWhile` skips values while its predicate is true, and
-    `takeWhile` ends traversal at the first false result. An expression without `collect` evaluates its
-    source once and produces a lazy `Stream<T>`. Stage callbacks are created and count expressions
-    evaluated in source order when the pipeline is built, while callback bodies run only as traversal
-    demands elements. Each traversal requests a new iterator from the source; this does not guarantee
-    that the source is replayable or yields the same values on every traversal. Stages execute in order,
-    and `take`/`takeWhile` may stop traversal early.
-    A final `collect` expression is the only terminal stage; it must evaluate to a mutable reference to a
-    `Sink<T>`, and the expression returns that sink. The pipeline is lowered directly to iteration and
-    sink additions. `Sink<T>.add(T)` returns `Boolean`; collected pipelines ignore that result, allowing
-    sinks such as `Set<T>` to report whether an element was newly inserted. Before traversal, the
-    collected form evaluates the source and acquires its iterator
-    for iterable inputs, then evaluates the collector, then evaluates count expressions and snapshots
-    stage captures in source order. Stage expressions are emitted inline in the collected loop, so there
-    is no per-element stage callback invocation; stage bodies still run for each relevant element during
-    traversal. Lazy for-expressions compose ordinary `Stream<T>` operators and therefore retain
-    intermediate stream/iterator wrappers and per-element callback calls. A fused lazy iterator/state
-    machine could reduce that overhead, but would add machinery for stage state, captures, repeated
-    traversal, short-circuiting, exceptions, and `flatMap` ordering; defer it until measurements show the
-    wrappers or callback dispatch are a meaningful cost.
+- For-expressions use ordered `for`, `let`, and `if` clauses followed by exactly one final result
+    clause. `yield expression` produces a lazy `Stream<T>`; `collect expression into sink` eagerly
+    adds each projected value to a mutable `Sink<T>` and returns that sink. Generators nest in
+    lexical, depth-first order, and bindings are visible to subsequent clauses. A lazy comprehension
+    evaluates its outer source expression when constructed and evaluates per-element clauses only as
+    traversal requests values; it does not guarantee that a source is replayable. Eager collection
+    evaluates the outer source and sink once before traversal. `Stream<T>` methods such as `map`,
+    `filter`, `flatMap`, `take`, and `drop` remain ordinary library operations and can be composed
+    with the resulting stream. Fusion is not a semantic guarantee.
 
 #### Prototypes and partial support
 
@@ -150,12 +148,13 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     Arrays support nullable element types, while broader nullable collection behavior remains limited.
 - Generic functions and methods support multiple contract bounds per type parameter. Generic
     function references can be specialized explicitly with `name::<Type>` or inferred from an
-    expected function type; these are monomorphic values, not polymorphic lambdas. Variance and
-    first-class generic function values without specialization remain unsupported. Applied contract
-    bounds are supported on generic functions, methods, classes, and contracts; class and contract
-    evidence is carried through instances for member and default-method dispatch. Class-side factory
-    evidence and non-nominal witness dispatch are implemented. Generic witness overlap analysis
-    remains incomplete. See
+    expected function type; these are monomorphic values, not polymorphic lambdas. Checked
+    declaration-site covariance and use-site projections are implemented, while full
+    contravariance and first-class generic function values without specialization remain
+    unsupported. Applied contract bounds are supported on generic functions, methods, classes, and
+    contracts; class and contract evidence is carried through instances for member and
+    default-method dispatch. Higher-kinded evidence and non-nominal witness dispatch are
+    implemented. Generic witness overlap analysis remains incomplete. See
     [design-document-15](design-document-15_type-class-witnesses-and-generic-bounds.md).
       Generic callback adaptation works across top-level functions, specialized function references,
       and nominal members; broader shape coverage and adapter reuse remain.
@@ -164,13 +163,13 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     remains pending; see
     [design-document-16](design-document-16_patterns-and-pattern-matching.md).
 
-#### Planned language features
+#### Implemented features with limits and remaining proposals
 
-- Method delegation: allow a wrapper method to forward its parameters and result to a receiver method
+- **Planned — method delegation:** allow a wrapper method to forward its parameters and result to a receiver method
     reference, such as `get(index: Int): T` delegating to `contents::get`. Define this as a distinct
     forwarding form, not as a function-reference value or a change to `=` expression bodies; syntax,
     generic substitution, and receiver mutability rules remain to be designed.
-- Default parameters are implemented separately from field initializers. They may appear only on a
+- **Implemented with limits — default parameters:** they are implemented separately from field initializers. They may appear only on a
     trailing parameter suffix; positional calls supply a prefix, and each omitted default is evaluated
     once per call, left to right, in declaration scope; explicit arguments (including `null`) remain
     ordinary call-site arguments. Defaults may refer to earlier parameters, while function values
@@ -179,21 +178,21 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     belong to the contract and are available through contract- and implementing-class-typed calls;
     implementations provide only the full-arity method. Compiled-library APIs record minimum arity.
     Defaults on named/canonical constructors and curated external-class methods remain deferred.
-- Typed signature-only external functions are implemented for registered JVM targets. A narrowly
-    curated external-class facade supports `System.out` and `PrintStream.print`/`println`; general
-    external classes and member declarations, and expected-class declarations, remain future work.
-    See the [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
-    Native sums, nominal products, and concrete built-in newtypes with guarded construction are
-    implemented. Direct-carrier newtype lowering and discriminated unions beyond native sums and
-    sealed contracts remain deferred; see
+- **Implemented in a curated slice — external declarations:** typed signature-only external
+    functions and explicit external-class facades are supported for registered JVM targets. Facades
+    expose selected Java constructors, methods, and properties; unrestricted Java declarations and
+    inherited-member discovery remain out of scope. See the
+    [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
+- **Implemented — native sums, nominal products, and guarded newtypes.** Direct-carrier newtype
+    lowering and discriminated unions beyond native sums and sealed contracts remain deferred; see
     [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
-- Immutable collection types and list comprehensions.
-- Safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`), and explicit
-    reference identity (`===`) are implemented. Value equality uses `Eq<T>` evidence, and custom
+- **Planned — additional immutable collection types and dedicated list-comprehension syntax.**
+- **Implemented — safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`),
+    and explicit reference identity (`===`).** Value equality uses `Eq<T>` evidence, and custom
     relational comparisons use `Comparable<T>` and `Ordering`. See the
     [small language features discussion](design-document-10_small-miscelaneous.md) and the
     [equality and hashing design](design-document-17_structural-equality-and-hashing.md).
-- One trailing `T...` parameter is supported on functions, class methods, contract methods, and
+- **Implemented with limits — one trailing `T...` parameter** is supported on functions, class methods, contract methods, and
     signature-only external functions. Its body type and full function-value parameter type are
     `Array<T>`; direct calls pack the positional arguments after fixed parameters, while indirect
     function-value calls take one array argument. Trailing defaults may precede the variadic
@@ -202,40 +201,41 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     syntax, canonical `new` constructors, and external-class methods remain deferred. Named
     constructors are static factories and accept the same variadic parameters as functions. The
     bundled `zeron.collections.List<T>.of(elements: T...)` factory provides a standard example.
-- Trailing-lambda syntax: allow one block lambda after a call, as in `repeat(3) { index ->
+- **Proposed — trailing-lambda syntax:** allow one block lambda after a call, as in `repeat(3) { index ->
     println(index) }`, with parentheses optional when the lambda is the only argument (`run {
     initialize() }`). Use unparenthesized comma-separated parameter names; a body without `->`
     denotes a zero-parameter lambda. Multiline call chains and nested trailing lambdas need
     readability evaluation; ordinary parenthesized lambdas remain an escape hatch. Multiple
     trailing lambdas per call are out of scope.
-- Low priority: anonymous objects that explicitly implement a named contract, for one-off adapters
-    and test doubles. Anonymous record values are excluded because they would introduce structural
-    typing; capture, identity, and lowering rules remain to be designed.
-- Pattern assignment and derived creation.
-- Typed raised effects have an initial implementation: callable `raises` clauses and function-type
+- **Implemented — anonymous objects** can explicitly implement named contracts for one-off adapters
+    and test doubles. Anonymous record values remain excluded because they would introduce
+    structural typing.
+- **Planned — pattern assignment and derived creation.**
+- **Implemented with limits — typed raised effects:** callable `raises` clauses and function-type
     annotations, `raise` expressions, and `handle (...) with { case Effect [as value] -> ...; }`.
     Property patterns, catch-all cases, effect generics, effects in top-level initializers, and
     automatic Java-exception conversion remain unsupported. Entry-point `main` may declare effects
     like any other callable. See
     [design-document-13](design-document-13_typed-raised-effects.md) for semantics and next steps.
-- Low priority: optional `do` notation for sequencing short-circuiting `Option`/`Result` values.
+- **Low priority proposal — optional `do` notation** for sequencing short-circuiting `Option`/`Result` values.
     A block may mix ordinary statements with `<-` binds; a bind short-circuits on the context's
     failure case, and all binds in the initial design use the same context and `Result` error type.
     The final expression must explicitly construct its `Option`/`Result` value; plain results are
     not implicitly lifted. This sequences value-level failures and does not handle declared
     `raises` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
-- Low priority: compiler-recognized type-admissibility constraints on generic type parameters, such
-    as `NonNull` to exclude nullable type arguments or `Numeric` to admit only `Int`, `Long`, and
-    `Float`. These constraints restrict which types may be supplied but do not expose operations;
-    generic operator support remains a separate operator-witness design. Constraint inference,
-    forwarding, and compiled-library representation would need definition before implementation.
+- **Implemented — generic admissibility markers:** parameters admit non-null, read-only arguments by
+    default; `nullable` and `mut` opt in independently, while `effect` is exclusive and enables
+    exact generic effect propagation with runtime checks at generic raise sites. These markers do
+    not enable handler cases on unresolved type parameters. A closed-set `numeric` marker is
+    deferred; generic `+`, `*`, and `-` use the
+    operation-specific algebraic contracts in [ZEP-0036](zeps/ZEP-0036.md).
     `Stable<T>` for hash-key admissibility was rejected in
     [ZEP-0014](zeps/ZEP-0014.md); reconsider it only if a sound, useful guarantee can be enforced.
-- Low priority: type-predicate return types such as `isSome(): this is Option.Some`, which connect a
+- **Low priority proposal — type-predicate return types** such as `isSome(): this is Option.Some`, which connect a
     successful Boolean check to flow refinement of a stable receiver. Define how predicate bodies
     are verified so the refinement is sound, which receivers may be narrowed, and how generic
     arguments are preserved despite runtime erasure before using this for `Result`.
-- Low priority: an explicit pipe operator where `value |> f` means `f(value)` and
+- **Low priority proposal — an explicit pipe operator** where `value |> f` means `f(value)` and
     `value |> f(option)` means `f(value, option)`. The piped value becomes the first argument;
     stages evaluate left to right. No partial application, method lookup, or implicit nullable/result
     propagation is intended.
@@ -345,8 +345,9 @@ member boundaries are also adapted through generated helpers and erased contract
 shape coverage remains follow-up work. `Array<T>` is an implemented built-in invariant type
 constructor with its own descriptor, not a user-defined generic class; literals, indexing, and
 `.length` are supported. Empty literals require an expected array type, and
-`zeron.internal.generateArray` initializes every slot through an index callback. The `Type[]` spelling
-and discriminated unions remain design proposals.
+`zeron.internal.generateArray` initializes every slot through an index callback. The `Type[]`
+spelling remains a syntax proposal; native sums, products, and newtypes are implemented with the
+limits described in [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
 Mutable-reference capability (`&Type`) is preserved in resolved
 types and enforced for array-slot writes, function-view projection, class member mutation, and
 mutable-to-read-only projections.
@@ -448,8 +449,8 @@ alternative named-function body delimiter.
 
 #### Generic functions (first slice)
 
-See the [generic-function implementation note and roadmap](design-document-07_generic-functions.md) for
-the current resolver and JVM lowering details.
+See the [generic type system status and roadmap](design-document-19_generic-type-system.md) for
+current generic features, limitations, acceptance criteria, and roadmap.
 
 Generic functions declare type parameters after the name and require an explicit return type:
 
@@ -469,17 +470,21 @@ remaining type variables. Generic functions require annotated returns so their s
 before body resolution.
 
 Unbounded type parameters are opaque in function bodies. A contract-bounded parameter can call that
-contract's non-mutating methods; operators and other type-specific operations still need future
-constraints. Contextually typed lambdas remain monomorphic; safe immutable let-bound lambdas have a
-limited rank-1 generalization slice. Generic named functions can be referenced as monomorphic
+contract's non-mutating methods; supported algebraic operators require explicit `Add<T>`,
+`Addition<T>`, or `Mult<T>` bounds, with no inferred hidden requirements. Other type-specific
+operations still need their own contracts or constraints. Contextually typed lambdas remain
+monomorphic; safe immutable let-bound lambdas have a limited rank-1 generalization slice. Generic
+named functions can be referenced as monomorphic
 function values by explicit specialization or expected function type. At runtime, type parameters
 erase to `Object`; direct callback parameters/results and specialized function references crossing
 between erased and concrete function shapes use generated bridge helpers. Nested callbacks, nullable
 callback values, and mutable function views are adapted recursively; broader primitive/reference
-combinations and bridge-reuse coverage remain. Invariant generic classes/contracts and callback
-adaptation across their erased member boundaries are implemented. Contract bounds are supported on
-generic functions, methods, classes, and contracts. Class and contract evidence is carried through
-instances for member and default-method dispatch; variance and broader inference remain deferred.
+combinations and bridge-reuse coverage remain. Generic classes and contracts are invariant by
+default, with checked declaration-site covariance and use-site projections implemented. Callback
+adaptation across erased member boundaries is implemented. Contract bounds are supported on generic
+functions, methods, classes, and contracts. Class and contract evidence is carried through instances
+for member and default-method dispatch; broader inference remains deferred. See the
+[generic type system roadmap](design-document-19_generic-type-system.md).
 
 ---
 
@@ -652,12 +657,9 @@ type. Range values can be stored and iterated later like any other iterable.
 
 #### Making an iterable
 
-`Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`,
-defined in `src/main/resources/stdlib/zeron/collections/iterator.zn` and
-`src/main/resources/stdlib/zeron/collections/iterable.zn`, respectively. The standard library also
-provides a lazy `Stream<T>` in `src/main/resources/stdlib/zeron/collections/stream.zn`, a
-`Sink<T>` contract, and an array-backed mutable `List<T>` in
-`src/main/resources/stdlib/zeron/collections/list.zn`. The
+`Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`.
+Collection abstractions also include a lazy `Stream<T>`, a `Sink<T>` contract, and an array-backed
+mutable `List<T>`. The
 `for` protocol recognizes only the fully-qualified `zeron.collections.Iterable<T>` contract; a
 same-named contract in another package
 does not make a type iterable. A custom iterable imports and implements these public contracts
@@ -739,13 +741,13 @@ declaration synthesizes a public constructor; `private constructor new;` restric
 construction. Fields remain private. Visibility-marked properties generate getters, and `mut`
 properties also generate setters; custom accessors use explicitly declared backing fields. Named
 factories have no `this`; block bodies must return `&Class` on every normal path, and all object
-allocation still goes through canonical `new`. Contracts can also require named factories; conforming
-classes must provide compatible public factories, which are statically dispatched through the
-concrete class name rather than dynamically through a contract value. Methods and properties provide
-the instance API. Contracts can require method signatures and read-only or writable properties; the
-source design permits multiple declaration-site conformances, checked statically, and calls through
-contract-typed references use interface dispatch, including when a class conforms to multiple
-contracts. Default contract methods and applied contract composition with `requires` are implemented. Separate
+allocation still goes through canonical `new`. Contracts describe instance behavior and do not
+require named factories; generic construction uses higher-kinded evidence or an explicit factory.
+Methods and properties provide the instance API. Contracts can require method signatures and
+read-only or writable properties; the source design permits multiple declaration-site conformances,
+checked statically, and calls through contract-typed references use interface dispatch, including
+when a class conforms to multiple contracts. Default contract methods and applied contract
+composition with `requires` are implemented. Separate
 `implement` declarations and class inheritance remain deferred.
 
 ```zeron

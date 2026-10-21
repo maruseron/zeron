@@ -66,7 +66,7 @@ public final class AnyTypeTest {
         final var className = "AnyValues" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
         final var statements = parse("""
-                fn identity<T>(value: T): T = value;
+                fn identity<T: nullable>(value: T): T = value;
             let globalUnit: Any = ();
                 fn echoAny(value: Any): Any = value;
                 fn anyInt(): Any = 42;

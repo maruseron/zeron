@@ -3,14 +3,14 @@ package zeron.collections;
 import zeron.control.Foldable;
 import zeron.lang.Eq;
 
-public extension<T> Array<T> {
-    public fn foldLeft<R>(initial: R, combine: (R, T) -> R): R {
+public extension<T: nullable + mut> Array<T> {
+    public fn foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         for (let item in this) result = combine(result, item);
         return result;
     }
 
-    public fn fold<R>(initial: R, accumulator: (R, T) -> R): R {
+    public fn fold<R: mut>(initial: R, accumulator: (R, T) -> R): R {
         return this.foldLeft(initial, accumulator);
     }
 
@@ -20,11 +20,11 @@ public extension<T> Array<T> {
 }
 
 witness Foldable<Array<_>> for Array<_> {
-    fn foldLeft<A, B>(this: Array<A>, initial: B, combine: (B, A) -> B): B =
+    fn foldLeft<A: mut, B: mut>(this: Array<A>, initial: B, combine: (B, A) -> B): B =
         this.foldLeft(initial, combine);
 }
 
-public extension<T: Eq<T>> Array<T> {
+public extension<T: nullable + mut + Eq<T>> Array<T> {
     public fn contains(item: T): Boolean = this.indexOf(item) >= 0;
 
     public fn indexOf(item: T): Int {

@@ -6,11 +6,11 @@ import zeron.lang.Hashable;
 import zeron.lang.Option;
 import zeron.lang.Pair;
 
-fn hashKey<T: Hashable<T>>(key: T): Int = key.hash();
+fn hashKey<T: nullable + Hashable<T>>(key: T): Int = key.hash();
 
-fn equalKeys<T: Eq<T>>(left: T, right: T): Boolean = left == right;
+fn equalKeys<T: nullable + Eq<T>>(left: T, right: T): Boolean = left == right;
 
-class MapEntry<K, V> {
+class MapEntry<K: nullable, V: nullable + mut> {
     keyValue: K;
     cachedHash: Int;
     storedValue: V;
@@ -30,7 +30,7 @@ class MapEntry<K, V> {
     public next(): MapEntry<K, V>? = this.nextEntry;
 }
 
-class MapIterator<K, V> is Iterator<Pair<K, V>> {
+class MapIterator<K: nullable, V: nullable + mut> is Iterator<Pair<K, V>> {
     buckets: &Array<MapEntry<K, V>?>;
     bucketIndex: Int;
     current: MapEntry<K, V>?;
@@ -40,9 +40,9 @@ class MapIterator<K, V> is Iterator<Pair<K, V>> {
     public constructor from(buckets: &Array<MapEntry<K, V>?>) =
         MapIterator<K, V>.new(buckets, 0, null);
 
-    public mut next(): Option<Pair<K, V>> {
+    public mut next(): Step<Pair<K, V>> {
         while (this.current === null) {
-            if (this.bucketIndex >= this.buckets.length) return Option<Pair<K, V>>.None();
+            if (this.bucketIndex >= this.buckets.length) return Step<Pair<K, V>>.Done();
             let entry = this.buckets[this.bucketIndex];
             this.bucketIndex = this.bucketIndex + 1;
             if (entry === null) {
@@ -52,13 +52,13 @@ class MapIterator<K, V> is Iterator<Pair<K, V>> {
             }
         }
         let entry = this.current;
-        if (entry === null) return Option<Pair<K, V>>.None();
+        if (entry === null) return Step<Pair<K, V>>.Done();
         this.current = entry.next();
-        return Option.Some(Pair<K, V>.new(entry.key(), entry.value()));
+        return Step.Yield(Pair<K, V>.new(entry.key(), entry.value()));
     }
 }
 
-class MapKeyIterator<K, V> is Iterator<K> {
+class MapKeyIterator<K: nullable, V: nullable + mut> is Iterator<K> {
     buckets: &Array<MapEntry<K, V>?>;
     bucketIndex: Int;
     current: MapEntry<K, V>?;
@@ -68,9 +68,9 @@ class MapKeyIterator<K, V> is Iterator<K> {
     public constructor from(buckets: &Array<MapEntry<K, V>?>) =
         MapKeyIterator<K, V>.new(buckets, 0, null);
 
-    public mut next(): Option<K> {
+    public mut next(): Step<K> {
         while (this.current === null) {
-            if (this.bucketIndex >= this.buckets.length) return Option<K>.None();
+            if (this.bucketIndex >= this.buckets.length) return Step<K>.Done();
             let entry = this.buckets[this.bucketIndex];
             this.bucketIndex = this.bucketIndex + 1;
             if (entry === null) {
@@ -80,13 +80,13 @@ class MapKeyIterator<K, V> is Iterator<K> {
             }
         }
         let entry = this.current;
-        if (entry === null) return Option<K>.None();
+        if (entry === null) return Step<K>.Done();
         this.current = entry.next();
-        return Option.Some(entry.key());
+        return Step.Yield(entry.key());
     }
 }
 
-public class Map<K: Hashable<K>, V> is Iterable<Pair<K, V>> {
+public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<K, V>> {
     buckets: &Array<MapEntry<K, V>?>;
     count: Int;
     hashFunction: (K) -> Int;

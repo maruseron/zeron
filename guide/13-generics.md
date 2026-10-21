@@ -124,6 +124,25 @@ public extension<T> Array<T> {
 The array provides values of type `T`, while `R` is the type of the running result. An integer
 array, for example, can be folded into a string by choosing `R` as `String`.
 
+## Mutable-reference type arguments
+
+Generic parameters admit read-only, non-null types by default. A mutable reference such as `&Box`
+is rejected unless the parameter opts in with `mut`:
+
+```zeron
+fn inspect<T>(value: T): Unit = ();
+fn preserveMutableView<T: mut>(value: T): T = value;
+```
+
+The `mut` marker controls which type arguments are admissible; it does not give the generic
+function permission to mutate its value. Mutation still requires a mutable reference and an
+operation that supports mutation. The `nullable` marker independently permits nullable arguments,
+so `T: nullable + mut` accepts both nullable types and mutable-reference types.
+
+Effect-kinded parameters use the exclusive `effect` marker to accept effect types for generic
+propagation. For the marker rules and nested generic boundaries, see the
+[generic type-system design](../documents/design-document-19_generic-type-system.md).
+
 ## Type erasure
 
 Zeron checks generic types while building a program, but the JVM does not keep every generic type

@@ -5,8 +5,16 @@ const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 const { createContentProvider, createDefinitionMiddleware } = require("./stdlib-documents");
 
 let client;
+let outputChannel;
 
 async function activate(context) {
+    context.subscriptions.push(vscode.commands.registerCommand(
+        "zeron.restartLanguageServer",
+        restartLanguageServer));
+    context.subscriptions.push(vscode.commands.registerCommand(
+        "zeron.reloadWindow",
+        reloadWindow));
+
     const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
     if (workspaceFolders.length !== 1) {
         const message = workspaceFolders.length === 0
@@ -17,7 +25,7 @@ async function activate(context) {
     }
 
     const workspaceFolder = workspaceFolders[0];
-    const outputChannel = vscode.window.createOutputChannel("Zeron Language Server");
+    outputChannel = vscode.window.createOutputChannel("Zeron Language Server");
     context.subscriptions.push(outputChannel);
     context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(
         "zeron-stdlib", createContentProvider(vscode)));
@@ -62,6 +70,27 @@ async function activate(context) {
         void vscode.window.showErrorMessage(
             `${message}. Install Zeron 0.3.0 or later, or configure zeron.server.path.`);
     }
+}
+
+async function restartLanguageServer() {
+    if (client === undefined) {
+        void vscode.window.showErrorMessage("The Zeron language server is not running.");
+        return;
+    }
+
+    try {
+        await client.restart();
+        void vscode.window.showInformationMessage("Zeron language server restarted.");
+    } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const message = `Unable to restart the Zeron language server: ${detail}`;
+        outputChannel?.appendLine(message);
+        void vscode.window.showErrorMessage(message);
+    }
+}
+
+function reloadWindow() {
+    return vscode.commands.executeCommand("workbench.action.reloadWindow");
 }
 
 function deactivate() {

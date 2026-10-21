@@ -259,6 +259,48 @@ public final class TypedRaisedEffectsTest {
         }
     }
 
+    @Test
+    public void genericEffectParametersPropagateAndValidateRuntimeValues() throws Exception {
+        final var packageName = "genericEffect" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-generic-effects-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                public effect Failure {}
+                fn relay<E: effect>(value: E): Int raises E = raise value;
+                fn handled(): Int = handle (relay(Failure.new())) with {
+                    case Failure -> 7;
+                };
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit),
+                    packageName + ".Main", packageName, List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + ".Main");
+                assertEquals(7, main.getMethod("handled").invoke(null));
+                try {
+                    main.getMethod("relay", Object.class).invoke(null, "not an effect");
+                    throw new AssertionError("The generic effect boundary must reject non-effect values.");
+                } catch (final InvocationTargetException exception) {
+                    assertEquals(ClassCastException.class, exception.getCause().getClass());
+                }
+            }
+        } finally {
+            deleteTree(output);
+        }
+
+        final var unresolvedCase = parse("GenericHandler.zn", """
+                fn invalid<E: effect>(value: E): Int = handle (raise value) with {
+                    case E -> 1;
+                };
+                """);
+        assertTrue(new ResolutionService().resolveUnitsWithDiagnostics(List.of(unresolvedCase)).errors().stream()
+                .anyMatch(error -> error.message().contains("concrete effect type")));
+    }
+
     private static CompilationUnit parse(final String sourcePath, final String source) {
         return Parser.of(Scanner.from(source, sourcePath).scanTokens())
                 .parseCompilationUnit(sourcePath);

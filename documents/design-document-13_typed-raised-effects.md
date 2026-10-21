@@ -7,18 +7,18 @@ raised effects. The feature is intentionally separate from `Result<T, E>`: a `Re
 value that callers inspect, while a raised effect transfers control to a matching handler or to the
 caller.
 
-The initial slice supports nominal, non-generic `effect` declarations; `raises` clauses on
+The implementation supports nominal, non-generic `effect` declarations; `raises` clauses on
 functions, class methods, extension methods, named constructors, and function type annotations;
-`raise` expressions; and expression handlers. Effects are checked by the resolver and represented in
+`raise` expressions; inline expression handlers; named reusable handlers; and first-class structural
+handler types. Effects and handler shapes are checked by the resolver and represented in
 compiled-library API metadata. Handler cases use the existing named-pattern syntax, can bind the
 whole payload with `as`, and can include Boolean guards.
 
 The implementation does not add effect inheritance, effect generics, effect rows, catch-all or
-wildcard cases, or asynchronous effects. Java checked exceptions can be mapped only through the
-explicit external-class method mapping described below; there is no automatic translation. Declared
-effects may escape from the entry-point `main`; top-level initializers remain effect-free. The
-implementation is limited to expression handlers; no statement-level `try`/`catch` form is
-introduced.
+wildcard cases, or asynchronous effects. Java checked exceptions can be mapped only through explicit
+interop declarations and configured bindings described below; there is no automatic translation.
+Declared effects may escape from the entry-point `main`; top-level initializers remain effect-free.
+Handlers remain expression-scoped; no statement-level `try`/`catch` form is introduced.
 
 Synchronous resource cleanup is provided separately by statement-style `using` scopes and the
 `zeron.resource.Disposable` contract. Such scopes contribute body and disposal effects to the
@@ -75,6 +75,40 @@ handle (read(path)) with {
 OR-pattern alternatives in a handler case must name the same effect type. Multiple cases for the
 same effect are allowed and tried in source order. The parser requires at least one case.
 
+### Named and first-class handlers
+
+A named handler is an immutable top-level or namespace value. Its cases use the same syntax and
+coverage rules as an inline handler:
+
+```zeron
+public handler EmptyText {
+    case NotFound(_) -> "";
+}
+
+fn readOrEmpty(path: String): String = handle (read(path)) with EmptyText;
+```
+
+An anonymous `handler { ... }` expression can be stored, passed, or returned where a handler type
+is expected. It may capture immutable locals by value, following lambda capture rules. Handler types
+use the form `R ~> {E1, E2} [raises {G1}]`: `R` is the protected computation's normal result type,
+the first finite set is the set of exact effects completely handled, and the optional `raises` set
+contains effects that handler cases may raise. Omitting it means the handler cases raise no effects;
+the explicit `raises {}` spelling has the same meaning. Both sets may be empty; effect types in
+either set must be concrete.
+
+```zeron
+fn applyPolicy(policy: String ~> {NotFound}): String =
+    handle (read("input.txt")) with policy;
+
+fn example(): String = applyPolicy(handler {
+    case NotFound.path(_) -> "";
+});
+```
+
+Named and anonymous handlers with the same result type and effect sets have the same structural
+type. Assignment and parameter compatibility require an exact match of all three components;
+handler composition, effect-row polymorphism, and effect subtyping are not supported.
+
 ## Static semantics
 
 ### Effect declarations
@@ -106,27 +140,39 @@ identity.
 The entry-point `main` function may declare raised effects like any other callable. Effects not
 handled within `main` must appear in its `raises` clause. Top-level value initializers cannot raise
 effects because there is no enclosing callable or entry-point boundary to receive them. Java
-exceptions are not translated by default. External-class methods can explicitly map declared Java
-checked exceptions to ordinary Zeron effects:
+exceptions are not translated by default. External-class methods and constructors, plus external
+functions backed by configured Java bindings with class-file metadata, can explicitly map declared
+Java checked exceptions to ordinary Zeron effects:
 
 ```zeron
 public external class Reader = "java.io.Reader" {
     public read(): Int
         throws java.io.IOException -> FileFailure::fromIOException;
 }
+
+public external class FileReader = "java.io.FileReader" {
+    public constructor new(path: String)
+        throws java.io.FileNotFoundException -> FileFailure::fromIOException;
+}
+
+public external fn readConfigured(path: String): String?
+    throws java.io.IOException -> FileFailure::fromIOException;
 ```
 
-Every checked exception declared by the Java method must be covered by a mapping. Each mapped
-exception type must be a Java subtype of `Throwable`, and the named public effect constructor must
-accept exactly one payload whose Java-facing type matches that exception type. If multiple mappings
-apply, the most-specific exception type takes precedence; ambiguous mappings are rejected. Mapping
-validation uses class-file metadata, so it does not load or initialize the Java class. Checked
-exceptions are not inferred for direct Java interop calls: those calls are rejected when the selected
-method declares checked exceptions. Java constructors declaring checked exceptions are currently
-unsupported, including constructors exposed by an external facade.
+Every checked exception declared by the Java callable must be covered by a compatible mapping. Each
+mapped exception type must be a checked Java subtype of `Throwable`, and the named public effect
+constructor must accept one payload type capable of receiving the mapped exception. It may be a
+supertype such as `Throwable`, which allows distinct exception types to share an effect while
+preserving the original object. Mappings that do not correspond to a declared checked exception,
+duplicate mappings for one exception type, and incomplete coverage are rejected. If multiple
+mappings apply, the most-specific exception type takes precedence. Mapping validation uses
+class-file metadata, so it does not load or initialize the Java class. Direct Java calls remain
+invalid when checked exceptions are declared unless they resolve through one of these mapped
+declarations; call-site mapping syntax is not provided. Generic Java `throws` type variables are
+rejected rather than inferred from erased bounds.
 
-The method's Zeron `raises` set is derived from its mappings. At runtime, only the Java invocation is
-covered by the translation handler: receiver and argument evaluation failures are not remapped.
+The callable's Zeron `raises` set is derived from its mappings. At runtime, only the Java invocation
+is covered by the translation handler: receiver and argument evaluation failures are not remapped.
 `RuntimeException` descendants and `Error`s bypass translation even when a broad mapping names
 `Exception` or `Throwable`; they continue to the host unchanged. The original Java exception is
 passed as the payload to the selected Zeron effect constructor.
@@ -138,8 +184,18 @@ value is preserved. A handler removes an effect from that set only if it has an 
 irrefutable pattern for that effect. In particular, guarded or refutable patterns do not prove
 coverage; a set of refutable cases is not combined to infer exhaustiveness. An unmatched payload,
 including one for a listed but incompletely handled effect, remains in the escaping set and must be
-declared or handled by an outer scope. Handler arms and guards are resolved in the enclosing effect
-scope, so effects they raise are not removed by that same handler.
+declared or handled by an outer scope. Inline handler arms and guards are resolved in the enclosing effect scope, so effects they raise
+are not removed by that same handler. A first-class handler records its case-raised set in its
+structural type. Applying it removes only its complete handled set from the protected computation
+and adds the recorded case-raised set:
+
+```text
+(protected effects \ handled effects) ∪ handler-case effects
+```
+
+The handler value is evaluated once before the protected expression. Effects raised while
+evaluating that value escape to the enclosing scope rather than being caught by the handler being
+applied.
 
 The handler expression has a common result type for the protected expression's normal result and all
 handler arms. When the protected expression has type `Never`, only the arms determine the result
@@ -154,17 +210,16 @@ catch-all case, so it cannot silently erase an unlisted effect.
 
 Raised effect lists are part of `FunctionDescriptor` signatures, including function type annotations
 and exported signatures for functions, methods, extensions, and named constructors. A function type
-accepts a value whose effect set is a subset of the expected effect set. Erased JVM function-shape
-names and SAM descriptors do not include raised effects because JVM invocation types are unchanged.
-Runtime effect checking is preserved inside generated lambda bodies.
+accepts a value whose effect set is a subset of the expected effect set. Handler types are structural
+and require exact result, handled-effect, and handler-raised-effect sets. JVM callable interfaces
+encode only the handler result and dispatch argument; effect capabilities remain in source-level
+descriptors and library metadata.
 
-Effect metadata was first added in compiled-library index schema version 15. The current schema
-serializes both the effect marker on exported nominal classes and raised sets on exported callable
-signatures, as well as external-facade exception mappings needed to revalidate and emit those bridges
-in separately compiled clients. The standard-library API version remains
-independent of this binary schema version. Consumers of schemas that predate effect metadata must
-rebuild or use a compatible compiler; such an index cannot communicate effect markers, raised
-signatures, or exception mappings safely.
+The compiled-library index serializes effect markers, callable raised sets, handler shapes on
+exported values, and external-facade exception mappings needed for separately compiled clients. The
+standard-library API version remains independent of the binary schema version. Consumers of schemas
+that predate the relevant metadata must rebuild or use a compatible compiler; such an index cannot
+communicate effect markers, raised signatures, handler capabilities, or exception mappings safely.
 
 ## Runtime model
 
@@ -173,10 +228,11 @@ The compiler emits a final `zeron.runtime.RaisedEffect` runtime exception with a
 support class is emitted alongside compiled classes.
 
 A handler compiles its protected expression into a JVM exception-table region catching only
-`RaisedEffect`. It tries the patterns in source order, evaluates a guard only after its pattern
-matches, and evaluates the arm only when both pattern and guard succeed. If no case matches, it
-rethrows the same carrier. Ordinary Java exceptions are not caught by effect handlers; only an explicit external-facade mapping
-translates the declared checked exception at its Java call site. An unhandled carrier escaping the
+`RaisedEffect`. Inline cases and first-class handler dispatch try patterns in source order, evaluate
+a guard only after its pattern matches, and evaluate the arm only when both pattern and guard
+succeed. If no case matches, the same carrier is rethrown. Ordinary Java exceptions are not caught
+by effect handlers; only an explicit external-facade mapping translates the declared checked
+exception at its Java call site. An unhandled carrier escaping the
 generated `main` method likewise propagates unchanged across the host boundary;
 the current compiler does not add a launcher that catches and formats it. A future launcher may
 report an uncaught Zeron effect by catching only `RaisedEffect`, without translating Java exceptions
@@ -187,25 +243,29 @@ class files and public effect metadata is available to imported compiled librari
 
 Other follow-up areas:
 
-1. Design effect subtyping and generic payloads, if needed, without conflating effect identity with
-   nominal value-type inheritance.
-2. Extend explicit checked-exception mappings only as concrete interop needs arise; they remain an
+1. [ZEP-0054](./zeps/ZEP-0054.md) drafts ordinary nominal members and contract conformance for
+   effect payloads while preserving exact effect identity.
+2. [ZEP-0055](./zeps/ZEP-0055.md) drafts an effect-kind constraint for generic declarations and
+   propagation of abstract effects. It does not add generic effect payload declarations or generic
+   handler cases.
+3. [ZEP-0013](./zeps/ZEP-0013.md) explores effect subtyping and a denotable top `Effect` type.
+   These remain proposals and do not change the exact-matching semantics described above.
+4. Generic effect payload declarations remain separately explored in [ZEP-0005](./zeps/ZEP-0005.md)
+   and depend on a sound runtime identity model.
+5. Extend explicit checked-exception mappings only as concrete interop needs arise; they remain an
    opt-in boundary and do not alter ordinary Java exception propagation.
-3. Explore effect-set polymorphism only after concrete callable and function-type compatibility has
+6. Explore effect-set polymorphism only after concrete callable and function-type compatibility has
    stabilized.
-4. Decide whether observable I/O belongs in the raised-effect system. `raises` currently describes
+7. Decide whether observable I/O belongs in the raised-effect system. `raises` currently describes
    typed control-flow effects, not purity or the absence of observable side effects, so `println`
    can have no declared raised effects without being pure. If operations such as `println` were to
    raise a hypothetical `IO` effect, weigh the semantic benefit against the learning burden of
    introducing effect handling early; `main` may declare such effects and let them escape to the
    host boundary.
-5. Explore first-class, typed effect-handler values that can be named and reused after `with`,
-   while keeping `match` for ordinary value inspection and `handle` for raised control flow.
-   Specify how handler result types relate to the protected expression's normal result, how
-   unhandled effects propagate, and how handler-raised effects are checked; consider composition
-   separately. Keep this distinct from resumable algebraic effect handlers unless continuation
-   resumption is explicitly designed.
-6. Decide whether raised effects should remain abortive or eventually grow into fully resumable
+8. [ZEP-0056](./zeps/ZEP-0056.md) and [ZEP-0057](./zeps/ZEP-0057.md) implement named reusable
+   handlers and first-class structural handler types. These remain abortive and preserve `match` for
+   ordinary value inspection; resumable continuations are a separate design question.
+9. Decide whether raised effects should remain abortive or eventually grow into fully resumable
    algebraic effects. Resumption is not part of the current runtime model: `raise` throws a carrier
    and unwinds the JVM stack to a handler. Supporting resumable operations would require capturing
    and invoking continuations and would change the compiler/runtime model substantially. Do not

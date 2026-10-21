@@ -355,9 +355,10 @@ final class NominalTypeEmitter {
         final var product = productDeclaration(context, className);
         final var newtype = newtypeDeclaration(context, className);
         final var classDesc = ClassDesc.of(className);
-        final var interfaces = declaration.contractUses().stream()
+        final var interfaces = new ArrayList<ClassDesc>(declaration.contractUses().stream()
             .map(contractUse -> ClassDesc.of(contractUse.name().lexeme()))
-            .toList();
+            .toList());
+        if (declaration.isEffect()) interfaces.add(ClassDesc.of("zeron.runtime.EffectValue"));
         final var classPath = outputPath(context, className);
         Files.createDirectories(classPath.getParent());
         context.classFile.buildTo(classPath.toAbsolutePath(),

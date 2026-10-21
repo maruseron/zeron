@@ -101,8 +101,8 @@ unsupported.
 
 This is an initial, intentionally constrained generalization rule. Reassignable bindings, nested
 polymorphic schemes, explicit `forall`, and unresolved parameters used by operators are not
-generalized. Operator-constrained lambdas retain deferred monomorphic contextual inference because
-the language does not yet have operator constraints.
+generalized. Operator overloading is implemented through explicit algebraic bounds, but
+operator-constrained lambdas remain monomorphic and do not infer those bounds.
 
 ### Multi-parameter lambda syntax
 
@@ -155,8 +155,9 @@ Address the remaining work in this order:
 5. **Extend polymorphic lambda inference: constrained rank-1 generalization implemented.**
 	Direct immutable-let lambdas infer applied-contract bounds from body member use and bounded
 	generic callees. Each use resolves evidence independently; the generated template specializes and
-	caches erased closures per activation. Explicit `forall`, nested schemes, and operator constraints
-	remain separate work; the implementation does not provide higher-rank polymorphism.
+	caches erased closures per activation. Explicit `forall`, nested schemes, and generalization of
+	operator-constrained lambdas remain separate work; the implementation does not provide higher-rank
+	polymorphism.
 6. **Specify and implement capture lowering: implemented.** Immutable captured values are passed through the `invokedynamic` factory descriptor and bound to the runtime function object; static helpers receive captures before the lambda's declared parameters. Explicit shared mutable state is available through the ordinary `zeron.lang.Cell<T>` library type; capturing a mutable cell reference preserves the existing by-value reference-capture model.
 7. **Unify artifact output: implemented baseline.** Generated programs are emitted under `dist/`; source classes follow their declared package paths, while generated lambda interfaces remain in the default package. Define stale-artifact handling and configurable output directories if incremental or multi-project compilation requires them.
 8. **Expand behavior tests: broader baseline implemented.** Tests cover same-shape lambdas with different bodies, zero and multiple parameters, the complete `Int`/`Float`/`Boolean`/`String` callback input-output matrix, stored and returned callbacks, nested lambdas, immutable captures across generic boundaries, adapter reuse, and deterministic repeated compilation. Continue with incremental/multi-project compilation, explicit shared mutation, and additional nominal/nested shape combinations; verify both program output and emitted descriptors/call instructions.

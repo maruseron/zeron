@@ -65,7 +65,9 @@ responsibilities.
 - `documents/design-document-04_mutability.md`: mutability semantics and implementation.
 - `documents/design-document-05_classes-and-contracts.md`: classes and contracts.
 - `documents/design-document-06_intrinsic-arrays.md`: intrinsic array types and operations.
-- `documents/design-document-07_generic-functions.md`: generic functions.
+- `documents/design-document-19_generic-type-system.md`: current generic type system status,
+  limitations, acceptance criteria, and roadmap.
+- Superseded, historical note: `documents/design-document-07_generic-functions.md`.
 - `documents/design-document-08_flow-typing-type-tests-and-casts.md`: flow typing, type tests, and casts.
 - `documents/design-document-09_namespaces-packages-and-imports.md`: source-level names, packages, imports, and visibility.
 - `documents/design-document-10_small-miscelaneous.md`: low-priority null and equality feature discussion.

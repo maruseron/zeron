@@ -2,7 +2,7 @@ package zeron.ranges;
 
 import zeron.collections.Iterable;
 import zeron.collections.Iterator;
-import zeron.lang.Option;
+import zeron.collections.Step;
 
 public class IntIterator is Iterator<Int> {
     current: Int;
@@ -18,17 +18,17 @@ public class IntIterator is Iterator<Int> {
     public constructor descending(current: Int, end: Int) =
         IntIterator.new(current, end, -1, false);
 
-    public mut next(): Option<Int> {
-        if (this.done) return Option<Int>.None();
-        if (this.step > 0 and this.current > this.end) return Option<Int>.None();
-        if (this.step < 0 and this.current < this.end) return Option<Int>.None();
+    public mut next(): Step<Int> {
+        if (this.done) return Step<Int>.Done();
+        if (this.step > 0 and this.current > this.end) return Step<Int>.Done();
+        if (this.step < 0 and this.current < this.end) return Step<Int>.Done();
         let temp = this.current;
         if (this.current == this.end) {
             this.done = true;
         } else {
             this.current = this.current + this.step;
         }
-        return Option<Int>.Some(temp);
+        return Step.Yield(temp);
     }
 }
 

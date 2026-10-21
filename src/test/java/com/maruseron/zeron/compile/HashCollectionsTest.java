@@ -98,7 +98,8 @@ public final class HashCollectionsTest {
                 }
 
                 fn collectedSetBehavior(): Boolean {
-                    let collected = for [1, 1, 2] collect Set.empty<Int>();
+                    let collected = for item in [1, 1, 2]
+                        collect item into Set.empty<Int>();
                     return collected.size == 2 and collected.contains(1) and collected.contains(2);
                 }
                 """;

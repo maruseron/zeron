@@ -53,15 +53,29 @@ final class TypeResolver {
         final var seenEffects = new HashSet<TypeDescriptor>();
         for (final var effect : function.raisedEffects()) {
             validateType(context, effect, where);
-            if (!(effect instanceof NominalDescriptor nominal)
-                    || context.classes.get(nominal.name()) == null
-                    || !context.classes.get(nominal.name()).isEffect()) {
+            if (!isEffectType(context, effect)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        where, "A raises clause must name a declared non-generic effect type."));
+                        where, "A raises clause must name a declared effect type or an effect-kinded parameter."));
             }
             if (!seenEffects.add(effect)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
                         where, "An effect may appear only once in a raises clause."));
+            }
+        }
+        if (function.isHandler()) {
+            final var handledEffects = new HashSet<TypeDescriptor>();
+            for (final var effect : function.handledEffects()) {
+                validateType(context, effect, where);
+                if (effect instanceof TypeParameterDescriptor || !isEffectType(context, effect)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, where,
+                            "A handler type must name concrete effect types."));
+                }
+                if (!handledEffects.add(effect)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT, where,
+                            "An effect may appear only once in a handler type."));
+                }
             }
         }
     }
@@ -104,7 +118,7 @@ final class TypeResolver {
                     if (javaClass.hasTypeParameters()) {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                                 where,
-                                "Generic Java classes are not supported by the current interop slice."));
+                                "Raw Java generic types are not supported."));
                     }
                     break;
                 }
@@ -124,13 +138,23 @@ final class TypeResolver {
                             "Type '" + nominal.name() + "' requires " + arity + " type arguments."));
                 }
             }
-            case ArrayDescriptor array -> validateType(context, array.elementType(), where);
+            case ArrayDescriptor array -> {
+                if (array.elementType() instanceof TypeProjectionDescriptor) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            where, "Use-site projections are not supported for arrays."));
+                }
+                validateType(context, array.elementType(), where);
+            }
             case NullableDescriptor nullable -> validateType(context, nullable.baseType(), where);
             case ReferenceDescriptor reference -> validateType(context, reference.baseType(), where);
             case AppliedConstructorDescriptor applied -> {
                 if (!applied.constructor().isHigherKinded()) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                             where, "Only a higher-kinded type parameter can be applied."));
+                }
+                if (applied.argument() instanceof TypeProjectionDescriptor) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            where, "Use-site projections are not supported for type constructors."));
                 }
                 validateType(context, applied.argument(), where);
             }
@@ -161,10 +185,16 @@ final class TypeResolver {
                             where, "Unknown type constructor '" + name + "'."));
                 }
                 for (final var argument : constructor.arguments()) {
+                    if (argument instanceof TypeProjectionDescriptor) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                                "Use-site projections are not supported for type constructors."));
+                    }
                     if (!(argument instanceof InferDescriptor)) validateType(context, argument, where);
                 }
             }
             case FunctionDescriptor function -> validateFunctionTypes(context, function, where);
+            case TypeProjectionDescriptor projection -> validateType(context, projection.bound(), where);
             case GenericDescriptor generic -> {
                 generic.baseType().resolveName(
                         resolveTypeName(context, generic.baseType().name(), where));
@@ -172,14 +202,21 @@ final class TypeResolver {
                 MemberInteropResolver.validateStarTypeAmbiguity(context, name, where);
                 final var classDeclaration = context.classes.get(name);
                 final var contractDeclaration = context.contracts.get(name);
+                final var javaClass = classDeclaration == null && contractDeclaration == null
+                        ? context.javaClassPath.find(name) : null;
                 if (classDeclaration == null && contractDeclaration == null) {
-                    if (context.javaClassPath.find(name) != null) {
-                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
-                                where,
-                                "Generic Java classes are not supported by the current interop slice."));
+                    if (javaClass != null) {
+                        if (javaClass.typeParameters().isEmpty()
+                                || javaClass.typeParameters().size() != generic.typeParameters().size()) {
+                            Zeron.resolutionError(new ResolutionError(
+                                    DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                                    "Java type '" + name + "' expects " + javaClass.typeParameters().size()
+                                            + " type arguments, found " + generic.typeParameters().size() + "."));
+                        }
+                    } else {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND,
+                                where, "Unknown generic type '" + name + "'."));
                     }
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND,
-                            where, "Unknown generic type '" + name + "'."));
                 }
                 if (classDeclaration != null) {
                     ensureTypeAccessible(context, name, where, classDeclaration.isPublic());
@@ -187,23 +224,34 @@ final class TypeResolver {
                 if (contractDeclaration != null) {
                     ensureTypeAccessible(context, name, where, contractDeclaration.isPublic());
                 }
-                final var arity = classDeclaration != null ? classDeclaration.typeParameters().size()
-                        : contractDeclaration.typeParameters().size();
+                final var genericParameters = classDeclaration != null ? classDeclaration.typeParameters()
+                        : contractDeclaration != null ? contractDeclaration.typeParameters()
+                        : javaClass.typeParameters();
+                final var arity = genericParameters.size();
                 if (arity == 0 || arity != generic.typeParameters().size()) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                             where,
                             "Type '" + name + "' expects " + arity + " type arguments, found "
                                     + generic.typeParameters().size() + "."));
                 }
-                final var genericParameters = classDeclaration != null
-                        ? classDeclaration.typeParameters() : contractDeclaration.typeParameters();
                 for (int index = 0; index < genericParameters.size(); index++) {
                     final var argument = generic.typeParameters().get(index);
+                    final var projected = argument instanceof TypeProjectionDescriptor projection;
+                    final var projection = projected ? (TypeProjectionDescriptor) argument : null;
+                    if (projected
+                            && projection.kind() == TypeProjectionDescriptor.Kind.IN
+                            && genericParameters.get(index).variance()
+                                    == TypeParameterDescriptor.Variance.COVARIANT) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                                "An 'in' projection conflicts with declaration-site covariance."));
+                    }
                     final var expectsConstructor = contractDeclaration != null
                             && contractDeclaration.higherKinded()
                             && genericParameters.get(index).isHigherKinded();
-                    final var isConstructor = argument instanceof TypeConstructorDescriptor
-                            || argument instanceof TypeParameterDescriptor parameter
+                    final var effectiveArgument = projected ? projection.bound() : argument;
+                    final var isConstructor = effectiveArgument instanceof TypeConstructorDescriptor
+                            || effectiveArgument instanceof TypeParameterDescriptor parameter
                                     && parameter.isHigherKinded();
                     if (expectsConstructor != isConstructor) {
                         Zeron.resolutionError(new ResolutionError(
@@ -212,8 +260,11 @@ final class TypeResolver {
                                         ? "This HKT contract argument must be a type constructor."
                                         : "A type constructor cannot be used as an ordinary type argument."));
                     }
+                    validateTypeArgument(context, genericParameters.get(index), effectiveArgument, where);
                 }
-                generic.typeParameters().forEach(parameter -> validateType(context, parameter, where));
+                generic.typeParameters().forEach(parameter -> validateType(context,
+                    parameter instanceof TypeProjectionDescriptor projection
+                            ? projection.bound() : parameter, where));
                 if (!genericParameters.isEmpty()) {
                     final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
                     for (int index = 0; index < genericParameters.size(); index++) {
@@ -221,7 +272,9 @@ final class TypeResolver {
                                 generic.typeParameters().get(index));
                     }
                     for (int index = 0; index < genericParameters.size(); index++) {
-                        final var argument = generic.typeParameters().get(index);
+                        final var rawArgument = generic.typeParameters().get(index);
+                        final var argument = rawArgument instanceof TypeProjectionDescriptor projection
+                                ? projection.bound() : rawArgument;
                         for (final var bound : genericParameters.get(index).bounds()) {
                             final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
                             if (!TypeClassEvidence.hasEvidence(context, requiredBound, argument, where)) {
@@ -238,13 +291,55 @@ final class TypeResolver {
     static TypeDescriptor requireEffectType(final ResolutionContext context, final TypeDescriptor type,
                                             final Token where) {
         validateType(context, type, where);
-        if (!(type instanceof NominalDescriptor nominal)
-                || context.classes.get(nominal.name()) == null
-                || !context.classes.get(nominal.name()).isEffect()) {
+        if (!isEffectType(context, type)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    where, "Expected a declared non-generic effect type."));
+                    where, "Expected a declared effect type or an effect-kinded type parameter."));
         }
         return type;
+    }
+
+    static TypeDescriptor validateTypeArgument(final ResolutionContext context,
+                                               final TypeParameterDescriptor parameter,
+                                               final TypeDescriptor argument,
+                                               final Token where) {
+        if (!parameter.isEffectKind()
+                && mayAdmitMutableReference(argument) && !parameter.admitsMutableArguments()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    where, "Type parameter '" + parameter.name()
+                            + "' does not admit mutable-reference type argument '"
+                            + TypeFormatter.format(argument) + "'."));
+        }
+        final var actual = argument instanceof ReferenceDescriptor reference
+                ? reference.baseType() : argument;
+        final var nullable = actual instanceof NullableDescriptor || actual instanceof NullDescriptor
+                || actual instanceof TypeParameterDescriptor typeParameter
+                        && typeParameter.admitsNullableArguments();
+        if (nullable && !parameter.admitsNullableArguments()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    where, "Type parameter '" + parameter.name()
+                            + "' does not admit nullable type arguments."));
+        }
+        if (parameter.isEffectKind() && !isEffectType(context, actual)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    where, "Type parameter '" + parameter.name()
+                            + "' requires an effect type argument."));
+        }
+        return parameter.isEffectKind() ? actual : argument;
+    }
+
+    private static boolean mayAdmitMutableReference(final TypeDescriptor type) {
+        var current = type;
+        while (current instanceof NullableDescriptor nullable) current = nullable.baseType();
+        return current instanceof ReferenceDescriptor
+                || current instanceof TypeParameterDescriptor parameter
+                        && parameter.admitsMutableArguments();
+    }
+
+    private static boolean isEffectType(final ResolutionContext context, final TypeDescriptor type) {
+        if (type instanceof TypeParameterDescriptor parameter) return parameter.isEffectKind();
+        if (!(type instanceof NominalDescriptor nominal)) return false;
+        final var declaration = context.classes.get(nominal.name());
+        return declaration != null && declaration.isEffect();
     }
 
     static TypeDescriptor classType(final ResolutionContext context, final Stmt.ClassDecl declaration) {
@@ -263,7 +358,20 @@ final class TypeResolver {
                 || parameters.size() != generic.typeParameters().size()) return Map.of();
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < parameters.size(); i++) {
-            substitutions.put(parameters.get(i), generic.typeParameters().get(i));
+            final var argument = generic.typeParameters().get(i);
+            if (argument instanceof TypeProjectionDescriptor projection) {
+                final var upperBound = projection.kind() == TypeProjectionDescriptor.Kind.OUT
+                        ? projection.bound()
+                        : parameters.get(i).bounds().size() == 1
+                                ? parameters.get(i).bounds().getFirst()
+                                : TypeDescriptor.ofAny().toNullable();
+                final var lowerBound = projection.kind() == TypeProjectionDescriptor.Kind.IN
+                        ? projection.bound() : TypeDescriptor.ofNever();
+                substitutions.put(parameters.get(i),
+                        CapturedTypeDescriptor.create(lowerBound, upperBound));
+            } else {
+                substitutions.put(parameters.get(i), argument);
+            }
         }
         return substitutions;
     }

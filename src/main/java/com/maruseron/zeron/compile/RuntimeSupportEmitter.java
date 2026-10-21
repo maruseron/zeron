@@ -13,6 +13,7 @@ import java.lang.constant.MethodTypeDesc;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 
 final class RuntimeSupportEmitter {
     private static final ClassDesc UNIT_CLASS = ClassDesc.of("zeron.lang.Unit");
@@ -79,6 +80,53 @@ final class RuntimeSupportEmitter {
         }
     }
 
+    static void emitBigIntegerSupportClass(final Path outputDirectory) throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "BigIntegerSupport.class"));
+        Files.createDirectories(output.getParent());
+        try (final var classBytes = RuntimeSupportEmitter.class.getResourceAsStream(
+                "/zeron/runtime/BigIntegerSupport.class")) {
+            if (classBytes == null) {
+                throw new IOException("Missing compiled BigIntegerSupport runtime class.");
+            }
+            Files.copy(classBytes, output, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    static void emitJavaArraySupportClass(final Path outputDirectory) throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "JavaArraySupport.class"));
+        Files.createDirectories(output.getParent());
+        try (final var classBytes = RuntimeSupportEmitter.class.getResourceAsStream(
+                "/zeron/runtime/JavaArraySupport.class")) {
+            if (classBytes == null) {
+                throw new IOException("Missing compiled JavaArraySupport runtime class.");
+            }
+            Files.copy(classBytes, output, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    static void emitHttpSupportClasses(final Path outputDirectory) throws IOException {
+        final var classNames = List.of(
+                "HttpSupport",
+                "HttpSupport$ClientHandle",
+                "HttpSupport$SendOutcome",
+                "HttpSupport$Failure",
+                "HttpSupport$ResponseHandle",
+                "HttpSupport$TimedBodyInputStream",
+                "HttpSupport$ReadEvent");
+        for (final var className : classNames) {
+            final var output = outputDirectory.resolve(
+                    Path.of("zeron", "runtime", className + ".class"));
+            Files.createDirectories(output.getParent());
+            try (final var classBytes = RuntimeSupportEmitter.class.getResourceAsStream(
+                    "/zeron/runtime/" + className + ".class")) {
+                if (classBytes == null) {
+                    throw new IOException("Missing compiled " + className + " runtime class.");
+                }
+                Files.copy(classBytes, output, StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+    }
+
     static void emitRaisedEffectClass(final Path outputDirectory) throws IOException {
         final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "RaisedEffect.class"));
         Files.createDirectories(output.getParent());
@@ -139,6 +187,23 @@ final class RuntimeSupportEmitter {
                         code.areturn();
                     });
         });
+    }
+
+    static void emitEffectSupportClasses(final Path outputDirectory) throws IOException {
+        emitRuntimeClass(outputDirectory, "EffectValue");
+        emitRuntimeClass(outputDirectory, "EffectSupport");
+    }
+
+    private static void emitRuntimeClass(final Path outputDirectory, final String className) throws IOException {
+        final var output = outputDirectory.resolve(Path.of("zeron", "runtime", className + ".class"));
+        Files.createDirectories(output.getParent());
+        try (final var classBytes = RuntimeSupportEmitter.class.getResourceAsStream(
+                "/zeron/runtime/" + className + ".class")) {
+            if (classBytes == null) {
+                throw new IOException("Missing compiled " + className + " runtime class.");
+            }
+            Files.copy(classBytes, output, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     static void emitResourceSupportClass(final Path outputDirectory) throws IOException {

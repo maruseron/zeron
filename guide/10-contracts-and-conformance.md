@@ -69,25 +69,6 @@ a read-only requirement can be met by either a read-only or writable property.
 Contracts describe what an object lets other code do, not how it stores its information. They
 cannot add fields to a class.
 
-## Required named constructors
-
-A contract can require a named constructor too. This is useful when every conforming class should
-offer the same named way to create an object:
-
-```zeron
-contract TokenFactory {
-    constructor from(value: Int);
-}
-
-class Token is TokenFactory {
-    value: Int;
-    public constructor from(value: Int) = Token.new(value);
-}
-```
-
-Each conforming class provides a public constructor with the required name and compatible
-parameters. Call it through the concrete class name, such as `Token.from(42)`.
-
 ## Default methods
 
 Sometimes every conforming class should share the same implementation of an operation. A contract

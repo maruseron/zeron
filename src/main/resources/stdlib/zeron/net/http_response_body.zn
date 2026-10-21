@@ -1,0 +1,41 @@
+package zeron.net;
+
+import zeron.io.IoFailure;
+import zeron.io.Reader;
+import zeron.lang.Option;
+import zeron.resource.Disposable;
+import zeron.resource.DisposeFailure;
+
+external fn httpIsResponseHandle(response: Any?): Boolean;
+external fn httpResponseRead(response: Any?, buffer: &ByteArray, offset: Int, length: Int): Int;
+external fn httpResponseReadFailure(response: Any?): java.io.IOException;
+external fn httpResponseDispose(response: Any?): java.io.IOException?;
+
+public class HttpResponseBody is Reader, Disposable {
+    response: Any?;
+
+    private constructor new;
+
+    public constructor from(response: Any?) raises HttpFailure {
+        if (not httpIsResponseHandle(response)) {
+            raise HttpFailure.new(HttpFailureKind.Transport(),
+                "The HTTP runtime returned an invalid response handle.", null);
+        }
+        return HttpResponseBody.new(response);
+    }
+
+    public mut read(buffer: &ByteArray, offset: Int, length: Int): Option<Int>
+            raises IoFailure {
+        let count = httpResponseRead(this.response, buffer, offset, length);
+        if (count == -2) {
+            raise IoFailure.fromIOException(httpResponseReadFailure(this.response));
+        }
+        if (count < 0) return Option<Int>.None();
+        return Option.Some(count);
+    }
+
+    public mut dispose(): Unit raises DisposeFailure {
+        let failure = httpResponseDispose(this.response);
+        if (failure != null) raise DisposeFailure.new(failure);
+    }
+}

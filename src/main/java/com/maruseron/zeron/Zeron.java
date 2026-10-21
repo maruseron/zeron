@@ -69,6 +69,10 @@ public class Zeron {
         final var invocation = ((CliParser.Parsed) parseResult).invocation();
         debugEnabled = invocation.debug();
         return switch (invocation) {
+            case CliParser.Version _ -> {
+                System.out.println("zeron " + ZeronVersion.current());
+                yield 0;
+            }
             case CliParser.Initialize _ -> initializeProject(Paths.get("."));
             case CliParser.ProjectCommand command -> runProjectCommand(command);
             case CliParser.Format command -> FormatCommandRunner.run(command);
@@ -81,6 +85,10 @@ public class Zeron {
             case CliParser.Dump dump -> {
                 ZeronLibraryIndexDump.main(dump.source().toString());
                 yield 0;
+            }
+            case CliParser.DumpStandardLibrary dump -> {
+                final var successful = ZeronLibraryIndexDump.dumpBundledStandardLibrary(dump.packageName());
+                yield successful ? 0 : exitCode() == 0 ? 1 : exitCode();
             }
             case CliParser.BuildStandardLibrary build -> buildStandardLibraryCommand(build);
             case CliParser.Repl _ -> runRepl();

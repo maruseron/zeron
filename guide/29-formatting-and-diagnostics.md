@@ -56,3 +56,14 @@ zeron explain ZR2014
 The explanation provides more context than the short diagnostic message. `zeron help fmt` and
 `zeron help explain` show command usage. In VS Code, the language server publishes diagnostics as
 you edit; see [VS Code and the language server](28-vscode-and-language-server.md).
+
+## Check the compiler version
+
+Print the version of the running Zeron distribution from any directory, without a project manifest:
+
+```text
+zeron version
+```
+
+The `zeron --version` alias prints the same concise version string. Maven and packaged builds embed
+the project version; raw classes without embedded version metadata report `zeron development`.

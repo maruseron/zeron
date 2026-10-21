@@ -1246,16 +1246,16 @@ public final class StandardLibraryTest {
 
             import zeron.collections.Iterator;
             import zeron.collections.Iterable;
-            import zeron.lang.Option;
+            import zeron.collections.Step;
 
             class %s is Iterator<Int> {
                 value: Int;
                 ready: Boolean;
                 public constructor new;
-                public mut next(): Option<Int> {
-                    if (not this.ready) return Option<Int>.None();
+                public mut next(): Step<Int> {
+                    if (not this.ready) return Step<Int>.Done();
                     this.ready = false;
-                    return Option.Some(this.value);
+                    return Step.Yield(this.value);
                 }
                 }
                 class %s is Iterable<Int> {
@@ -1282,7 +1282,7 @@ public final class StandardLibraryTest {
                 final var iteratorModel = ClassFile.of().parse(iteratorFile);
                 final var nextMethod = iteratorModel.methods().stream()
                     .filter(method -> method.methodName().equalsString("next")
-                        && method.methodType().equalsString("()Lzeron/lang/Option;"))
+                        && method.methodType().equalsString("()Lzeron/collections/Step;"))
                     .findFirst()
                     .orElseThrow();
                 assertTrue(nextMethod.code().orElseThrow().elementStream()
@@ -1766,113 +1766,101 @@ public final class StandardLibraryTest {
                 }
                 fn lazyArrayPipeline(): Int {
                     let calls = Calls.new(0);
-                    let values: Stream<Int> = for [1, 2, 3]
-                        map item -> calls.record(item)
-                        filter item -> item > 1;
+                    let values: Stream<Int> = for item in [1, 2, 3]
+                        if item > 1
+                        yield calls.record(item);
                     let before = calls.read();
                     let total = values.fold(0, (sum, item) -> sum + item);
                     return before * 100 + total * 10 + calls.read();
                 }
                 fn collectedArrayPipeline(): Int {
-                    let values = for [1, 2, 3, 4]
-                        filter item -> item %% 2 == 0
-                        map item -> item * 3
-                        collect List<Int>.empty();
+                    let values = for item in [1, 2, 3, 4]
+                        if item %% 2 == 0
+                        collect item * 3 into List<Int>.empty();
                     return values.size * 100 + values.at(0) + values.at(1);
                 }
                 fn collectedIterablePipeline(): Int {
-                    let values = for Stream<Int>.fromArray([2, 5])
-                        map item -> item + 1
-                        collect List<Int>.empty();
+                    let values = for item in Stream<Int>.fromArray([2, 5])
+                        collect item + 1 into List<Int>.empty();
                     return values.at(0) * 10 + values.at(1);
                 }
                 fn collectedCapturePipeline(factor: Int): Int {
-                    let values = for [1, 2, 3]
-                        map item -> item * factor
-                        filter item -> item > factor
-                        flatMap item -> List<Int>.of(item, item + factor)
-                        collect List<Int>.empty();
+                    let values = for item in [1, 2, 3]
+                        let scaled = item * factor
+                        if scaled > factor
+                        for expanded in List<Int>.of(scaled, scaled + factor)
+                        collect expanded into List<Int>.empty();
                     return values.size * 100 + values.at(0) + values.at(1)
                         + values.at(2) + values.at(3);
                 }
                 fn lazyFlatMapPipeline(): Int {
                     let calls = Calls.new(0);
-                    let values = for [1, 2, 3]
-                        flatMap item -> List<Int>.of(calls.record(item), calls.record(item + 10));
+                    let values = for item in [1, 2, 3]
+                        for output in List<Int>.of(calls.record(item), calls.record(item + 10))
+                        yield output;
                     let before = calls.read();
                     let sum = values.fold(0, (total, item) -> total + item);
                     return before * 1000 + calls.read() * 100 + sum;
                 }
                 fn collectedFlatMapPipeline(): Int {
-                    let values = for [1, 2, 3]
-                        flatMap item -> List<Int>.of(item, item + 1)
-                        filter item -> item %% 2 == 0
-                        collect List<Int>.empty();
+                    let values = for item in [1, 2, 3]
+                        for output in List<Int>.of(item, item + 1)
+                        if output %% 2 == 0
+                        collect output into List<Int>.empty();
                     return values.size * 100 + values.at(0) + values.at(1) + values.at(2);
                 }
                 fn nestedFlatMapPipeline(): Int {
-                    let values = for [1, 2]
-                        flatMap item -> List<Int>.of(item, item + 1)
-                        flatMap item -> List<Int>.of(item * 10, item * 100)
-                        collect List<Int>.empty();
+                    let values = for outer in [1, 2]
+                        for middle in List<Int>.of(outer, outer + 1)
+                        for inner in List<Int>.of(middle * 10, middle * 100)
+                        collect inner into List<Int>.empty();
                     return values.size * 1000 + values.at(0) + values.at(1) + values.at(7);
                 }
                 fn lazyLimitAndWhilePipeline(): Int {
-                    let values: Stream<Int> = for [1, 2, 3, 4, 5, 6, 7]
-                        drop 1
-                        take 5
-                        dropWhile item -> item < 3
-                        takeWhile item -> item < 6;
+                    let values: Stream<Int> = (for item in [1, 2, 3, 4, 5, 6, 7]
+                        yield item).drop(1).take(5)
+                            .dropWhile((item) -> item < 3)
+                            .takeWhile((item) -> item < 6);
                     return values.fold(0, (sum, item) -> sum * 10 + item);
                 }
                 fn collectedLimitAndWhilePipeline(): Int {
-                    let values = for [1, 2, 3, 4, 5, 6, 7, 8]
-                        drop 1
-                        take 6
-                        dropWhile item -> item < 4
-                        takeWhile item -> item < 7
-                        collect List<Int>.empty();
+                    let values = (for item in [1, 2, 3, 4, 5, 6, 7, 8]
+                        yield item).drop(1).take(6)
+                            .dropWhile((item) -> item < 4)
+                            .takeWhile((item) -> item < 7).toList();
                     return values.size * 100 + values.at(0) * 10 + values.at(1) + values.at(2);
                 }
                 fn collectedLimitsAfterFlatMap(): Int {
-                    let values = for [1, 2, 3]
-                        flatMap item -> List<Int>.of(item, item * 10)
-                        drop 2
-                        take 3
-                        collect List<Int>.empty();
+                    let values = (for item in [1, 2, 3]
+                        for output in List<Int>.of(item, item * 10)
+                        yield output).drop(2).take(3).toList();
                     return values.size * 1000 + values.at(0) * 100 + values.at(1) * 10 + values.at(2);
                 }
                 fn collectedTakeStopsUpstream(): Int {
                     let calls = Calls.new(0);
-                    let values = for [1, 2, 3, 4]
-                        map item -> calls.record(item)
-                        take 2
-                        collect List<Int>.empty();
+                    let values = (for item in [1, 2, 3, 4]
+                        yield calls.record(item)).take(2).toList();
                     return calls.read() * 100 + values.size * 10 + values.at(0) + values.at(1);
                 }
                 fn collectedTakeWithFilteredDownstream(): Int {
                     let calls = Calls.new(0);
-                    let values = for [1, 2, 3, 4]
-                        map item -> calls.record(item)
-                        take 2
-                        filter item -> item > 2
-                        collect List<Int>.empty();
+                    let values = (for item in [1, 2, 3, 4]
+                        yield calls.record(item)).take(2)
+                            .filter((item) -> item > 2).toList();
                     return calls.read() * 100 + values.size;
                 }
                 fn collectedTakeBeforeFlatMap(): Int {
-                    let values = for [1, 2, 3]
-                        take 2
-                        flatMap item -> List<Int>.of(item, item * 10)
-                        collect List<Int>.empty();
+                    let values = (for item in [1, 2, 3]
+                        for output in [item, item * 10]
+                        yield output).take(4).toList();
                     return values.size * 100 + values.at(0) + values.at(1)
                         + values.at(2) + values.at(3);
                 }
                 fn collectedTakeWhileStopsUpstream(): Int {
                     let calls = Calls.new(0);
-                    let values = for [1, 2, 3, 4]
-                        map item -> calls.record(item)
-                        takeWhile item -> item < 3
-                        collect List<Int>.empty();
+                    let values = (for item in [1, 2, 3, 4]
+                        yield calls.record(item))
+                            .takeWhile((item) -> item < 3).toList();
                     return calls.read() * 100 + values.size * 10 + values.at(0) + values.at(1);
                 }
                 """.formatted(packageName));
@@ -1885,7 +1873,7 @@ public final class StandardLibraryTest {
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
                 final var test = loader.loadClass(className);
-                assertEquals(53, test.getMethod("lazyArrayPipeline").invoke(null));
+                assertEquals(52, test.getMethod("lazyArrayPipeline").invoke(null));
                 assertEquals(218, test.getMethod("collectedArrayPipeline").invoke(null));
                 assertEquals(36, test.getMethod("collectedIterablePipeline").invoke(null));
                 assertEquals(424, test.getMethod("collectedCapturePipeline", int.class).invoke(null, 2));
@@ -1912,7 +1900,8 @@ public final class StandardLibraryTest {
         final var source = parse("Main.zn", """
                 package %s;
                 import zeron.collections.List;
-                fn collect(sink: List<Int>): List<Int> = for [1, 2] collect sink;
+                fn collect(sink: List<Int>): List<Int> =
+                    for item in [1, 2] collect item into sink;
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(
                 StandardLibrary.withBundledUnits(List.of(source)),
@@ -2295,6 +2284,7 @@ public final class StandardLibraryTest {
         final var iteratorClass = libraryOutput.resolve(Path.of("zeron", "collections", "Iterator.class"));
         final var arrayIteratorClass = libraryOutput.resolve(
                 Path.of("zeron", "collections", "ArrayIterator.class"));
+        final var stepClass = libraryOutput.resolve(Path.of("zeron", "collections", "Step.class"));
         final var rangeClass = libraryOutput.resolve(Path.of("zeron", "ranges", "IntRange.class"));
         final var cellClass = libraryOutput.resolve(Path.of("zeron", "lang", "Cell.class"));
         final var unitClass = libraryOutput.resolve(Path.of("zeron", "lang", "Unit.class"));
@@ -2303,7 +2293,12 @@ public final class StandardLibraryTest {
                 package %s;
                 import zeron.collections.Iterable;
                 import zeron.collections.ArrayIterator;
+                import zeron.collections.Step;
                 import zeron.lang.Cell;
+                import zeron.algebra.Add;
+                import zeron.algebra.Addition;
+                import zeron.algebra.Mult;
+                import zeron.algebra.Multiplication;
                 import zeron.io.print;
                 import zeron.io.println;
                 fn cellResult(): Int = Cell<Int>.new(42).get();
@@ -2316,13 +2311,36 @@ public final class StandardLibraryTest {
                 fn arrayIteratorResult(): Int {
                     let iterator = ArrayIterator<Int>.from([2, 3, 5]);
                     let mut total = 0;
-                    let mut item = iterator.next();
-                    while (item.isSome()) {
-                        total += item.fold(value -> value, () -> 0);
-                        item = iterator.next();
+                    let mut done = false;
+                    while (not done) {
+                        let item = iterator.next();
+                        if (item matches Step.Yield(value)) {
+                            total += value;
+                        } else {
+                            done = true;
+                        }
                     }
                     return total;
                 }
+                fn nullableArrayIteratorResult(): Int {
+                    let nullValue: String? = null;
+                    let values: Array<String?> = [nullValue];
+                    let iterator = ArrayIterator<String?>.from(values);
+                    let first = iterator.next();
+                    if (first matches Step.Yield(value)) {
+                        if (value === null) {
+                            let second = iterator.next();
+                            if (second matches Step.Done()) return 1;
+                        }
+                    }
+                    return 0;
+                }
+                fn add<T: Add<T>>(left: T, right: T): T = left + right;
+                fn subtract<T: Addition<T>>(left: T, right: T): T = left - right;
+                fn multiply<T: Mult<T>>(left: T, right: T): T = left * right;
+                fn reciprocal<T: Multiplication<T>>(value: T): T = value.reciprocal();
+                fn algebraicResult(): Int = subtract(add(20, 24), 2);
+                fn reciprocalResult(): Float = reciprocal(2.0);
                 fn announce(): Unit {
                     print("compiled");
                     println("!");
@@ -2337,6 +2355,7 @@ public final class StandardLibraryTest {
             assertTrue(Files.exists(iterableClass));
             assertTrue(Files.exists(iteratorClass));
             assertTrue(Files.exists(arrayIteratorClass));
+            assertTrue(Files.exists(stepClass));
             assertTrue(Files.exists(rangeClass));
             assertTrue(Files.exists(cellClass));
             assertTrue(Files.exists(unitClass));
@@ -2347,9 +2366,17 @@ public final class StandardLibraryTest {
                     .anyMatch(export -> export.qualifiedName().equals("zeron.lang.Cell")
                             && export.methods().stream().anyMatch(method -> method.name().equals("get"))
                             && export.methods().stream().anyMatch(method -> method.name().equals("set"))));
+            assertTrue(standardLibraryIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.ContractExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ContractExport.class::cast)
+                    .map(ZeronLibraryIndex.ContractExport::qualifiedName)
+                    .toList()
+                    .containsAll(List.of("zeron.algebra.Add", "zeron.algebra.Addition",
+                            "zeron.algebra.Mult", "zeron.algebra.Multiplication")));
             try (final var jar = new JarFile(libraryJar.toFile())) {
                 assertTrue(jar.getJarEntry(ZeronVersions.API_INDEX_JAR_ENTRY) != null);
                 assertTrue(jar.getJarEntry("zeron/collections/Stream.class") != null);
+                assertTrue(jar.getJarEntry("zeron/collections/Step.class") != null);
                 assertTrue(jar.getJarEntry("zeron/lang/Unit.class") != null);
             }
 
@@ -2366,6 +2393,9 @@ public final class StandardLibraryTest {
                     assertEquals(42, client.getMethod("cellResult").invoke(null));
                     assertEquals(6, client.getMethod("result").invoke(null));
                     assertEquals(10, client.getMethod("arrayIteratorResult").invoke(null));
+                    assertEquals(1, client.getMethod("nullableArrayIteratorResult").invoke(null));
+                    assertEquals(42, client.getMethod("algebraicResult").invoke(null));
+                    assertEquals(0.5, client.getMethod("reciprocalResult").invoke(null));
                     client.getMethod("announce").invoke(null);
                 } finally {
                     System.setOut(originalOutput);
@@ -2449,9 +2479,9 @@ public final class StandardLibraryTest {
         final var next = iterator.getClass().getMethod("next");
         final var values = new ArrayList<Integer>();
         for (;;) {
-            final var option = next.invoke(iterator);
-            if (!option.getClass().getName().endsWith("Option$$sum$Some")) break;
-            values.add((Integer) option.getClass().getMethod("$zeron$payload$0").invoke(option));
+            final var step = next.invoke(iterator);
+            if (!step.getClass().getName().endsWith("Step$$sum$Yield")) break;
+            values.add((Integer) step.getClass().getMethod("$zeron$payload$0").invoke(step));
         }
         return values;
     }

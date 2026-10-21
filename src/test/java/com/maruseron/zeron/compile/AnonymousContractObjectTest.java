@@ -108,7 +108,7 @@ public final class AnonymousContractObjectTest {
     }
 
     @Test
-    public void rejectsMutableCapturesAndConstructorBearingContracts() {
+    public void rejectsMutableCapturesAndAcceptsBehavioralContracts() {
         final var mutableCapture = parse("""
                 contract Readable { read(): Int; }
                 fn invalid(): Int {
@@ -122,14 +122,13 @@ public final class AnonymousContractObjectTest {
                         .resolve());
         assertTrue(captureError.getMessage().contains("Cannot capture mutable binding"));
 
-        final var constructorRequirement = parse("""
-                contract Factory { constructor create(); }
-                fn invalid() = object : Factory {};
+        final var behavioralContract = parse("""
+                contract Factory { create(): Int; }
+                fn make(): Factory = object : Factory {
+                    public create(): Int = 1;
+                };
                 """);
-        final var constructorError = assertThrows(ResolutionError.class,
-                () -> CompilationService.forCompilationUnits(List.of(constructorRequirement), "FactoryMain", "")
-                        .resolve());
-        assertTrue(constructorError.getMessage().contains("named contract constructors"));
+        CompilationService.forCompilationUnits(List.of(behavioralContract), "FactoryMain", "").resolve();
     }
 
     private static CompilationUnit parse(final String source) {

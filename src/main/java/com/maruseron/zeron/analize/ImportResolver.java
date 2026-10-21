@@ -13,10 +13,13 @@ final class ImportResolver {
     record Validation(ImportEnvironment environment, List<ResolutionError> errors,
                       Set<String> invalidAliases) {}
 
+    record LiteralSuffixImport(String ownerName, String suffixName) {}
+
     record ImportEnvironment(Map<String, String> types,
                              Map<String, String> functions,
                              Map<String, String> values,
                              Map<String, String> extensions,
+                             Map<String, LiteralSuffixImport> literalSuffixes,
                              List<String> onDemandPackages,
                              List<String> onDemandNamespaces) {}
 
@@ -61,6 +64,7 @@ final class ImportResolver {
         final var importedFunctions = new LinkedHashMap<String, String>();
         final var importedValues = new LinkedHashMap<String, String>();
         final var importedExtensions = new LinkedHashMap<String, String>();
+        final var importedLiteralSuffixes = new LinkedHashMap<String, LiteralSuffixImport>();
         final var onDemandPackages = new ArrayList<String>();
         final var onDemandNamespaces = new ArrayList<String>();
         final var localTypeNames = new HashSet<String>();
@@ -81,6 +85,55 @@ final class ImportResolver {
         for (final var importDeclaration : unit.imports()) {
             try {
             final var target = importDeclaration.qualifiedName();
+            if (importDeclaration.suffixImport()) {
+                final var separator = target.lastIndexOf('.');
+                if (separator <= 0 || separator == target.length() - 1) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                            importDeclaration.location(),
+                            "A suffix import must name a class-owned suffix."));
+                }
+                final var ownerName = target.substring(0, separator);
+                final var suffixName = target.substring(separator + 1);
+                final var owner = classes.get(ownerName);
+                final var suffix = owner == null ? null : owner.literalSuffixes().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(suffixName))
+                        .findFirst().orElse(null);
+                if (owner == null || suffix == null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                            importDeclaration.location(),
+                            "Unknown class-owned suffix '" + target + "'."));
+                }
+                if (!owner.isPublic() && !unit.packageName().equals(packageOf(ownerName))) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                            importDeclaration.location(),
+                            "Suffix owner '" + ownerName + "' is not public."));
+                }
+                if (suffixName.equals("L")) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                            importDeclaration.location(),
+                            "The built-in 'L' suffix is reserved."));
+                }
+                for (final var factory : suffix.factories()) {
+                    final var constructor = owner.namedConstructors().stream()
+                            .filter(candidate -> candidate.name().lexeme()
+                                    .equals(factory.constructorName().lexeme()))
+                            .findFirst().orElse(null);
+                    if (constructor == null || !constructor.isPublic()) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                                importDeclaration.location(),
+                                "Suffix factory '" + factory.constructorName().lexeme()
+                                        + "' must be a public named constructor."));
+                    }
+                }
+                final var binding = new LiteralSuffixImport(ownerName, suffixName);
+                if (importedLiteralSuffixes.putIfAbsent(importDeclaration.localName(), binding) != null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                            importDeclaration.location(),
+                            "Duplicate or ambiguous suffix import '"
+                                    + importDeclaration.localName() + "'."));
+                }
+                continue;
+            }
             if (importDeclaration.onDemand()) {
                 final var namespaceTarget = resolveNamespaceTarget(target, unit.packageName());
                 if (namespaceTarget != null) {
@@ -148,11 +201,6 @@ final class ImportResolver {
                         (valueDeclaration == null ? "Type '" : "Value '") + target + "' is not public."));
             }
             if (classDeclaration != null || contractDeclaration != null || javaClass != null) {
-                if (javaClass != null && javaClass.hasTypeParameters()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
-                            importDeclaration.location(),
-                            "Generic Java classes are not supported by the current interop slice."));
-                }
                 if (BuiltinTypes.NAMES.contains(importDeclaration.localName())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
                             importDeclaration.location(),
@@ -222,7 +270,8 @@ final class ImportResolver {
             }
         }
         return new Validation(new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions),
-                Map.copyOf(importedValues), Map.copyOf(importedExtensions), List.copyOf(onDemandPackages),
+                Map.copyOf(importedValues), Map.copyOf(importedExtensions),
+                Map.copyOf(importedLiteralSuffixes), List.copyOf(onDemandPackages),
                 List.copyOf(onDemandNamespaces)),
                 List.copyOf(errors),
                 Set.copyOf(invalidAliases));

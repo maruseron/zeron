@@ -384,6 +384,10 @@ final class LambdaCompilationPlan {
             }
             case Expr.SumCaseTest test -> collectLambdaShapes(test.value);
             case Expr.Pipeline pipeline -> {
+                if (pipeline.isComprehension()) {
+                    collectLambdaShapes(pipeline.loweredExpression());
+                    break;
+                }
                 collectLambdaShapes(pipeline.source);
                 for (final var stage : pipeline.stages) {
                     switch (stage) {
@@ -413,7 +417,18 @@ final class LambdaCompilationPlan {
             case Expr.Raise raise -> collectLambdaShapes(raise.effect);
             case Expr.Handle handle -> {
                 collectLambdaShapes(handle.expression);
-                for (final var arm : handle.arms) collectLambdaShapes(arm.expression());
+                collectLambdaShapes(handle.handler);
+                for (final var arm : handle.arms) {
+                    collectLambdaShapes(arm.guard());
+                    collectLambdaShapes(arm.expression());
+                }
+            }
+            case Expr.HandlerLiteral handler -> collectLambdaShapes(handler.implementation);
+            case Expr.HandlerDispatch dispatch -> {
+                for (final var arm : dispatch.arms) {
+                    collectLambdaShapes(arm.guard());
+                    collectLambdaShapes(arm.expression());
+                }
             }
             case Expr.Assignment assignment -> collectLambdaShapes(assignment.value);
             case Expr.Unary unary -> collectLambdaShapes(unary.right);
@@ -425,6 +440,7 @@ final class LambdaCompilationPlan {
                 }
                 collectLambdaShapes(variable.implicitFieldReceiver());
             }
+            case Expr.SuffixedLiteral literal -> collectLambdaShapes(literal.factoryCall());
             case Expr.Literal _ -> {}
             case null -> {}
             default -> {}
@@ -489,8 +505,12 @@ final class LambdaCompilationPlan {
                                          final Set<String> locals,
                                          final List<Token> captured,
                                          final Set<String> seen) {
+        final var scopedNames = new HashSet<>(locals);
         for (final var statement : statements) {
-            collectCapturedVariables(statement, locals, captured, seen);
+            collectCapturedVariables(statement, scopedNames, captured, seen);
+            if (statement instanceof Stmt.Var variable) {
+                scopedNames.add(variable.name().lexeme());
+            }
         }
     }
 
@@ -531,9 +551,7 @@ final class LambdaCompilationPlan {
             }
             case Stmt.Expression(Expr expression) -> collectCapturedVariables(expression, localNames, captured, seen);
             case Stmt.Var(Token name, TypeDescriptor _, Expr initializer, BindingMutability _, _) -> {
-                final var nestedNames = new HashSet<>(localNames);
-                nestedNames.add(name.lexeme());
-                if (initializer != null) collectCapturedVariables(initializer, nestedNames, captured, seen);
+                if (initializer != null) collectCapturedVariables(initializer, localNames, captured, seen);
             }
             case Stmt.While(Token _, Expr condition, Stmt body) -> {
                 collectCapturedVariables(condition, localNames, captured, seen);
@@ -642,11 +660,49 @@ final class LambdaCompilationPlan {
                     collectCapturedVariables(arm.expression(), armNames, captured, seen);
                 }
             }
+            case Expr.Pipeline pipeline -> {
+                if (pipeline.isComprehension() && pipeline.loweredExpression() != null) {
+                    collectCapturedVariables(pipeline.loweredExpression(), localNames, captured, seen);
+                } else {
+                    collectCapturedVariables(pipeline.source, localNames, captured, seen);
+                    for (final var stage : pipeline.stages) {
+                        final var lambda = switch (stage) {
+                            case Expr.PipelineStage.Map map -> map.lambda();
+                            case Expr.PipelineStage.FlatMap flatMap -> flatMap.lambda();
+                            case Expr.PipelineStage.Filter filter -> filter.lambda();
+                            case Expr.PipelineStage.DropWhile dropWhile -> dropWhile.lambda();
+                            case Expr.PipelineStage.TakeWhile takeWhile -> takeWhile.lambda();
+                            case Expr.PipelineStage.Drop _, Expr.PipelineStage.Take _,
+                                    Expr.PipelineStage.Collect _ -> null;
+                        };
+                        if (lambda != null) {
+                            collectCapturedVariables(lambda, localNames, captured, seen);
+                        } else {
+                            collectCapturedVariables(stage.expression(), localNames, captured, seen);
+                        }
+                    }
+                }
+            }
             case Expr.SumCaseTest test -> collectCapturedVariables(test.value, localNames, captured, seen);
             case Expr.Raise raise -> collectCapturedVariables(raise.effect, localNames, captured, seen);
             case Expr.Handle handle -> {
                 collectCapturedVariables(handle.expression, localNames, captured, seen);
+                if (handle.handler != null) {
+                    collectCapturedVariables(handle.handler, localNames, captured, seen);
+                }
                 for (final var arm : handle.arms) {
+                    final var armNames = new HashSet<>(localNames);
+                    arm.pattern().bindingNames().forEach(name -> armNames.add(name.lexeme()));
+                    if (arm.guard() != null) {
+                        collectCapturedVariables(arm.guard(), armNames, captured, seen);
+                    }
+                    collectCapturedVariables(arm.expression(), armNames, captured, seen);
+                }
+            }
+            case Expr.HandlerLiteral handler ->
+                    collectCapturedVariables(handler.implementation, localNames, captured, seen);
+            case Expr.HandlerDispatch dispatch -> {
+                for (final var arm : dispatch.arms) {
                     final var armNames = new HashSet<>(localNames);
                     arm.pattern().bindingNames().forEach(name -> armNames.add(name.lexeme()));
                     if (arm.guard() != null) {
@@ -662,6 +718,8 @@ final class LambdaCompilationPlan {
             }
             case Expr.AnonymousObject object -> object.initializers().forEach(initializer ->
                     collectCapturedVariables(initializer, localNames, captured, seen));
+            case Expr.SuffixedLiteral literal ->
+                    collectCapturedVariables(literal.factoryCall(), localNames, captured, seen);
             case Expr.Literal _ -> {}
             case Expr.Logical logical -> {
                 collectCapturedVariables(logical.left, localNames, captured, seen);

@@ -131,7 +131,6 @@ public final class ClassContractTest {
         final var source = """
                 contract Base%s<T> {
                     mut property item: T;
-                    constructor from(value: T);
                     value(): T;
                     default extra(): Int = 1;
                 }
@@ -142,9 +141,9 @@ public final class ClassContractTest {
                     public constructor from(value: Int) = Implementation%s.new(value);
                     public value(): Int = this.item;
                 }
-                fn read<T: Derived%s<Int>>(value: T): Int = value.value() + value.extra();
-                fn readBase<T: Base%s<Int>>(value: T): Int = value.value();
-                fn readItem<T: Base%s<Int>>(value: T): Int = value.item;
+                fn read<T: mut + Derived%s<Int>>(value: T): Int = value.value() + value.extra();
+                fn readBase<T: mut + Base%s<Int>>(value: T): Int = value.value();
+                fn readItem<T: mut + Base%s<Int>>(value: T): Int = value.item;
                 fn update<T: Base%s<Int>>(value: &T): Unit { value.item = 9; }
                 fn run(): Int {
                     let item = Implementation%s.from(7);
@@ -185,7 +184,6 @@ public final class ClassContractTest {
         final var labelName = "ChildLabelImplementation" + suffix;
         final var source = """
                 contract %s<T> {
-                    constructor from(value: T);
                     value(): T;
                 }
                 contract %s<T> requires %s<T> {}
@@ -201,8 +199,8 @@ public final class ClassContractTest {
                     default label(): String = "child";
                 }
                 class %s is %s { public constructor new; }
-                fn read<T: %s<String>>(value: T): String = value.value();
-                fn readLabel<T: %s>(value: T): String = value.label();
+                fn read<T: mut + %s<String>>(value: T): String = value.value();
+                fn readLabel<T: mut + %s>(value: T): String = value.label();
                 fn run(): String =
                     read(%s.from("ignored")) + ":" + readLabel(%s.new());
                 """.formatted(rootName, leftName, rootName, rightName, rootName,
@@ -319,10 +317,11 @@ public final class ClassContractTest {
                     "value=" + BoundedBox<Label>.new(Label.new("label"));
                 fn builtin(): String = "value=" + 42;
                 fn nullable(value: Int?): String = "value=" + value;
-                fn generic<T: zeron.lang.Display<T>>(value: T): String = "value=" + value;
+                fn generic<T: mut + zeron.lang.Display<T>>(value: T): String = "value=" + value;
                 fn genericRun(): String = generic(42);
+                fn genericBounded<T: mut + zeron.lang.Display<T>>(value: T): String = "value=" + value;
                 fn genericBoundedRun(): String =
-                    generic(BoundedBox<Label>.new(Label.new("generic label")));
+                    genericBounded(BoundedBox<Label>.new(Label.new("generic label")));
                 """;
         final var compiler = new CompilationService(parse(source), programName);
         try {
@@ -374,121 +373,6 @@ public final class ClassContractTest {
             Files.deleteIfExists(Path.of("dist", programName + ".class"));
             Files.deleteIfExists(Path.of("dist", "Box.class"));
             Files.deleteIfExists(Path.of("dist", "Render.class"));
-        }
-    }
-
-    @Test
-    public void explicitWitnessRemapsFactoryAndGenericMethodsForwardEvidence() throws Exception {
-        final var suffix = UUID.randomUUID().toString().replace("-", "");
-        final var programName = "MappedWitness" + suffix;
-        final var source = """
-                contract Empty<T> {
-                    constructor empty(value: T);
-                }
-                class Box is Empty<Int> {
-                    value: Int;
-                    public constructor create(value: Int) = Box.new(value);
-                }
-                witness Empty<Int> for Box {
-                    empty = Box.create;
-                }
-                class Builder {
-                    public constructor new;
-                    public make<C: Empty<Int>>(): &C = C.empty(42);
-                }
-                fn create<C: Empty<Int>>(value: C): &C = C.empty(42);
-                fn run(): Box = Builder.new().make<Box>();
-                fn direct(): Box = create<Box>(Box.new(0));
-                """;
-        final var compiler = new CompilationService(parse(source), programName);
-        try {
-            compiler.resolve();
-            compiler.compile();
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
-                final var program = loader.loadClass(programName);
-                assertEquals("Box", program.getMethod("run").invoke(null).getClass().getName());
-                assertEquals("Box", program.getMethod("direct").invoke(null).getClass().getName());
-                final var make = loader.loadClass("Builder").getDeclaredMethod(
-                        "make", java.lang.invoke.MethodHandle.class);
-                assertEquals(Object.class, make.getReturnType());
-            }
-        } finally {
-            Files.deleteIfExists(Path.of("dist", programName + ".class"));
-            Files.deleteIfExists(Path.of("dist", "Builder.class"));
-            Files.deleteIfExists(Path.of("dist", "Box.class"));
-            Files.deleteIfExists(Path.of("dist", "Empty.class"));
-        }
-    }
-
-    @Test
-    public void genericWitnessPatternMapsAppliedContractFactories() throws Exception {
-        final var programName = "GenericWitness" + UUID.randomUUID().toString().replace("-", "");
-        final var source = """
-                contract Empty<T> {
-                    constructor empty(value: T);
-                }
-                class Box<T> is Empty<T> {
-                    value: T;
-                    public constructor create(value: T) = Box.new(value);
-                }
-                witness<T> Empty<T> for Box<T> {
-                    empty = Box<T>.create;
-                }
-                fn make<C: Empty<Int>>(): &C = C.empty(42);
-                fn run(): Box<Int> = make<Box<Int>>();
-                """;
-        final var compiler = new CompilationService(parse(source), programName);
-        try {
-            compiler.resolve();
-            compiler.compile();
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
-                assertEquals("Box", loader.loadClass(programName).getMethod("run").invoke(null)
-                        .getClass().getName());
-            }
-        } finally {
-            Files.deleteIfExists(Path.of("dist", programName + ".class"));
-            Files.deleteIfExists(Path.of("dist", "Box.class"));
-            Files.deleteIfExists(Path.of("dist", "Empty.class"));
-        }
-    }
-
-    @Test
-    public void genericBoundFactoryReceivesHiddenErasedConstructorEvidence() throws Exception {
-        final var suffix = UUID.randomUUID().toString().replace("-", "");
-        final var programName = "WitnessProgram" + suffix;
-        final var source = """
-                contract Empty<T> {
-                    constructor empty(value: T);
-                }
-                class Box is Empty<Int> {
-                    value: Int;
-                    public constructor empty(value: Int) = Box.new(value);
-                }
-                fn forwarded<C: Empty<Int>>(value: C): &C = C.empty(42);
-                fn create<C: Empty<Int>>(value: C): &C = forwarded<C>(value);
-                fn run(): Box = create<Box>(Box.new(0));
-                """;
-        final var programFile = Path.of("dist", programName + ".class");
-        final var boxFile = Path.of("dist", "Box.class");
-        final var contractFile = Path.of("dist", "Empty.class");
-        try {
-            final var compiler = new CompilationService(parse(source), programName);
-            compiler.resolve();
-            compiler.compile();
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
-                final var program = loader.loadClass(programName);
-                assertEquals("Box", program.getMethod("run").invoke(null).getClass().getName());
-                final var create = program.getDeclaredMethod("create", Object.class,
-                        java.lang.invoke.MethodHandle.class);
-                assertEquals(Object.class, create.getReturnType());
-            }
-        } finally {
-            Files.deleteIfExists(programFile);
-            Files.deleteIfExists(boxFile);
-            Files.deleteIfExists(contractFile);
         }
     }
 

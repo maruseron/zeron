@@ -16,7 +16,6 @@ public final class ContractComposition {
     public record Applied(Stmt.ContractDecl declaration, Stmt.ContractUse use,
                           Map<TypeParameterDescriptor, TypeDescriptor> substitutions) {}
     public record MethodSlot(Applied applied, Stmt.ContractMethod method, int index) {}
-    public record ConstructorSlot(Applied applied, Stmt.NamedContractConstructor constructor, int index) {}
 
     static List<Applied> closure(final ResolutionContext context, final Stmt.ContractUse root) {
         return closure(context.contracts, root);
@@ -64,21 +63,6 @@ public final class ContractComposition {
             }
         }
         return List.copyOf(methods);
-    }
-
-    public static List<ConstructorSlot> constructors(final ResolutionContext context, final Stmt.ContractUse root) {
-        return constructors(context.contracts, root);
-    }
-
-    public static List<ConstructorSlot> constructors(final Map<String, Stmt.ContractDecl> contracts,
-                                                     final Stmt.ContractUse root) {
-        final var constructors = new ArrayList<ConstructorSlot>();
-        for (final var applied : closure(contracts, root)) {
-            for (final var constructor : applied.declaration().namedConstructors()) {
-                constructors.add(new ConstructorSlot(applied, constructor, constructors.size()));
-            }
-        }
-        return List.copyOf(constructors);
     }
 
     static boolean isShadowedByAncestor(final ResolutionContext context,

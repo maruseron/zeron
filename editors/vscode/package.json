@@ -15,7 +15,9 @@
     "test": "node --test"
   },
   "activationEvents": [
-    "onLanguage:zeron"
+    "onLanguage:zeron",
+    "onCommand:zeron.restartLanguageServer",
+    "onCommand:zeron.reloadWindow"
   ],
   "engines": {
     "vscode": "^1.85.0"
@@ -24,6 +26,16 @@
     "Programming Languages"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "zeron.restartLanguageServer",
+        "title": "Zeron: Restart Language Server"
+      },
+      {
+        "command": "zeron.reloadWindow",
+        "title": "Zeron: Reload Window"
+      }
+    ],
     "languages": [
       {
         "id": "zeron",

@@ -47,7 +47,9 @@ final class WitnessPatternUnifier {
         for (final var parameter : parameters) {
             while (usedScopes.contains(nextScope[0])) nextScope[0] = Math.incrementExact(nextScope[0]);
             result.put(parameter, new TypeParameterDescriptor(nextScope[0], parameter.name(),
-                    List.of(), parameter.isHigherKinded()));
+                    List.of(), parameter.isHigherKinded(), parameter.variance(),
+                    parameter.admitsNullableArguments(), parameter.isEffectKind(),
+                    parameter.admitsMutableArguments()));
             usedScopes.add(nextScope[0]);
             nextScope[0] = Math.incrementExact(nextScope[0]);
         }
@@ -203,6 +205,11 @@ final class WitnessPatternUnifier {
             final var leftParameter = left.typeParameters().get(index);
             final var rightParameter = right.typeParameters().get(index);
             if (leftParameter.isHigherKinded() != rightParameter.isHigherKinded()
+                    || leftParameter.variance() != rightParameter.variance()
+                    || leftParameter.admitsNullableArguments() != rightParameter.admitsNullableArguments()
+                    || leftParameter.isEffectKind() != rightParameter.isEffectKind()
+                    || leftParameter.admitsMutableArguments()
+                            != rightParameter.admitsMutableArguments()
                     || leftParameter.bounds().size() != rightParameter.bounds().size()) return List.of();
             states = relateFunctionParameters(leftParameter, rightParameter, states);
             for (int boundIndex = 0; boundIndex < leftParameter.bounds().size(); boundIndex++) {

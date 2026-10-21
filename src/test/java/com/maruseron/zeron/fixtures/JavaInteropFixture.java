@@ -1,15 +1,22 @@
 package com.maruseron.zeron.fixtures;
 
 public class JavaInteropFixture {
+    private static final int[] SHARED_INT_VALUES = {6};
+    private static final Object[] SHARED_OBJECT_VALUES = {"original"};
     private int value;
     public int publicValue;
     public int[] publicArray = new int[0];
+    public float publicFloat = 3.25f;
     public final int finalValue = 17;
     public static int publicStaticValue = 23;
     public static final int finalStaticValue = 29;
 
     public JavaInteropFixture(final int value) {
         this.value = value;
+    }
+
+    public JavaInteropFixture(final int[] values) {
+        this.value = values.length;
     }
 
     public static int add(final int left, final int right) {
@@ -90,6 +97,62 @@ public class JavaInteropFixture {
 
     public static int[] echoInts(final int[] values) {
         return values;
+    }
+
+    public static int[] nullableIntArray() {
+        return null;
+    }
+
+    public static long[] echoLongs(final long[] values) {
+        return values;
+    }
+
+    public static double[] echoDoubles(final double[] values) {
+        return values;
+    }
+
+    public static boolean[] echoBooleans(final boolean[] values) {
+        return values;
+    }
+
+    public static int[] sharedIntValues() {
+        return SHARED_INT_VALUES;
+    }
+
+    public static void overwriteSharedInt() {
+        SHARED_INT_VALUES[0] = 99;
+    }
+
+    public static void resetSharedInt() {
+        SHARED_INT_VALUES[0] = 6;
+    }
+
+    public static Object[] sharedObjectValues() {
+        return SHARED_OBJECT_VALUES;
+    }
+
+    public static void overwriteSharedObject() {
+        SHARED_OBJECT_VALUES[0] = "changed";
+    }
+
+    public static void resetSharedObject() {
+        SHARED_OBJECT_VALUES[0] = "original";
+    }
+
+    public static void overwriteFirstInt(final int[] values) {
+        values[0] = 99;
+    }
+
+    public static float floatResult() {
+        return 1.25f;
+    }
+
+    public static float floatParameter(final float value) {
+        return value;
+    }
+
+    public static String nullableString() {
+        return null;
     }
 
     public static int readValue(final JavaInteropFixture fixture) {

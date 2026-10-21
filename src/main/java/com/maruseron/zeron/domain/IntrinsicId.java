@@ -29,7 +29,8 @@ public enum IntrinsicId {
     STRING_CODE_POINT_WIDTH_AT_OFFSET("zeron.string.code-point-width-at-offset.v1"),
     CHAR_TO_INT("zeron.char.to-int.v1"),
     INT_TO_CHAR("zeron.char.from-int.v1"),
-    CHAR_TO_STRING("zeron.char.to-string.v1");
+    CHAR_TO_STRING("zeron.char.to-string.v1"),
+    BIG_INTEGER_FROM_LITERAL_TEXT("zeron.numeric.big-integer-from-literal-text.v1");
 
     private final String stableName;
 

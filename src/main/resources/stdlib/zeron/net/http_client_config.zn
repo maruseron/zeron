@@ -1,0 +1,42 @@
+package zeron.net;
+
+import zeron.lang.Result;
+import zeron.time.Duration;
+
+public type HttpClientConfigError = InvalidTimeout;
+
+public class HttpClientConfig {
+    connectTimeoutValue: Duration;
+    responseTimeoutValue: Duration;
+    bodyReadIdleTimeoutValue: Duration;
+
+    private constructor new;
+
+    public property connectTimeout: Duration {
+        get = this.connectTimeoutValue;
+    }
+
+    public property responseTimeout: Duration {
+        get = this.responseTimeoutValue;
+    }
+
+    public property bodyReadIdleTimeout: Duration {
+        get = this.bodyReadIdleTimeoutValue;
+    }
+
+    public constructor standard() = HttpClientConfig.new(
+        Duration.fromNanoseconds(10000000000L),
+        Duration.fromNanoseconds(30000000000L),
+        Duration.fromNanoseconds(30000000000L));
+
+    public withTimeouts(connectTimeout: Duration, responseTimeout: Duration,
+                        bodyReadIdleTimeout: Duration): Result<HttpClientConfig, HttpClientConfigError> {
+        if (connectTimeout.nanoseconds <= 0L or responseTimeout.nanoseconds <= 0L
+                or bodyReadIdleTimeout.nanoseconds <= 0L) {
+            return Result<HttpClientConfig, HttpClientConfigError>.Err(
+                HttpClientConfigError.InvalidTimeout());
+        }
+        return Result<HttpClientConfig, HttpClientConfigError>.Ok(
+            HttpClientConfig.new(connectTimeout, responseTimeout, bodyReadIdleTimeout));
+    }
+}

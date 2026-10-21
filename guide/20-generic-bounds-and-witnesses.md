@@ -26,11 +26,29 @@ Bounds can include generic contract arguments, not just a contract name. For exa
 operations and related types it expects, rather than treating every generic type as if it had the
 same capabilities.
 
-Generic code can also call contract factory requirements through a bound. For example, a type
-bounded by `Sink<E>` can use that contract's `empty()` factory to create a sink. The current model
-does not support calling mutating operations such as `add` through a generic bound, even when the
-contract declares them; the mutability rules for bounds are still limited. The compiler checks
-applied contract arguments even though the JVM erases generic type arguments.
+Applied contract bounds describe behavior on existing values. A mutating method can be called
+through a bound when the receiver has a mutable reference and the type arguments satisfy the
+contract's admissibility requirements. The JVM erases generic type arguments, but Zeron still checks
+the applied arguments during compilation.
+
+Contracts no longer declare class-side factories. To create and populate a generic collection,
+bound its type constructor by `Collector<C<_>>`:
+
+```zeron
+import zeron.collections.Collector;
+
+fn collectInto<C<_>: Collector<C>, E: nullable + mut>(
+    source: Iterable<E>
+): &C<E> {
+    let result = C.empty<E>();
+    for (let item in source) C.add(result, item);
+    return result;
+}
+```
+
+`Collector` is a higher-kinded contract: it describes operations on a whole family of types such as
+`List<T>`. A `Sink<T>` bound remains useful when code only needs to add to an existing value. See
+[Higher-kinded abstractions](30-higher-kinded-abstractions.md) for constructor bounds and dispatch.
 
 ## When a type does not declare the required contract
 
@@ -72,9 +90,9 @@ defaults. Its methods are read-only in the current model: `mut` requirements are
 not guarantee that a witness method is free of other effects.
 
 If a class already declares nominal conformance, that conformance remains authoritative for its
-instance methods; a witness cannot replace them. A witness can, however, map a contract factory
-requirement to a public named constructor. That mapping is statically dispatched and does not add
-a virtual constructor.
+instance methods; a witness cannot replace them. Factories are expressed separately: use a class's
+named constructor directly, pass a factory value for one concrete type, or use an HKT contract for
+a generic type family.
 
 ## Selecting witnesses
 
@@ -111,7 +129,8 @@ The current implementation has several boundaries:
 - Applied contract bounds are supported on generic functions, methods, classes, and contracts.
   Class-bound evidence is selected during construction and carried by instances; bounded contract
   defaults use evidence carried by implementing instances.
-- Mutating methods through bounds and `mut` witness requirements are unsupported.
+- A read-only receiver cannot call mutating methods through a bound; use a mutable reference.
+  Mutating witness requirements remain unsupported.
 - A witness cannot override the instance methods of a nominally conforming class.
 - Generic arguments are erased at runtime. An ordinary erased Java-callable descriptor has no
   witness context and throws `UnsupportedOperationException`; Zeron-generated calls use the

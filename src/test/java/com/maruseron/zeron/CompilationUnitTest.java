@@ -22,6 +22,31 @@ import static org.junit.Assert.assertTrue;
 
 public final class CompilationUnitTest {
     @Test
+    public void compilesAndRunsSeparatedAndRadixIntegerLiterals() throws Exception {
+        final var className = "NumericLiteralMain" + UUID.randomUUID().toString().replace("-", "");
+        final var mainPath = Path.of("dist", className + ".class");
+        final var unit = parse(className + ".zn", """
+                fn intResult(): Int = 1_000 + 0b10 + 0o10 + 0x10;
+                fn longResult(): Long = 1_000L + 0b10L + 0o10L + 0x10L;
+                """);
+
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit), className, "");
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(1_026, generated.getMethod("intResult").invoke(null));
+                assertEquals(1_026L, generated.getMethod("longResult").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(mainPath);
+        }
+    }
+
+    @Test
     public void parserRecoveryReportsErrorsWithoutNullDeclarations() {
         final var previousError = Zeron.hadError;
         Zeron.hadError = false;

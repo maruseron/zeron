@@ -1,5 +1,5 @@
 package zeron.lang;
 
-public contract Eq<T> {
+public contract Eq<T: nullable + mut> {
     eq(other: T): Boolean;
 }

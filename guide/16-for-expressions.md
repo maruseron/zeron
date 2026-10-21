@@ -1,87 +1,86 @@
 # For-expressions
 
-A `for` expression starts with a source to visit, then applies a series of stages to its values.
-It uses the same iteration support as a `for` loop, but each stage transforms, skips, limits, or
-collects values:
+A for-expression visits values from one or more sources and produces a result. Its clauses are
+written in evaluation order: `for` introduces a generator, `let` names an intermediate value, and
+`if` filters out paths that do not match. End with `yield` for a lazy stream:
 
 ```zeron
-let values = for [1, 2, 3, 4, 5]
-    map number -> number * 2
-    filter number -> number > 4;
+let values = for number in [1, 2, 3, 4, 5]
+    if number > 2
+    yield number * 2;
 ```
 
-Stages run from top to bottom. This example doubles each number first, then keeps the doubled
-values greater than four. Because there is no `collect` stage, the expression produces a lazy
-`Stream<Int>`: it describes the work, and values are produced as the stream is traversed.
+The expression produces a lazy `Stream<Int>`. Constructing it evaluates the outer source expression,
+but traversal and per-item clause expressions are deferred until values are requested.
 
-## Transforming values
+## Generators and local bindings
 
-`map` changes each value. Its expression becomes the value passed to the next stage:
-
-```zeron
-map number -> number * 2
-```
-
-`flatMap` changes each value into an iterable and visits each item from that iterable before
-moving on to the next source value. It is useful when each input can produce zero, one, or several
-outputs:
+Each `for name in source` clause introduces a nested generator. Later generators are evaluated for
+each path that reaches them, and traversed completely before the earlier generator advances:
 
 ```zeron
 import zeron.collections.List;
 
-let expanded = for [1, 2]
-    flatMap number -> List<Int>.of(number, number * 10);
+let expanded = for number in [1, 2]
+    for result in List<Int>.of(number, number * 10)
+    yield result;
 ```
 
-This produces `1`, `10`, `2`, and `20`, in that order.
+The resulting stream yields `1`, `10`, `2`, and `20` in that order.
 
-## Filtering and limiting values
-
-`filter` keeps a value only when its condition is true. `dropWhile` skips values at the beginning
-while its condition is true, then passes that value and all remaining values through. `takeWhile`
-passes values until its condition first becomes false, then ends the traversal:
+Use `let` to compute an intermediate value once for each path reaching that clause. Later clauses
+and the result expression can use the binding:
 
 ```zeron
-let selected = for [1, 2, 3, 4, 5, 6]
-    filter number -> number %% 2 == 0
-    dropWhile number -> number < 4
-    takeWhile number -> number < 7;
+let labels = for number in [1, 2, 3]
+    let doubled = number * 2
+    if doubled > 2
+    yield "value: " + doubled.toString();
 ```
 
-This leaves `4` and `6`: the filter first keeps even numbers, then `dropWhile` skips `2`, and
-`takeWhile` continues through the remaining values because both are less than `7`.
+A guard applies at its position. A false `if` skips the rest of the current path, including any later
+generators or result expression.
 
-Use `drop count` to skip a number of values, or `take count` to stop after that many values:
+## Lazy streams and stream operations
+
+`yield expression` is the final clause of a lazy for-expression. It selects the value produced for
+each path and returns a `Stream<T>`; it does not consume that stream. The ordinary `Stream<T>`
+methods remain available for transformations and limits:
 
 ```zeron
-let middle = for [1, 2, 3, 4, 5, 6]
-    drop 2
-    take 3;
+let middle = (for number in [1, 2, 3, 4, 5, 6]
+    yield number)
+    .drop(2)
+    .take(3);
 ```
 
-`middle` contains `3`, `4`, and `5`. Counts are evaluated when the pipeline is created. Negative
-counts behave like zero. These stages apply to the values at their position in the pipeline, so
-after a `flatMap` they count the flattened values.
+Here `middle` is a stream of `3`, `4`, and `5`. Operations such as `map`, `filter`, `flatMap`,
+`dropWhile`, and `takeWhile` are library methods, not for-expression clauses. They can be composed
+with a yielded stream like any other stream.
+
+Each traversal requests iterators from its sources as needed. A for-expression does not promise that
+those sources are replayable or will return the same values on each traversal.
 
 ## Collecting into a sink
 
-If the result should be stored in a collection, end the pipeline with `collect` and provide a
-mutable sink:
+Use `collect expression into sink` as the final clause when the values should be added to a mutable
+sink immediately:
 
 ```zeron
 import zeron.collections.List;
 
-let evens = for [1, 2, 3, 4, 5, 6]
-    filter number -> number %% 2 == 0
-    map number -> number * 10
-    collect List<Int>.empty();
+let evens = for number in [1, 2, 3, 4, 5, 6]
+    if number %% 2 == 0
+    collect number * 10 into List<Int>.empty();
 ```
 
-The expression returns the same sink after adding each produced value, so `evens` is a
-`List<Int>`. A sink is mutable because collecting calls its `add` operation. `collect` must be the
-final stage.
+The expression returns the same sink after adding each projected value, so `evens` is a
+`List<Int>`. The sink is evaluated once before traversal. If a source, clause, projection, or sink
+addition fails, evaluation stops; earlier effects and sink mutations are not rolled back.
 
-`collect` is the only terminal stage in a for-expression. To count or fold the results instead,
-leave off `collect` and use the resulting stream's operations, such as `count()` or `fold(...)`.
-For a plain loop with no transformation stages, use the `for` statement from
+`yield` and `collect` are alternatives, and exactly one result clause is required at the end. Use
+`yield` when you want to keep composing a lazy stream; use `collect` when you need the values stored
+in a sink.
+
+For a plain loop with no transformed result, use the `for` statement from
 [expressions and control flow](05-expressions-and-control-flow.md).

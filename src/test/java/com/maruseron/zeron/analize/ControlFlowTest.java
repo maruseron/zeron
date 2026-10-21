@@ -175,15 +175,15 @@ public final class ControlFlowTest {
     @Test
     public void resolvesForOverAUserDefinedIterable() {
         final var source = parseUnit("""
-                import zeron.lang.Option;
+                import zeron.collections.Step;
                 class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
-                    public mut next(): Option<Int> {
-                        if (this.index >= 3) return Option<Int>.None();
+                    public mut next(): Step<Int> {
+                        if (this.index >= 3) return Step<Int>.Done();
                         let value = this.index;
                         this.index = this.index + 1;
-                        return Option.Some(value);
+                        return Step.Yield(value);
                     }
                 }
                 class Counter is zeron.collections.Iterable<Int> {
@@ -231,15 +231,15 @@ public final class ControlFlowTest {
         final var className = "IterableForGenerated" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
         final var declarations = parseUnit("""
-                import zeron.lang.Option;
+                import zeron.collections.Step;
                 class CounterIterator is zeron.collections.Iterator<Int> {
                     index: Int;
                     public constructor new;
-                    public mut next(): Option<Int> {
-                        if (this.index >= 5) return Option<Int>.None();
+                    public mut next(): Step<Int> {
+                        if (this.index >= 5) return Step<Int>.Done();
                         let value = this.index;
                         this.index = this.index + 1;
-                        return Option.Some(value);
+                        return Step.Yield(value);
                     }
                 }
                 class Counter is zeron.collections.Iterable<Int> {
@@ -250,10 +250,10 @@ public final class ControlFlowTest {
                     value: T;
                     ready: Boolean;
                     public constructor new;
-                    public mut next(): Option<T> {
-                        if (not this.ready) return Option<T>.None();
+                    public mut next(): Step<T> {
+                        if (not this.ready) return Step<T>.Done();
                         this.ready = false;
-                        return Option.Some(this.value);
+                        return Step.Yield(this.value);
                     }
                 }
                 class Single<T> is zeron.collections.Iterable<T> {

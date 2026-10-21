@@ -87,7 +87,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     final var constructors = externalClass.constructors().stream()
                             .map(constructor -> new Stmt.ExternalConstructor(token("new"),
                                     parameterNames(constructor.parameterTypes().size(), className.line()),
-                                    constructor.parameterTypes(), true))
+                                    constructor.parameterTypes(), true,
+                                    constructor.exceptionMappings().stream()
+                                            .map(mapping -> new Stmt.ExternalExceptionMapping(
+                                                    TypeDescriptor.ofName(mapping.exceptionType()),
+                                                    TypeDescriptor.ofName(mapping.effectType()),
+                                                    token(mapping.constructorName())))
+                                            .toList()))
                             .toList();
                     final var methods = externalClass.methods().stream()
                             .map(method -> new Stmt.ExternalMethod(token(method.signature().name()),
@@ -147,18 +153,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                             .toList();
                     statements.add(new Stmt.ClassDecl(className, classExport.typeParameters(), contractUses,
                         fields, properties, constructor, namedConstructors, methods, patterns,
-                        true, classExport.effect()));
+                        true, classExport.effect(), List.of(), List.of(), List.of(), List.of(),
+                        classExport.literalSuffixes().stream()
+                                .map(suffix -> new Stmt.LiteralSuffix(token(suffix.name()),
+                                        suffix.factories().stream()
+                                                .map(factory -> new Stmt.LiteralSuffixFactory(
+                                                        factory.category(), factory.stringInput(),
+                                                        token(factory.constructorName())))
+                                                .toList()))
+                                .toList()));
                 }
                 case ContractExport contract -> {
                     final var contractName = token(contract.qualifiedName());
-                    final var constructors = contract.constructors().stream()
-                        .map(constructor -> new Stmt.NamedContractConstructor(
-                                token(constructor.name()),
-                                namedParameters(constructor.parameterNames(),
-                                        constructor.signature().arity(), contractName.line()),
-                                constructor.signature(),
-                                constructor.variadic()))
-                        .toList();
                     final var methods = contract.methods().stream()
                         .map(method -> new Stmt.ContractMethod(
                                 token(method.name()),
@@ -179,7 +185,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         .map(use -> new Stmt.ContractUse(token(use.qualifiedName()), use.typeArguments()))
                         .toList();
                     statements.add(new Stmt.ContractDecl(contractName, contract.typeParameters(),
-                            requiredContracts, constructors, methods, properties, true,
+                            requiredContracts, methods, properties, true,
                             contract.sealed(), contract.higherKinded(), permittedClasses));
                 }
                 case SumExport sum -> {
@@ -207,10 +213,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                             newtype.underlyingType(), validator, true));
                 }
                 case WitnessExport witness -> {
-                    final var mappings = witness.mappings().stream()
-                            .map(mapping -> new Stmt.WitnessFactoryMapping(token(mapping.requirementName()),
-                                    mapping.targetType(), token(mapping.constructorName())))
-                            .toList();
                     final var methods = witness.methods().stream().map(method -> {
                         final var source = new Stmt.Function(token(method.requirementName()),
                                 namedParameters(method.methodParameterNames(),
@@ -231,7 +233,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         return new Stmt.WitnessMethod(token(method.requirementName()), source, helper);
                     }).toList();
                     statements.add(new Stmt.Witness(token(simpleName(witness.qualifiedName())),
-                            witness.typeParameters(), witness.contractType(), witness.targetType(), mappings,
+                            witness.typeParameters(), witness.contractType(), witness.targetType(),
                             methods, witness.derived(), witness.requirements().stream()
                                     .map(requirement -> new Stmt.WitnessRequirement(
                                             requirement.contractType(), requirement.targetType()))
@@ -287,9 +289,15 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
     }
 
-    public record ExternalConstructorExport(List<TypeDescriptor> parameterTypes) {
+    public record ExternalConstructorExport(List<TypeDescriptor> parameterTypes,
+                                            List<ExternalExceptionMappingExport> exceptionMappings) {
         public ExternalConstructorExport {
             parameterTypes = List.copyOf(parameterTypes);
+            exceptionMappings = List.copyOf(exceptionMappings);
+        }
+
+        public ExternalConstructorExport(final List<TypeDescriptor> parameterTypes) {
+            this(parameterTypes, List.of());
         }
     }
 
@@ -390,7 +398,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                               List<NamedConstructorExport> namedConstructors,
                               List<MethodExport> methods,
                               List<PropertyExport> properties,
-                              List<PatternExport> patterns) implements ExportedDeclaration {
+                              List<PatternExport> patterns,
+                              List<LiteralSuffixExport> literalSuffixes) implements ExportedDeclaration {
         public ClassExport {
             Objects.requireNonNull(qualifiedName);
             typeParameters = List.copyOf(typeParameters);
@@ -405,6 +414,23 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             methods = List.copyOf(methods);
             properties = List.copyOf(properties);
             patterns = List.copyOf(patterns);
+            literalSuffixes = List.copyOf(literalSuffixes);
+        }
+
+        public ClassExport(String qualifiedName,
+                           List<TypeParameterDescriptor> typeParameters,
+                           List<ContractUseExport> contracts,
+                           List<TypeDescriptor> canonicalConstructorParameters,
+                           List<String> canonicalConstructorParameterNames,
+                           boolean canonicalConstructorPublic,
+                           boolean effect,
+                           List<NamedConstructorExport> namedConstructors,
+                           List<MethodExport> methods,
+                           List<PropertyExport> properties,
+                           List<PatternExport> patterns) {
+            this(qualifiedName, typeParameters, contracts, canonicalConstructorParameters,
+                    canonicalConstructorParameterNames, canonicalConstructorPublic, effect,
+                    namedConstructors, methods, properties, patterns, List.of());
         }
 
         public ClassExport(String qualifiedName,
@@ -417,7 +443,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                            List<MethodExport> methods,
                            List<PropertyExport> properties) {
             this(qualifiedName, typeParameters, contracts, canonicalConstructorParameters,
-                    List.of(), canonicalConstructorPublic, effect, namedConstructors, methods, properties, List.of());
+                    List.of(), canonicalConstructorPublic, effect, namedConstructors, methods, properties,
+                    List.of(), List.of());
         }
 
         public ClassExport(String qualifiedName,
@@ -431,14 +458,28 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                            List<PropertyExport> properties,
                            List<PatternExport> patterns) {
             this(qualifiedName, typeParameters, contracts, canonicalConstructorParameters, List.of(),
-                    canonicalConstructorPublic, effect, namedConstructors, methods, properties, patterns);
+                    canonicalConstructorPublic, effect, namedConstructors, methods, properties, patterns, List.of());
+        }
+    }
+
+    public record LiteralSuffixExport(String name, List<LiteralSuffixFactoryExport> factories) {
+        public LiteralSuffixExport {
+            Objects.requireNonNull(name);
+            factories = List.copyOf(factories);
+        }
+    }
+
+    public record LiteralSuffixFactoryExport(Stmt.LiteralSuffixCategory category,
+                                             boolean stringInput, String constructorName) {
+        public LiteralSuffixFactoryExport {
+            Objects.requireNonNull(category);
+            Objects.requireNonNull(constructorName);
         }
     }
 
     public record ContractExport(String qualifiedName,
                                  List<TypeParameterDescriptor> typeParameters,
                                  List<ContractUseExport> requiredContracts,
-                                 List<NamedConstructorExport> constructors,
                                  List<MethodExport> methods,
                                  List<PropertyExport> properties,
                                  boolean sealed,
@@ -448,7 +489,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             Objects.requireNonNull(qualifiedName);
             typeParameters = List.copyOf(typeParameters);
             requiredContracts = List.copyOf(requiredContracts);
-            constructors = List.copyOf(constructors);
             methods = List.copyOf(methods);
             properties = List.copyOf(properties);
             permittedClasses = List.copyOf(permittedClasses);
@@ -456,33 +496,30 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
         public ContractExport(String qualifiedName,
                               List<TypeParameterDescriptor> typeParameters,
-                              List<NamedConstructorExport> constructors,
                               List<MethodExport> methods,
                               List<PropertyExport> properties) {
-            this(qualifiedName, typeParameters, List.of(), constructors, methods, properties,
+            this(qualifiedName, typeParameters, List.of(), methods, properties,
                     false, false, List.of());
         }
 
         public ContractExport(String qualifiedName,
                               List<TypeParameterDescriptor> typeParameters,
-                              List<NamedConstructorExport> constructors,
                               List<MethodExport> methods,
                               List<PropertyExport> properties,
                               boolean sealed,
                               List<ContractUseExport> permittedClasses) {
-            this(qualifiedName, typeParameters, List.of(), constructors, methods, properties,
+            this(qualifiedName, typeParameters, List.of(), methods, properties,
                     sealed, false, permittedClasses);
         }
 
         public ContractExport(String qualifiedName,
                               List<TypeParameterDescriptor> typeParameters,
                               List<ContractUseExport> requiredContracts,
-                              List<NamedConstructorExport> constructors,
                               List<MethodExport> methods,
                               List<PropertyExport> properties,
                               boolean sealed,
                               List<ContractUseExport> permittedClasses) {
-            this(qualifiedName, typeParameters, requiredContracts, constructors, methods, properties,
+            this(qualifiedName, typeParameters, requiredContracts, methods, properties,
                     sealed, false, permittedClasses);
         }
     }
@@ -548,7 +585,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     public record WitnessExport(String qualifiedName, List<TypeParameterDescriptor> typeParameters,
                                 TypeDescriptor contractType, TypeDescriptor targetType,
-                                List<WitnessFactoryMappingExport> mappings,
                                 List<WitnessMethodExport> methods, boolean derived, boolean higherKinded,
                                 List<WitnessRequirementExport> requirements) implements ExportedDeclaration {
         public WitnessExport {
@@ -556,32 +592,22 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             typeParameters = List.copyOf(typeParameters);
             Objects.requireNonNull(contractType);
             Objects.requireNonNull(targetType);
-            mappings = List.copyOf(mappings);
             methods = List.copyOf(methods);
             requirements = List.copyOf(requirements);
         }
 
         public WitnessExport(String qualifiedName, List<TypeParameterDescriptor> typeParameters,
                              TypeDescriptor contractType, TypeDescriptor targetType,
-                             List<WitnessFactoryMappingExport> mappings,
                              List<WitnessMethodExport> methods) {
-            this(qualifiedName, typeParameters, contractType, targetType, mappings,
+            this(qualifiedName, typeParameters, contractType, targetType,
                     methods, false, false, List.of());
         }
 
         public WitnessExport(String qualifiedName, List<TypeParameterDescriptor> typeParameters,
                              TypeDescriptor contractType, TypeDescriptor targetType,
-                             List<WitnessFactoryMappingExport> mappings) {
-            this(qualifiedName, typeParameters, contractType, targetType, mappings, List.of(),
-                    false, false, List.of());
-        }
-
-        public WitnessExport(String qualifiedName, List<TypeParameterDescriptor> typeParameters,
-                             TypeDescriptor contractType, TypeDescriptor targetType,
-                             List<WitnessFactoryMappingExport> mappings,
                              List<WitnessMethodExport> methods, boolean derived,
                              List<WitnessRequirementExport> requirements) {
-            this(qualifiedName, typeParameters, contractType, targetType, mappings,
+            this(qualifiedName, typeParameters, contractType, targetType,
                     methods, derived, false, requirements);
         }
     }
@@ -622,7 +648,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             final var qualifiedName = qualify(packageName,
                     "$zeron$derived$" + simpleName + "$" + derived.lexeme());
             exports.add(new WitnessExport(qualifiedName, typeParameters, requiredContract, target,
-                    List.of(), List.of(), true, requirements));
+                    List.of(), true, false, requirements));
         }
     }
 
@@ -668,15 +694,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                    int minimumArity, int helperMinimumArity, boolean variadic) {
             this(requirementName, helperQualifiedName, helperJvmOwner, helperName, methodSignature,
                     helperType, minimumArity, helperMinimumArity, variadic, List.of());
-        }
-    }
-
-    public record WitnessFactoryMappingExport(String requirementName, TypeDescriptor targetType,
-                                              String constructorName) {
-        public WitnessFactoryMappingExport {
-            Objects.requireNonNull(requirementName);
-            Objects.requireNonNull(targetType);
-            Objects.requireNonNull(constructorName);
         }
     }
 
@@ -860,6 +877,14 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                                 output.name().lexeme(), output.type()))
                                                         .toList(),
                                                 pattern.refutable()))
+                                        .toList(),
+                                classDeclaration.literalSuffixes().stream()
+                                        .map(suffix -> new LiteralSuffixExport(suffix.name().lexeme(),
+                                                suffix.factories().stream()
+                                                        .map(factory -> new LiteralSuffixFactoryExport(
+                                                                factory.category(), factory.stringInput(),
+                                                                factory.constructorName().lexeme()))
+                                                        .toList()))
                                         .toList()));
                         addDerivedWitnessExports(exports, unit.packageName(), classDeclaration.name(),
                                 classDeclaration.typeParameters(),
@@ -872,7 +897,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 externalClass.constructors().stream()
                                         .filter(Stmt.ExternalConstructor::isPublic)
                                         .map(constructor -> new ExternalConstructorExport(
-                                                constructor.parameterTypes()))
+                                                constructor.parameterTypes(),
+                                                constructor.exceptionMappings().stream()
+                                                        .map(mapping -> new ExternalExceptionMappingExport(
+                                                                mapping.javaExceptionType().name(),
+                                                                mapping.effectType().name(),
+                                                                mapping.constructorName().lexeme()))
+                                                        .toList()))
                                         .toList(),
                                 externalClass.methods().stream()
                                         .filter(Stmt.ExternalMethod::isPublic)
@@ -930,13 +961,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                             .map(use -> new ContractUseExport(
                                                     use.name().lexeme(), use.typeArguments()))
                                             .toList(),
-                                    contract.namedConstructors().stream()
-                                            .map(constructor -> new NamedConstructorExport(
-                                                    constructor.name().lexeme(),
-                                                    constructor.typeDescriptor(),
-                                                    constructor.variadic(),
-                                                    constructor.parameters().stream().map(Token::lexeme).toList()))
-                                            .toList(),
                                     contract.methods().stream()
                                             .map(method -> new MethodExport(method.name().lexeme(),
                                                     method.typeDescriptor(), method.isMutating(),
@@ -959,12 +983,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 : unit.packageName() + ".") + "$zeron$witness$" + witnessIndex++;
                         exports.add(new WitnessExport(qualifiedName, witness.typeParameters(),
                                 witness.contractType(), witness.targetType(),
-                                witness.mappings().stream()
-                                        .map(mapping -> new WitnessFactoryMappingExport(
-                                                mapping.requirementName().lexeme(),
-                                                mapping.targetType(),
-                                                mapping.constructorName().lexeme()))
-                                        .toList(),
                                 witness.methods().stream().map(method -> {
                                     final var helperName = method.implementation().name().lexeme();
                                     final var helperQualifiedName = qualify(unit.packageName(), helperName);
@@ -1149,6 +1167,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         writeType(output, outputParameter.type(), context);
                     }
                 }
+                output.writeInt(classExport.literalSuffixes().size());
+                for (final var suffix : classExport.literalSuffixes()) {
+                    output.writeUTF(suffix.name());
+                    output.writeInt(suffix.factories().size());
+                    for (final var factory : suffix.factories()) {
+                        output.writeByte(factory.category().ordinal());
+                        output.writeBoolean(factory.stringInput());
+                        output.writeUTF(factory.constructorName());
+                    }
+                }
             }
             case ContractExport contract -> {
                 output.writeByte(3);
@@ -1160,13 +1188,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     output.writeUTF(required.qualifiedName());
                     output.writeInt(required.typeArguments().size());
                     for (final var type : required.typeArguments()) writeType(output, type, context);
-                }
-                output.writeInt(contract.constructors().size());
-                for (final var constructor : contract.constructors()) {
-                    output.writeUTF(constructor.name());
-                    writeFunction(output, constructor.signature(), context);
-                    output.writeBoolean(constructor.variadic());
-                    writeStrings(output, constructor.parameterNames());
                 }
                 writeMethods(output, contract.methods(), context);
                 writeProperties(output, contract.properties(), context);
@@ -1220,6 +1241,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 for (final var constructor : externalClass.constructors()) {
                     output.writeInt(constructor.parameterTypes().size());
                     for (final var type : constructor.parameterTypes()) writeType(output, type, context);
+                    output.writeInt(constructor.exceptionMappings().size());
+                    for (final var mapping : constructor.exceptionMappings()) {
+                        output.writeUTF(mapping.exceptionType());
+                        output.writeUTF(mapping.effectType());
+                        output.writeUTF(mapping.constructorName());
+                    }
                 }
                 output.writeInt(externalClass.methods().size());
                 for (final var method : externalClass.methods()) {
@@ -1246,12 +1273,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 writeTypeParameters(output, witness.typeParameters(), context);
                 writeType(output, witness.contractType(), context);
                 writeType(output, witness.targetType(), context);
-                output.writeInt(witness.mappings().size());
-                for (final var mapping : witness.mappings()) {
-                    output.writeUTF(mapping.requirementName());
-                    writeType(output, mapping.targetType(), context);
-                    output.writeUTF(mapping.constructorName());
-                }
                 output.writeInt(witness.methods().size());
                 for (final var method : witness.methods()) {
                     output.writeUTF(method.requirementName());
@@ -1339,8 +1360,24 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     }
                     patterns.add(new PatternExport(patternName, outputs, refutable));
                 }
+                final var literalSuffixes = new ArrayList<LiteralSuffixExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var suffixName = input.readUTF();
+                    final var factories = new ArrayList<LiteralSuffixFactoryExport>();
+                    for (int j = 0, factoryCount = readCount(input); j < factoryCount; j++) {
+                        final var categoryOrdinal = input.readUnsignedByte();
+                        final var categories = Stmt.LiteralSuffixCategory.values();
+                        if (categoryOrdinal >= categories.length) {
+                            throw new IOException("Invalid literal suffix category.");
+                        }
+                        factories.add(new LiteralSuffixFactoryExport(categories[categoryOrdinal],
+                                input.readBoolean(), input.readUTF()));
+                    }
+                    literalSuffixes.add(new LiteralSuffixExport(suffixName, factories));
+                }
                 yield new ClassExport(name, typeParameters, contracts, constructorParameters,
-                        constructorParameterNames, canonicalPublic, effect, constructors, methods, properties, patterns);
+                        constructorParameterNames, canonicalPublic, effect, constructors, methods, properties,
+                        patterns, literalSuffixes);
             }
             case 3 -> {
                 final var name = input.readUTF();
@@ -1355,14 +1392,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     }
                     requiredContracts.add(new ContractUseExport(requiredName, arguments));
                 }
-                final var constructors = new ArrayList<NamedConstructorExport>();
-                for (int i = 0, count = readCount(input); i < count; i++) {
-                    final var constructorName = input.readUTF();
-                    final var signature = readFunction(input, context);
-                    final var variadic = input.readBoolean();
-                    constructors.add(new NamedConstructorExport(constructorName, signature, variadic,
-                            readStrings(input)));
-                }
                 final var methods = readMethods(input, context);
                 final var properties = readProperties(input, context);
                 final var sealed = input.readBoolean();
@@ -1376,7 +1405,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     }
                     permitted.add(new ContractUseExport(permittedName, arguments));
                 }
-                yield new ContractExport(name, typeParameters, requiredContracts, constructors,
+                yield new ContractExport(name, typeParameters, requiredContracts,
                         methods, properties, sealed, higherKinded, permitted);
             }
             case 7 -> {
@@ -1416,7 +1445,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     for (int j = 0, parameterCount = readCount(input); j < parameterCount; j++) {
                         parameterTypes.add(readType(input, context));
                     }
-                    constructors.add(new ExternalConstructorExport(parameterTypes));
+                    final var exceptionMappings = new ArrayList<ExternalExceptionMappingExport>();
+                    for (int j = 0, mappingCount = readCount(input); j < mappingCount; j++) {
+                        exceptionMappings.add(new ExternalExceptionMappingExport(
+                                input.readUTF(), input.readUTF(), input.readUTF()));
+                    }
+                    constructors.add(new ExternalConstructorExport(parameterTypes, exceptionMappings));
                 }
                 final var methods = new ArrayList<ExternalMethodExport>();
                 for (int i = 0, count = readCount(input); i < count; i++) {
@@ -1442,11 +1476,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var typeParameters = readTypeParameters(input, context);
                 final var contractType = readType(input, context);
                 final var targetType = readType(input, context);
-                final var mappings = new ArrayList<WitnessFactoryMappingExport>();
-                for (int i = 0, count = readCount(input); i < count; i++) {
-                    mappings.add(new WitnessFactoryMappingExport(input.readUTF(),
-                            readType(input, context), input.readUTF()));
-                }
                 final var methods = new ArrayList<WitnessMethodExport>();
                 for (int i = 0, count = readCount(input); i < count; i++) {
                     methods.add(new WitnessMethodExport(input.readUTF(), input.readUTF(), input.readUTF(),
@@ -1461,7 +1490,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     requirements.add(new WitnessRequirementExport(
                             readType(input, context), readType(input, context)));
                 }
-                yield new WitnessExport(name, typeParameters, contractType, targetType, mappings,
+                yield new WitnessExport(name, typeParameters, contractType, targetType,
                         methods, derived, higherKinded, requirements);
             }
             default -> throw new IOException("Unknown declaration kind in Zeron library index.");
@@ -1553,6 +1582,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             output.writeUTF(parameter.name());
             output.writeInt(context.wireScope(parameter.scopeId()));
             output.writeBoolean(parameter.isHigherKinded());
+            output.writeByte(parameter.variance().ordinal());
+            output.writeBoolean(parameter.admitsNullableArguments());
+            output.writeBoolean(parameter.isEffectKind());
+            output.writeBoolean(parameter.admitsMutableArguments());
         }
         for (final var parameter : parameters) {
             output.writeInt(parameter.bounds().size());
@@ -1566,15 +1599,29 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         final var names = new ArrayList<String>(count);
         final var scopes = new ArrayList<Integer>(count);
         final var higherKinded = new ArrayList<Boolean>(count);
+        final var variances = new ArrayList<TypeParameterDescriptor.Variance>(count);
+        final var nullableArguments = new ArrayList<Boolean>(count);
+        final var effectKinds = new ArrayList<Boolean>(count);
+        final var mutableArguments = new ArrayList<Boolean>(count);
         final var parameters = new ArrayList<TypeParameterDescriptor>(count);
         for (int i = 0; i < count; i++) {
             names.add(input.readUTF());
             scopes.add(input.readInt());
             higherKinded.add(input.readBoolean());
+            final var varianceOrdinal = input.readUnsignedByte();
+            final var availableVariances = TypeParameterDescriptor.Variance.values();
+            if (varianceOrdinal >= availableVariances.length) {
+                throw new IOException("Invalid generic type-parameter variance.");
+            }
+            variances.add(availableVariances[varianceOrdinal]);
+            nullableArguments.add(input.readBoolean());
+            effectKinds.add(input.readBoolean());
+            mutableArguments.add(input.readBoolean());
         }
         for (int i = 0; i < count; i++) {
             final var parameter = new TypeParameterDescriptor(context.runtimeScope(scopes.get(i)),
-                    names.get(i), List.of(), higherKinded.get(i));
+                    names.get(i), List.of(), higherKinded.get(i), variances.get(i),
+                    nullableArguments.get(i), effectKinds.get(i), mutableArguments.get(i));
             parameters.add(parameter);
             context.parameters.put(new WireTypeParameter(scopes.get(i), names.get(i)), parameter);
         }
@@ -1586,12 +1633,29 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             if (!bounds.isEmpty()) {
                 final var old = parameters.get(i);
                 final var parameter = new TypeParameterDescriptor(old.scopeId(), old.name(), bounds,
-                        old.isHigherKinded());
+                        old.isHigherKinded(), old.variance(),
+                        old.admitsNullableArguments(), old.isEffectKind(),
+                        old.admitsMutableArguments());
                 parameters.set(i, parameter);
                 context.parameters.put(new WireTypeParameter(scopes.get(i), names.get(i)), parameter);
             }
         }
         return List.copyOf(parameters);
+    }
+
+    private static void writeTypes(final DataOutputStream output, final List<TypeDescriptor> types,
+                                   final WriteContext context) throws IOException {
+        output.writeInt(types.size());
+        for (final var type : types) writeType(output, type, context);
+    }
+
+    private static List<TypeDescriptor> readTypes(final DataInputStream input,
+                                                  final ReadContext context) throws IOException {
+        final var types = new ArrayList<TypeDescriptor>();
+        for (int i = 0, count = readCount(input); i < count; i++) {
+            types.add(readType(input, context));
+        }
+        return List.copyOf(types);
     }
 
     private static void writeType(final DataOutputStream output,
@@ -1618,6 +1682,11 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeUTF(generic.baseType().name());
                 output.writeInt(generic.typeParameters().size());
                 for (final var argument : generic.typeParameters()) writeType(output, argument, context);
+            }
+            case TypeProjectionDescriptor projection -> {
+                output.writeByte(21);
+                output.writeByte(projection.kind().ordinal());
+                writeType(output, projection.bound(), context);
             }
             case ArrayDescriptor array -> {
                 output.writeByte(10);
@@ -1653,10 +1722,17 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 }
             }
             case FunctionDescriptor function -> {
-                output.writeByte(14);
-                writeFunction(output, function, context);
+                if (function.isHandler()) {
+                    output.writeByte(22);
+                    writeType(output, function.returnType(), context);
+                    writeTypes(output, function.handledEffects(), context);
+                    writeTypes(output, function.raisedEffects(), context);
+                } else {
+                    output.writeByte(14);
+                    writeFunction(output, function, context);
+                }
             }
-            case InferDescriptor _, NullDescriptor _ ->
+            case InferDescriptor _, NullDescriptor _, CapturedTypeDescriptor _ ->
                     throw new IOException("Internal types cannot be exported in a Zeron library index.");
         }
     }
@@ -1693,6 +1769,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             case 16 -> TypeDescriptor.ofByteArray();
             case 17 -> TypeDescriptor.ofLong();
             case 20 -> TypeDescriptor.ofChar();
+            case 22 -> TypeDescriptor.handlerOf(readType(input, context),
+                    readTypes(input, context), readTypes(input, context));
             case 18 -> {
                 final var scope = input.readInt();
                 final var name = input.readUTF();
@@ -1709,6 +1787,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     arguments.add(input.readBoolean() ? TypeDescriptor.ofInfer() : readType(input, context));
                 }
                 yield new TypeConstructorDescriptor(base, arguments);
+            }
+            case 21 -> {
+                final var kind = input.readUnsignedByte();
+                final var kinds = TypeProjectionDescriptor.Kind.values();
+                if (kind >= kinds.length) throw new IOException("Invalid type projection in library index.");
+                yield new TypeProjectionDescriptor(kinds[kind], readType(input, context));
             }
             default -> throw new IOException("Unknown type kind in Zeron library index.");
         };

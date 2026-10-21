@@ -1,5 +1,19 @@
 package zeron.lang;
 
+import zeron.algebra.Addition;
+import zeron.algebra.Mult;
+
+witness Addition<Long> for Long {
+    fn add(other: Long): Long = this + other;
+    fn zero(): Long = 0L;
+    fn negate(): Long = -this;
+}
+
+witness Mult<Long> for Long {
+    fn multiply(other: Long): Long = this * other;
+    fn one(): Long = 1L;
+}
+
 public extension Long {
     public fn toInt(): Option<Int> = longToInt(this);
 }

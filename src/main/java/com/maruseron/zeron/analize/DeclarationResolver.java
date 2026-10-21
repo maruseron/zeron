@@ -41,15 +41,6 @@ final class DeclarationResolver {
                 TypeResolver.validateTypeParameterBound(context, parameter, contract.name()));
         validateRequiredContracts(context, contract);
         validateSealedContract(context, contract);
-        for (final var constructor : contract.namedConstructors()) {
-            if (contract.namedConstructors().stream().anyMatch(existing -> existing != constructor
-                    && existing.name().lexeme().equals(constructor.name().lexeme()))) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        constructor.name(), "Duplicate contract constructor name."));
-            }
-            TypeResolver.validateFunctionTypes(context, constructor.typeDescriptor(), constructor.name());
-            TypeResolver.validateTypeParameterBounds(context, constructor.typeDescriptor(), constructor.name());
-        }
         final var methodNames = new HashSet<String>();
         for (final var method : contract.methods()) {
             if (!methodNames.add(method.name().lexeme())) {
@@ -71,6 +62,7 @@ final class DeclarationResolver {
             }
             TypeResolver.validateType(context, property.type(), property.name());
         }
+        VariancePositionValidator.validate(context, contract);
         validateContractComposition(context, contract);
     }
 
@@ -108,8 +100,6 @@ final class DeclarationResolver {
             final var methodMutability = new HashMap<String, Boolean>();
             final var methodVariadic = new HashMap<String, Boolean>();
             final var properties = new LinkedHashMap<String, TypeDescriptor>();
-            final var constructors = new LinkedHashMap<String, FunctionDescriptor>();
-            final var constructorVariadic = new HashMap<String, Boolean>();
 
             for (final var applied : closure) {
                 for (final var method : applied.declaration().methods()) {
@@ -134,19 +124,6 @@ final class DeclarationResolver {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
                                 property.name(), "Incompatible inherited contract property '"
                                         + property.name().lexeme() + "'." ));
-                    }
-                }
-                for (final var constructor : applied.declaration().namedConstructors()) {
-                    final var signature = (FunctionDescriptor) TypeSubstitution.substitute(
-                            constructor.typeDescriptor(), applied.substitutions());
-                    final var name = constructor.name().lexeme();
-                    final var previous = constructors.putIfAbsent(name, signature);
-                    final var previousVariadic = constructorVariadic.putIfAbsent(name, constructor.variadic());
-                    if (previous != null && (previousVariadic != constructor.variadic()
-                            || !compatibleMethodSignatures(context, previous, constructor.variadic(),
-                                    signature, constructor.variadic()))) {
-                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
-                                constructor.name(), "Incompatible inherited contract constructor '" + name + "'." ));
                     }
                 }
             }
@@ -348,6 +325,7 @@ final class DeclarationResolver {
             TypeResolver.validateFunctionTypes(context, constructor.typeDescriptor(), constructor.name());
             TypeResolver.validateTypeParameterBounds(context, constructor.typeDescriptor(), constructor.name());
         }
+        validateLiteralSuffixes(declaration);
 
         for (final var property : declaration.properties()) {
             if (!fieldNames.add(property.name().lexeme())) {
@@ -421,6 +399,7 @@ final class DeclarationResolver {
 
         }
         validateHigherKindedConformances(context, declaration, contractNames);
+        VariancePositionValidator.validate(context, declaration);
 
         final var previousClass = context.frame.currentClassName;
         final var previousInitializerFields = context.frame.initializerVisibleFields;
@@ -451,6 +430,65 @@ final class DeclarationResolver {
         } finally {
             context.frame.currentClassName = previousClass;
             context.frame.initializerVisibleFields = previousInitializerFields;
+        }
+    }
+
+    private static void validateLiteralSuffixes(final Stmt.ClassDecl declaration) {
+        if (declaration.literalSuffixes().isEmpty()) return;
+        if (!declaration.typeParameters().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    declaration.literalSuffixes().getFirst().name(),
+                    "Numeric literal suffixes cannot be declared on generic classes."));
+        }
+        final var names = new HashSet<String>();
+        for (final var suffix : declaration.literalSuffixes()) {
+            if (!names.add(suffix.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        suffix.name(), "Duplicate class numeric literal suffix."));
+            }
+            if (suffix.name().lexeme().equals("L")) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        suffix.name(), "The built-in 'L' suffix is reserved."));
+            }
+            if (suffix.factories().isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        suffix.name(), "A numeric literal suffix must declare at least one factory."));
+            }
+            final var categories = new HashSet<Stmt.LiteralSuffixCategory>();
+            for (final var factory : suffix.factories()) {
+                if (!categories.add(factory.category())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            factory.constructorName(),
+                            "A numeric literal suffix can declare only one factory per category."));
+                }
+                final var constructor = declaration.namedConstructors().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(factory.constructorName().lexeme()))
+                        .findFirst().orElse(null);
+                if (constructor == null || !constructor.isPublic()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                            factory.constructorName(),
+                            "A numeric literal suffix factory must be a public named constructor."));
+                }
+                final var parameters = constructor.typeDescriptor().parameters();
+                if (parameters.size() != 1) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                            factory.constructorName(),
+                            "A numeric literal suffix factory must accept exactly one argument."));
+                }
+                final var parameterType = parameters.getFirst();
+                final var accepted = factory.stringInput()
+                        ? parameterType instanceof StringDescriptor
+                        : factory.category() == Stmt.LiteralSuffixCategory.INTEGER
+                                ? parameterType instanceof IntDescriptor || parameterType instanceof LongDescriptor
+                                : parameterType instanceof FloatDescriptor;
+                if (!accepted) {
+                    final var expected = factory.stringInput() ? "String"
+                            : factory.category() == Stmt.LiteralSuffixCategory.INTEGER ? "Int or Long" : "Float";
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                            factory.constructorName(),
+                            "This numeric literal suffix factory must accept " + expected + "."));
+                }
+            }
         }
     }
 
@@ -585,6 +623,7 @@ final class DeclarationResolver {
                                           final List<Stmt.Field> earlierFields,
                                           final Token where) {
         switch (initializer) {
+            case Expr.SuffixedLiteral _ -> {}
             case Expr.Literal _ -> {}
             case Expr.Grouping grouping ->
                     validateFieldInitializer(context, grouping.expression, earlierFields, where);
@@ -716,35 +755,6 @@ final class DeclarationResolver {
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < contract.typeParameters().size(); i++) {
             substitutions.put(contract.typeParameters().get(i), contractUse.typeArguments().get(i));
-        }
-        for (final var required : contract.namedConstructors()) {
-            final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
-                    required.typeDescriptor(), substitutions);
-            final var implementation = declaration.namedConstructors().stream()
-                    .filter(constructor -> constructor.name().lexeme().equals(required.name().lexeme()))
-                    .filter(constructor -> constructor.isPublic() 
-                            && constructor.variadic() == required.variadic()
-                            && compatibleMethodSignatures(context, requiredType, required.variadic(), 
-                                    constructor.typeDescriptor(), constructor.variadic()))
-                    .findFirst()
-                    .orElse(null);
-            final var contractType = contractUse.typeArguments().isEmpty()
-                    ? TypeDescriptor.ofName(contractUse.name().lexeme())
-                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(contractUse.name().lexeme()),
-                            contractUse.typeArguments());
-            final var targetType = declaration.typeParameters().isEmpty()
-                    ? TypeDescriptor.ofName(declaration.name().lexeme())
-                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(declaration.name().lexeme()),
-                            declaration.typeParameters().stream()
-                                    .map(parameter -> (TypeDescriptor) parameter).toList());
-            final var explicitMapping = TypeClassEvidence.explicitMapping(context,
-                    contractType, targetType, required.name().lexeme());
-            if (implementation == null && explicitMapping == null) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        contractUse.name(),
-                        "Class does not provide a compatible public contract constructor '"
-                                + required.name().lexeme() + "'."));
-            }
         }
         for (final var required : contract.methods()) {
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
@@ -899,10 +909,19 @@ final class DeclarationResolver {
                     implementation.typeParameters().get(i));
         }
         for (int i = 0; i < required.typeParameters().size(); i++) {
+            final var requiredParameter = required.typeParameters().get(i);
+            final var implementationParameter = implementation.typeParameters().get(i);
+            if (requiredParameter.admitsNullableArguments()
+                    != implementationParameter.admitsNullableArguments()
+                    || requiredParameter.isEffectKind() != implementationParameter.isEffectKind()
+                    || requiredParameter.admitsMutableArguments()
+                            != implementationParameter.admitsMutableArguments()) {
+                return false;
+            }
             final var requiredBounds = required.typeParameters().get(i).bounds().stream()
                     .map(bound -> TypeSubstitution.substitute(bound, methodSubstitutions))
                     .toList();
-            if (!requiredBounds.equals(implementation.typeParameters().get(i).bounds())) return false;
+            if (!requiredBounds.equals(implementationParameter.bounds())) return false;
         }
         for (int i = 0; i < required.arity(); i++) {
             if (!TypeSubstitution.substitute(required.parameters().get(i), methodSubstitutions)

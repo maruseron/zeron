@@ -11,10 +11,16 @@ document. Project source files continue to open normally and remain editable.
 
 - Install the Zeron 0.3.0 or later distribution and ensure `zeron` is available on `PATH`.
 - Install the Java runtime required by that Zeron distribution.
-- Open a single-project Zeron workspace containing its `zeron.toml` manifest.
+- Open a single-project Zeron workspace. A `zeron.toml` manifest is optional for language-server
+  features; without one, the server analyzes Zeron sources under the workspace folder. Opening the
+  repository root or the standard-library folder directly selects the standard-library sources.
 
-By default, the extension launches `zeron lsp` from the workspace root. If the executable is not on
-`PATH`, set `zeron.server.path` to its command or path, then reload the VS Code window.
+By default, the extension launches `zeron lsp` from the workspace root. If `zeron.toml` is present,
+it configures the project; otherwise the server infers a source workspace from the folder. Build and
+run commands still require a project manifest. If the executable is not on `PATH`, set
+`zeron.server.path` to its command or path, then reload the VS Code window.
+
+To restart the language server, run **Zeron: Restart Language Server** from the Command Palette.
 
 Multi-root workspaces are not supported by the current language server integration. Syntax
 highlighting continues to work if the server is missing or cannot start; see the **Zeron Language
@@ -30,5 +36,6 @@ code --extensionDevelopmentPath=editors/vscode sample_programs/list_monad
 ```
 
 The grammar is intentionally a lightweight editor grammar rather than a second implementation of
-the compiler scanner. Contextual soft keywords are generally left as identifiers to avoid coloring
-ordinary variables as keywords. Language semantics come from the LSP server, not the grammar.
+the compiler scanner. Contextual soft keywords are highlighted when local syntax cues identify
+their use; other ambiguous occurrences may remain identifiers to avoid coloring ordinary variables
+as keywords. Language semantics come from the LSP server, not the grammar.

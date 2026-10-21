@@ -411,7 +411,7 @@ public final class SumTypeTest {
                         case Choice.Nothing() -> "nothing";
                     };
                 }
-                fn throughBound<T: Label>(value: T): String = value.label();
+                fn throughBound<T: mut + Label>(value: T): String = value.label();
                 fn run(): String =
                     if (Choice.Just(42).hasValue())
                     then throughBound(Choice.Just(42))

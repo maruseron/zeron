@@ -1,0 +1,55 @@
+package zeron.net;
+
+import zeron.resource.Disposable;
+import zeron.resource.DisposeFailure;
+
+external fn httpCreateClient(connectTimeoutNanos: Long): Any;
+external fn httpSend(client: Any?, uri: String?, method: String?, headerEntries: Array<String>,
+                     body: ByteArray?, responseTimeoutNanos: Long,
+                     bodyReadIdleTimeoutNanos: Long): Any?;
+external fn httpSendSucceeded(outcome: Any?): Boolean;
+external fn httpSendFailureKind(outcome: Any?): String;
+external fn httpSendFailureMessage(outcome: Any?): String;
+external fn httpSendFailureCause(outcome: Any?): Any?;
+external fn httpSendResponse(outcome: Any?): Any?;
+external fn httpClientDispose(client: Any?): Boolean;
+
+public class HttpClient is Disposable {
+    clientHandle: Any;
+    config: HttpClientConfig;
+
+    private constructor new;
+
+    public constructor with(config: HttpClientConfig) =
+        HttpClient.new(httpCreateClient(config.connectTimeout.nanoseconds), config);
+
+    public send(request: HttpRequest): HttpResponse raises HttpFailure {
+        let mut responseTimeout = request.responseTimeout;
+        if (responseTimeout == null) responseTimeout = this.config.responseTimeout;
+        let mut bodyReadIdleTimeout = request.bodyReadIdleTimeout;
+        if (bodyReadIdleTimeout == null) {
+            bodyReadIdleTimeout = this.config.bodyReadIdleTimeout;
+        }
+
+        let outcome = httpSend(this.clientHandle, request.uri.value, request.method.value,
+            request.headers.toPairs(), request.body,
+            responseTimeout.nanoseconds, bodyReadIdleTimeout.nanoseconds);
+        if (not httpSendSucceeded(outcome)) {
+            let kind = httpSendFailureKind(outcome);
+            let message = httpSendFailureMessage(outcome);
+            raise HttpFailure.new(httpFailureKind(kind), message,
+                httpSendFailureCause(outcome));
+        }
+
+        let response = httpSendResponse(outcome);
+        if (not httpIsResponseHandle(response)) {
+            raise HttpFailure.new(HttpFailureKind.Transport(),
+                "The HTTP runtime returned an invalid response handle.", null);
+        }
+        return HttpResponse.from(response);
+    }
+
+    public mut dispose(): Unit raises DisposeFailure {
+        httpClientDispose(this.clientHandle);
+    }
+}

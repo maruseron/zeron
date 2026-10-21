@@ -33,6 +33,50 @@ import static org.junit.Assert.assertTrue;
 
 public final class ZeronLibraryIndexTest {
     @Test
+    public void preservesGenericAdmissibilityMarkersInLibraryIndexes() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var packageName = "markerlibrary" + suffix;
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-marker-library-");
+        final var unit = parse("Library.zn", """
+                package %s;
+                public effect Failure {}
+                public fn nullable<T: nullable>(value: T): T = value;
+                public fn raised<E: effect>(value: E): E raises E = value;
+                public fn mutable<T: mut>(value: T): T = value;
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit),
+                    packageName + ".Library", packageName, List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+
+            final var index = ZeronLibraryIndex.readFromDirectory(output);
+            final var functions = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.FunctionExport.class::isInstance)
+                    .map(ZeronLibraryIndex.FunctionExport.class::cast)
+                    .toList();
+            final var nullable = functions.stream()
+                    .filter(function -> function.qualifiedName().equals(packageName + ".nullable"))
+                    .findFirst().orElseThrow().signature().typeParameters().getFirst();
+            final var effect = functions.stream()
+                    .filter(function -> function.qualifiedName().equals(packageName + ".raised"))
+                    .findFirst().orElseThrow().signature().typeParameters().getFirst();
+            final var mutable = functions.stream()
+                    .filter(function -> function.qualifiedName().equals(packageName + ".mutable"))
+                    .findFirst().orElseThrow().signature().typeParameters().getFirst();
+            assertTrue(nullable.admitsNullableArguments());
+            assertFalse(nullable.isEffectKind());
+            assertFalse(effect.admitsNullableArguments());
+            assertTrue(effect.isEffectKind());
+            assertFalse(mutable.admitsNullableArguments());
+            assertFalse(mutable.isEffectKind());
+            assertTrue(mutable.admitsMutableArguments());
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
     public void separatelyCompiledClientUsesPublicSumFromLibraryIndex() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var libraryPackage = "sumlibrary" + suffix;
@@ -73,6 +117,74 @@ public final class ZeronLibraryIndexTest {
         } finally {
             deleteTree(Path.of("dist"));
             deleteTree(libraryRoot);
+        }
+    }
+
+    @Test
+    public void separatelyCompiledClientUsesImportedClassNumericLiteralSuffix() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "suffixlibrary" + suffix;
+        final var clientPackage = "suffixclient" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-suffix-library-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-suffix-client-");
+        final var library = parse("Library.zn", """
+                package %s;
+                public class Meter {
+                    public property value: Float;
+                    public constructor ofFloat(value: Float) = Meter.new(value);
+                    suffix m {
+                        decimal: ofFloat;
+                    }
+                }
+                public class LiteralText {
+                    public property value: String;
+                    public constructor fromLiteralText(value: String) = LiteralText.new(value);
+                    suffix n {
+                        integer: string fromLiteralText;
+                    }
+                }
+                """.formatted(libraryPackage));
+        final var client = parse("Main.zn", """
+                package %s;
+                import suffix %s.Meter.m as mm;
+                import suffix %s.LiteralText.n;
+                fn value(): Float = 6.7mm.value;
+                fn large(): String = 9223372036854775808n.value;
+                fn radix(): String = 0xFF_FFn.value;
+                """.formatted(clientPackage, libraryPackage, libraryPackage));
+
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage,
+                    List.of(), false, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var libraryIndex = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+            final var exported = libraryIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.ClassExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ClassExport.class::cast)
+                    .filter(declaration -> declaration.qualifiedName().equals(libraryPackage + ".Meter"))
+                    .findFirst().orElseThrow();
+            assertEquals("m", exported.literalSuffixes().getFirst().name());
+            assertEquals("ofFloat", exported.literalSuffixes().getFirst().factories().getFirst().constructorName());
+
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), clientPackage + ".Main", clientPackage,
+                    List.of(libraryIndex), false, List.of(), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    clientOutput.toUri().toURL(), libraryOutput.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(6.7, loader.loadClass(clientPackage + ".Main")
+                        .getMethod("value").invoke(null));
+                final var program = loader.loadClass(clientPackage + ".Main");
+                assertEquals("9223372036854775808", program.getMethod("large").invoke(null));
+                assertEquals("0xFF_FF", program.getMethod("radix").invoke(null));
+            }
+        } finally {
+            deleteTree(clientOutput);
+            deleteTree(libraryOutput);
         }
     }
 
@@ -182,6 +294,61 @@ public final class ZeronLibraryIndexTest {
     }
 
     @Test
+    public void separatelyCompiledClientUsesAlgebraicOperatorWitnessFromLibraryIndex() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "algebralibrary" + suffix;
+        final var clientPackage = "algebraclient" + suffix;
+        final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-algebra-library-");
+        final var library = parse("Library.zn", """
+                package %s;
+                import zeron.algebra.Addition;
+                public class Vector {
+                    public property value: Int;
+                    public constructor new;
+                }
+                witness Addition<Vector> for Vector {
+                    fn add(other: Vector): Vector = Vector.new(this.value + other.value);
+                    fn zero(): Vector = Vector.new(0);
+                    fn negate(): Vector = Vector.new(-this.value);
+                }
+                """.formatted(libraryPackage));
+        final var client = parse("Main.zn", """
+                package %s;
+                import %s.*;
+                import zeron.algebra.Addition;
+                fn subtract<T: mut + Addition<T>>(left: T, right: T): T = left - right;
+                fn run(): Int = subtract(Vector.new(5), Vector.new(2)).value;
+                """.formatted(clientPackage, libraryPackage));
+        try {
+            deleteTree(Path.of("dist"));
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            copyTree(Path.of("dist"), libraryRoot);
+            final var libraryIndex = ZeronLibraryIndex.readFromDirectory(libraryRoot);
+            assertTrue(libraryIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.WitnessExport.class::isInstance)
+                    .map(ZeronLibraryIndex.WitnessExport.class::cast)
+                    .anyMatch(witness -> witness.contractType().name().equals("zeron.algebra.Addition")));
+
+            deleteTree(Path.of("dist"));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), clientPackage + ".Main", clientPackage, List.of(libraryIndex));
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(3, loader.loadClass(clientPackage + ".Main").getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(libraryRoot);
+        }
+    }
+
+    @Test
     public void separatelyCompiledClientUsesClassDeclaredHktImplementationFromLibraryIndex() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var libraryPackage = "hktlibrary" + suffix;
@@ -190,10 +357,10 @@ public final class ZeronLibraryIndexTest {
         final var library = parse("Library.zn", """
                 package %s;
                 import zeron.control.Functor;
-                public class Box<T> is Functor<Box<_>> {
+                public class Box<T: mut> is Functor<Box<_>> {
                     public property value: T;
                     implementation Functor<Box<_>> {
-                        fn map<A, B>(this: Box<A>, transform: (A) -> B): Box<B> =
+                        fn map<A: mut, B: mut>(this: Box<A>, transform: (A) -> B): Box<B> =
                             Box.new(transform(this.value));
                     }
                 }
@@ -260,14 +427,14 @@ public final class ZeronLibraryIndexTest {
                     public constructor new;
                     public name(): String = this.value;
                 }
-                public class Box<T> {
+                public class Box<T: mut> {
                     public property value: T;
                     public constructor new;
                 }
-                witness<T: Named> zeron.lang.Display<Box<T>> for Box<T> {
+                witness<T: mut + Named> zeron.lang.Display<Box<T>> for Box<T> {
                     fn toString(): String = this.value.name();
                 }
-                public fn render<T: zeron.lang.Display<T>>(value: T): String = "value=" + value;
+                public fn render<T: mut + zeron.lang.Display<T>>(value: T): String = "value=" + value;
                 """.formatted(libraryPackage));
         final var client = parse("Main.zn", """
                 package %s;
@@ -299,76 +466,6 @@ public final class ZeronLibraryIndexTest {
                     getClass().getClassLoader())) {
                 assertEquals("value=library", loader.loadClass(clientPackage + ".Main")
                         .getMethod("run").invoke(null));
-            }
-        } finally {
-            deleteTree(Path.of("dist"));
-            deleteTree(libraryRoot);
-        }
-    }
-
-    @Test
-    public void separatelyCompiledClientPassesConstructorEvidenceFromLibraryIndex() throws Exception {
-        final var suffix = UUID.randomUUID().toString().replace("-", "");
-        final var libraryPackage = "witnesslibrary" + suffix;
-        final var clientPackage = "witnessclient" + suffix;
-        final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-witness-library-");
-        final var library = parse("Library.zn", """
-                package %s;
-                public contract Empty<T> {
-                    constructor empty(value: T);
-                }
-                public class Box is Empty<Int> {
-                    value: Int;
-                    public constructor create(value: Int) = Box.new(value);
-                }
-                witness Empty<Int> for Box {
-                    empty = Box.create;
-                }
-                public fn create<C: Empty<Int>>(value: C): &C = C.empty(42);
-                """.formatted(libraryPackage));
-        final var client = parse("Main.zn", """
-                package %s;
-                import %s.*;
-                import %s.create;
-                fn run(): Box = create<Box>(Box.new(0));
-                """.formatted(clientPackage, libraryPackage, libraryPackage));
-        try {
-            deleteTree(Path.of("dist"));
-            final var libraryCompiler = CompilationService.forCompilationUnits(
-                    List.of(library), libraryPackage + ".Builder", libraryPackage);
-            libraryCompiler.resolve();
-            libraryCompiler.compile();
-            copyTree(Path.of("dist"), libraryRoot);
-            final var libraryIndex = ZeronLibraryIndex.readFromDirectory(libraryRoot);
-            final var exportedFactory = libraryIndex.declarations().stream()
-                    .filter(ZeronLibraryIndex.FunctionExport.class::isInstance)
-                    .map(ZeronLibraryIndex.FunctionExport.class::cast)
-                    .filter(value -> value.qualifiedName().equals(libraryPackage + ".create"))
-                    .findFirst().orElseThrow();
-            assertEquals(com.maruseron.zeron.domain.TypeDescriptor.genericOf(
-                            com.maruseron.zeron.domain.TypeDescriptor.ofName(libraryPackage + ".Empty"),
-                            com.maruseron.zeron.domain.TypeDescriptor.ofInt()),
-                    exportedFactory.signature().typeParameters().getFirst().bounds().getFirst());
-            final var witness = libraryIndex.declarations().stream()
-                    .filter(ZeronLibraryIndex.WitnessExport.class::isInstance)
-                    .map(ZeronLibraryIndex.WitnessExport.class::cast)
-                    .findFirst().orElseThrow();
-            assertEquals("empty", witness.mappings().getFirst().requirementName());
-            assertEquals("create", witness.mappings().getFirst().constructorName());
-
-            deleteTree(Path.of("dist"));
-            final var clientCompiler = CompilationService.forCompilationUnits(
-                    List.of(client), clientPackage + ".Main", clientPackage, List.of(libraryIndex));
-            clientCompiler.resolve();
-            clientCompiler.compile();
-            try (final var loader = new URLClassLoader(new java.net.URL[]{
-                    Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()},
-                    getClass().getClassLoader())) {
-                final var main = loader.loadClass(clientPackage + ".Main");
-                assertEquals(libraryPackage + ".Box", main.getMethod("run").invoke(null).getClass().getName());
-                final var factory = loader.loadClass(exportedFactory.jvmOwner()).getDeclaredMethod(
-                        "create", Object.class, java.lang.invoke.MethodHandle.class);
-                assertEquals(Object.class, factory.getReturnType());
             }
         } finally {
             deleteTree(Path.of("dist"));
@@ -632,7 +729,6 @@ public final class ZeronLibraryIndexTest {
         final var contract = parse("Metric.zn", """
                 package %s;
                 public contract Metric {
-                    constructor of(values: Int...);
                     measure(prefix: Int = 4, values: Int...): Int;
                 }
                 """.formatted(contractPackage));
@@ -682,8 +778,8 @@ public final class ZeronLibraryIndexTest {
                     .filter(export -> export.qualifiedName().equals(contractPackage + ".Metric"))
                     .findFirst().orElseThrow();
             assertTrue(exportedMetric.methods().getFirst().variadic());
-            assertEquals("of", exportedMetric.constructors().getFirst().name());
-            assertTrue(exportedMetric.constructors().getFirst().variadic());
+            assertEquals("measure", exportedMetric.methods().getFirst().name());
+            assertTrue(exportedMetric.methods().getFirst().variadic());
             deleteTree(Path.of("dist"));
 
             final var implementationCompiler = CompilationService.forCompilationUnits(
@@ -940,7 +1036,7 @@ public final class ZeronLibraryIndexTest {
                 public contract Named { name(): String; }
                 public contract Encodable { encode(): String; }
                 public contract Renderer {
-                    render<T: Named + Encodable>(value: T): String;
+                    render<T: mut + Named + Encodable>(value: T): String;
                 }
                 public class Item is Named, Encodable {
                     label: String;
@@ -950,10 +1046,10 @@ public final class ZeronLibraryIndexTest {
                 }
                 public class LibraryRenderer is Renderer {
                     public constructor new;
-                    public render<T: Named + Encodable>(value: T): String =
+                    public render<T: mut + Named + Encodable>(value: T): String =
                         value.name() + value.encode();
                 }
-                public fn describe<T: Named + Encodable>(value: T): String =
+                public fn describe<T: mut + Named + Encodable>(value: T): String =
                     value.name() + value.encode();
                 """.formatted(libraryPackage));
         final var client = parse("Client.zn", """

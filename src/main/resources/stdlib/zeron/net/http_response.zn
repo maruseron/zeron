@@ -1,0 +1,57 @@
+package zeron.net;
+
+import zeron.io.Reader;
+import zeron.resource.Disposable;
+import zeron.resource.DisposeFailure;
+
+external fn httpResponseStatus(response: Any?): Int;
+external fn httpResponseVersion(response: Any?): String;
+external fn httpResponseHeaders(response: Any?): Array<String>;
+
+public type HttpVersion = Http1_1 | Http2;
+
+public class HttpResponse is Disposable {
+    statusCodeValue: Int;
+    headersValue: HttpHeaders;
+    versionValue: HttpVersion;
+    bodyValue: &Reader;
+
+    private constructor new;
+
+    public property statusCode: Int {
+        get = this.statusCodeValue;
+    }
+
+    public property headers: HttpHeaders {
+        get = this.headersValue;
+    }
+
+    public property version: HttpVersion {
+        get = this.versionValue;
+    }
+
+    public property body: &Reader {
+        get = this.bodyValue;
+    }
+
+    public constructor from(response: Any?) raises HttpFailure {
+        if (not httpIsResponseHandle(response)) {
+            raise HttpFailure.new(HttpFailureKind.Transport(),
+                "The HTTP runtime returned an invalid response handle.", null);
+        }
+        let versionText = httpResponseVersion(response);
+        let version = match (versionText) {
+            case "HTTP/1.1" -> HttpVersion.Http1_1();
+            case "HTTP/2" -> HttpVersion.Http2();
+            case _ -> raise HttpFailure.new(HttpFailureKind.Protocol(),
+                "The HTTP runtime returned an unsupported protocol version.", null);
+        };
+        let body: &Reader = HttpResponseBody.from(response);
+        let headers = HttpHeaders.fromResponsePairs(httpResponseHeaders(response));
+        return HttpResponse.new(httpResponseStatus(response), headers, version, body);
+    }
+
+    public mut dispose(): Unit raises DisposeFailure {
+        this.body.dispose();
+    }
+}

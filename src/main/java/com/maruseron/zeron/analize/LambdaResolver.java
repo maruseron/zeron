@@ -28,9 +28,11 @@ final class LambdaResolver {
                                 + "' for polymorphic lambda at this use."));
             }
             final var actual = substitutions.get(parameter);
+            final var normalizedActual = TypeResolver.validateTypeArgument(context, parameter, actual, where);
+            substitutions.put(parameter, normalizedActual);
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
-                ensureLambdaSchemeBound(context, requiredBound, actual, where,
+                ensureLambdaSchemeBound(context, requiredBound, normalizedActual, where,
                         reference.resolvedValueDeclaration());
             }
         }
@@ -128,6 +130,8 @@ final class LambdaResolver {
                         "Cannot infer type parameter '" + parameter.name()
                                 + "' for function value; provide an explicit type argument."));
             }
+            substitutions.put(parameter, TypeResolver.validateTypeArgument(
+                    context, parameter, substitutions.get(parameter), reference.name));
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
                 final var actual = substitutions.get(parameter);
@@ -417,16 +421,45 @@ final class LambdaResolver {
                         || referencesAnyVariable(context, iff.thenExpr, thenNames)
                         || referencesAnyVariable(context, iff.elseExpr, names);
             }
-            case Expr.Pipeline pipeline -> referencesAnyVariable(context, pipeline.source, names)
-                || pipeline.stages.stream().anyMatch(stage -> {
-                    final var stageNames = new HashSet<>(names);
-                    if (stage instanceof Expr.PipelineStage.Map m && m.binding() != null) stageNames.remove(m.binding().lexeme());
-                    if (stage instanceof Expr.PipelineStage.FlatMap f && f.binding() != null) stageNames.remove(f.binding().lexeme());
-                    if (stage instanceof Expr.PipelineStage.Filter f && f.binding() != null) stageNames.remove(f.binding().lexeme());
-                    if (stage instanceof Expr.PipelineStage.DropWhile d && d.binding() != null) stageNames.remove(d.binding().lexeme());
-                    if (stage instanceof Expr.PipelineStage.TakeWhile t && t.binding() != null) stageNames.remove(t.binding().lexeme());
-                    return referencesAnyVariable(context, stage.expression(), stageNames);
-                });
+            case Expr.Pipeline pipeline -> {
+                if (!pipeline.isComprehension()) {
+                    yield referencesAnyVariable(context, pipeline.source, names)
+                            || pipeline.stages.stream().anyMatch(stage -> {
+                                final var stageNames = new HashSet<>(names);
+                                if (stage instanceof Expr.PipelineStage.Map m && m.binding() != null) stageNames.remove(m.binding().lexeme());
+                                if (stage instanceof Expr.PipelineStage.FlatMap f && f.binding() != null) stageNames.remove(f.binding().lexeme());
+                                if (stage instanceof Expr.PipelineStage.Filter f && f.binding() != null) stageNames.remove(f.binding().lexeme());
+                                if (stage instanceof Expr.PipelineStage.DropWhile d && d.binding() != null) stageNames.remove(d.binding().lexeme());
+                                if (stage instanceof Expr.PipelineStage.TakeWhile t && t.binding() != null) stageNames.remove(t.binding().lexeme());
+                                return referencesAnyVariable(context, stage.expression(), stageNames);
+                            });
+                }
+                final var scopedNames = new HashSet<>(names);
+                boolean references = false;
+                for (final var clause : pipeline.clauses()) {
+                    switch (clause) {
+                        case Expr.PipelineClause.Generator generator -> {
+                            references |= referencesAnyVariable(context, generator.source(), scopedNames);
+                            scopedNames.remove(generator.binding().lexeme());
+                        }
+                        case Expr.PipelineClause.Let let -> {
+                            references |= referencesAnyVariable(context, let.expression(), scopedNames);
+                            scopedNames.remove(let.binding().lexeme());
+                        }
+                        case Expr.PipelineClause.Guard guard ->
+                                references |= referencesAnyVariable(context, guard.condition(), scopedNames);
+                    }
+                }
+                switch (pipeline.result()) {
+                    case Expr.PipelineResult.Yield yielded ->
+                            references |= referencesAnyVariable(context, yielded.expression(), scopedNames);
+                    case Expr.PipelineResult.Collect collect -> {
+                        references |= referencesAnyVariable(context, collect.expression(), scopedNames);
+                        references |= referencesAnyVariable(context, collect.sink(), scopedNames);
+                    }
+                }
+                yield references;
+            }
             case Expr.Match match -> referencesAnyVariable(context, match.scrutinee, names)
                 || match.arms.stream().anyMatch(arm -> {
                     final var armNames = new HashSet<>(names);
@@ -437,12 +470,20 @@ final class LambdaResolver {
                 });
             case Expr.Raise raise -> referencesAnyVariable(context, raise.effect, names);
             case Expr.Handle handle -> referencesAnyVariable(context, handle.expression, names)
+                || handle.handler != null && referencesAnyVariable(context, handle.handler, names)
                 || handle.arms.stream().anyMatch(arm -> {
                     final var armNames = new HashSet<>(names);
                     arm.pattern().bindingNames().forEach(name -> armNames.remove(name.lexeme()));
                     return arm.guard() != null && referencesAnyVariable(context, arm.guard(), armNames)
                             || referencesAnyVariable(context, arm.expression(), armNames);
                 });
+            case Expr.HandlerDispatch dispatch -> dispatch.arms.stream().anyMatch(arm -> {
+                final var armNames = new HashSet<>(names);
+                arm.pattern().bindingNames().forEach(name -> armNames.remove(name.lexeme()));
+                return arm.guard() != null && referencesAnyVariable(context, arm.guard(), armNames)
+                        || referencesAnyVariable(context, arm.expression(), armNames);
+            });
+            case Expr.HandlerLiteral handler -> referencesAnyVariable(context, handler.implementation, names);
             case Expr.Logical logical -> referencesAnyVariable(context, logical.left, names)
                 || referencesAnyVariable(context, logical.right, names);
             case Expr.Coalesce coalesce -> referencesAnyVariable(context, coalesce.left, names)
@@ -456,6 +497,8 @@ final class LambdaResolver {
                     && referencesAnyVariable(context, returned.value(), names));
             case Expr.AnonymousObject object -> object.initializers().stream()
                     .anyMatch(initializer -> referencesAnyVariable(context, initializer, names));
+            case Expr.SuffixedLiteral literal -> literal.factoryCall() != null
+                    && referencesAnyVariable(context, literal.factoryCall(), names);
             case Expr.Literal _ -> false;
         };
         }

@@ -14,6 +14,13 @@ final class TypeUnifier {
                       TypeDescriptor actual,
                       final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                       final Token where) {
+        if (pattern instanceof TypeProjectionDescriptor projection) {
+            if (actual instanceof TypeProjectionDescriptor actualProjection) {
+                actual = actualProjection.bound();
+            }
+            unify(projection.bound(), actual, substitutions, where);
+            return;
+        }
         if (pattern instanceof TypeParameterDescriptor parameter) {
             if (actual instanceof NullDescriptor) return;
             if (parameter.isHigherKinded()

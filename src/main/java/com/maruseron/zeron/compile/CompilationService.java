@@ -90,7 +90,7 @@ public final class CompilationService {
                 bundleStandardLibrarySources, javaClassPathRoots, FunctionBindingRegistry.standard(), outputDirectory);
     }
 
-    private static CompilationService forCompilationUnits(final List<CompilationUnit> units,
+    public static CompilationService forCompilationUnits(final List<CompilationUnit> units,
                                                            final String mainClassName,
                                                            final String packageName,
                                                            final List<ZeronLibraryIndex> libraries,

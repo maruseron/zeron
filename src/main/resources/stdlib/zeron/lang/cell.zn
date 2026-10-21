@@ -1,6 +1,6 @@
 package zeron.lang;
 
-public class Cell<T> {
+public class Cell<T: nullable + mut> {
     value: T;
 
     public constructor new;

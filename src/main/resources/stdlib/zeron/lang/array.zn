@@ -1,0 +1,8 @@
+package zeron.lang;
+
+import zeron.collections.ArrayIterator;
+import zeron.collections.Iterator;
+
+public extension<T: nullable + mut> Array<T> {
+    public fn iterator(): &Iterator<T> = ArrayIterator.from(this);
+}

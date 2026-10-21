@@ -6,7 +6,7 @@
 
     <groupId>com.maruseron</groupId>
     <artifactId>zeron</artifactId>
-    <version>0.4.1</version>
+    <version>0.5.0</version>
 
     <licenses>
         <license>
@@ -71,6 +71,9 @@
                         <configuration>
                             <target>
                                 <mkdir dir="${project.build.directory}/generated-resources/stdlib"/>
+                                <mkdir dir="${project.build.directory}/generated-resources/META-INF/zeron"/>
+                                <echo file="${project.build.directory}/generated-resources/META-INF/zeron/version.properties"
+                                      encoding="UTF-8">version=${project.version}</echo>
                                 <pathconvert property="stdlib.sources"
                                              pathsep="${line.separator}"
                                              dirsep="/">

@@ -1,0 +1,28 @@
+package zeron.net;
+
+public type HttpFailureKind =
+      Dns
+    | Connection
+    | Tls
+    | Timeout
+    | Interrupted
+    | Protocol
+    | Transport;
+
+public effect HttpFailure {
+    public property kind: HttpFailureKind;
+    public property message: String;
+    public property cause: Any?;
+}
+
+fn httpFailureKind(value: String): HttpFailureKind {
+    return match (value) {
+        case "Dns" -> HttpFailureKind.Dns();
+        case "Connection" -> HttpFailureKind.Connection();
+        case "Tls" -> HttpFailureKind.Tls();
+        case "Timeout" -> HttpFailureKind.Timeout();
+        case "Interrupted" -> HttpFailureKind.Interrupted();
+        case "Protocol" -> HttpFailureKind.Protocol();
+        case _ -> HttpFailureKind.Transport();
+    };
+}

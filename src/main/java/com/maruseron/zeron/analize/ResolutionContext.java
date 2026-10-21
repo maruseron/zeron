@@ -55,7 +55,8 @@ final class ResolutionContext {
     String packageName;
     String entrySourcePath;
     ImportResolver.ImportEnvironment currentImports =
-            new ImportResolver.ImportEnvironment(Map.of(), Map.of(), Map.of(), Map.of(), List.of(), List.of());
+            new ImportResolver.ImportEnvironment(
+                    Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), List.of(), List.of());
     Set<String> invalidImportAliases = Set.of();
     String currentSourcePath;
     String currentNamespaceName;

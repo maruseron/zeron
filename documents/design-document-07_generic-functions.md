@@ -1,6 +1,12 @@
-# Generic Functions: Implementation and Roadmap
+# Generic Functions: Superseded Implementation Note
 
 ## Status
+
+This historical note is superseded by
+[design-document-19_generic-type-system.md](./design-document-19_generic-type-system.md), which is
+the current cross-cutting status and roadmap for generics. This file is retained to preserve the
+original implementation notes; its feature and limitation statements may not reflect later work,
+including ZEP-0048, ZEP-0051, and ZEP-0052.
 
 Zeron has an implemented first slice of generic named functions. Calls support inference and
 explicit type arguments, generic signatures are substituted during resolution, and the compiler
@@ -163,8 +169,10 @@ to their raw JVM class or interface; see [design-document-05_classes-and-contrac
 
 Generic call inference is structural and intentionally bounded. It handles direct type variables,
 function signatures, arrays (including a mutable array literal projected to a read-only parameter),
-nullable/reference wrappers, and existing generic descriptors. It is not a general subtype solver: there are no variance rules or inference from a desired result
-type alone. Because each Zeron callable name has a single declaration, calls infer that declaration's
+nullable/reference wrappers, and existing generic descriptors. It is not a general subtype solver:
+variance is not yet implemented (its accepted design is in
+[ZEP-0051](zeps/ZEP-0051.md)), and inference from a desired result type alone is unsupported.
+Because each Zeron callable name has a single declaration, calls infer that declaration's
 generic parameters directly; there is no candidate ranking or return-type-based selection.
 Contract bounds may authorize readonly contract methods on generic function and method type
 parameters; all bounds are checked independently.

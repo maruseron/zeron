@@ -24,20 +24,24 @@ small set of operations that describes how to get items one by one.
 The standard protocol is defined by two contracts in the `zeron.collections` package:
 
 ```zeron
-public contract Iterable<T> {
+public type Step<T: nullable> =
+      Yield(value: T)
+    | Done;
+
+public contract Iterable<T: nullable> {
     iterator(): &Iterator<T>;
 }
 
-public contract Iterator<T> {
-    mut next(): Option<T>;
+public contract Iterator<T: nullable> {
+    mut next(): Step<T>;
 }
 ```
 
-An `Iterable<T>` can make an iterator. The iterator's `next()` method returns an `Option<T>`:
-`Some(item)` when there is another item, or `None` when it has reached the end. `Option` is a type
-for a value that may or may not be present; it is explained in
-[Option and Result](19-option-and-result.md). The loop takes care of asking for items until there
-are no more.
+An `Iterable<T>` can make an iterator. The iterator's `next()` method returns a `Step<T>`:
+`Step.Yield(item)` when there is another item, or `Step<T>.Done()` when it has reached the end.
+This iterator-specific result keeps exhaustion separate from `Option<T>`, which represents the
+presence or absence of a value and is explained in [Option and Result](19-option-and-result.md).
+The loop takes care of asking for items until there are no more.
 
 An iterator is mutable because it remembers its position and moves forward each time `next()` is
 called. If you define a type that conforms to `Iterable<T>` and returns an appropriate iterator,

@@ -182,6 +182,7 @@ final class LambdaCaptureValidator {
             case Expr.Raise raise -> walkCaptureUsage(raise.effect, localNames);
             case Expr.Handle handle -> {
                 walkCaptureUsage(handle.expression, localNames);
+                if (handle.handler != null) walkCaptureUsage(handle.handler, localNames);
                 for (final var arm : handle.arms) {
                     final var armNames = new HashSet<>(localNames);
                     arm.pattern().bindingNames().forEach(name -> armNames.add(name.lexeme()));
@@ -189,7 +190,17 @@ final class LambdaCaptureValidator {
                     walkCaptureUsage(arm.expression(), armNames);
                 }
             }
+            case Expr.HandlerLiteral handler -> validate(handler.implementation, localNames);
+            case Expr.HandlerDispatch dispatch -> {
+                for (final var arm : dispatch.arms) {
+                    final var armNames = new HashSet<>(localNames);
+                    arm.pattern().bindingNames().forEach(name -> armNames.add(name.lexeme()));
+                    if (arm.guard() != null) walkCaptureUsage(arm.guard(), armNames);
+                    walkCaptureUsage(arm.expression(), armNames);
+                }
+            }
             case Expr.Lambda lambda -> validate(lambda, localNames);
+            case Expr.SuffixedLiteral literal -> walkCaptureUsage(literal.factoryCall(), localNames);
             case Expr.Literal _ -> {}
             case Expr.Logical logical -> {
                 walkCaptureUsage(logical.left, localNames);

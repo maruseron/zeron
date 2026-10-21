@@ -2,7 +2,7 @@ package zeron.collections;
 
 import zeron.lang.Hashable;
 
-public class Set<T: Hashable<T>> is Iterable<T>, Sink<T> {
+public class Set<T: nullable + Hashable<T>> is Iterable<T>, Sink<T> {
     values: &Map<T, Unit>;
 
     private constructor new;

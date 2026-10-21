@@ -61,6 +61,131 @@ public final class OperatorTest {
     }
 
     @Test
+    public void compilesAlgebraicOperatorsThroughWitnessesAndGenericBounds() throws Exception {
+        final var className = "AlgebraicOperators" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                import zeron.algebra.Add;
+                import zeron.algebra.Addition;
+                import zeron.algebra.Mult;
+                import zeron.algebra.Multiplication;
+                class Vector {
+                    public property value: Int;
+                    public constructor new;
+                }
+                witness Addition<Vector> for Vector {
+                    fn add(other: Vector): Vector = Vector.new(this.value + other.value);
+                    fn zero(): Vector = Vector.new(0);
+                    fn negate(): Vector = Vector.new(-this.value);
+                }
+                witness Mult<Vector> for Vector {
+                    fn multiply(other: Vector): Vector = Vector.new(this.value * other.value);
+                    fn one(): Vector = Vector.new(1);
+                }
+                class NominalVector is Addition<&NominalVector>,
+                        Mult<&NominalVector> {
+                    public property value: Int;
+                    public constructor new;
+                    public add(other: &NominalVector): &NominalVector =
+                        NominalVector.new(this.value + other.value);
+                    public zero(): &NominalVector = NominalVector.new(0);
+                    public negate(): &NominalVector = NominalVector.new(-this.value);
+                    public multiply(other: &NominalVector): &NominalVector =
+                        NominalVector.new(this.value * other.value);
+                    public one(): &NominalVector = NominalVector.new(1);
+                }
+                fn add<T: mut + Add<T>>(left: T, right: T): T = left + right;
+                fn subtract<T: mut + Addition<T>>(left: T, right: T): T = left - right;
+                fn negate<T: mut + Addition<T>>(value: T): T = -value;
+                fn multiply<T: mut + Mult<T>>(left: T, right: T): T = left * right;
+                fn reciprocal<T: mut + Multiplication<T>>(value: T): T = value.reciprocal();
+                fn additiveIdentity<T: mut + Add<T>>(value: T): T = value.zero();
+                fn multiplicativeIdentity<T: mut + Mult<T>>(value: T): T = value.one();
+                fn forwarded<T: mut + Addition<T>>(left: T, right: T): T = subtract(left, right);
+                fn builtinAdd(): Int = add(2, 3);
+                fn builtinLongAdd(): Long = add(2L, 3L);
+                fn builtinFloatAdd(): Float = add(2.0, 3.0);
+                fn builtinSubtract(): Int = subtract(2, 3);
+                fn builtinFloatSubtract(): Float = subtract(5.0, 2.0);
+                fn builtinNegate(): Int = negate(3);
+                fn builtinMultiply(): Int = multiply(2, 3);
+                fn builtinLongMultiply(): Long = multiply(2L, 3L);
+                fn builtinFloatMultiply(): Float = multiply(2.0, 3.0);
+                fn builtinReciprocal(): Float = reciprocal(2.0);
+                fn builtinZero(): Int = additiveIdentity(1);
+                fn builtinOne(): Int = multiplicativeIdentity(0);
+                fn forwardedEvidence(): Int = forwarded(5, 2);
+                fn witnessAdd(): Int = add(Vector.new(2), Vector.new(3)).value;
+                fn witnessSubtract(): Int = subtract(Vector.new(5), Vector.new(2)).value;
+                fn witnessNegate(): Int = negate(Vector.new(3)).value;
+                fn witnessMultiply(): Int = multiply(Vector.new(2), Vector.new(3)).value;
+                fn directSubtract(): Int = (Vector.new(5) - Vector.new(2)).value;
+                fn nominalAdd(): Int = add(NominalVector.new(2), NominalVector.new(3)).value;
+                fn nominalMultiply(): Int = multiply(NominalVector.new(2), NominalVector.new(3)).value;
+                """;
+        final var classFile = Path.of("dist", className + ".class");
+        final var vectorFile = Path.of("dist", "Vector.class");
+        final var nominalVectorFile = Path.of("dist", "NominalVector.class");
+        try {
+            final var compiler = new CompilationService(parse(source), className);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(5, generated.getMethod("builtinAdd").invoke(null));
+                assertEquals(5L, generated.getMethod("builtinLongAdd").invoke(null));
+                assertEquals(5.0, generated.getMethod("builtinFloatAdd").invoke(null));
+                assertEquals(-1, generated.getMethod("builtinSubtract").invoke(null));
+                assertEquals(3.0, generated.getMethod("builtinFloatSubtract").invoke(null));
+                assertEquals(-3, generated.getMethod("builtinNegate").invoke(null));
+                assertEquals(6, generated.getMethod("builtinMultiply").invoke(null));
+                assertEquals(6L, generated.getMethod("builtinLongMultiply").invoke(null));
+                assertEquals(6.0, generated.getMethod("builtinFloatMultiply").invoke(null));
+                assertEquals(0.5, generated.getMethod("builtinReciprocal").invoke(null));
+                assertEquals(0, generated.getMethod("builtinZero").invoke(null));
+                assertEquals(1, generated.getMethod("builtinOne").invoke(null));
+                assertEquals(3, generated.getMethod("forwardedEvidence").invoke(null));
+                assertEquals(5, generated.getMethod("witnessAdd").invoke(null));
+                assertEquals(3, generated.getMethod("witnessSubtract").invoke(null));
+                assertEquals(-3, generated.getMethod("witnessNegate").invoke(null));
+                assertEquals(6, generated.getMethod("witnessMultiply").invoke(null));
+                assertEquals(3, generated.getMethod("directSubtract").invoke(null));
+                assertEquals(5, generated.getMethod("nominalAdd").invoke(null));
+                assertEquals(6, generated.getMethod("nominalMultiply").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+            Files.deleteIfExists(vectorFile);
+            Files.deleteIfExists(nominalVectorFile);
+        }
+    }
+
+    @Test
+    public void requiresTheSpecificAlgebraicContractForEachOperator() {
+        for (final var source : List.of(
+                "fn invalid<T>(left: T, right: T): T = left + right;",
+                "fn invalid<T: Add<T>>(left: T, right: T): T = left + right;",
+                """
+                class AddOnly { public constructor new; }
+                witness zeron.algebra.Add<AddOnly> for AddOnly {
+                    fn add(other: AddOnly): AddOnly = this;
+                    fn zero(): AddOnly = AddOnly.new();
+                }
+                fn invalid(left: AddOnly, right: AddOnly): AddOnly = left - right;
+                """,
+                """
+                class Fake {
+                    public constructor new;
+                    public add(other: Fake): Fake = this;
+                }
+                fn invalid(left: Fake, right: Fake): Fake = left + right;
+                """)) {
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+        }
+    }
+
+    @Test
     public void compilesRemainderBitwiseAndShiftOperators() throws Exception {
         final var className = "IntegerOperators" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
@@ -138,31 +263,39 @@ public final class OperatorTest {
                     public property value: Int;
                     public constructor new;
                 }
-                witness zeron.lang.Comparable<&Rank> for Rank {
-                    fn compareTo(other: &Rank): zeron.lang.Ordering =
+                witness zeron.lang.Comparable<Rank> for Rank {
+                    fn compareTo(other: Rank): zeron.lang.Ordering =
                         if (this.value < other.value) then zeron.lang.Ordering.LT()
                         else if (this.value > other.value) then zeron.lang.Ordering.GT()
                         else zeron.lang.Ordering.EQ();
                 }
-                class NominalRank is zeron.lang.Comparable<&NominalRank> {
+                class NominalRank is zeron.lang.Comparable<NominalRank> {
                     public property value: Int;
                     public constructor new;
-                    public compareTo(other: &NominalRank): zeron.lang.Ordering =
+                    public compareTo(other: NominalRank): zeron.lang.Ordering =
                         if (this.value < other.value) then zeron.lang.Ordering.LT()
                         else if (this.value > other.value) then zeron.lang.Ordering.GT()
                         else zeron.lang.Ordering.EQ();
                 }
-                fn less(): Boolean = Rank.new(1) < Rank.new(2);
-                fn lessFalse(): Boolean = Rank.new(3) < Rank.new(2);
-                fn lessOrEqual(): Boolean = Rank.new(2) <= Rank.new(2);
-                fn lessOrEqualFalse(): Boolean = Rank.new(3) <= Rank.new(2);
-                fn greater(): Boolean = Rank.new(3) > Rank.new(2);
-                fn greaterFalse(): Boolean = Rank.new(1) > Rank.new(2);
-                fn greaterOrEqual(): Boolean = Rank.new(2) >= Rank.new(2);
-                fn greaterOrEqualFalse(): Boolean = Rank.new(1) >= Rank.new(2);
-                fn nominalLess(): Boolean = NominalRank.new(1) < NominalRank.new(2);
+                fn rankLess(left: Rank, right: Rank): Boolean = left < right;
+                fn rankLessOrEqual(left: Rank, right: Rank): Boolean = left <= right;
+                fn rankGreater(left: Rank, right: Rank): Boolean = left > right;
+                fn rankGreaterOrEqual(left: Rank, right: Rank): Boolean = left >= right;
+                fn less(): Boolean = rankLess(Rank.new(1), Rank.new(2));
+                fn lessFalse(): Boolean = rankLess(Rank.new(3), Rank.new(2));
+                fn lessOrEqual(): Boolean = rankLessOrEqual(Rank.new(2), Rank.new(2));
+                fn lessOrEqualFalse(): Boolean = rankLessOrEqual(Rank.new(3), Rank.new(2));
+                fn greater(): Boolean = rankGreater(Rank.new(3), Rank.new(2));
+                fn greaterFalse(): Boolean = rankGreater(Rank.new(1), Rank.new(2));
+                fn greaterOrEqual(): Boolean = rankGreaterOrEqual(Rank.new(2), Rank.new(2));
+                fn greaterOrEqualFalse(): Boolean = rankGreaterOrEqual(Rank.new(1), Rank.new(2));
+                fn nominalLess(): Boolean {
+                    let left: NominalRank = NominalRank.new(1);
+                    let right: NominalRank = NominalRank.new(2);
+                    return left < right;
+                }
                 fn generic<T: zeron.lang.Comparable<T>>(left: T, right: T): Boolean = left < right;
-                fn genericLess(): Boolean = generic(Rank.new(1), Rank.new(2));
+                fn genericLess(): Boolean = generic<Rank>(Rank.new(1), Rank.new(2));
                 """;
         final var classFile = Path.of("dist", className + ".class");
         try {

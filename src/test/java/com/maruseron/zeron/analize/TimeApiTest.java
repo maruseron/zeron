@@ -48,17 +48,23 @@ public final class TimeApiTest {
                 fn negativeSecondsAreRepresentable(): Boolean = Duration.fromSeconds(-9223372037L).isSome();
                 fn secondsBoundary(): Boolean = Duration.fromSeconds(9223372036L).isSome();
                 fn negativeSecondsBoundary(): Boolean = Duration.fromSeconds(-9223372036L).isSome();
-                fn durationOrdering(): Boolean =
-                    Duration.fromNanoseconds(-1L) < Duration.zero();
-                fn durationEquality(): Boolean =
-                    Duration.fromNanoseconds(42L) == Duration.fromNanoseconds(42L);
-                fn hash<T: Hashable<T>>(value: T): Int = value.hash();
+                fn durationOrdering(): Boolean {
+                    let earlier: Duration = Duration.fromNanoseconds(-1L);
+                    let zero: Duration = Duration.zero();
+                    return earlier < zero;
+                }
+                fn durationEquality(): Boolean {
+                    let left: Duration = Duration.fromNanoseconds(42L);
+                    let right: Duration = Duration.fromNanoseconds(42L);
+                    return left == right;
+                }
+                fn hash<T: mut + Hashable<T>>(value: T): Int = value.hash();
                 fn durationHash(): Int = hash(Duration.fromNanoseconds(42L));
                 fn durationHashIsStable(): Boolean =
                     durationHash() == hash(Duration.fromNanoseconds(42L));
                 fn instantOrdering(): Boolean {
-                    let start = Instant.now();
-                    let end = Instant.now();
+                    let start: Instant = Instant.now();
+                    let end: Instant = Instant.now();
                     return end >= start;
                 }
                 fn elapsed(): Long {

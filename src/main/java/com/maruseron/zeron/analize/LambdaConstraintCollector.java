@@ -236,6 +236,23 @@ final class LambdaConstraintCollector {
                 }
             }
             case Expr.Pipeline pipeline -> {
+                if (pipeline.isComprehension()) {
+                    for (final var clause : pipeline.clauses()) {
+                        switch (clause) {
+                            case Expr.PipelineClause.Generator generator -> scan(generator.source());
+                            case Expr.PipelineClause.Let let -> scan(let.expression());
+                            case Expr.PipelineClause.Guard guard -> scan(guard.condition());
+                        }
+                    }
+                    switch (pipeline.result()) {
+                        case Expr.PipelineResult.Yield yielded -> scan(yielded.expression());
+                        case Expr.PipelineResult.Collect collect -> {
+                            scan(collect.expression());
+                            scan(collect.sink());
+                        }
+                    }
+                    break;
+                }
                 scan(pipeline.source);
                 for (final var stage : pipeline.stages) {
                     if (!(stage instanceof Expr.PipelineStage.Map)
@@ -255,10 +272,18 @@ final class LambdaConstraintCollector {
                     scan(arm.expression());
                 }
             }
+            case Expr.HandlerDispatch dispatch -> {
+                for (final var arm : dispatch.arms) {
+                    scan(arm.guard());
+                    scan(arm.expression());
+                }
+            }
+            case Expr.HandlerLiteral handler -> scan(handler.implementation);
             case Expr.TypeTest test -> scan(test.value);
             case Expr.SumCaseTest test -> scan(test.value);
             case Expr.Cast cast -> scan(cast.value);
             case Expr.AnonymousObject object -> object.initializers().forEach(this::scan);
+            case Expr.SuffixedLiteral literal -> scan(literal.factoryCall());
             case Expr.Lambda _, Expr.Variable _, Expr.Literal _ -> {}
         }
     }

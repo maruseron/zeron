@@ -9,6 +9,7 @@ import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.lang.constant.ClassDesc;
+import java.lang.constant.MethodTypeDesc;
 import java.util.*;
 
 import static com.maruseron.zeron.analize.Resolver.*;
@@ -101,7 +102,8 @@ final class MemberInteropResolver {
                 final var javaField = javaClass == null ? null : javaClass.fields().stream()
                         .filter(candidate -> candidate.name().equals(property.name.lexeme()))
                         .findFirst().orElse(null);
-                final var fieldType = javaField == null ? null : JavaTypeMapping.toZeronType(javaField.descriptor());
+                final var fieldType = javaField == null ? null
+                        : javaFieldType(context, javaClass, javaField, null, property.name);
                 final var facadeFieldAllowed = externalClass != null
                         ? declaredProperty != null && declaredProperty.isPublic()
                             && fieldType != null && fieldType.equals(declaredProperty.type())
@@ -110,10 +112,6 @@ final class MemberInteropResolver {
                         || !facadeFieldAllowed) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             property.name, "Unknown or unsupported external static property."));
-                }
-                if (javaField.hasGenericSignature()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
-                            property.name, "Generic Java fields are not supported."));
                 }
                 property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
                         javaField.descriptor().descriptorString(), true, javaField.isFinal()));
@@ -237,7 +235,8 @@ final class MemberInteropResolver {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
                         property.name, "Property is private."));
             }
-            final var propertyType = resolvedPropertyType(context, ownerName, propertyDeclaration, memberReceiverType);
+            final var propertyType = exposeProjectedResult(
+                    resolvedPropertyType(context, ownerName, propertyDeclaration, memberReceiverType), property.name);
             property.setResolvedOwnerName(ownerName);
             property.setResolvedAsProperty(true);
             context.recordReference(property.name, propertyDeclaration.nameToken(), propertyType);
@@ -263,15 +262,13 @@ final class MemberInteropResolver {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             property.name, "Static Java fields must be accessed through their class."));
                 }
-                if (javaField.hasGenericSignature()) {
-                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
-                            property.name, "Generic Java fields are not supported."));
-                }
-                final var fieldType = JavaTypeMapping.toZeronType(javaField.descriptor());
-                if (fieldType == null) {
+                final var resolvedFieldType = javaFieldType(
+                        context, javaClass, javaField, memberReceiverType, property.name);
+                if (resolvedFieldType == null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                             property.name, "Java field descriptor is not supported."));
                 }
+                final var fieldType = exposeProjectedResult(resolvedFieldType, property.name);
                 property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
                         javaField.descriptor().descriptorString(), false, javaField.isFinal()));
                 final var resultType = property.safeNavigation() ? fieldType.toNullable() : fieldType;
@@ -289,6 +286,7 @@ final class MemberInteropResolver {
                 ensureFieldAccessible(context, property.name, ownerName);
                 final var fieldType = TypeSubstitution.substitute(field.type(),
                         TypeResolver.substitutionsFor(context, owner.typeParameters(), memberReceiverType));
+                context.recordReference(property.name, field.name(), fieldType);
                 final var resultType = property.safeNavigation() ? fieldType.toNullable() : fieldType;
                 property.setType(resultType);
                 finishSafeNavigation(context, safeFlows);
@@ -320,6 +318,22 @@ final class MemberInteropResolver {
         return resolveMemberCall(context, call, null);
     }
 
+    static TypeDescriptor resolveOperatorContractCall(final ResolutionContext context,
+                                                      final Expr.MemberCall call,
+                                                      final TypeDescriptor receiverType,
+                                                      final TypeDescriptor requiredContractType) {
+        if (receiverType instanceof TypeParameterDescriptor parameter) {
+            if (!TypeClassEvidence.hasEvidence(context, requiredContractType, receiverType, call.name)) {
+                return null;
+            }
+            return resolveBoundedMemberCall(context, call, parameter, requiredContractType);
+        }
+        if (context.typeCompatibility.isContractProjection(requiredContractType, receiverType)) {
+            return resolveMemberCall(context, call, receiverType, null);
+        }
+        return resolveWitnessMethodCall(context, call, receiverType, requiredContractType);
+    }
+
     static TypeDescriptor resolveWitnessMethodForContract(final ResolutionContext context,
                                                           final Expr.MemberCall call,
                                                           final TypeDescriptor receiverType,
@@ -348,14 +362,14 @@ final class MemberInteropResolver {
     private static TypeDescriptor resolveHigherKindedCall(final ResolutionContext context,
                                                           final Expr.MemberCall call,
                                                           final TypeParameterDescriptor parameter) {
-        final var matches = new ArrayList<Map.Entry<Integer, ContractComposition.MethodSlot>>();
+        final var matches = new LinkedHashMap<String, Map.Entry<Integer, ContractComposition.MethodSlot>>();
         for (int boundIndex = 0; boundIndex < parameter.bounds().size(); boundIndex++) {
             final var use = ContractComposition.fromType(parameter.bounds().get(boundIndex));
             if (use == null) continue;
             for (final var slot : ContractComposition.methods(context, use)) {
                 if (slot.applied().declaration().higherKinded()
                         && slot.method().name().lexeme().equals(call.name.lexeme())) {
-                    matches.add(Map.entry(boundIndex, slot));
+                    matches.putIfAbsent(methodProviderKey(slot), Map.entry(boundIndex, slot));
                 }
             }
         }
@@ -363,49 +377,64 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "The higher-kinded parameter has no bound providing this operation."));
         }
-        final var selected = matches.getFirst();
+        if (matches.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                    "HKT operation is ambiguous across the constructor parameter's bounds."));
+        }
+        final var selected = matches.values().iterator().next();
         final var selectedSignature = (FunctionDescriptor) TypeSubstitution.substitute(
                 selected.getValue().method().typeDescriptor(),
                 selected.getValue().applied().substitutions());
-        for (final var other : matches.stream().skip(1).toList()) {
-            final var otherSignature = (FunctionDescriptor) TypeSubstitution.substitute(
-                    other.getValue().method().typeDescriptor(), other.getValue().applied().substitutions());
-            if (!selectedSignature.equals(otherSignature)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
-                        "HKT operation is ambiguous across the constructor parameter's bounds."));
-            }
+        final var method = selected.getValue().method();
+        if (method.isMutating() && !Stmt.hasReceiverParameter(method.parameters())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                    "A mutating HKT operation must declare an explicit receiver parameter."));
         }
+        final var callableSignature = method.isMutating()
+                ? withReferenceReceiver(selectedSignature)
+                : selectedSignature;
         final var methodIndex = selected.getValue().index();
         call.setWitnessEvidence(Expr.methodEvidenceToken(parameter, selected.getKey(), methodIndex),
-                selectedSignature);
+                callableSignature);
         call.setResolvedOwnerName(selected.getValue().applied().declaration().name().lexeme());
-        final var method = selected.getValue().method();
         final var fixedArity = Stmt.fixedArity(method.parameters(), method.variadic());
-        if (selectedSignature.isGeneric()) {
-            return resolveGenericMemberCall(context, call, selectedSignature,
+        if (callableSignature.isGeneric()) {
+            return resolveGenericMemberCall(context, call, callableSignature,
                     method.minimumArity(), method.variadic(), fixedArity);
         }
-        ensureMemberCallArity(call, selectedSignature, method.minimumArity(), method.variadic());
+        ensureMemberCallArity(call, callableSignature, method.minimumArity(), method.variadic());
         if (method.variadic()) {
-            call.setVariadic(((ArrayDescriptor) selectedSignature.parameters().getLast()).elementType(),
+            call.setVariadic(((ArrayDescriptor) callableSignature.parameters().getLast()).elementType(),
                     fixedArity);
         }
         for (int index = 0; index < call.arguments.size(); index++) {
-            final var expected = memberParameterType(selectedSignature.parameters(), index,
+            final var expected = memberParameterType(callableSignature.parameters(), index,
                     fixedArity, method.variadic());
             ensureAssignable(context, expected,
                     resolveArgument(context, call.arguments.get(index), expected), call.name);
         }
-        call.setResolvedDescriptor(selectedSignature);
-        call.setType(selectedSignature.returnType());
-        return selectedSignature.returnType();
+        call.setResolvedDescriptor(callableSignature);
+        call.setType(callableSignature.returnType());
+        return callableSignature.returnType();
     }
 
     private static TypeDescriptor resolveHigherKindedReceiverCall(
             final ResolutionContext context, final Expr.MemberCall call,
-            final AppliedConstructorDescriptor receiverType) {
+            final AppliedConstructorDescriptor receiverType, final boolean mutableReceiver) {
         final var constructor = receiverType.constructor();
-        final var matches = new ArrayList<Map.Entry<Integer, ContractComposition.MethodSlot>>();
+        final var hasBehavioralProvider = constructor.bounds().stream()
+                .map(ContractComposition::fromType)
+                .filter(Objects::nonNull)
+                .filter(use -> {
+                    final var declaration = context.contracts.get(use.name().lexeme());
+                    return declaration != null && !declaration.higherKinded();
+                })
+                .flatMap(use -> ContractComposition.methods(context, use).stream())
+                .anyMatch(slot -> slot.method().name().lexeme().equals(call.name.lexeme()));
+        if (hasBehavioralProvider) {
+            return resolveBoundedMemberCall(context, call, constructor, null, true);
+        }
+        final var matches = new LinkedHashMap<String, Map.Entry<Integer, ContractComposition.MethodSlot>>();
         for (int boundIndex = 0; boundIndex < constructor.bounds().size(); boundIndex++) {
             final var use = ContractComposition.fromType(constructor.bounds().get(boundIndex));
             if (use == null) continue;
@@ -413,7 +442,7 @@ final class MemberInteropResolver {
                 if (slot.applied().declaration().higherKinded()
                         && Stmt.hasReceiverParameter(slot.method().parameters())
                         && slot.method().name().lexeme().equals(call.name.lexeme())) {
-                    matches.add(Map.entry(boundIndex, slot));
+                    matches.putIfAbsent(methodProviderKey(slot), Map.entry(boundIndex, slot));
                 }
             }
         }
@@ -421,20 +450,20 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "The higher-kinded parameter has no receiver operation with this name."));
         }
-        final var selected = matches.getFirst();
+        if (matches.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                    "HKT receiver operation is ambiguous across the constructor parameter's bounds."));
+        }
+        final var selected = matches.values().iterator().next();
         final var signature = (FunctionDescriptor) TypeSubstitution.substitute(
                 selected.getValue().method().typeDescriptor(),
                 selected.getValue().applied().substitutions());
-        for (final var other : matches.stream().skip(1).toList()) {
-            final var otherSignature = (FunctionDescriptor) TypeSubstitution.substitute(
-                    other.getValue().method().typeDescriptor(), other.getValue().applied().substitutions());
-            if (!signature.equals(otherSignature)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
-                        "HKT receiver operation is ambiguous across the constructor parameter's bounds."));
-            }
-        }
 
         final var method = selected.getValue().method();
+        if (method.isMutating() && !mutableReceiver) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
+                    "Mutating HKT operations require a mutable reference receiver."));
+        }
         final var receiverParameter = signature.parameters().getFirst();
         final var explicitParameters = signature.parameters().subList(1, signature.arity());
         final var explicitSignature = TypeDescriptor.functionWithEffectsOf(signature.name(), signature.returnType(),
@@ -473,6 +502,18 @@ final class MemberInteropResolver {
         return signature.returnType();
     }
 
+    private static String methodProviderKey(final ContractComposition.MethodSlot slot) {
+        return slot.applied().declaration().name().lexeme() + slot.applied().use().typeArguments()
+                + "#" + slot.method().name().lexeme();
+    }
+
+    private static FunctionDescriptor withReferenceReceiver(final FunctionDescriptor function) {
+        final var parameters = new ArrayList<>(function.parameters());
+        parameters.set(0, new ReferenceDescriptor(parameters.getFirst()));
+        return TypeDescriptor.functionWithEffectsOf(function.name(), function.returnType(),
+                parameters, function.typeParameters(), function.raisedEffects());
+    }
+
     private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                              final TypeDescriptor alreadyResolvedReceiverType,
                                              final TypeDescriptor expectedType) {
@@ -483,7 +524,7 @@ final class MemberInteropResolver {
         }
         if (call.receiver.getType() instanceof AppliedConstructorDescriptor applied
                 && applied.constructor().isHigherKinded()) {
-            return resolveHigherKindedReceiverCall(context, call, applied);
+            return resolveHigherKindedReceiverCall(context, call, applied, false);
         }
         final var receiverPath = expressionPath(call.receiver);
         final var classOwnerName = receiverPath == null ? null : resolveClassName(context, receiverPath,
@@ -568,7 +609,7 @@ final class MemberInteropResolver {
             final var declaration = context.classes.get(classOwnerName);
             if (declaration == null) {
                 final var javaClass = context.javaClassPath.find(classOwnerName);
-                if (javaClass != null) return resolveJavaTypeCall(context, call, javaClass);
+                if (javaClass != null) return resolveJavaTypeCall(context, call, javaClass, expectedType);
             }
             if (declaration != null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
@@ -583,7 +624,8 @@ final class MemberInteropResolver {
                 ? reference.baseType() : receiverType;
         if (receiverBaseType instanceof AppliedConstructorDescriptor applied
                 && applied.constructor().isHigherKinded()) {
-            return resolveHigherKindedReceiverCall(context, call, applied);
+            return resolveHigherKindedReceiverCall(
+                    context, call, applied, receiverType instanceof ReferenceDescriptor);
         }
         if (receiverType instanceof TypeParameterDescriptor parameter) {
             return resolveBoundedMemberCall(context, call, parameter);
@@ -661,8 +703,9 @@ final class MemberInteropResolver {
                             resolveArgument(context, call.arguments.get(i), expected),
                             call.name);
                 }
-                call.setType(descriptor.returnType());
-                return descriptor.returnType();
+                final var returnType = exposeProjectedResult(descriptor.returnType(), call.name);
+                call.setType(returnType);
+                return returnType;
             }
         }
         if (classMethod == null && contractMethod == null) {
@@ -713,8 +756,9 @@ final class MemberInteropResolver {
                                 resolveArgument(context, call.arguments.get(i), expected),
                                 call.name);
                     }
-                    call.setType(descriptor.returnType());
-                    return descriptor.returnType();
+                    final var returnType = exposeProjectedResult(descriptor.returnType(), call.name);
+                    call.setType(returnType);
+                    return returnType;
                 }
             }
             final var extensionResult = resolveImportedExtension(context, call, receiverType, false);
@@ -752,6 +796,7 @@ final class MemberInteropResolver {
                 classMethod != null
                         ? TypeResolver.substitutionsFor(context, typeParameters, receiverType)
                         : appliedContract.substitutions());
+        final var exposedReturn = exposeProjectedResult(instantiatedDescriptor.returnType(), call.name);
         final var isMutating = classMethod != null
                 ? classMethod.isMutating()
                 : contractMethod.isMutating();
@@ -799,8 +844,8 @@ final class MemberInteropResolver {
                     resolveArgument(context, call.arguments.get(i), expected),
                     call.name);
         }
-        call.setType(instantiatedDescriptor.returnType());
-        return instantiatedDescriptor.returnType();
+        call.setType(exposedReturn);
+        return exposedReturn;
     }
 
     private static TypeDescriptor resolveFunctionPropertyCall(final ResolutionContext context,
@@ -1013,6 +1058,8 @@ final class MemberInteropResolver {
                                 + "' for imported extension method '" + call.name.lexeme()
                                 + "'; provide an explicit type argument."));
             }
+            substitutions.put(parameter, TypeResolver.validateTypeArgument(
+                    context, parameter, substitutions.get(parameter), call.name));
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
                 final var actualType = substitutions.get(parameter);
@@ -1237,13 +1284,19 @@ final class MemberInteropResolver {
                                                            final List<TypeDescriptor> priorArgumentTypes) {
         call.setResolvedClassName(className);
         final var typeParameters = declaration.typeParameters();
-        if (!call.explicitTypeArguments.isEmpty()
-                && typeParameters.size() != call.explicitTypeArguments.size()) {
+        final var explicitClassTypeArguments = call.explicitOwnerTypeArguments().isEmpty()
+                ? call.explicitTypeArguments : call.explicitOwnerTypeArguments();
+        if (!call.explicitOwnerTypeArguments().isEmpty() && !call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    call.name, "Zeron constructors do not declare method type parameters."));
+        }
+        if (!explicitClassTypeArguments.isEmpty()
+                && typeParameters.size() != explicitClassTypeArguments.size()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.name, "Expected " + typeParameters.size() + " class type arguments, found "
-                            + call.explicitTypeArguments.size() + "."));
+                            + explicitClassTypeArguments.size() + "."));
         }
-        for (final var explicitType : call.explicitTypeArguments) {
+        for (final var explicitType : explicitClassTypeArguments) {
             TypeResolver.validateType(context, explicitType, call.name);
         }
 
@@ -1276,8 +1329,8 @@ final class MemberInteropResolver {
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
-            substitutions.put(typeParameters.get(i), call.explicitTypeArguments.get(i));
+        for (int i = 0; i < explicitClassTypeArguments.size(); i++) {
+            substitutions.put(typeParameters.get(i), explicitClassTypeArguments.get(i));
         }
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -1292,7 +1345,7 @@ final class MemberInteropResolver {
             }
         }
 
-        if (call.explicitTypeArguments.isEmpty()) {
+        if (explicitClassTypeArguments.isEmpty()) {
             inferClassArgumentsFromExpectedType(declaration, substitutions, expectedType, call.name);
         }
 
@@ -1319,6 +1372,8 @@ final class MemberInteropResolver {
                         call.name, "Cannot infer class type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument or an expected type."));
             }
+            substitutions.put(parameter, TypeResolver.validateTypeArgument(
+                    context, parameter, substitutions.get(parameter), call.name));
         }
 
         final var instantiatedParameters = signature.parameters().stream()
@@ -1440,6 +1495,29 @@ final class MemberInteropResolver {
         };
     }
 
+    private static boolean containsAnyTypeParameter(final TypeDescriptor type,
+                                                    final List<TypeParameterDescriptor> parameters) {
+        return switch (type) {
+            case TypeParameterDescriptor parameter -> parameters.contains(parameter);
+            case AppliedConstructorDescriptor applied -> containsAnyTypeParameter(applied.constructor(), parameters)
+                    || containsAnyTypeParameter(applied.argument(), parameters);
+            case NullableDescriptor nullable -> containsAnyTypeParameter(nullable.baseType(), parameters);
+            case ReferenceDescriptor reference -> containsAnyTypeParameter(reference.baseType(), parameters);
+            case ArrayDescriptor array -> containsAnyTypeParameter(array.elementType(), parameters);
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .anyMatch(argument -> containsAnyTypeParameter(argument, parameters));
+            case TypeProjectionDescriptor projection -> containsAnyTypeParameter(projection.bound(), parameters);
+            case CapturedTypeDescriptor capture -> containsAnyTypeParameter(capture.lowerBound(), parameters)
+                    || containsAnyTypeParameter(capture.upperBound(), parameters);
+            case FunctionDescriptor function -> containsAnyTypeParameter(function.returnType(), parameters)
+                    || function.parameters().stream()
+                    .anyMatch(parameter -> containsAnyTypeParameter(parameter, parameters))
+                    || function.raisedEffects().stream()
+                    .anyMatch(effect -> containsAnyTypeParameter(effect, parameters));
+            default -> false;
+        };
+    }
+
     private static void inferClassArgumentsFromExpectedType(final Stmt.ClassDecl declaration,
                                                              final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                                                              TypeDescriptor expectedType,
@@ -1523,6 +1601,8 @@ final class MemberInteropResolver {
                         "Cannot infer type parameter '" + parameter.name()
                                 + "'; provide an explicit type argument."));
             }
+            substitutions.put(parameter, TypeResolver.validateTypeArgument(
+                    context, parameter, substitutions.get(parameter), call.name));
             for (final var bound : parameter.bounds()) {
                 final var requiredBound = TypeSubstitution.substitute(bound, substitutions);
                 final var actualType = substitutions.get(parameter);
@@ -1542,30 +1622,68 @@ final class MemberInteropResolver {
                     resolvedArguments[i], call.name);
         }
         final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
+        final var exposedReturn = exposeProjectedResult(instantiatedReturn, call.name);
         call.setResolvedDescriptor(TypeDescriptor.functionOf(genericType.name(), instantiatedReturn,
                 instantiatedParameters.toArray(TypeDescriptor[]::new)));
         if (variadic) {
             call.setVariadic(((ArrayDescriptor) instantiatedParameters.getLast()).elementType(), fixedArity);
         }
-        call.setType(instantiatedReturn);
-        return instantiatedReturn;
+        call.setType(exposedReturn);
+        return exposedReturn;
     }
 
     private static TypeDescriptor resolveJavaTypeCall(final ResolutionContext context, final Expr.MemberCall call,
-                                               final JavaClassPath.JavaClass javaClass) {
-        if (!call.explicitTypeArguments.isEmpty()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
-                    call.name,
-                    "Java generic type arguments are not supported by the current interop slice."));
-        }
+                                               final JavaClassPath.JavaClass javaClass,
+                                               final TypeDescriptor expectedType) {
         final var constructor = call.name.lexeme().equals("new");
         if (constructor && (javaClass.isInterface() || javaClass.isAbstract())) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
                     call.name,
                     "Cannot construct an abstract Java class or interface."));
         }
+        if (!constructor && !call.explicitOwnerTypeArguments().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    call.name, "Explicit owner type arguments are only valid on constructor calls."));
+        }
         final var methodName = constructor ? "<init>" : call.name.lexeme();
-        return resolveJavaCall(context, call, javaClass, methodName, constructor, !constructor, null);
+        if (constructor && !call.explicitOwnerTypeArguments().isEmpty()
+                && call.explicitOwnerTypeArguments().size() != javaClass.typeParameters().size()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    call.name, "Expected " + javaClass.typeParameters().size() + " Java class type arguments, found "
+                            + call.explicitOwnerTypeArguments().size() + "."));
+        }
+        return resolveJavaCall(context, call, javaClass, methodName, constructor, !constructor, null, null,
+                expectedType);
+    }
+
+    private static TypeDescriptor javaFieldType(final ResolutionContext context,
+                                                final JavaClassPath.JavaClass javaClass,
+                                                final JavaClassPath.JavaField field,
+                                                final TypeDescriptor receiverType,
+                                                final Token where) {
+        if (field.genericSignature() == null) return JavaTypeMapping.toZeronType(field.descriptor());
+        final TypeDescriptor fieldType;
+        try {
+            fieldType = JavaGenericSignatureParser.parseFieldType(
+                    field.genericSignature(), javaClass.typeParameters());
+        } catch (final IllegalArgumentException _) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
+                    where, "The Java field generic signature is not supported."));
+            throw new IllegalStateException("Unreachable");
+        }
+        final var substitutions = receiverType == null
+                ? Map.<TypeParameterDescriptor, TypeDescriptor>of()
+                : TypeResolver.substitutionsFor(context, javaClass.typeParameters(), receiverType);
+        return TypeSubstitution.substitute(fieldType, substitutions);
+    }
+
+    private static TypeDescriptor exposeProjectedResult(final TypeDescriptor resultType,
+                                                        final Token where) {
+        if (TypeSubstitution.hasUnexposableCapture(resultType)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
+                    where, "A captured projected type cannot escape inside a compound result type."));
+        }
+        return TypeSubstitution.widenCapture(resultType);
     }
 
     private static TypeDescriptor resolveJavaInstanceCall(final ResolutionContext context, final Expr.MemberCall call,
@@ -1577,13 +1695,8 @@ final class MemberInteropResolver {
                     call.name,
                     "Java instance method calls require a mutable & receiver."));
         }
-        if (!call.explicitTypeArguments.isEmpty()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
-                    call.name,
-                    "Java generic method type arguments are not supported by the current interop slice."));
-        }
         return resolveJavaCall(context, call, javaClass, call.name.lexeme(), false, false,
-                receiverType instanceof ReferenceDescriptor);
+                receiverType instanceof ReferenceDescriptor, receiverType, null);
     }
 
     private static boolean externalFacadeAllows(final ResolutionContext context,
@@ -1614,7 +1727,9 @@ final class MemberInteropResolver {
                                            final String methodName,
                                            final boolean constructor,
                                            final boolean staticCall,
-                                           final Boolean mutableReceiver) {
+                                           final Boolean mutableReceiver,
+                                           final TypeDescriptor receiverType,
+                                           final TypeDescriptor expectedType) {
         if (call.arguments.stream().anyMatch(Expr.Lambda.class::isInstance)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
                     call.name,
@@ -1630,8 +1745,65 @@ final class MemberInteropResolver {
                 .toList();
         final var candidates = new ArrayList<JavaCandidate>();
         var hasUnsupportedShape = false;
+        var hasGenericInferenceFailure = false;
+        var hasExplicitTypeArgumentMismatch = false;
+        final var classSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        if (receiverType != null) {
+            classSubstitutions.putAll(
+                    TypeResolver.substitutionsFor(context, javaClass.typeParameters(), receiverType));
+        }
+        if (constructor) {
+            final var explicitOwnerArguments = call.explicitOwnerTypeArguments();
+            for (int i = 0; i < explicitOwnerArguments.size(); i++) {
+                final var explicitType = explicitOwnerArguments.get(i);
+                if (explicitType instanceof TypeProjectionDescriptor) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            call.name, "A Java constructor requires concrete class type arguments."));
+                }
+                TypeResolver.validateType(context, explicitType, call.name);
+                classSubstitutions.put(javaClass.typeParameters().get(i), explicitType);
+            }
+            if (explicitOwnerArguments.isEmpty()) {
+                var expectedBase = expectedType;
+                if (expectedBase instanceof ReferenceDescriptor reference) expectedBase = reference.baseType();
+                if (expectedBase instanceof NullableDescriptor nullable) expectedBase = nullable.baseType();
+                if (expectedBase instanceof GenericDescriptor generic
+                        && generic.name().equals(javaClass.binaryName())
+                        && generic.typeParameters().size() == javaClass.typeParameters().size()) {
+                    for (int i = 0; i < javaClass.typeParameters().size(); i++) {
+                        classSubstitutions.put(javaClass.typeParameters().get(i),
+                                generic.typeParameters().get(i));
+                    }
+                }
+            }
+        }
         for (final var method : namedCandidates) {
+            JavaGenericSignatureParser.MethodSignature genericSignature = null;
+            if (method.genericSignature() != null) {
+                try {
+                    genericSignature = JavaGenericSignatureParser.parseMethodSignature(
+                            method.genericSignature(), javaClass.typeParameters());
+                } catch (final IllegalArgumentException _) {
+                    if (!method.isVarArgs()
+                            || call.arguments.size() != method.descriptor().parameterCount() - 1) {
+                        hasUnsupportedShape = true;
+                        continue;
+                    }
+                    genericSignature = null;
+                }
+                if (genericSignature != null
+                        && genericSignature.parameterTypes().size() != method.descriptor().parameterCount()) {
+                    hasUnsupportedShape = true;
+                    continue;
+                }
+                if (genericSignature != null
+                        && genericSignature.throwsTypes().stream().anyMatch(TypeSubstitution::containsTypeParameter)) {
+                    hasUnsupportedShape = true;
+                    continue;
+                }
+            }
             if (method.hasGenericSignature()
+                    && genericSignature == null
                     && (!method.isVarArgs()
                     || call.arguments.size() != method.descriptor().parameterCount() - 1)) {
                 hasUnsupportedShape = true;
@@ -1648,14 +1820,48 @@ final class MemberInteropResolver {
             } else if (formalCount != actualTypes.size()) {
                 continue;
             }
+            final var methodTypeParameters = genericSignature == null
+                    ? List.<TypeParameterDescriptor>of() : genericSignature.typeParameters();
+            if (call.explicitTypeArguments.size() != 0
+                    && call.explicitTypeArguments.size() != methodTypeParameters.size()) {
+                hasExplicitTypeArgumentMismatch = true;
+                continue;
+            }
+            final var substitutions = new LinkedHashMap<>(classSubstitutions);
+            for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
+                final var explicitType = call.explicitTypeArguments.get(i);
+                TypeResolver.validateType(context, explicitType, call.name);
+                substitutions.put(methodTypeParameters.get(i), explicitType);
+            }
             final var parameterTypes = new ArrayList<TypeDescriptor>();
             var cost = 0;
             var applicable = true;
             for (int i = 0; i < actualTypes.size(); i++) {
+                final var formalIndex = method.isVarArgs() && i >= fixedCount ? formalCount - 1 : i;
                 final var javaParameterType = method.isVarArgs() && i >= fixedCount
                         ? method.descriptor().parameterType(formalCount - 1).componentType()
                         : method.descriptor().parameterType(i);
-                final var parameterType = JavaTypeMapping.toZeronMethodType(javaParameterType);
+                final var genericParameterPattern = genericSignature == null
+                        ? null : genericSignature.parameterTypes().get(formalIndex);
+                if (genericParameterPattern != null) {
+                    final var inferenceParameters = new ArrayList<>(methodTypeParameters);
+                    if (constructor) {
+                        inferenceParameters.addAll(javaClass.typeParameters());
+                    }
+                    final var inferencePattern = TypeSubstitution.substitute(
+                            genericParameterPattern, substitutions);
+                    if (containsAnyTypeParameter(inferencePattern, inferenceParameters)) {
+                        try {
+                            TypeUnifier.unify(inferencePattern, actualTypes.get(i), substitutions, call.name);
+                        } catch (final ResolutionError _) {
+                            applicable = false;
+                            break;
+                        }
+                    }
+                }
+                final var parameterType = genericParameterPattern == null
+                        ? JavaTypeMapping.toZeronMethodType(javaParameterType)
+                        : TypeSubstitution.substitute(genericParameterPattern, substitutions);
                 if (parameterType == null) {
                     hasUnsupportedShape = true;
                     applicable = false;
@@ -1675,19 +1881,65 @@ final class MemberInteropResolver {
             }
             if (!applicable) continue;
 
-            final var returnType = constructor
-                    ? new ReferenceDescriptor(TypeDescriptor.ofName(javaClass.binaryName()))
-                    : JavaTypeMapping.toZeronMethodType(method.descriptor().returnType());
+            if (constructor || receiverType != null) {
+                for (final var parameter : javaClass.typeParameters()) {
+                    if (!substitutions.containsKey(parameter)) {
+                        if (constructor) hasGenericInferenceFailure = true;
+                        applicable = false;
+                        break;
+                    }
+                }
+            }
+            for (final var parameter : methodTypeParameters) {
+                if (!substitutions.containsKey(parameter)) {
+                    hasGenericInferenceFailure = true;
+                    applicable = false;
+                    break;
+                }
+            }
+            if (!applicable || !javaTypeParameterBoundsSatisfied(
+                    context, javaClass.typeParameters(), substitutions)
+                    || !javaTypeParameterBoundsSatisfied(context, methodTypeParameters, substitutions)) {
+                continue;
+            }
+
+            final var constructedType = javaClass.typeParameters().isEmpty()
+                    ? TypeDescriptor.ofName(javaClass.binaryName())
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(javaClass.binaryName()),
+                            javaClass.typeParameters().stream().map(substitutions::get).toList());
+            var returnType = constructor
+                    ? new ReferenceDescriptor(constructedType)
+                    : genericSignature == null
+                            ? JavaTypeMapping.toZeronReturnType(method.descriptor().returnType())
+                            : TypeSubstitution.substitute(genericSignature.returnType(), substitutions);
             if (returnType == null) {
                 hasUnsupportedShape = true;
                 continue;
             }
+            if (!constructor) {
+                final var facade = context.externalClasses.get(javaClass.binaryName());
+                if (facade != null) {
+                    final var declaredMethod = facade.methods().stream()
+                            .filter(declaration -> DeclarationRegistry.matchesExternalMethod(declaration, method))
+                            .findFirst().orElse(null);
+                    if (declaredMethod != null) returnType = declaredMethod.typeDescriptor().returnType();
+                }
+            }
+            returnType = exposeProjectedResult(returnType, call.name);
             if (!constructor) TypeResolver.validateType(context, returnType, call.name);
-                candidates.add(new JavaCandidate(method, List.copyOf(parameterTypes), returnType, cost,
+            candidates.add(new JavaCandidate(method, List.copyOf(parameterTypes), returnType, cost,
                     method.isVarArgs()));
         }
 
         if (candidates.isEmpty()) {
+            if (hasExplicitTypeArgumentMismatch) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                        call.name, "The explicit Java method type argument count does not match the selected method."));
+            }
+            if (hasGenericInferenceFailure && !hasUnsupportedShape) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
+                        call.name, "Cannot infer all Java generic type arguments; provide explicit type arguments."));
+            }
             final var reason = hasUnsupportedShape
                     ? "Matching Java generic, varargs, or unsupported type signatures are not supported."
                     : "No applicable public Java overload was found.";
@@ -1727,23 +1979,34 @@ final class MemberInteropResolver {
         final var facadeMethod = facade == null || constructor ? null : facade.methods().stream()
                 .filter(method -> DeclarationRegistry.matchesExternalMethod(method, selected.method()))
                 .findFirst().orElse(null);
+        final var facadeConstructor = facade == null || !constructor ? null : facade.constructors().stream()
+                .filter(declaration -> DeclarationRegistry.matchesExternalConstructor(
+                        declaration, selected.method()))
+                .findFirst().orElse(null);
         final var returnType = facadeMethod == null
                 ? selected.returnType()
                 : facadeMethod.typeDescriptor().returnType();
         final var checkedExceptions = selected.method().exceptionTypes().stream()
                 .filter(exceptionType -> isCheckedJavaException(context, exceptionType))
                 .toList();
-        if (!checkedExceptions.isEmpty() && (constructor || facadeMethod == null)) {
+        if (!checkedExceptions.isEmpty() && (constructor
+                ? facadeConstructor == null : facadeMethod == null)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
                     call.name, "Java calls declaring checked exceptions require an external facade mapping."));
         }
-        final var exceptionMappings = facadeMethod == null ? List.<JavaCallTarget.ExceptionMapping>of()
-                : resolveExceptionMappings(context, facadeMethod);
+        final var exceptionMappings = constructor
+                ? facadeConstructor == null ? List.<JavaCallTarget.ExceptionMapping>of()
+                        : resolveExceptionMappings(context, facadeConstructor, selected.method())
+                : facadeMethod == null ? List.<JavaCallTarget.ExceptionMapping>of()
+                        : resolveExceptionMappings(context, facadeMethod, selected.method());
         call.setJavaCallTarget(new JavaCallTarget(javaClass.binaryName(), methodName,
             selected.method().descriptor().descriptorString(), invocationKind, selected.varArgs(),
                 exceptionMappings));
-        final var raisedEffects = facadeMethod == null ? List.<TypeDescriptor>of()
-                : facadeMethod.typeDescriptor().raisedEffects();
+        final var raisedEffects = facadeMethod != null
+                ? facadeMethod.typeDescriptor().raisedEffects()
+                : facadeConstructor == null ? List.<TypeDescriptor>of()
+                        : facadeConstructor.exceptionMappings().stream()
+                                .map(Stmt.ExternalExceptionMapping::effectType).distinct().toList();
         call.setResolvedDescriptor(TypeDescriptor.functionWithEffectsOf(methodName, returnType,
                 selected.parameterTypes(), List.of(), raisedEffects));
         call.setType(returnType);
@@ -1751,18 +2014,114 @@ final class MemberInteropResolver {
     }
 
     static void validateExternalExceptionMappings(final ResolutionContext context,
-                                                  final Stmt.ExternalMethod method) {
-        resolveExceptionMappings(context, method);
+                                                  final Stmt.ExternalMethod method,
+                                                  final JavaClassPath.JavaMethod javaMethod) {
+        resolveExceptionMappings(context, method, javaMethod);
+    }
+
+    static void validateExternalExceptionMappings(final ResolutionContext context,
+                                                  final Stmt.ExternalConstructor constructor,
+                                                  final JavaClassPath.JavaMethod javaConstructor) {
+        resolveExceptionMappings(context, constructor, javaConstructor);
+    }
+
+    static List<JavaCallTarget.ExceptionMapping> resolveExternalFunctionExceptionMappings(
+            final ResolutionContext context, final Stmt.ExternalFunction function) {
+        final var binding = context.externalFunctionBindings.get(function);
+        if (binding == null) {
+            throw new IllegalStateException("External function binding is missing: "
+                    + function.name().lexeme());
+        }
+        final var javaMethod = boundJavaMethod(context, binding);
+        if (javaMethod == null && !function.exceptionMappings().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    function.name(), "Java exception mappings require public class-file method metadata."));
+        }
+        return javaMethod == null ? List.of()
+                : resolveExceptionMappings(context, function.exceptionMappings(), function.name(),
+                        function.typeDescriptor(), javaMethod);
+    }
+
+    private static JavaClassPath.JavaMethod boundJavaMethod(
+            final ResolutionContext context, final FunctionBindingRegistry.Binding binding) {
+        final String ownerName;
+        final String methodName;
+        final MethodTypeDesc descriptor;
+        final boolean isStatic;
+        switch (binding.target()) {
+            case FunctionBindingRegistry.StaticMethod target -> {
+                ownerName = binaryName(target.owner());
+                methodName = target.methodName();
+                descriptor = target.descriptor();
+                isStatic = true;
+            }
+            case FunctionBindingRegistry.InstanceMethod target -> {
+                ownerName = binaryName(target.owner());
+                methodName = target.methodName();
+                descriptor = target.descriptor();
+                isStatic = false;
+            }
+            case FunctionBindingRegistry.StaticFieldInstanceMethod target -> {
+                ownerName = binaryName(target.methodOwner());
+                methodName = target.methodName();
+                descriptor = target.methodDescriptor();
+                isStatic = false;
+            }
+            case FunctionBindingRegistry.IntrinsicBinding _ -> {
+                return null;
+            }
+        }
+        final var javaClass = context.javaClassPath.find(ownerName);
+        if (javaClass == null) return null;
+        return javaClass.methods().stream()
+                .filter(method -> method.name().equals(methodName) && method.isStatic() == isStatic
+                        && !method.isConstructor() && method.descriptor().equals(descriptor))
+                .findFirst().orElse(null);
+    }
+
+    private static String binaryName(final ClassDesc classDescriptor) {
+        final var descriptor = classDescriptor.descriptorString();
+        if (descriptor.startsWith("L") && descriptor.endsWith(";")) {
+            return descriptor.substring(1, descriptor.length() - 1).replace('/', '.');
+        }
+        throw new IllegalArgumentException("Expected a Java reference class, found " + classDescriptor);
     }
 
     private static List<JavaCallTarget.ExceptionMapping> resolveExceptionMappings(
-            final ResolutionContext context, final Stmt.ExternalMethod method) {
+            final ResolutionContext context, final Stmt.ExternalMethod method,
+            final JavaClassPath.JavaMethod javaMethod) {
         TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
+        return resolveExceptionMappings(context, method.exceptionMappings(), method.name(),
+                method.typeDescriptor(), javaMethod);
+    }
+
+    private static List<JavaCallTarget.ExceptionMapping> resolveExceptionMappings(
+            final ResolutionContext context, final Stmt.ExternalConstructor constructor,
+            final JavaClassPath.JavaMethod javaConstructor) {
+        return resolveExceptionMappings(context, constructor.exceptionMappings(), constructor.name(), null,
+                javaConstructor);
+    }
+
+    private static List<JavaCallTarget.ExceptionMapping> resolveExceptionMappings(
+            final ResolutionContext context, final List<Stmt.ExternalExceptionMapping> exceptionMappings,
+            final Token where, final FunctionDescriptor signature,
+            final JavaClassPath.JavaMethod javaMethod) {
+        if (signature != null) TypeResolver.validateFunctionTypes(context, signature, where);
         final var mappings = new ArrayList<JavaCallTarget.ExceptionMapping>();
-        for (final var mapping : method.exceptionMappings()) {
+        final var mappedExceptionTypes = new HashSet<String>();
+        for (final var mapping : exceptionMappings) {
             TypeResolver.validateType(context, mapping.javaExceptionType(), mapping.constructorName());
             TypeResolver.validateType(context, mapping.effectType(), mapping.constructorName());
             final var exceptionName = mapping.javaExceptionType().name();
+            if (!mappedExceptionTypes.add(exceptionName)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                        mapping.constructorName(), "A Java exception type can be mapped only once per callable."));
+            }
+            if (!context.javaClassPath.isSubtypeOf(exceptionName, "java.lang.Throwable")
+                    || !isCheckedJavaException(context, exceptionName)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                        mapping.constructorName(), "Exception mappings must name checked Java Throwable subtypes."));
+            }
             final var effectName = mapping.effectType().name();
             final var effectClass = context.classes.get(effectName);
             if (effectClass == null || !effectClass.isEffect()) {
@@ -1781,12 +2140,11 @@ final class MemberInteropResolver {
                             "Mapped effect constructor must be public and accept exactly one Java exception."));
                 }
                 final var parameterType = effectClass.canonicalConstructorTypes().getFirst();
-                if (!TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(parameterType))
-                        .equals(java.lang.constant.ClassDesc.of(exceptionName))) {
+                if (!acceptsJavaException(context, parameterType, exceptionName)) {
                     Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
                             mapping.constructorName(),
-                            "Mapped effect constructor parameter must exactly match Java exception type '"
+                            "Mapped effect constructor parameter must accept Java exception type '"
                                     + exceptionName + "'."));
                 }
                 constructorType = TypeDescriptor.functionOf("new",
@@ -1804,19 +2162,19 @@ final class MemberInteropResolver {
                 }
                 TypeResolver.validateFunctionTypes(context, constructor.typeDescriptor(), constructor.name());
                 final var parameterType = constructor.typeDescriptor().parameters().getFirst();
-                if (!TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(parameterType))
-                        .equals(java.lang.constant.ClassDesc.of(exceptionName))) {
+                if (!acceptsJavaException(context, parameterType, exceptionName)) {
                     Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
                             mapping.constructorName(),
-                            "Mapped effect constructor parameter must exactly match Java exception type '"
+                            "Mapped effect constructor parameter must accept Java exception type '"
                                     + exceptionName + "'."));
                 }
                 constructorType = constructor.typeDescriptor();
             }
             final var constructorDescriptor = canonicalConstructor
                     ? java.lang.constant.MethodTypeDesc.of(java.lang.constant.ConstantDescs.CD_void,
-                            java.lang.constant.ClassDesc.of(exceptionName))
+                            TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(
+                                    effectClass.canonicalConstructorTypes().getFirst())))
                     : java.lang.constant.MethodTypeDesc.of(
                             TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(constructorType.returnType())),
                             TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(
@@ -1824,6 +2182,40 @@ final class MemberInteropResolver {
             mappings.add(new JavaCallTarget.ExceptionMapping(exceptionName, effectName,
                     mapping.constructorName().lexeme(), constructorDescriptor.descriptorString(),
                     canonicalConstructor));
+        }
+        if (javaMethod != null) {
+            final var declaredChecked = javaMethod.exceptionTypes().stream()
+                    .filter(exceptionType -> isCheckedJavaException(context, exceptionType))
+                    .toList();
+            for (final var declaredException : declaredChecked) {
+                if (mappings.stream().noneMatch(mapping ->
+                        context.javaClassPath.isSubtypeOf(declaredException, mapping.exceptionType()))) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, where,
+                            "Declared checked Java exception '" + declaredException
+                                    + "' must have an explicit Zeron effect mapping."));
+                }
+            }
+            for (final var mapping : mappings) {
+                if (declaredChecked.stream().noneMatch(declaredType ->
+                        context.javaClassPath.isSubtypeOf(mapping.exceptionType(), declaredType))) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, where,
+                            "Mapped Java exception type '" + mapping.exceptionType()
+                                    + "' is not a declared exception type or its subtype."));
+                }
+            }
+        }
+        if (signature != null) {
+            final var declaredEffectNames = signature.raisedEffects().stream()
+                    .map(TypeDescriptor::name).collect(java.util.stream.Collectors.toSet());
+            final var mappedEffectNames = mappings.stream()
+                    .map(JavaCallTarget.ExceptionMapping::effectType)
+                    .collect(java.util.stream.Collectors.toSet());
+            if (!declaredEffectNames.equals(mappedEffectNames)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                        where, "The declared raised effects must match the Java exception mappings."));
+            }
         }
         mappings.sort((left, right) -> {
             if (context.javaClassPath.isSubtypeOf(left.exceptionType(), right.exceptionType())) return -1;
@@ -1833,10 +2225,57 @@ final class MemberInteropResolver {
         return List.copyOf(mappings);
     }
 
-    private static boolean isCheckedJavaException(final ResolutionContext context, final String exceptionType) {
+    private static boolean acceptsJavaException(final ResolutionContext context,
+                                                final TypeDescriptor parameterType,
+                                                final String exceptionName) {
+        final var descriptor = TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(parameterType))
+                .descriptorString();
+        if (!descriptor.startsWith("L") || !descriptor.endsWith(";")) return false;
+        final var parameterName = descriptor.substring(1, descriptor.length() - 1).replace('/', '.');
+        return context.javaClassPath.isSubtypeOf(exceptionName, parameterName);
+    }
+
+    private static boolean isCheckedJavaException(final ResolutionContext context,
+                                                  final String exceptionType) {
         return context.javaClassPath.isSubtypeOf(exceptionType, "java.lang.Throwable")
                 && !context.javaClassPath.isSubtypeOf(exceptionType, "java.lang.RuntimeException")
                 && !context.javaClassPath.isSubtypeOf(exceptionType, "java.lang.Error");
+    }
+
+    private static boolean javaTypeParameterBoundsSatisfied(
+            final ResolutionContext context,
+            final List<TypeParameterDescriptor> parameters,
+            final Map<TypeParameterDescriptor, TypeDescriptor> substitutions) {
+        for (final var parameter : parameters) {
+            final var actual = substitutions.get(parameter);
+            if (actual == null) return false;
+            for (final var bound : parameter.bounds()) {
+                final var required = TypeSubstitution.substitute(bound, substitutions);
+                if (!context.typeCompatibility.canAssign(required, actual)
+                        && !javaBoxedTypeSatisfiesBound(context, required, actual)) return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean javaBoxedTypeSatisfiesBound(final ResolutionContext context,
+                                                       final TypeDescriptor required,
+                                                       final TypeDescriptor actual) {
+        var actualJavaType = TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(actual)).descriptorString();
+        final var requiredJavaType = TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(required))
+                .descriptorString();
+        actualJavaType = switch (actualJavaType) {
+            case "I" -> "Ljava/lang/Integer;";
+            case "J" -> "Ljava/lang/Long;";
+            case "B" -> "Ljava/lang/Byte;";
+            case "D", "F" -> "Ljava/lang/Double;";
+            case "Z" -> "Ljava/lang/Boolean;";
+            default -> actualJavaType;
+        };
+        if (!actualJavaType.startsWith("L") || !requiredJavaType.startsWith("L")) return false;
+        final var actualName = actualJavaType.substring(1, actualJavaType.length() - 1).replace('/', '.');
+        final var requiredName = requiredJavaType.substring(1, requiredJavaType.length() - 1).replace('/', '.');
+        return context.javaClassPath.isSubtypeOf(actualName, requiredName);
     }
 
     private static int javaConversionCost(final ResolutionContext context, final TypeDescriptor expected, final TypeDescriptor actual) {
@@ -1864,94 +2303,84 @@ final class MemberInteropResolver {
 
     private static TypeDescriptor resolveBoundedMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                                     final TypeParameterDescriptor parameter) {
+        return resolveBoundedMemberCall(context, call, parameter, null);
+    }
+
+    private static TypeDescriptor resolveBoundedMemberCall(final ResolutionContext context, final Expr.MemberCall call,
+                                                    final TypeParameterDescriptor parameter,
+                                                    final TypeDescriptor requiredContractType) {
+        return resolveBoundedMemberCall(context, call, parameter, requiredContractType, false);
+    }
+
+    private static TypeDescriptor resolveBoundedMemberCall(final ResolutionContext context, final Expr.MemberCall call,
+                                                    final TypeParameterDescriptor parameter,
+                                                    final TypeDescriptor requiredContractType,
+                                                    final boolean behavioralOnly) {
         if (parameter.bounds().isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "Member access on an unconstrained type parameter is not allowed."));
         }
         TypeDescriptor bound = null;
         Stmt.ContractMethod method = null;
-        Stmt.NamedContractConstructor factory = null;
         Map<TypeParameterDescriptor, TypeDescriptor> selectedContractSubstitutions = Map.of();
         int selectedBoundIndex = -1;
-        int selectedFactoryIndex = -1;
         int selectedMethodIndex = -1;
-        var hasMutatingMethod = false;
+        final var matches = new LinkedHashMap<String, Map.Entry<Integer, ContractComposition.MethodSlot>>();
+        final var requiredUse = requiredContractType == null
+                ? null : ContractComposition.fromType(requiredContractType);
         for (int boundIndex = 0; boundIndex < parameter.bounds().size(); boundIndex++) {
             final var candidateBound = parameter.bounds().get(boundIndex);
             final var candidateUse = ContractComposition.fromType(candidateBound);
-            final var factorySlot = candidateUse == null ? null
-                    : ContractComposition.constructors(context, candidateUse).stream()
-                            .filter(slot -> slot.constructor().name().lexeme().equals(call.name.lexeme()))
-                            .findFirst().orElse(null);
-            final var candidateFactory = factorySlot == null ? null : factorySlot.constructor();
-            if (candidateFactory != null) {
-                bound = candidateBound;
-                factory = candidateFactory;
-                selectedContractSubstitutions = factorySlot.applied().substitutions();
-                selectedBoundIndex = boundIndex;
-                selectedFactoryIndex = factorySlot.index();
-                break;
+            if (candidateUse == null) continue;
+            final var candidateDeclaration = context.contracts.get(candidateUse.name().lexeme());
+            if (candidateDeclaration == null || behavioralOnly && candidateDeclaration.higherKinded()) continue;
+            if (requiredUse != null && (candidateUse == null
+                    || !ContractComposition.entails(context, candidateUse,
+                            requiredUse.name().lexeme(), requiredUse.typeArguments()))) {
+                continue;
             }
-            final var methodSlot = candidateUse == null ? null
-                    : ContractComposition.methods(context, candidateUse).stream()
-                            .filter(slot -> slot.method().name().lexeme().equals(call.name.lexeme()))
-                            .findFirst().orElse(null);
-            final var candidateMethod = methodSlot == null ? null : methodSlot.method();
-            if (candidateMethod != null) {
-                if (candidateMethod.isMutating()) {
-                    hasMutatingMethod = true;
-                    continue;
-                }
-                bound = candidateBound;
-                method = candidateMethod;
-                selectedContractSubstitutions = methodSlot.applied().substitutions();
-                selectedBoundIndex = boundIndex;
-                selectedMethodIndex = methodSlot.index();
-                break;
+            final var candidateBoundIndex = boundIndex;
+            final var methodSlot = ContractComposition.methods(context, candidateUse).stream()
+                    .filter(slot -> slot.method().name().lexeme().equals(call.name.lexeme()))
+                    .filter(slot -> requiredUse == null
+                            || slot.applied().use().name().lexeme().equals(requiredUse.name().lexeme())
+                            && slot.applied().use().typeArguments().equals(requiredUse.typeArguments()))
+                    .findFirst().orElse(null);
+            if (methodSlot != null) {
+                matches.putIfAbsent(methodProviderKey(methodSlot), Map.entry(candidateBoundIndex, methodSlot));
             }
         }
-        if (factory != null) {
-            final var declaredType = (FunctionDescriptor) TypeSubstitution.substitute(
-                    factory.typeDescriptor(), selectedContractSubstitutions);
-            final var factoryType = TypeDescriptor.functionOf(factory.name().lexeme(),
-                    new ReferenceDescriptor(parameter), declaredType.parameters().toArray(TypeDescriptor[]::new));
-            if (call.arguments.size() < factoryType.arity()
-                    || !factory.variadic() && call.arguments.size() != factoryType.arity()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                        call.name, "Wrong number of arguments for class-side constructor '" + call.name.lexeme() + "'."));
-            }
-            for (int index = 0; index < call.arguments.size(); index++) {
-                final var expected = factory.variadic()
-                        && index >= factoryType.arity() - 1
-                        ? ((ArrayDescriptor) factoryType.parameters().getLast()).elementType()
-                        : factoryType.parameters().get(index);
-                ensureAssignable(context, expected,
-                        resolveArgument(context, call.arguments.get(index), expected), call.name);
-            }
-            call.setWitnessEvidence(Expr.evidenceToken(parameter, selectedBoundIndex, selectedFactoryIndex),
-                    factoryType);
-            call.setResolvedDescriptor(factoryType);
-            call.setType(factoryType.returnType());
-            call.setResolvedOwnerName(className(context, bound));
-            return factoryType.returnType();
+        if (matches.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
+                    "Member is ambiguous across the type parameter's contract bounds."));
+        }
+        if (!matches.isEmpty()) {
+            final var selected = matches.values().iterator().next();
+            selectedBoundIndex = selected.getKey();
+            final var candidateBound = parameter.bounds().get(selectedBoundIndex);
+            final var methodSlot = selected.getValue();
+            bound = candidateBound;
+            method = methodSlot.method();
+            selectedContractSubstitutions = methodSlot.applied().substitutions();
+            selectedMethodIndex = methodSlot.index();
         }
         if (method == null) {
-            if (hasMutatingMethod) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
-                        "Mutating methods are not available through a generic contract bound."));
-            }
             final var functionPropertyResult = resolveFunctionPropertyCall(
                     context, call, call.receiver.getType());
             if (functionPropertyResult != null) return functionPropertyResult;
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "Method is not provided by any of the type parameter's contract bounds."));
         }
+        if (method.isMutating() && !(call.receiver.getType() instanceof ReferenceDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
+                    "Mutating methods require a mutable reference receiver."));
+        }
         final var ownerName = className(context, bound);
 
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
                 method.typeDescriptor(), selectedContractSubstitutions);
         final var evidenceMethodParameters = new ArrayList<TypeDescriptor>();
-        evidenceMethodParameters.add(parameter);
+        evidenceMethodParameters.add(call.receiver.getType());
         evidenceMethodParameters.addAll(descriptor.parameters());
         final var evidenceMethodType = TypeDescriptor.functionWithEffectsOf(
                 method.name().lexeme(), descriptor.returnType(), evidenceMethodParameters,
@@ -2283,11 +2712,25 @@ final class MemberInteropResolver {
             final ResolutionContext context, final String ownerName, final TypeDescriptor receiverType) {
         final var baseType = receiverType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : receiverType;
+        if (baseType instanceof TypeParameterDescriptor parameter) {
+            return parameter.bounds().stream()
+                    .flatMap(bound -> contractCompositionForType(context, ownerName, bound).stream())
+                    .toList();
+        }
         final var arguments = baseType instanceof GenericDescriptor generic
                 ? generic.typeParameters() : List.<TypeDescriptor>of();
+        final var contract = context.contracts.get(ownerName);
+        final var captureSubstitutions = contract == null
+                ? Map.<TypeParameterDescriptor, TypeDescriptor>of()
+                : TypeResolver.substitutionsFor(context, contract.typeParameters(), baseType);
+        final var capturedArguments = contract == null
+                ? arguments
+                : contract.typeParameters().stream()
+                        .map(captureSubstitutions::get)
+                        .toList();
         final var token = new Token(TokenType.IDENTIFIER, ownerName, null,
                 com.maruseron.zeron.diagnostic.SourceSpan.line(null, 1));
-        return ContractComposition.closure(context, new Stmt.ContractUse(token, arguments));
+        return ContractComposition.closure(context, new Stmt.ContractUse(token, capturedArguments));
     }
 
     static void ensureFieldAccessible(final ResolutionContext context, final Token where, final String owner) {

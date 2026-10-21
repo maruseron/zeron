@@ -333,38 +333,156 @@ public final class Scanner {
     }
 
     private void number() {
-        while (isDigit(peek())) advance();
-
-        var isDecimal = false;
-        if (peek() == '.' && isDigit(peekNext())) {
-            isDecimal = true;
-            // consume the .
-            do advance();
-            while (isDigit(peek()));
+        final var radix = radixPrefix();
+        if (radix != 10) {
+            advance();
+            radixInteger(radix);
+            return;
         }
 
+        var valid = consumeDigits(10, true);
+        final var isDecimal = startsFraction();
         if (isDecimal) {
-            addToken(DOUBLE, Double.parseDouble(source.substring(start, current)));
-        } else if (match('L')) {
-            final var value = new BigInteger(source.substring(start, current - 1));
-            if (value.compareTo(BigInteger.ONE.shiftLeft(63)) > 0) {
-                addToken(LONG, BigInteger.ZERO);
-                recordDiagnostic(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
-                        span(tokenStart, position()),
-                        "Long literal is outside the supported Long range.");
-            } else {
-                addToken(LONG, value);
-            }
+            advance();
+            valid &= consumeDigits(10, false);
+        }
+        final var isLong = !isDecimal && match('L');
+        if (isLong && peek() == '_') {
+            valid = false;
+            while (peek() == '_' || isDigit(peek())) advance();
+        }
+
+        if (!valid) {
+            invalidNumericLiteral(isDecimal, isLong);
+            return;
+        }
+
+        if (!isLong && isAlpha(peek())) {
+            addToken(SUFFIXABLE_NUMBER, new SuffixableNumber(
+                    isDecimal ? SuffixableNumber.Kind.DECIMAL : SuffixableNumber.Kind.INTEGER, 10));
+            return;
+        }
+
+        final var valueEnd = isLong ? current - 1 : current;
+        final var value = source.substring(start, valueEnd).replace("_", "");
+        if (isDecimal) {
+            addToken(DOUBLE, Double.parseDouble(value));
+        } else if (isLong) {
+            addLongLiteral(value, 10);
         } else {
             try {
-                addToken(INT, Integer.parseInt(source.substring(start, current)));
+                addToken(INT, Integer.parseInt(value));
             } catch (NumberFormatException _) {
-                addToken(INT, 0);
-                recordDiagnostic(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
-                        span(tokenStart, position()),
-                        "Integer literal is outside the supported Int range.");
+                integerLiteralOutOfRange(INT, "Integer literal is outside the supported Int range.");
             }
         }
+    }
+
+    private void radixInteger(final int radix) {
+        var valid = consumeDigits(radix, false);
+        final var isLong = match('L');
+        if (isLong && peek() == '_') {
+            valid = false;
+            while (peek() == '_' || isDigit(peek())) advance();
+        }
+        if (!valid) {
+            if (current == start + 2 && isAlpha(peek())) {
+                while (isAlphanumeric(peek())) advance();
+            }
+            invalidNumericLiteral(false, isLong);
+            return;
+        }
+
+        if (!isLong && isAlpha(peek())) {
+            addToken(SUFFIXABLE_NUMBER, new SuffixableNumber(SuffixableNumber.Kind.INTEGER, radix));
+            return;
+        }
+
+        final var suffixLength = isLong ? 1 : 0;
+        final var digits = source.substring(start + 2, current - suffixLength).replace("_", "");
+        if (isLong) {
+            addLongLiteral(digits, radix);
+        } else {
+            try {
+                addToken(INT, Integer.parseInt(digits, radix));
+            } catch (NumberFormatException _) {
+                integerLiteralOutOfRange(INT, "Integer literal is outside the supported Int range.");
+            }
+        }
+    }
+
+    private int radixPrefix() {
+        if (source.charAt(start) != '0') return 10;
+        return switch (peek()) {
+            case 'b', 'B' -> 2;
+            case 'o', 'O' -> 8;
+            case 'x', 'X' -> 16;
+            default -> 10;
+        };
+    }
+
+    private boolean startsFraction() {
+        if (peek() != '.') return false;
+        if (isDigit(peekNext())) return true;
+        return peekNext() == '_' && current + 2 < source.length()
+                && isDigit(source.charAt(current + 2));
+    }
+
+    private boolean consumeDigits(final int radix, final boolean hasInitialDigit) {
+        var valid = true;
+        var hasDigits = hasInitialDigit;
+        var previousWasDigit = hasInitialDigit;
+        while (true) {
+            final var digit = digitValue(peek(), radix);
+            if (digit >= 0) {
+                advance();
+                hasDigits = true;
+                previousWasDigit = true;
+            } else if (peek() == '_') {
+                advance();
+                if (!previousWasDigit || digitValue(peek(), radix) < 0) valid = false;
+                previousWasDigit = false;
+            } else if (radix != 10 && isDigit(peek())) {
+                advance();
+                valid = false;
+                previousWasDigit = false;
+            } else {
+                break;
+            }
+        }
+        return valid && hasDigits && previousWasDigit;
+    }
+
+    private int digitValue(final char character, final int radix) {
+        final int digit;
+        if (character >= '0' && character <= '9') digit = character - '0';
+        else if (character >= 'a' && character <= 'f') digit = character - 'a' + 10;
+        else if (character >= 'A' && character <= 'F') digit = character - 'A' + 10;
+        else return -1;
+        return digit < radix ? digit : -1;
+    }
+
+    private void addLongLiteral(final String digits, final int radix) {
+        final var value = new BigInteger(digits, radix);
+        if (value.compareTo(BigInteger.ONE.shiftLeft(63)) > 0) {
+            integerLiteralOutOfRange(LONG, "Long literal is outside the supported Long range.");
+        } else {
+            addToken(LONG, value);
+        }
+    }
+
+    private void integerLiteralOutOfRange(final TokenType tokenType, final String message) {
+        addToken(tokenType, tokenType == LONG ? BigInteger.ZERO : 0);
+        recordDiagnostic(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                span(tokenStart, position()), message);
+    }
+
+    private void invalidNumericLiteral(final boolean isDecimal, final boolean isLong) {
+        final var type = isDecimal ? DOUBLE : isLong ? LONG : INT;
+        final Object value = type == DOUBLE ? 0.0 : type == LONG ? BigInteger.ZERO : 0;
+        addToken(type, value);
+        recordDiagnostic(DiagnosticCatalog.INVALID_NUMERIC_LITERAL,
+                span(tokenStart, position()), "Invalid numeric literal.");
     }
 
     private void identifier() {

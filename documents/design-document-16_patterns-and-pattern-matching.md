@@ -201,6 +201,42 @@ patterns are checked against the statically known matched type, and generic patt
 substituted from that type. Inference may fill omitted pattern type arguments when unambiguous;
 otherwise they must be written explicitly.
 
+## Generic applications and JVM erasure
+
+**Accepted direction: generic pattern arguments are static-only.** A pattern may use generic
+arguments to check compatibility with the scrutinee's statically known applied type and to
+substitute pattern output types. They are not runtime discriminators: generated tests can check the
+erased class, not whether a value is a particular application such as `Box<Int>` rather than
+`Box<String>`.
+
+A pattern such as `Box<Int>` must not narrow a scrutinee whose static type is only `Any` or another
+erased/unknown generic view to `Box<Int>`. The resolver must reject that use unless the scrutinee's
+static type entails the required applied type; mere runtime-test compatibility or an upcast to a
+broader covariant view is not enough. For example, a statically known `Box<Int>` can be matched as
+`Box<Int>`, but `Any` or `Box<out Any?>` cannot be narrowed to `Box<Int>` by that pattern. The
+resolver must not insert an unchecked cast or present the generic argument as runtime-verified. This
+rule is about static evidence, not merely whether a raw JVM `instanceof Box` can be emitted.
+
+An explicit safe projected view may be used when the scrutinee is unknown, for example
+`Box<out Any?>`. The runtime test still checks only the raw `Box` class; the arm binding keeps the
+projected type, and member access remains restricted by the projection rules. Such a pattern does
+not capture or reveal the concrete type argument. The resolver must accept it only when the source
+type can safely be viewed through that projection.
+
+Two cases that differ only in generic arguments have the same erased runtime test and are not
+distinct alternatives. Such cases must be diagnosed as duplicate or unreachable unless an
+independent runtime condition, such as a value subpattern or guard, distinguishes them. A guard or
+refutable value pattern can distinguish values; the generic spelling by itself cannot. Coverage
+analysis must remain conservative and must not count erased generic arguments as separate sealed
+alternatives.
+
+This contract does not require general runtime reification. A future feature that wants to inspect
+applied generic identity at runtime must define and propagate an explicit type-identity witness,
+including its ABI and separate-compilation behavior; it is outside the current pattern-matching
+contract. See [ZEP-0015](zeps/ZEP-0015.md) for the separate reification exploration. Generic
+`is`/`as?` targets with static application proofs are proposed separately in
+[ZEP-0053](zeps/ZEP-0053.md).
+
 ## Refutation and guards
 
 There are two distinct conditional checks:
@@ -233,32 +269,33 @@ bindings must have compatible types. The common bindings are available to the gu
 An alternative succeeds at most once; after one matches, later alternatives in that OR-pattern are
 not evaluated.
 
-Duplicate or wholly subsumed unguarded cases should be diagnosed as unreachable. Guarded cases may
-follow an earlier case for the same class because an earlier guard can fail. An unguarded irrefutable
-case makes later cases that it subsumes unreachable. The initial coverage analysis is intentionally
+Duplicate or wholly subsumed unguarded cases should be diagnosed as unreachable, including cases
+that differ only by generic arguments erased to the same runtime test. Guarded cases may follow an
+earlier case for the same class because an earlier guard can fail. An unguarded irrefutable case
+makes later cases that it subsumes unreachable. The initial coverage analysis is intentionally
 structural and conservative: it does not prove arbitrary value predicates or infer totality from a
 refutable nested pattern.
 
 ## Implemented grammar
 
-```text
-patternDeclaration ::= visibility "pattern" IDENTIFIER
+```ebnf
+patternDeclaration   ::= visibility "pattern" IDENTIFIER
                        "(" [patternOutput {"," patternOutput}] ")"
                        ["when" expression] block
-patternOutput      ::= IDENTIFIER ":" type
+patternOutput        ::= IDENTIFIER ":" type
 
-matchArm           ::= "case" matchCasePattern ["if" expression] "->" expression ";"
-matchCasePattern   ::= matchCaseAlternative {"|" matchCaseAlternative}
+matchArm             ::= "case" matchCasePattern ["if" expression] "->" expression ";"
+matchCasePattern     ::= matchCaseAlternative {"|" matchCaseAlternative}
 matchCaseAlternative ::= IDENTIFIER "(" [patternArgument {"," patternArgument}] ")"
                        | patternAlternative
-matchPattern       ::= patternAlternative {"|" patternAlternative}
-patternAlternative ::= "_"
-                     | literalPattern ["as" IDENTIFIER]
-                     | type ["." IDENTIFIER "(" [patternArgument
+matchPattern         ::= patternAlternative {"|" patternAlternative}
+patternAlternative   ::= "_"
+                       | literalPattern ["as" IDENTIFIER]
+                       | type ["." IDENTIFIER "(" [patternArgument
                          {"," patternArgument}] ")" | "(" [patternArgument
                          {"," patternArgument}] ")"] ["as" IDENTIFIER]
-patternArgument    ::= "_" | IDENTIFIER | literalPattern ["as" IDENTIFIER] | matchPattern
-literalPattern     ::= INT | "-" INT | STRING | "true" | "false"
+patternArgument      ::= "_" | IDENTIFIER | literalPattern ["as" IDENTIFIER] | matchPattern
+iteralPattern     :  := INT | "-" INT | STRING | "true" | "false"
 ```
 
 The type-qualified call form keeps class-pattern selection explicit and fits the current
@@ -346,11 +383,10 @@ would change behavior. Evaluation order is left-to-right and source-defined.
 
 ## Libraries and compatibility
 
-Public pattern declarations are part of a class's source API. They were added to library-index
-schema v19; the current schema is v24 and preserves their names, generic output signatures, and
-total/refutable status so consumers can type-check patterns without library source files. Compiled
-classes expose the generated helper ABI, while keeping helper names out of source-level name
-resolution.
+Public pattern declarations are part of a class's source API. The API index preserves their names,
+generic output signatures, and total/refutable status so consumers can type-check patterns without
+library source files. The current API-index schema is version 6. Compiled classes expose the
+generated helper ABI, while keeping helper names out of source-level name resolution.
 
 The implementation prefers a declared pattern when one exists. If there is no declared pattern
 with the requested name, the old single-public-property extraction form remains available for
@@ -365,7 +401,8 @@ matches.
 3. Completed: named-pattern resolution and helper emission for multiple outputs.
 4. Completed: refutable `when` patterns and null-result failure lowering.
 5. Completed: nested patterns, short-circuiting, OR bindings, and conservative coverage propagation.
-6. Completed: public-pattern metadata (introduced in schema v19) and separately compiled consumers.
+6. Completed: public-pattern metadata and separately compiled consumers; metadata is preserved in
+   the current API-index schema.
 7. Completed: supported literal patterns and built-in product destructuring with conservative
    coverage.
 8. Remaining: broaden negative tests for output assignment, visibility, mutability, and invalid OR

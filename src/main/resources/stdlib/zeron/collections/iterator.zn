@@ -1,7 +1,9 @@
 package zeron.collections;
 
-import zeron.lang.Option;
+public type Step<T: nullable + mut> =
+      Yield(value: T)
+    | Done;
 
-public contract Iterator<T> {
-    mut next(): Option<T>;
+public contract Iterator<T: nullable + mut> {
+    mut next(): Step<T>;
 }

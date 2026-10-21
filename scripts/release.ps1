@@ -73,6 +73,11 @@ try {
         throw "Packaged compiler failed the diagnostic explanation smoke test."
     }
 
+    $versionOutput = & $launcher version
+    if ($LASTEXITCODE -ne 0 -or ($versionOutput -join "`n") -ne "zeron $projectVersion") {
+        throw "Packaged compiler reported an unexpected version: $($versionOutput -join "`n")"
+    }
+
     $smokeRoot = Join-Path $stageRoot "smoke"
     $smokeSource = Join-Path $smokeRoot "src\Main.zn"
     New-Item -ItemType Directory -Path (Split-Path -Parent $smokeSource) -Force | Out-Null

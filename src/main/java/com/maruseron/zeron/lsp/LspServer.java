@@ -8,14 +8,17 @@ import org.eclipse.lsp4j.services.LanguageServer;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutionException;
+import java.util.Optional;
 
 public final class LspServer {
     private LspServer() {}
 
-    public static int run(final Path manifest) {
+    public static int run(final Optional<Path> manifest) {
         final ProjectAnalysisWorkspace workspace;
         try {
-            workspace = ProjectAnalysisWorkspace.open(manifest);
+            workspace = manifest.isPresent()
+                    ? ProjectAnalysisWorkspace.open(manifest.orElseThrow())
+                    : ProjectAnalysisWorkspace.openSourceWorkspace(Path.of("."));
         } catch (final IOException | IllegalArgumentException exception) {
             System.err.println("Unable to start Zeron language server: " + exception.getMessage());
             return 1;

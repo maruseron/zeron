@@ -5,6 +5,7 @@ import java.lang.constant.ConstantDescs;
 import java.lang.constant.MethodTypeDesc;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -57,10 +58,21 @@ public final class FunctionBindingRegistry {
         }
     }
 
-    public record Binding(FunctionDescriptor signature, JvmTarget target) {
+    public record Binding(FunctionDescriptor signature, JvmTarget target,
+                          List<JavaCallTarget.ExceptionMapping> exceptionMappings) {
         public Binding {
             Objects.requireNonNull(signature);
             Objects.requireNonNull(target);
+            exceptionMappings = List.copyOf(exceptionMappings);
+        }
+
+        public Binding(final FunctionDescriptor signature, final JvmTarget target) {
+            this(signature, target, List.of());
+        }
+
+        public Binding withExceptionMappings(
+                final List<JavaCallTarget.ExceptionMapping> mappings) {
+            return new Binding(signature, target, mappings);
         }
     }
 
@@ -123,12 +135,17 @@ public final class FunctionBindingRegistry {
                 "characterCodingExceptionAsIOException",
                 TypeDescriptor.ofName("java.io.IOException"),
                 TypeDescriptor.ofName("java.nio.charset.CharacterCodingException"));
-        final var utf8Decoder = TypeDescriptor.functionOf("utf8Decoder",
-                new NullableDescriptor(new ReferenceDescriptor(
-                        TypeDescriptor.ofName("java.nio.charset.CharsetDecoder"))));
         final var checkedNumericConversion = TypeDescriptor.functionOf("floatToInt",
                 TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), TypeDescriptor.ofInt()),
                 TypeDescriptor.ofFloat());
+        final var bigInteger = new ReferenceDescriptor(TypeDescriptor.ofName("java.math.BigInteger"));
+        final var bigIntegerAdd = TypeDescriptor.functionOf("bigIntegerAdd",
+                bigInteger, bigInteger, bigInteger);
+        final var bigIntegerMultiply = TypeDescriptor.functionOf("bigIntegerMultiply",
+                bigInteger, bigInteger, bigInteger);
+        final var bigIntegerNegate = TypeDescriptor.functionOf("bigIntegerNegate", bigInteger, bigInteger);
+        final var bigIntegerToString = TypeDescriptor.functionOf(
+                "bigIntegerToString", TypeDescriptor.ofString(), bigInteger);
         final var string = TypeDescriptor.ofString().toNullable();
         final var stringSearch = TypeDescriptor.functionOf("stringIndexOf",
                 TypeDescriptor.ofInt(), string, string);
@@ -138,8 +155,6 @@ public final class FunctionBindingRegistry {
                 TypeDescriptor.ofBoolean(), string, string);
         final var stringEndsWith = TypeDescriptor.functionOf("stringEndsWith",
                 TypeDescriptor.ofBoolean(), string, string);
-        final var floatPredicate = TypeDescriptor.functionOf("floatPredicate",
-                TypeDescriptor.ofBoolean(), TypeDescriptor.ofFloat());
         final var stringLength = TypeDescriptor.functionOf("stringLength", TypeDescriptor.ofInt(), string);
         final var stringIsEmpty = TypeDescriptor.functionOf("stringIsEmpty", TypeDescriptor.ofBoolean(), string);
         final var stringSubstring = TypeDescriptor.functionOf("stringSubstring",
@@ -165,7 +180,14 @@ public final class FunctionBindingRegistry {
                 TypeDescriptor.ofChar(), TypeDescriptor.ofInt());
         final var charToString = TypeDescriptor.functionOf("charToString",
                 TypeDescriptor.ofString(), TypeDescriptor.ofChar());
-        final var doubleClass = ClassDesc.of("java.lang.Double");
+        final var stringArray = TypeDescriptor.arrayOf(TypeDescriptor.ofString());
+        final var httpSupport = ClassDesc.of("zeron.runtime.HttpSupport");
+        final var httpString = TypeDescriptor.ofString().toNullable();
+        final var httpNonNullString = TypeDescriptor.ofString();
+        final var httpObject = TypeDescriptor.ofAny().toNullable();
+        final var httpClient = TypeDescriptor.ofAny();
+        final var httpResponse = httpObject;
+        final var httpIOException = TypeDescriptor.ofName("java.io.IOException");
         return new FunctionBindingRegistry(Map.ofEntries(
                 Map.entry("zeron.lang.intToFloat",
                         new Binding(numericConversion, new IntrinsicBinding(IntrinsicId.INT_TO_FLOAT))),
@@ -181,91 +203,33 @@ public final class FunctionBindingRegistry {
                         new Binding(stringGetBytes, new InstanceMethod(ClassDesc.of("java.lang.String"),
                                 "getBytes", MethodTypeDesc.of(ClassDesc.ofDescriptor("[B"),
                                         ClassDesc.of("java.nio.charset.Charset"))))),
-                Map.entry("zeron.io.text.utf8Decoder",
-                        new Binding(utf8Decoder, new StaticFieldInstanceMethod(
-                                ClassDesc.of("java.nio.charset.StandardCharsets"), "UTF_8",
-                                ClassDesc.of("java.nio.charset.Charset"),
-                                ClassDesc.of("java.nio.charset.Charset"), "newDecoder",
-                                MethodTypeDesc.of(ClassDesc.of("java.nio.charset.CharsetDecoder"))))),
                 Map.entry("zeron.io.characterCodingExceptionAsIOException",
                         new Binding(codingExceptionConversion, new IntrinsicBinding(
                                 IntrinsicId.CHARACTER_CODING_EXCEPTION_TO_IO_EXCEPTION))),
                 Map.entry("zeron.lang.floatToInt",
                         new Binding(checkedNumericConversion,
                                 new IntrinsicBinding(IntrinsicId.FLOAT_TO_INT_OPTION))),
-                Map.entry("zeron.lang.floatIsNaN",
-                        new Binding(floatPredicate, new StaticMethod(doubleClass, "isNaN",
-                                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_double)))),
-                Map.entry("zeron.lang.floatIsFinite",
-                        new Binding(floatPredicate, new StaticMethod(doubleClass, "isFinite",
-                                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_double)))),
-                Map.entry("zeron.math.mathAbsInt",
-                        mathBinding("mathAbsInt", "abs", TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
-                Map.entry("zeron.math.mathAbsLong",
-                        mathBinding("mathAbsLong", "abs", TypeDescriptor.ofLong(), TypeDescriptor.ofLong())),
-                Map.entry("zeron.math.mathAbsFloat",
-                        mathBinding("mathAbsFloat", "abs", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathMinInt",
-                        mathBinding("mathMinInt", "min", TypeDescriptor.ofInt(),
-                                TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
-                Map.entry("zeron.math.mathMinLong",
-                        mathBinding("mathMinLong", "min", TypeDescriptor.ofLong(),
-                                TypeDescriptor.ofLong(), TypeDescriptor.ofLong())),
-                Map.entry("zeron.math.mathMinFloat",
-                        mathBinding("mathMinFloat", "min", TypeDescriptor.ofFloat(),
-                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathMaxInt",
-                        mathBinding("mathMaxInt", "max", TypeDescriptor.ofInt(),
-                                TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
-                Map.entry("zeron.math.mathMaxLong",
-                        mathBinding("mathMaxLong", "max", TypeDescriptor.ofLong(),
-                                TypeDescriptor.ofLong(), TypeDescriptor.ofLong())),
-                Map.entry("zeron.math.mathMaxFloat",
-                        mathBinding("mathMaxFloat", "max", TypeDescriptor.ofFloat(),
-                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathClampInt",
-                        mathBinding("mathClampInt", "clamp", TypeDescriptor.ofInt(),
-                                TypeDescriptor.ofLong(), TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
-                Map.entry("zeron.math.mathClampLong",
-                        mathBinding("mathClampLong", "clamp", TypeDescriptor.ofLong(),
-                                TypeDescriptor.ofLong(), TypeDescriptor.ofLong(), TypeDescriptor.ofLong())),
-                Map.entry("zeron.math.mathClampFloat",
-                        mathBinding("mathClampFloat", "clamp", TypeDescriptor.ofFloat(),
-                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatSqrt",
-                        mathBinding("mathFloatSqrt", "sqrt", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatPow",
-                        mathBinding("mathFloatPow", "pow", TypeDescriptor.ofFloat(),
-                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatExp",
-                        mathBinding("mathFloatExp", "exp", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatLn",
-                        mathBinding("mathFloatLn", "log", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatLog10",
-                        mathBinding("mathFloatLog10", "log10", TypeDescriptor.ofFloat(),
-                                TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatSin",
-                        mathBinding("mathFloatSin", "sin", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatCos",
-                        mathBinding("mathFloatCos", "cos", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatTan",
-                        mathBinding("mathFloatTan", "tan", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatAsin",
-                        mathBinding("mathFloatAsin", "asin", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatAcos",
-                        mathBinding("mathFloatAcos", "acos", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatAtan",
-                        mathBinding("mathFloatAtan", "atan", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatAtan2",
-                        mathBinding("mathFloatAtan2", "atan2", TypeDescriptor.ofFloat(),
-                                TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatFloor",
-                        mathBinding("mathFloatFloor", "floor", TypeDescriptor.ofFloat(),
-                                TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatCeil",
-                        mathBinding("mathFloatCeil", "ceil", TypeDescriptor.ofFloat(), TypeDescriptor.ofFloat())),
-                Map.entry("zeron.math.mathFloatRound",
-                        mathBinding("mathFloatRound", "round", TypeDescriptor.ofLong(), TypeDescriptor.ofFloat())),
+                Map.entry("zeron.math.bigIntegerFromLiteralText",
+                        intrinsicBinding(TypeDescriptor.functionOf("bigIntegerFromLiteralText",
+                                bigInteger, TypeDescriptor.ofString()),
+                                IntrinsicId.BIG_INTEGER_FROM_LITERAL_TEXT)),
+                Map.entry("zeron.math.bigIntegerAdd",
+                        new Binding(bigIntegerAdd, new InstanceMethod(ClassDesc.of("java.math.BigInteger"), "add",
+                                MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.math.bigIntegerMultiply",
+                        new Binding(bigIntegerMultiply,
+                                new InstanceMethod(ClassDesc.of("java.math.BigInteger"), "multiply",
+                                        MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                                ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.math.bigIntegerNegate",
+                        new Binding(bigIntegerNegate,
+                                new InstanceMethod(ClassDesc.of("java.math.BigInteger"), "negate",
+                                        MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.math.bigIntegerToString",
+                        new Binding(bigIntegerToString,
+                                new InstanceMethod(ClassDesc.of("java.math.BigInteger"), "toString",
+                                        MethodTypeDesc.of(ConstantDescs.CD_String)))),
                 Map.entry("zeron.lang.stringLength",
                         new Binding(stringLength, new InstanceMethod(stringClass, "length",
                                 MethodTypeDesc.of(ConstantDescs.CD_int)))),
@@ -309,22 +273,81 @@ public final class FunctionBindingRegistry {
                 Map.entry("zeron.lang.intToChar",
                         intrinsicBinding(intToChar, IntrinsicId.INT_TO_CHAR)),
                 Map.entry("zeron.lang.charToString",
-                        intrinsicBinding(charToString, IntrinsicId.CHAR_TO_STRING))));
+                        intrinsicBinding(charToString, IntrinsicId.CHAR_TO_STRING)),
+                Map.entry("zeron.net.httpValidateUri",
+                        httpBinding(httpSupport, "validateUri", TypeDescriptor.ofInt(),
+                                httpString)),
+                Map.entry("zeron.net.httpValidateMethod",
+                        httpBinding(httpSupport, "validateMethod", TypeDescriptor.ofBoolean(),
+                                httpString)),
+                Map.entry("zeron.net.httpValidateHeader",
+                        httpBinding(httpSupport, "validateHeader", TypeDescriptor.ofInt(),
+                                httpString, httpString)),
+                Map.entry("zeron.net.httpValidateResponseHeaderPairs",
+                        httpBinding(httpSupport, "validateResponseHeaderPairs", TypeDescriptor.ofBoolean(),
+                                stringArray)),
+                Map.entry("zeron.net.httpEmptyHeaders",
+                        httpBinding(httpSupport, "emptyHeaders", stringArray)),
+                Map.entry("zeron.net.httpAppendHeader",
+                        httpBinding(httpSupport, "appendHeader", stringArray,
+                                stringArray, httpString, httpString)),
+                Map.entry("zeron.net.httpCopyHeaderPairs",
+                        httpBinding(httpSupport, "copyHeaderPairs", stringArray, stringArray)),
+                Map.entry("zeron.net.httpHeaderValues",
+                        httpBinding(httpSupport, "headerValues", stringArray,
+                                stringArray, httpString)),
+                Map.entry("zeron.net.httpCreateClient",
+                        httpBinding(httpSupport, "createClient", httpClient, TypeDescriptor.ofLong())),
+                Map.entry("zeron.net.httpSend",
+                        httpBinding(httpSupport, "send", httpResponse, httpObject,
+                                httpString, httpString, stringArray,
+                                TypeDescriptor.ofByteArray().toNullable(), TypeDescriptor.ofLong(),
+                                TypeDescriptor.ofLong())),
+                Map.entry("zeron.net.httpSendSucceeded",
+                        httpBinding(httpSupport, "sendSucceeded", TypeDescriptor.ofBoolean(), httpResponse)),
+                Map.entry("zeron.net.httpSendFailureKind",
+                        httpBinding(httpSupport, "sendFailureKind", httpNonNullString, httpResponse)),
+                Map.entry("zeron.net.httpSendFailureMessage",
+                        httpBinding(httpSupport, "sendFailureMessage", httpNonNullString, httpResponse)),
+                Map.entry("zeron.net.httpSendFailureCause",
+                        httpBinding(httpSupport, "sendFailureCause", TypeDescriptor.ofAny().toNullable(),
+                                httpResponse)),
+                Map.entry("zeron.net.httpSendResponse",
+                        httpBinding(httpSupport, "sendResponse", httpResponse, httpResponse)),
+                Map.entry("zeron.net.httpIsResponseHandle",
+                        httpBinding(httpSupport, "isResponseHandle", TypeDescriptor.ofBoolean(), httpResponse)),
+                Map.entry("zeron.net.httpResponseStatus",
+                        httpBinding(httpSupport, "responseStatus", TypeDescriptor.ofInt(), httpResponse)),
+                Map.entry("zeron.net.httpResponseVersion",
+                        httpBinding(httpSupport, "responseVersion", httpNonNullString, httpResponse)),
+                Map.entry("zeron.net.httpResponseHeaders",
+                        httpBinding(httpSupport, "responseHeaders", stringArray, httpResponse)),
+                Map.entry("zeron.net.httpResponseRead",
+                        httpBinding(httpSupport, "responseRead", TypeDescriptor.ofInt(), httpResponse,
+                                new ReferenceDescriptor(TypeDescriptor.ofByteArray()),
+                                TypeDescriptor.ofInt(), TypeDescriptor.ofInt())),
+                Map.entry("zeron.net.httpResponseReadFailure",
+                        httpBinding(httpSupport, "responseReadFailure", httpIOException, httpResponse)),
+                Map.entry("zeron.net.httpResponseDispose",
+                        httpBinding(httpSupport, "responseDispose", httpIOException.toNullable(), httpResponse)),
+                Map.entry("zeron.net.httpClientDispose",
+                        httpBinding(httpSupport, "clientDispose", TypeDescriptor.ofBoolean(), httpObject))));
     }
 
     private static Binding intrinsicBinding(final FunctionDescriptor signature, final IntrinsicId id) {
         return new Binding(signature, new IntrinsicBinding(id));
     }
 
-    private static Binding mathBinding(final String functionName,
+    private static Binding httpBinding(final ClassDesc owner,
                                        final String methodName,
                                        final TypeDescriptor returnType,
                                        final TypeDescriptor... parameterTypes) {
         final var parameterClasses = Arrays.stream(parameterTypes)
                 .map(TypeDescriptor::toJavaClassDesc)
                 .toArray(ClassDesc[]::new);
-        return new Binding(TypeDescriptor.functionOf(functionName, returnType, parameterTypes),
-                new StaticMethod(ClassDesc.of("java.lang.Math"), methodName,
-                        MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(returnType), parameterClasses)));
+        final var signature = TypeDescriptor.functionOf(methodName, returnType, parameterTypes);
+        return new Binding(signature, new StaticMethod(owner, methodName,
+                MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(returnType), parameterClasses)));
     }
+
 }

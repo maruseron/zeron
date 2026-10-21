@@ -1,5 +1,5 @@
 package zeron.lang;
 
-public contract Hashable<T> requires Eq<T> {
+public contract Hashable<T: nullable + mut> requires Eq<T> {
     hash(): Int;
 }

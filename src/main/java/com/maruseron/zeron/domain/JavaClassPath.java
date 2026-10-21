@@ -28,6 +28,7 @@ public final class JavaClassPath {
                              boolean isStatic,
                              boolean isVarArgs,
                              boolean hasGenericSignature,
+                             String genericSignature,
                              boolean isConstructor,
                              List<String> exceptionTypes) {
         public JavaMethod {
@@ -36,16 +37,20 @@ public final class JavaClassPath {
     }
 
     public record JavaField(String name, java.lang.constant.ClassDesc descriptor,
-                            boolean isStatic, boolean isFinal, boolean hasGenericSignature) {}
+                            boolean isStatic, boolean isFinal, boolean hasGenericSignature,
+                            String genericSignature) {}
 
     public record JavaClass(String binaryName,
                             String superclassName,
                             boolean isInterface,
                             boolean isAbstract,
                             boolean hasTypeParameters,
+                            String genericSignature,
+                            List<TypeParameterDescriptor> typeParameters,
                             List<JavaMethod> methods,
                             List<JavaField> fields) {
         public JavaClass {
+            typeParameters = List.copyOf(typeParameters);
             methods = List.copyOf(methods);
             fields = List.copyOf(fields);
         }
@@ -134,6 +139,8 @@ public final class JavaClassPath {
                         method.methodTypeSymbol(), method.flags().has(AccessFlag.STATIC),
                         method.flags().has(AccessFlag.VARARGS),
                         method.findAttribute(Attributes.signature()).isPresent(),
+                        method.findAttribute(Attributes.signature())
+                                .map(attribute -> attribute.signature().stringValue()).orElse(null),
                         method.methodName().equalsString("<init>"),
                         method.findAttribute(Attributes.exceptions())
                                 .map(attribute -> attribute.exceptions().stream()
@@ -145,15 +152,17 @@ public final class JavaClassPath {
                 .filter(field -> field.flags().has(AccessFlag.PUBLIC))
                 .map(field -> new JavaField(field.fieldName().stringValue(), field.fieldTypeSymbol(),
                         field.flags().has(AccessFlag.STATIC), field.flags().has(AccessFlag.FINAL),
-                        field.findAttribute(Attributes.signature()).isPresent()))
+                        field.findAttribute(Attributes.signature()).isPresent(),
+                        field.findAttribute(Attributes.signature())
+                                .map(attribute -> attribute.signature().stringValue()).orElse(null)))
                 .toList();
-        final var hasTypeParameters = model.findAttribute(Attributes.signature())
-                .map(signature -> signature.signature().stringValue().startsWith("<"))
-                .orElse(false);
+        final var genericSignature = model.findAttribute(Attributes.signature())
+                .map(attribute -> attribute.signature().stringValue()).orElse(null);
+        final var typeParameters = JavaGenericSignatureParser.parseClassTypeParameters(genericSignature);
         return new JavaClass(binaryName,
                 model.superclass().map(entry -> entry.asInternalName().replace('/', '.')).orElse(null),
                 flags.has(AccessFlag.INTERFACE),
-                flags.has(AccessFlag.ABSTRACT), hasTypeParameters,
+                flags.has(AccessFlag.ABSTRACT), !typeParameters.isEmpty(), genericSignature, typeParameters,
                 methods, fields);
     }
 

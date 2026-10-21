@@ -80,15 +80,22 @@ public final class ProjectAnalysisWorkspace {
         }
     }
 
-    private final ProjectManifest project;
     private final List<Path> roots;
     private final List<com.maruseron.zeron.domain.ZeronLibraryIndex> libraries;
+    private final Optional<Path> entry;
+    private final boolean bundleStandardLibrarySources;
+    private final List<Path> javaClassPathRoots;
 
-    private ProjectAnalysisWorkspace(final ProjectManifest project,
-                                     final List<com.maruseron.zeron.domain.ZeronLibraryIndex> libraries) {
-        this.project = project;
-        roots = project.sourceRoots().stream().map(path -> path.toAbsolutePath().normalize()).toList();
+    private ProjectAnalysisWorkspace(final List<Path> sourceRoots,
+                                     final Optional<Path> entry,
+                                     final boolean bundleStandardLibrarySources,
+                                     final List<com.maruseron.zeron.domain.ZeronLibraryIndex> libraries,
+                                     final List<Path> javaClassPathRoots) {
+        roots = sourceRoots.stream().map(path -> path.toAbsolutePath().normalize()).toList();
         this.libraries = List.copyOf(libraries);
+        this.entry = entry;
+        this.bundleStandardLibrarySources = bundleStandardLibrarySources;
+        this.javaClassPathRoots = List.copyOf(javaClassPathRoots);
     }
 
     public static ProjectAnalysisWorkspace open(final Path manifest) throws IOException {
@@ -101,7 +108,19 @@ public final class ProjectAnalysisWorkspace {
         final var libraries = Zeron.loadLibraries(project.libraryRoots());
         Zeron.validateJavaClassPathRoots(project.javaClassPathRoots());
         Zeron.validateStandardLibraryMode(libraries, project.bundleStandardLibrarySources());
-        return new ProjectAnalysisWorkspace(project, libraries);
+        return new ProjectAnalysisWorkspace(project.sourceRoots(), Optional.of(project.entry()),
+                project.bundleStandardLibrarySources(), libraries, project.javaClassPathRoots());
+    }
+
+    public static ProjectAnalysisWorkspace openSourceWorkspace(final Path workspaceRoot) {
+        final var root = workspaceRoot.toAbsolutePath().normalize();
+        if (!Files.isDirectory(root)) {
+            throw new IllegalArgumentException("Language-server workspace is not a directory: " + root);
+        }
+        final var standardLibraryRoot = standardLibrarySourceRoot(root);
+        final var sourceRoot = standardLibraryRoot.orElse(root);
+        return new ProjectAnalysisWorkspace(List.of(sourceRoot), Optional.empty(),
+                standardLibraryRoot.isEmpty(), List.of(), List.of());
     }
 
     public List<Path> sourceRoots() {
@@ -134,15 +153,15 @@ public final class ProjectAnalysisWorkspace {
             }
         }
         paths.addAll(normalizedOverlays.keySet());
-        final var entry = absoluteEntry();
-        if (!paths.contains(entry)) {
+        final var entryPath = entry.map(this::absoluteEntry).orElse(null);
+        if (entryPath != null && !paths.contains(entryPath)) {
             throw new IllegalArgumentException("Project entry source was not found under its configured roots: "
-                    + project.entry());
+                    + entry.orElseThrow());
         }
 
         final var orderedPaths = new ArrayList<Path>();
-        orderedPaths.add(entry);
-        paths.stream().filter(path -> !path.equals(entry)).forEach(orderedPaths::add);
+        if (entryPath != null) orderedPaths.add(entryPath);
+        paths.stream().filter(path -> !path.equals(entryPath)).forEach(orderedPaths::add);
 
         final var units = new ArrayList<CompilationUnit>();
         final var unassociatedDiagnostics = new ArrayList<Diagnostic>();
@@ -194,19 +213,20 @@ public final class ProjectAnalysisWorkspace {
             }
         }
 
-        final var entryUnit = units.stream()
-                .filter(unit -> Objects.equals(unit.sourcePath(), filesByCompilerPath.entrySet().stream()
-                        .filter(item -> item.getValue().equals(entry))
-                        .map(Map.Entry::getKey).findFirst().orElse(null)))
-                .findFirst()
-                .orElse(null);
-        if (entryUnit == null) {
+        final var entryCompilerPath = entryPath == null ? null : filesByCompilerPath.entrySet().stream()
+                .filter(item -> item.getValue().equals(entryPath))
+                .map(Map.Entry::getKey).findFirst().orElse(null);
+        final var analysisUnit = entryCompilerPath == null
+                ? units.stream().findFirst().orElse(null)
+                : units.stream().filter(unit -> Objects.equals(unit.sourcePath(), entryCompilerPath))
+                        .findFirst().orElse(null);
+        if (analysisUnit == null) {
             return new Snapshot(diagnostics, tokenLists, sourceText, filesByCompilerPath,
                     units, unassociatedDiagnostics, Optional.empty(), Optional.empty());
         }
 
         final List<CompilationUnit> compilerUnits;
-        if (project.bundleStandardLibrarySources()) {
+        if (bundleStandardLibrarySources) {
             final var bundled = StandardLibrary.withBundledUnitsWithDiagnostics(units);
             compilerUnits = bundled.units();
             unassociatedDiagnostics.addAll(bundled.diagnostics());
@@ -214,8 +234,8 @@ public final class ProjectAnalysisWorkspace {
             compilerUnits = List.copyOf(units);
         }
         final var compiler = CompilationService.forCompilationUnits(
-                compilerUnits, "ZeronLanguageServer", entryUnit.packageName(), libraries,
-                false, project.javaClassPathRoots());
+                compilerUnits, "ZeronLanguageServer", analysisUnit.packageName(), libraries,
+                false, javaClassPathRoots);
         checkCancellation();
         final var resolution = compiler.resolveWithDiagnostics();
         checkCancellation();
@@ -236,9 +256,23 @@ public final class ProjectAnalysisWorkspace {
         }
     }
 
-    private Path absoluteEntry() {
-        final var entry = project.entry();
+    private Path absoluteEntry(final Path entry) {
         return entry.isAbsolute() ? entry.normalize() : roots.getFirst().resolve(entry).normalize();
+    }
+
+    private static Optional<Path> standardLibrarySourceRoot(final Path workspaceRoot) {
+        final var nestedStandardLibrary = workspaceRoot.resolve(
+                Path.of("src", "main", "resources", "stdlib"));
+        if (isStandardLibrarySourceRoot(nestedStandardLibrary)) {
+            return Optional.of(nestedStandardLibrary);
+        }
+        return isStandardLibrarySourceRoot(workspaceRoot)
+                ? Optional.of(workspaceRoot)
+                : Optional.empty();
+    }
+
+    private static boolean isStandardLibrarySourceRoot(final Path root) {
+        return Files.isDirectory(root.resolve(Path.of("zeron", "lang")));
     }
 
     private boolean isInSourceRoots(final Path path) {

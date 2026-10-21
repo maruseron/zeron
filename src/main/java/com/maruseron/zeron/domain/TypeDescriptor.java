@@ -11,7 +11,8 @@ public sealed interface TypeDescriptor
             AnyDescriptor, NominalDescriptor, FunctionDescriptor, GenericDescriptor, ArrayDescriptor,
                 ByteArrayDescriptor,
                 NullableDescriptor, NullDescriptor, ReferenceDescriptor,
-                TypeParameterDescriptor, AppliedConstructorDescriptor, TypeConstructorDescriptor {
+                TypeParameterDescriptor, AppliedConstructorDescriptor, TypeConstructorDescriptor,
+                TypeProjectionDescriptor, CapturedTypeDescriptor {
 
     // Contract
     String name();
@@ -155,6 +156,13 @@ public sealed interface TypeDescriptor
         return new FunctionDescriptor(name, returnType, parameterTypes, typeParameters, raisedEffects);
     }
 
+    static FunctionDescriptor handlerOf(final TypeDescriptor returnType,
+                                        final List<TypeDescriptor> handledEffects,
+                                        final List<TypeDescriptor> raisedEffects) {
+        return new FunctionDescriptor("", returnType, List.of(ofAny()), List.of(),
+                raisedEffects, handledEffects).asHandler();
+    }
+
     static FunctionDescriptor lambdaOf(final TypeDescriptor returnType,
                                        final TypeDescriptor parameterType) {
         return functionOf("", returnType, parameterType == null
@@ -182,7 +190,8 @@ public sealed interface TypeDescriptor
             case AppliedConstructorDescriptor _ -> ConstantDescs.CD_Object;
             case TypeConstructorDescriptor _ -> ConstantDescs.CD_Object;
             case FunctionDescriptor     fd -> ClassDesc.of(FunctionShapeNames.interfaceName(
-                    (FunctionDescriptor) TypeSubstitution.erase(fd)));
+                    fd.isHandler() ? functionOf("", fd.returnType(), ofAny())
+                            : (FunctionDescriptor) TypeSubstitution.erase(fd)));
             case ArrayDescriptor         _ -> ConstantDescs.CD_Object.arrayType();
             case ByteArrayDescriptor     _ -> ClassDesc.ofDescriptor("[B");
             case ReferenceDescriptor    rd -> toJavaClassDesc(rd.baseType());
@@ -199,6 +208,8 @@ public sealed interface TypeDescriptor
             };
             case NullDescriptor _ -> ConstantDescs.CD_Object;
             case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
+            case TypeProjectionDescriptor projection -> toJavaClassDesc(projection.bound());
+            case CapturedTypeDescriptor capture -> toJavaClassDesc(capture.upperBound());
         };
     }
 
@@ -237,6 +248,8 @@ public sealed interface TypeDescriptor
             case NullableDescriptor     nd -> toJavaClassDesc(nd);
             case NullDescriptor          _ -> ConstantDescs.CD_Object;
             case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
+            case TypeProjectionDescriptor projection -> toJavaWrapper(projection.bound());
+            case CapturedTypeDescriptor capture -> toJavaWrapper(capture.upperBound());
         };
     }
 }

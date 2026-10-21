@@ -26,6 +26,14 @@ final class CliParser {
     private static ParseResult parseInvocation(final String... args) {
         if (args.length > 0) {
             switch (args[0]) {
+                case "version" -> {
+                    if (args.length != 1) return invalid("Usage: zeron version");
+                    return parsed(new Version());
+                }
+                case "--version" -> {
+                    if (args.length != 1) return invalid("Usage: zeron --version");
+                    return parsed(new Version());
+                }
                 case "init" -> {
                     if (args.length != 1) return invalid("Usage: zeron init");
                     return parsed(new Initialize());
@@ -59,6 +67,17 @@ final class CliParser {
                     return parsed(new Help(topic));
                 }
                 case "dump" -> {
+                    if (args.length >= 2 && args[1].equals("--stdlib")) {
+                        if (args.length > 3) {
+                            return invalid("Usage: zeron dump --stdlib [package]");
+                        }
+                        final var packageName = args.length == 3 ? args[2] : null;
+                        if (packageName != null
+                                && !packageName.matches("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*")) {
+                            return invalid("Standard-library package must be a dot-separated package name.");
+                        }
+                        return parsed(new DumpStandardLibrary(Optional.ofNullable(packageName)));
+                    }
                     if (args.length != 2) {
                         return invalid("Usage: zeron dump <api-index|class-directory|library.jar>");
                     }
@@ -130,19 +149,30 @@ final class CliParser {
         final var projectArguments = new ArrayList<String>();
         projectArguments.add("build");
         var stdioSpecified = false;
+        var manifestSpecified = false;
         for (var index = 1; index < args.length; index++) {
             if (args[index].equals("--stdio")) {
                 if (stdioSpecified) return invalid("The lsp --stdio option may only be specified once.");
                 stdioSpecified = true;
             } else {
+                if (args[index].equals("--manifest")) manifestSpecified = true;
                 projectArguments.add(args[index]);
             }
+        }
+        if (!manifestSpecified && !Files.exists(Path.of("zeron.toml"))) {
+            for (var index = 1; index < args.length; index++) {
+                if (!args[index].equals("--stdio") && !args[index].equals("--debug")
+                        && !args[index].equals("-d")) {
+                    return invalid("Unknown build option: " + args[index]);
+                }
+            }
+            return parsed(new LspCommand(Optional.empty()));
         }
         final var projectArgs = projectArguments.toArray(String[]::new);
         final var result = parseProjectCommand(projectArgs);
         if (result instanceof InvalidArguments invalidArguments) return invalidArguments;
         final var project = (ProjectCommand) ((Parsed) result).invocation();
-        return parsed(new LspCommand(project.manifest(), project.project()));
+        return parsed(new LspCommand(Optional.of(project.manifest())));
     }
 
     private static Optional<String> projectPathError(final ProjectManifest project) {
@@ -449,9 +479,14 @@ final class CliParser {
 
     record InvalidArguments(String message) implements ParseResult {}
 
-    sealed interface Invocation permits Initialize, ProjectCommand, LspCommand, Explain, Help, Dump,
-            BuildStandardLibrary, Repl, Compile, Format {
+    sealed interface Invocation permits Version, Initialize, ProjectCommand, LspCommand, Explain, Help, Dump,
+            DumpStandardLibrary, BuildStandardLibrary, Repl, Compile, Format {
         boolean debug();
+    }
+
+    record Version() implements Invocation {
+        @Override
+        public boolean debug() { return false; }
     }
 
     record Initialize() implements Invocation {
@@ -462,7 +497,7 @@ final class CliParser {
     record ProjectCommand(boolean launch, Path manifest, boolean debug, ProjectManifest project)
             implements Invocation {}
 
-    record LspCommand(Path manifest, ProjectManifest project) implements Invocation {
+    record LspCommand(Optional<Path> manifest) implements Invocation {
         @Override
         public boolean debug() { return false; }
     }
@@ -478,6 +513,11 @@ final class CliParser {
     }
 
     record Dump(Path source) implements Invocation {
+        @Override
+        public boolean debug() { return false; }
+    }
+
+    record DumpStandardLibrary(Optional<String> packageName) implements Invocation {
         @Override
         public boolean debug() { return false; }
     }

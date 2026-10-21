@@ -18,10 +18,192 @@ final class ExpressionFlowResolver {
         new LambdaCaptureValidator(context.symbols).validate(lambda);
     }
 
+    private record ResolvedAlgebraicOperator(TypeDescriptor type, Expr.MemberCall call) {}
+
+    private static ResolvedAlgebraicOperator resolveAlgebraicOperator(
+            final ResolutionContext context, final Expr receiver, final TypeDescriptor receiverType,
+            final String contractName, final String methodName, final List<Expr> arguments,
+            final Token operator) {
+        final var targetType = operatorTargetType(receiverType);
+        if (receiverType.isNullable() || receiverType instanceof NullDescriptor) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
+                    operator, "Nullable operands require a null check before using this operator."));
+        }
+        final var requiredContract = operatorContractType(context, contractName, targetType, operator);
+        if (!TypeClassEvidence.hasEvidence(context, requiredContract, targetType, operator)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    operator, "Operator '" + operator.lexeme() + "' requires "
+                            + TypeFormatter.format(requiredContract) + " evidence."));
+        }
+        final var name = new Token(TokenType.IDENTIFIER, methodName, null, operator.span());
+        final var call = new Expr.MemberCall(receiver, name, operator, arguments, List.of(),
+                TypeDescriptor.ofInfer());
+        call.setRequiredContractType(requiredContract);
+        final var resolved = MemberInteropResolver.resolveOperatorContractCall(
+                context, call, receiverType, requiredContract);
+        if (resolved == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    operator, "No method witness satisfies bound '"
+                            + TypeFormatter.format(requiredContract) + "'."));
+        }
+        ensureExact(context, operator, targetType, resolved);
+        RaisedEffectFlow.add(context,
+                new LinkedHashSet<>(call.resolvedDescriptor().raisedEffects()), operator);
+        return new ResolvedAlgebraicOperator(targetType, call);
+    }
+
+    private static ResolvedAlgebraicOperator resolveAlgebraicBinary(
+            final ResolutionContext context, final Expr.Binary binary, final TypeDescriptor receiverType) {
+        final var operator = switch (binary.operator.type()) {
+            case PLUS -> new AlgebraicOperator("zeron.algebra.Add", "add");
+            case STAR -> new AlgebraicOperator("zeron.algebra.Mult", "multiply");
+            default -> throw new IllegalArgumentException("Unsupported algebraic binary operator.");
+        };
+        return resolveAlgebraicOperator(context, binary.left, receiverType,
+                operator.contractName(), operator.methodName(), List.of(binary.right), binary.operator);
+    }
+
+    private static ResolvedAlgebraicOperator resolveAlgebraicSubtraction(
+            final ResolutionContext context, final Expr.Binary binary, final TypeDescriptor receiverType) {
+        final var targetType = operatorTargetType(receiverType);
+        final var additionContract = operatorContractType(
+                context, "zeron.algebra.Addition", targetType, binary.operator);
+        final var addition = new Token(TokenType.IDENTIFIER, "negate", null, binary.operator.span());
+        final var negatedRight = new Expr.MemberCall(binary.right, addition, binary.operator,
+                List.of(), List.of(), TypeDescriptor.ofInfer());
+        negatedRight.setRequiredContractType(additionContract);
+        return resolveAlgebraicOperator(context, binary.left, receiverType,
+                "zeron.algebra.Add", "add", List.of(negatedRight), binary.operator);
+    }
+
+    private record AlgebraicOperator(String contractName, String methodName) {}
+
+    private static TypeDescriptor operatorContractType(
+            final ResolutionContext context, final String contractName,
+            final TypeDescriptor targetType, final Token operator) {
+        final var contract = context.contracts.get(contractName);
+        if (contract == null || contract.typeParameters().size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    operator, "The standard " + contractName + "<T> contract is not available."));
+        }
+        return TypeDescriptor.genericOf(TypeDescriptor.ofName(contract.name().lexeme()), targetType);
+    }
+
+    private static TypeDescriptor operatorTargetType(final TypeDescriptor type) {
+        return type instanceof ReferenceDescriptor reference ? reference.baseType() : type;
+    }
+
+    private static boolean isBuiltInArithmeticType(final TypeDescriptor type) {
+        final var baseType = type instanceof ReferenceDescriptor reference
+                ? reference.baseType() : type;
+        return baseType instanceof IntDescriptor || baseType instanceof LongDescriptor
+                || baseType instanceof FloatDescriptor;
+    }
+
+    private static boolean isAlgebraicOperator(final TokenType operator) {
+        return operator == TokenType.PLUS || operator == TokenType.MINUS || operator == TokenType.STAR;
+    }
+
+    private static TypeDescriptor resolveSuffixedLiteral(
+            final ResolutionContext context, final Expr.SuffixedLiteral literal) {
+        final var imported = context.currentImports.literalSuffixes().get(literal.suffix().lexeme());
+        if (imported == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_NUMERIC_LITERAL,
+                    literal.suffix(), "Unknown or unimported numeric literal suffix '"
+                            + literal.suffix().lexeme() + "'."));
+        }
+        final var owner = context.classes.get(imported.ownerName());
+        final var suffix = owner == null ? null : owner.literalSuffixes().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(imported.suffixName()))
+                .findFirst().orElse(null);
+        if (suffix == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_NUMERIC_LITERAL,
+                    literal.suffix(), "The imported numeric literal suffix is unavailable."));
+        }
+        final var category = literal.info().kind() == com.maruseron.zeron.scan.SuffixableNumber.Kind.INTEGER
+                ? Stmt.LiteralSuffixCategory.INTEGER
+                : Stmt.LiteralSuffixCategory.DECIMAL;
+        final var mapping = suffix.factories().stream()
+                .filter(factory -> factory.category() == category)
+                .findFirst().orElse(null);
+        if (mapping == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_NUMERIC_LITERAL,
+                    literal.suffix(), "Suffix '" + literal.suffix().lexeme()
+                            + "' does not accept this numeric literal category."));
+        }
+        if (!owner.typeParameters().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_NUMERIC_LITERAL,
+                    literal.suffix(), "Numeric literal suffixes on generic classes are not supported."));
+        }
+        final var constructor = owner.namedConstructors().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(mapping.constructorName().lexeme()))
+                .findFirst().orElse(null);
+        if (constructor == null || constructor.typeDescriptor().parameters().size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    mapping.constructorName(), "A numeric literal suffix factory must be a unary named constructor."));
+        }
+        final var parameterType = constructor.typeDescriptor().parameters().getFirst();
+        final Expr argument;
+        if (mapping.stringInput()) {
+            if (!(parameterType instanceof StringDescriptor)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        mapping.constructorName(), "A string suffix factory must accept String."));
+            }
+            argument = new Expr.Literal(literal.number().lexeme(), TypeDescriptor.ofString());
+        } else if (category == Stmt.LiteralSuffixCategory.INTEGER) {
+            final var integer = integerValue(literal);
+            if (parameterType instanceof IntDescriptor) {
+                if (integer.compareTo(java.math.BigInteger.valueOf(Integer.MIN_VALUE)) < 0
+                        || integer.compareTo(java.math.BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                            literal.number(), "Integer literal is outside the suffix factory's Int range."));
+                }
+                argument = new Expr.Literal(integer.intValue(), TypeDescriptor.ofInt());
+            } else if (parameterType instanceof LongDescriptor) {
+                if (integer.compareTo(java.math.BigInteger.valueOf(Long.MIN_VALUE)) < 0
+                        || integer.compareTo(java.math.BigInteger.valueOf(Long.MAX_VALUE)) > 0) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                            literal.number(), "Integer literal is outside the suffix factory's Long range."));
+                }
+                argument = new Expr.Literal(integer.longValue(), TypeDescriptor.ofLong());
+            } else {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        mapping.constructorName(), "An integer suffix factory must accept Int, Long, or String."));
+                throw new IllegalStateException("Unreachable");
+            }
+        } else {
+            if (!(parameterType instanceof FloatDescriptor)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        mapping.constructorName(), "A decimal suffix factory must accept Float or String."));
+            }
+            argument = new Expr.Literal(Double.parseDouble(literal.number().lexeme().replace("_", "")),
+                    TypeDescriptor.ofFloat());
+        }
+
+        final var classToken = new Token(TokenType.IDENTIFIER, imported.ownerName(), null, literal.number().span());
+        final var receiver = new Expr.Variable(classToken, TypeDescriptor.ofInfer());
+        final var call = new Expr.MemberCall(receiver, mapping.constructorName(), literal.suffix(),
+                List.of(argument), List.of(), TypeDescriptor.ofInfer());
+        final var resultType = MemberInteropResolver.resolveMemberCall(context, call);
+        literal.setFactoryCall(call);
+        literal.setType(resultType);
+        context.recordReference(literal.suffix(), suffix.name(), resultType);
+        return resultType;
+    }
+
+    private static java.math.BigInteger integerValue(final Expr.SuffixedLiteral literal) {
+        var digits = literal.number().lexeme().replace("_", "");
+        if (literal.info().radix() != 10) digits = digits.substring(2);
+        return new java.math.BigInteger(digits, literal.info().radix());
+    }
+
     private static TypeDescriptor resolve(final ResolutionContext context, Expr expr) {
         return switch (expr) {
             case Expr.MemberCall call -> {
-                final var resolved = MemberInteropResolver.resolveMemberCall(context, call);
+                final var resolved = call.requiredContractType() == null
+                        ? MemberInteropResolver.resolveMemberCall(context, call)
+                        : MemberInteropResolver.resolveOperatorContractCall(context, call,
+                                resolve(context, call.receiver), call.requiredContractType());
                 final var descriptor = call.resolvedDescriptor();
                 if (descriptor != null) {
                     final var parameters = call.resolvedExtensionMethod() != null
@@ -56,6 +238,11 @@ final class ExpressionFlowResolver {
                 }
                 final var javaFieldTarget = assignment.property.javaFieldTarget();
                 if (javaFieldTarget != null) {
+                    if (javaFieldTarget.descriptor().equals("F")) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
+                                assignment.property.name,
+                                "Java float field writes would narrow Zeron Float values."));
+                    }
                     if (javaFieldTarget.isStatic()) {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                                 assignment.property.name, "Static Java field writes are not supported."));
@@ -99,7 +286,8 @@ final class ExpressionFlowResolver {
                                 assignment.property.name,
                                 "Property is read-only."));
                     }
-                    expectedType = assignment.property.getType();
+                    expectedType = MemberInteropResolver.resolvedPropertyType(
+                            context, ownerName, propertyDeclaration, receiverType);
                 } else {
                     final var field = MemberInteropResolver.findField(
                             context, ownerName, assignment.property.name);
@@ -107,11 +295,15 @@ final class ExpressionFlowResolver {
                             : TypeSubstitution.substitute(field.type(),
                                     TypeResolver.substitutionsFor(context, owner.typeParameters(), receiverType));
                 }
+                final var assignedType = MemberInteropResolver.resolveArgument(
+                        context, assignment.value, expectedType);
                 ensureAssignable(context, expectedType,
-                    MemberInteropResolver.resolveArgument(context, assignment.value, expectedType),
+                    assignedType,
                     assignment.property.name);
-                assignment.setType(expectedType);
-                yield expectedType;
+                final var resultType = TypeSubstitution.containsCapture(expectedType)
+                        ? assignedType : expectedType;
+                assignment.setType(resultType);
+                yield resultType;
             }
             case Expr.PropertyCompoundAssignment assignment -> {
                 MemberInteropResolver.resolveProperty(context, assignment.property);
@@ -121,6 +313,11 @@ final class ExpressionFlowResolver {
                 }
                 final var javaFieldTarget = assignment.property.javaFieldTarget();
                 if (javaFieldTarget != null) {
+                    if (javaFieldTarget.descriptor().equals("F")) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
+                                assignment.property.name,
+                                "Java float field writes would narrow Zeron Float values."));
+                    }
                     if (javaFieldTarget.isStatic() || javaFieldTarget.isFinal()) {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                                 assignment.property.name,
@@ -161,6 +358,13 @@ final class ExpressionFlowResolver {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                             assignment.property.name,
                             "Compound assignment requires a writable property."));
+                }
+                final var writeType = MemberInteropResolver.resolvedPropertyType(
+                        context, ownerName, property, receiverType);
+                if (TypeSubstitution.containsCapture(writeType)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
+                            assignment.property.name,
+                            "Compound assignment is unavailable through a projected generic property."));
                 }
                 final var operation = new Expr.Binary(assignment.property,
                         assignment.operator, assignment.value, TypeDescriptor.ofInfer());
@@ -330,6 +534,27 @@ final class ExpressionFlowResolver {
                     yield TypeDescriptor.ofBoolean();
                 }
                 final var leftType = resolve(context, binary.left);
+                if (binary.operator.type() == TokenType.PLUS
+                        && leftType instanceof StringDescriptor) {
+                    final var rightType = resolve(context, binary.right);
+                    final var refinedRightType = LambdaResolver.refineInferredType(
+                            context, binary.right, rightType, leftType);
+                    final var stringType = resolveStringConcatenation(context, binary, refinedRightType);
+                    binary.setType(stringType);
+                    yield stringType;
+                }
+                if (isAlgebraicOperator(binary.operator.type())
+                        && !isBuiltInArithmeticType(leftType)
+                        && !(leftType instanceof InferDescriptor)) {
+                    final var resultType = binary.operator.type() == TokenType.MINUS
+                            ? resolveAlgebraicSubtraction(context, binary, leftType)
+                            : resolveAlgebraicBinary(context, binary, leftType);
+                    final var call = (Expr.MemberCall) resultType.call();
+                    ensureExact(context, binary.operator, leftType, binary.right.getType());
+                    binary.setOperatorCall(call);
+                    binary.setType(resultType.type());
+                    yield resultType.type();
+                }
                 final var rightType = resolve(context, binary.right);
                 final var refinedLeftType = LambdaResolver.refineInferredType(
                         context, binary.left, leftType, rightType);
@@ -337,12 +562,6 @@ final class ExpressionFlowResolver {
                         context, binary.right, rightType, leftType);
                 Zeron.debug("resolving binary   " + refinedLeftType + " "
                     + binary.operator.lexeme() + " " + refinedRightType);
-                if (binary.operator.type() == TokenType.PLUS
-                        && refinedLeftType instanceof StringDescriptor) {
-                    final var stringType = resolveStringConcatenation(context, binary, refinedRightType);
-                    binary.setType(stringType);
-                    yield stringType;
-                }
                 final var equalityOperator = binary.operator.type() == TokenType.EQUAL_EQUAL
                         || binary.operator.type() == TokenType.BANG_EQUAL;
                 if (!equalityOperator && !isRelationalOperator(binary.operator.type())
@@ -420,8 +639,11 @@ final class ExpressionFlowResolver {
             case Expr.Call call -> {
                 final var resolved = context.callResolver.resolve(call);
                 if (call.genericFunctionType() != null) {
+                    final var specialized = call.specializedFunctionType();
                     RaisedEffectFlow.add(context,
-                            new LinkedHashSet<>(call.genericFunctionType().raisedEffects()), call.callee);
+                            new LinkedHashSet<>(specialized == null
+                                    ? call.genericFunctionType().raisedEffects() : specialized.raisedEffects()),
+                            call.callee);
                 }
                 if (call.implicitMemberCall() != null
                         && call.implicitMemberCall().resolvedDescriptor() != null) {
@@ -469,6 +691,8 @@ final class ExpressionFlowResolver {
                 yield TypeDescriptor.ofNever();
             }
             case Expr.Handle handle -> resolveHandle(context, handle);
+            case Expr.HandlerLiteral handler -> resolveHandlerLiteral(context, handler);
+            case Expr.HandlerDispatch dispatch -> dispatch.getType();
             case Expr.Coalesce coalesce -> {
                 final var leftType = resolve(context, coalesce.left);
                 final var afterLeft = context.frame.flowState.copy();
@@ -532,12 +756,13 @@ final class ExpressionFlowResolver {
             case Expr.AnonymousObject object -> resolveAnonymousObject(context, object);
             case Expr.Literal literal ->
                     literal.getType();
+            case Expr.SuffixedLiteral literal -> resolveSuffixedLiteral(context, literal);
             case Expr.TypeTest test -> {
                 yield resolveTypeTest(context, test);
             }
             case Expr.Cast cast -> {
                 final var sourceType = resolve(context, cast.value);
-                validateRuntimeTestTarget(context, cast.targetType, cast.operator);
+                validateRuntimeTestTarget(context, cast.targetType, sourceType, cast.operator, cast.safe);
                 if (!context.typeCompatibility.canTypeTest(sourceType, cast.targetType)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                             cast.operator,
@@ -568,6 +793,14 @@ final class ExpressionFlowResolver {
             }
             case Expr.Unary unary -> {
                 final var operandType = resolve(context, unary.right);
+                if (unary.operator.type() == TokenType.MINUS
+                        && !isBuiltInArithmeticType(operandType)) {
+                    final var resultType = resolveAlgebraicOperator(context, unary.right, operandType,
+                            "zeron.algebra.Addition", "negate", List.of(), unary.operator);
+                    unary.setOperatorCall((Expr.MemberCall) resultType.call());
+                    unary.setType(resultType.type());
+                    yield resultType.type();
+                }
                 if (TypeSubstitution.containsTypeParameter(operandType)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                             unary.operator,
@@ -726,17 +959,6 @@ final class ExpressionFlowResolver {
         }
 
         if (!object.declarationResolved()) {
-            for (final var contractUse : object.contracts()) {
-                for (final var applied : ContractComposition.closure(context, contractUse)) {
-                    if (!applied.declaration().namedConstructors().isEmpty()) {
-                        Zeron.resolutionError(new ResolutionError(
-                                DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                                object.keyword(),
-                                "Anonymous objects cannot implement contracts whose requirements include "
-                                        + "named contract constructors."));
-                    }
-                }
-            }
             DeclarationResolver.resolveClass(context, object.declaration());
             object.markDeclarationResolved();
         }
@@ -927,6 +1149,7 @@ final class ExpressionFlowResolver {
     }
 
     private static TypeDescriptor resolveHandle(final ResolutionContext context, final Expr.Handle handle) {
+        if (handle.handler != null) return resolveHandlerApplication(context, handle);
         final var enclosingEffects = RaisedEffectFlow.beginHandledExpression(context);
         TypeDescriptor protectedType;
         final var fullyHandledEffects = new LinkedHashSet<TypeDescriptor>();
@@ -934,6 +1157,11 @@ final class ExpressionFlowResolver {
         try {
             protectedType = resolve(context, handle.expression);
             for (final var arm : handle.arms) {
+                if (arm.effectType() instanceof TypeParameterDescriptor) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, arm.keyword(),
+                            "A handler case must name a concrete effect type."));
+                }
                 final var effect = TypeResolver.requireEffectType(context, arm.effectType(), arm.keyword());
                 arm.setResolvedEffectType(effect);
                 final var pattern = resolveMatchPattern(context, arm.pattern(), effect, false,
@@ -987,6 +1215,98 @@ final class ExpressionFlowResolver {
         return resultType;
     }
 
+    private static TypeDescriptor resolveHandlerLiteral(final ResolutionContext context,
+                                                        final Expr.HandlerLiteral handler) {
+        final var enclosingEffects = context.frame.raisedEffects;
+        context.frame.raisedEffects = new LinkedHashSet<>();
+        final var initialFlow = context.frame.flowState.copy();
+        final var fullyHandledEffects = new LinkedHashSet<TypeDescriptor>();
+        final var armPatterns = new ArrayList<MatchPatternResolution>();
+        TypeDescriptor resultType = null;
+        try {
+            for (final var arm : handler.arms) {
+                if (arm.effectType() instanceof TypeParameterDescriptor) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, arm.keyword(),
+                            "A handler case must name a concrete effect type."));
+                }
+                final var effect = TypeResolver.requireEffectType(context, arm.effectType(), arm.keyword());
+                arm.setResolvedEffectType(effect);
+                final var pattern = resolveMatchPattern(context, arm.pattern(), effect, false,
+                        Set.of(), List.of(), MatchRootKind.SEALED);
+                armPatterns.add(pattern);
+                if (arm.guard() == null && pattern.irrefutable()) fullyHandledEffects.add(effect);
+            }
+            for (int index = 0; index < handler.arms.size(); index++) {
+                final var arm = handler.arms.get(index);
+                final var pattern = armPatterns.get(index);
+                context.frame.flowState = initialFlow.copy();
+                context.symbols.beginScope();
+                try {
+                    for (final var binding : pattern.bindings().values()) {
+                        context.symbols.declareSymbol(SYNTHETIC_VAR, binding.name(),
+                                binding.type(), BindingMutability.IMMUTABLE);
+                        context.symbols.define(binding.name());
+                    }
+                    if (arm.suppressedBinding() != null) {
+                        final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());
+                        context.symbols.declareSymbol(SYNTHETIC_VAR, arm.suppressedBinding(),
+                                suppressedType, BindingMutability.IMMUTABLE);
+                        context.symbols.define(arm.suppressedBinding());
+                    }
+                    if (arm.guard() != null) {
+                        final var guardType = resolve(context, arm.guard());
+                        ensureAssignable(context, TypeDescriptor.ofBoolean(), guardType, arm.keyword());
+                    }
+                    final var armType = resolve(context, arm.expression());
+                    if (!(armType instanceof NeverDescriptor)) {
+                        resultType = resultType == null ? armType
+                                : ensureExact(context, arm.keyword(), resultType, armType);
+                    }
+                } finally {
+                    context.symbols.endScope();
+                }
+            }
+            if (resultType == null) resultType = TypeDescriptor.ofNever();
+            final var dispatch = (Expr.HandlerDispatch)
+                    ((Stmt.Return) handler.implementation.body.getFirst()).value();
+            dispatch.setType(resultType);
+            final var shape = TypeDescriptor.handlerOf(resultType, List.copyOf(fullyHandledEffects),
+                    List.copyOf(context.frame.raisedEffects));
+            handler.setType(shape);
+            return shape;
+        } finally {
+            context.frame.flowState = initialFlow;
+            context.frame.raisedEffects = enclosingEffects;
+        }
+    }
+
+    private static TypeDescriptor resolveHandlerApplication(final ResolutionContext context,
+                                                            final Expr.Handle handle) {
+        final var handlerType = resolve(context, handle.handler);
+        if (!(handlerType instanceof FunctionDescriptor function) || !function.isHandler()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    handle.keyword, "The value after 'with' must have a handler type."));
+            return TypeDescriptor.ofInfer();
+        }
+        final var enclosingEffects = RaisedEffectFlow.beginHandledExpression(context);
+        final TypeDescriptor protectedType;
+        try {
+            protectedType = resolve(context, handle.expression);
+        } finally {
+            RaisedEffectFlow.endHandledExpression(context, enclosingEffects,
+                    Set.copyOf(function.handledEffects()), handle.keyword);
+        }
+        if (!(protectedType instanceof NeverDescriptor)) {
+            ensureExact(context, handle.keyword, function.returnType(), protectedType);
+        }
+        RaisedEffectFlow.add(context, Set.copyOf(function.raisedEffects()), handle.keyword);
+        final var resultType = protectedType instanceof NeverDescriptor
+                ? function.returnType() : protectedType;
+        handle.setType(resultType);
+        return resultType;
+    }
+
     static TypeDescriptor resolveExpression(final ResolutionContext context, final Expr expression) {
         return resolve(context, expression);
     }
@@ -1010,6 +1330,22 @@ final class ExpressionFlowResolver {
     }
 
     private static TypeDescriptor resolvePipeline(final ResolutionContext context, final Expr.Pipeline pipeline) {
+        if (pipeline.isComprehension()) {
+            if (pipeline.result() instanceof Expr.PipelineResult.Collect collect) {
+                final var sinkType = resolve(context, collect.sink());
+                if (!(sinkType instanceof ReferenceDescriptor)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_COLLECTOR,
+                            collect.keyword(),
+                            "The collect result requires a mutable reference to a type conforming to Sink<T>."));
+                }
+                Resolver.ensureSink(context, sinkType, collect.keyword());
+            }
+            final var lowered = ComprehensionLowerer.lower(pipeline);
+            pipeline.setLoweredExpression(lowered);
+            final var resultType = resolve(context, lowered);
+            pipeline.setType(resultType);
+            return resultType;
+        }
         var sourceType = resolve(context, pipeline.source);
         if (sourceType instanceof ReferenceDescriptor ref) {
             sourceType = ref.baseType();
@@ -1046,9 +1382,11 @@ final class ExpressionFlowResolver {
                 }
                 case Expr.PipelineStage.FlatMap f -> {
                     final var parameter = f.wildcard() ? Resolver.SYNTHETIC_IDENTIFIER : f.binding();
-                    final var lambda = new Expr.Lambda(f.keyword(), List.of(parameter),
-                            List.of(new Stmt.Return(f.expression(), f.keyword())),
-                            TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), elementType));
+                    final var lambda = f.lambda() == null
+                            ? new Expr.Lambda(f.keyword(), List.of(parameter),
+                                    List.of(new Stmt.Return(f.expression(), f.keyword())),
+                                    TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), elementType))
+                            : f.lambda();
                     final var resultType = Resolver.resolveLambda(context, lambda,
                             TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), elementType)).returnType();
                     final var flattenedType = Resolver.ensureIterable(context, resultType, f.keyword());
@@ -1118,7 +1456,7 @@ final class ExpressionFlowResolver {
                 }
             };
         }
-        pipeline.setSinkProtocol(new Resolver.SinkProtocol("zeron.collections.Sink", "empty", "add"));
+        pipeline.setSinkProtocol(new Resolver.SinkProtocol("zeron.collections.Sink", "add"));
         final var resultType = sinkType == null
                 ? TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.collections.Stream"), elementType)
                 : sinkType;
@@ -1713,8 +2051,13 @@ final class ExpressionFlowResolver {
 
     private static TypeDescriptor resolveTypeTest(final ResolutionContext context, final Expr.TypeTest test) {
         final var sourceType = resolve(context, test.value);
+        if (test.nullTest) {
+            test.setResolvedTargetType(TypeDescriptor.ofNull());
+            test.setType(TypeDescriptor.ofBoolean());
+            return TypeDescriptor.ofBoolean();
+        }
         final var targetType = resolveSumCaseTestType(context, test.targetType, sourceType, test.operator);
-        validateRuntimeTestTarget(context, targetType, test.operator);
+        validateRuntimeTestTarget(context, targetType, sourceType, test.operator, true);
         if (!context.typeCompatibility.canTypeTest(sourceType, targetType)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                     test.operator,
@@ -1858,7 +2201,9 @@ final class ExpressionFlowResolver {
         return binding.type();
     }
 
-    private static void validateRuntimeTestTarget(final ResolutionContext context, final TypeDescriptor targetType, final Token where) {
+    private static void validateRuntimeTestTarget(final ResolutionContext context, final TypeDescriptor targetType,
+                                                  final TypeDescriptor sourceType, final Token where,
+                                                  final boolean allowGenericTarget) {
         TypeResolver.validateType(context, targetType, where);
         if (targetType instanceof NullableDescriptor || targetType instanceof ReferenceDescriptor
                 || targetType instanceof ArrayDescriptor || targetType instanceof GenericDescriptor
@@ -1868,8 +2213,11 @@ final class ExpressionFlowResolver {
             if (targetType instanceof GenericDescriptor generic
                     && context.classes.containsKey(generic.name())
                     && isGeneratedSumCase(context, generic.name())) return;
+            if (allowGenericTarget && context.typeCompatibility.canTestGenericTarget(sourceType, targetType)) return;
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST, where,
-                    "This type cannot be used as a runtime type-test target."));
+                    targetType instanceof GenericDescriptor
+                            ? "The generic arguments of this runtime type-test target are not statically determined."
+                            : "This type cannot be used as a runtime type-test target."));
         }
     }
 
@@ -1936,7 +2284,23 @@ final class ExpressionFlowResolver {
 
             if (expression instanceof Expr.TypeTest test) {
                 final var variable = directVariable(context, test.value);
-                if (variable != null && isRefinable(context, variable.name)) {
+                if (test.nullTest) {
+                    final var testedType = test.value.getType();
+                    final var mayBeNull = testedType instanceof NullableDescriptor
+                            || testedType instanceof NullDescriptor;
+                    final var mayBeNonNull = !(testedType instanceof NullDescriptor);
+                    if (!mayBeNull) whenTrue.markUnreachable();
+                    if (!mayBeNonNull) whenFalse.markUnreachable();
+                    if (variable != null && isRefinable(context, variable.name)) {
+                        final var binding = context.symbols.getSymbol(variable.name);
+                        final var existing = evaluated.get(binding.name());
+                        final var nonNull = existing == null
+                                ? nonNullFact(context, binding.type())
+                                : new FlowFact(false, existing.nonNullAlternatives());
+                        if (mayBeNull) whenTrue.put(binding.name(), new FlowFact(true, Set.of()));
+                        if (mayBeNonNull) whenFalse.put(binding.name(), nonNull);
+                    }
+                } else if (variable != null && isRefinable(context, variable.name)) {
                     whenTrue.put(context.symbols.getSymbol(variable.name).name(),
                             refineTypeFact(context, context.symbols.getSymbol(variable.name).type(),
                                     evaluated.get(context.symbols.getSymbol(variable.name).name()),

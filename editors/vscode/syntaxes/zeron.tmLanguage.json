@@ -10,7 +10,13 @@
       "include": "#strings"
     },
     {
+      "include": "#for-expression"
+    },
+    {
       "include": "#declarations"
+    },
+    {
+      "include": "#contextual-keywords"
     },
     {
       "include": "#keywords"
@@ -54,6 +60,59 @@
       "begin": "\"",
       "end": "\""
     },
+    "for-expression": {
+      "name": "meta.for-expression.zeron",
+      "begin": "\\b(for)(\\s+)([A-Za-z_][A-Za-z0-9_]*)(\\s+)(in)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.zeron"
+        },
+        "3": {
+          "name": "variable.other.zeron"
+        },
+        "5": {
+          "name": "keyword.control.zeron"
+        }
+      },
+      "end": "\\b(yield|collect)\\b",
+      "endCaptures": {
+        "1": {
+          "name": "keyword.control.zeron"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#contextual-keywords"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#function-calls"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
     "declarations": {
       "patterns": [
         {
@@ -64,6 +123,17 @@
             },
             "2": {
               "name": "entity.name.function.zeron"
+            }
+          }
+        },
+        {
+          "match": "\\b(handler)\\s+([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\{)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.handler.zeron"
+            },
+            "2": {
+              "name": "entity.name.constant.zeron"
             }
           }
         },
@@ -109,6 +179,104 @@
       "name": "keyword.control.zeron",
       "match": "\\b(?:and|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|private|property|public|raise|raises|return|sealed|static|then|this|throws|type|typeof|until|using|witness|while)\\b"
     },
+    "contextual-keywords": {
+      "patterns": [
+        {
+          "match": "(?<=:)\\s*(nullable)\\b(?=\\s*(?:\\+|,|>))",
+          "captures": {
+            "1": {
+              "name": "keyword.control.zeron"
+            }
+          }
+        },
+        {
+          "match": "(?:(?<=<)|(?<=,))(\\s*)(out)\\b(?=\\s*[^,>])",
+          "captures": {
+            "2": {
+              "name": "keyword.control.zeron"
+            }
+          }
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\bderiving\\b(?=\\s+[A-Z][A-Za-z0-9_]*(?:\\s*,\\s*[A-Z][A-Za-z0-9_]*)*\\s*(?:=|\\{))"
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\bwith\\b(?=\\s*\\{|\\s+suppressed\\b)"
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\bwith\\b(?=\\s+[A-Za-z_][A-Za-z0-9_]*\\b)"
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\bhandler\\b(?=\\s*(?:\\{|[A-Za-z_][A-Za-z0-9_]*\\s*\\{))"
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\b(implementation)\\b(?=\\s+[A-Za-z_][A-Za-z0-9_]*\\s*<[^{};]*_[^{};]*>\\s*\\{)"
+        },
+        {
+          "match": "\\b(import)(\\s+)(suffix)(?=\\s+[A-Za-z_])",
+          "captures": {
+            "1": {
+              "name": "keyword.control.zeron"
+            },
+            "3": {
+              "name": "keyword.control.zeron"
+            }
+          }
+        },
+        {
+          "name": "meta.declaration.suffix.zeron",
+          "begin": "\\b(suffix)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*)(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.zeron"
+            },
+            "2": {
+              "name": "entity.name.constant.zeron"
+            },
+            "4": {
+              "name": "punctuation.section.block.begin.zeron"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.zeron"
+            }
+          },
+          "patterns": [
+            {
+              "match": "\\b(integer|decimal)(?=\\s*:)",
+              "captures": {
+                "1": {
+                  "name": "keyword.control.zeron"
+                }
+              }
+            },
+            {
+              "match": "\\b(string)(?=\\s+[A-Za-z_][A-Za-z0-9_]*\\s*;)",
+              "captures": {
+                "1": {
+                  "name": "keyword.control.zeron"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "match": "(?:(?<=\\{)|^)\\s*(get)\\b(?=\\s*(?:=|\\{))",
+          "captures": {
+            "1": {
+              "name": "keyword.control.zeron"
+            }
+          }
+        }
+      ]
+    },
     "constants": {
       "name": "constant.language.zeron",
       "match": "\\b(?:false|null|true)\\b"
@@ -117,15 +285,23 @@
       "patterns": [
         {
           "name": "constant.numeric.float.zeron",
-          "match": "\\b[0-9]+\\.[0-9]+\\b"
-        },
-        {
-          "name": "constant.numeric.integer.long.zeron",
-          "match": "\\b[0-9]+L\\b"
+          "match": "\\b[0-9](?:_?[0-9])*\\.[0-9](?:_?[0-9])*(?!L\\b)[A-Za-z_][A-Za-z0-9_]*"
         },
         {
           "name": "constant.numeric.integer.zeron",
-          "match": "\\b[0-9]+\\b"
+          "match": "\\b(?:0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*|[0-9](?:_?[0-9])*)(?!L\\b)[A-Za-z_][A-Za-z0-9_]*"
+        },
+        {
+          "name": "constant.numeric.float.zeron",
+          "match": "\\b[0-9](?:_?[0-9])*\\.[0-9](?:_?[0-9])*\\b"
+        },
+        {
+          "name": "constant.numeric.integer.long.zeron",
+          "match": "\\b(?:0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*|[0-9](?:_?[0-9])*)L\\b"
+        },
+        {
+          "name": "constant.numeric.integer.zeron",
+          "match": "\\b(?:0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*|[0-9](?:_?[0-9])*)\\b"
         }
       ]
     },
@@ -147,7 +323,7 @@
     },
     "operators": {
       "name": "keyword.operator.zeron",
-      "match": "(?:===|==|!=|<=|>=|>>>=|>>>|>>=|>>|<<=|<<|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|\\.\\.\\.|\\.\\.|->|\\?\\?=|\\?\\?|\\?\\.|::|[+*/%&|^~!<>=?:-])"
+      "match": "(?:===|==|!=|<=|>=|>>>=|>>>|>>=|>>|<<=|<<|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|\\.\\.\\.|\\.\\.|~>|->|\\?\\?=|\\?\\?|\\?\\.|::|[+*/%&|^~!<>=?:-])"
     },
     "punctuation": {
       "patterns": [

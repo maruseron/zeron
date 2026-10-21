@@ -1,19 +1,19 @@
 package zeron.control;
 
 public contract Functor<F<_>> {
-    map<A, B>(this: F<A>, transform: (A) -> B): F<B>;
+    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
 }
 
 public contract Applicative<F<_>> requires Functor<F> {
-    pure<A>(value: A): F<A>;
+    pure<A: mut>(value: A): F<A>;
 
-    ap<A, B>(this: F<(A) -> B>, values: F<A>): F<B>;
+    ap<A: mut, B: mut>(this: F<(A) -> B>, values: F<A>): F<B>;
 }
 
 public contract Monad<F<_>> requires Applicative<F> {
-    flatMap<A, B>(this: F<A>, transform: (A) -> F<B>): F<B>;
+    flatMap<A: mut, B: mut>(this: F<A>, transform: (A) -> F<B>): F<B>;
 }
 
 public contract Foldable<F<_>> {
-    foldLeft<A, B>(this: F<A>, initial: B, combine: (B, A) -> B): B;
+    foldLeft<A: mut, B: mut>(this: F<A>, initial: B, combine: (B, A) -> B): B;
 }

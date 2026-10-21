@@ -17,6 +17,7 @@ import java.lang.classfile.Label;
 import java.lang.constant.ClassDesc;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;

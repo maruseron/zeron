@@ -10,10 +10,12 @@ The goal is to establish useful object semantics before adding class inheritance
 
 - Class and contract names are collected before member resolution, so signatures can refer to types declared later in the same program. Names are unique in the program type namespace and remain source-level nominal identities.
 - Classes conform to multiple contracts through declaration-site conformance and lower to generated JVM classes implementing each generated contract interface. Generated binary names do not determine source-level assignability.
-- Anonymous object expressions implement explicitly listed contracts using unique, hidden nominal classes. They support methods, contract properties, private initialized fields, and immutable local captures; fields and auto-property initializers run once at object creation. A transitive named-constructor requirement cannot be met by an anonymous instance and is rejected.
+- Generic classes and contracts support checked declaration-site covariance with `out T`; unannotated parameters remain invariant. Unsafe occurrences are rejected, and safe assignments preserve reference capability and nullability. Arrays, mutable references, writable properties, and generic effects remain invariant. See [ZEP-0051](./zeps/ZEP-0051.md).
+- Anonymous object expressions implement explicitly listed contracts using unique, hidden nominal classes. They support methods, contract properties, private initialized fields, and immutable local captures; fields and auto-property initializers run once at object creation.
 - Binding reassignment and reference mutation remain independent: `let mut x` permits rebinding, while `&T` permits mutation through the reference.
 - Lambdas can capture immutable class or contract references by value, including mutable reference views. Reassignable local bindings remain uncapturable.
-- Classes and contracts support invariant type parameters. Fields, methods, construction, and declaration-site conformance are checked after substitution.
+- Generic parameters are invariant by default; checked declaration-site covariance is available with
+  `out T`. Fields, methods, construction, and conformance are checked after substitution.
 - Sealed contracts declare a closed set of permitted classes with `sealed contract C permits A, B`.
   Permitted classes must be in the contract package, conform directly, and use matching generic
   parameters in declaration order. The compiler records permits in library metadata and the JVM
@@ -22,10 +24,10 @@ The goal is to establish useful object semantics before adding class inheritance
   exhaustive.
 - Parameterized nominal types retain source-level identity but erase to one raw JVM class or interface per declaration. Generic contract bridges adapt differing erased signatures.
 - Named constructors are static factories with expression or block bodies and an implicit mutable class-reference result. Omitted canonical declarations synthesize public construction; `private constructor new;` restricts it.
-- Contracts may require named constructors. A conforming class must provide a public named factory with a compatible signature; the requirement is checked statically and does not add a virtual constructor slot to the contract interface.
+- Contracts describe instance behavior and do not require named constructors or other class-side factories; generic construction uses higher-kinded evidence or an explicit factory.
 - `Iterator<T>` and `Iterable<T>` are ordinary bundled contracts. `Iterator<T>.next()` returns
-  `zeron.lang.Option<T>`; `Option<T>.None()` signals exhaustion and `Option.Some(value)` carries a
-  value. The `for` loop lowers this protocol and extracts yielded values from the `Some` case.
+  `zeron.collections.Step<T>`; `Step<T>.Done()` signals exhaustion and `Step.Yield(value)` carries a
+  value. The `for` loop lowers this protocol and extracts yielded values from the `Yield` case.
   `zeron.ranges.IntRange` implements
     `Iterable<Int>` and range loops invoke its methods through interface dispatch; arrays retain
     specialized lowering.
@@ -126,10 +128,9 @@ assignability still follows its explicit contract list, with no structural compa
 unrelated objects. Private fields and auto-properties require initializers, which are evaluated at
 construction and passed to the generated canonical constructor. Initializers, methods, and custom
 property accessors may capture enclosing immutable bindings; mutable local bindings remain
-uncapturable. Anonymous implementations cannot satisfy contracts whose transitive requirements
-include named constructors, because those are static class-side capabilities. Constructors and
-patterns are not available in anonymous object bodies. The generated classes are implementation
-details and are omitted from the public library API index.
+uncapturable. Contracts do not require class-side constructors, so anonymous implementations are
+not excluded on that basis. Constructors and patterns are not available in anonymous object bodies.
+The generated classes are implementation details and are omitted from the public library API index.
 
 ```zeron
 class Person {
@@ -235,7 +236,7 @@ sealed contract Lookup<T> requires Eq<T> permits Found<T>, Missing<T> {
 ```
 
 Requirements compose the complete contract surface transitively: abstract and default instance
-methods, properties, and named-constructor requirements. Applying a requiring contract substitutes
+methods and properties. Applying a requiring contract substitutes
 its type arguments through every transitive requirement. Thus `Hashable<User>` entails
 `Eq<User>`, but `Eq<User>` does not entail `Hashable<User>`.
 
@@ -243,58 +244,42 @@ A class conforming to a requiring contract also conforms to each transitive requ
 Repeated paths and an explicitly repeated direct conformance to the same applied contract are
 deduplicated. Generic bounds on a requiring contract expose inherited members and satisfy bounds on
 its required contracts. A witness for a requiring contract likewise entails its required bounds and
-forwards their method/factory evidence; a witness for a required contract alone does not establish
+forwards their method evidence; a witness for a required contract alone does not establish
 the requiring contract.
 
 Inherited defaults follow class conformance rules: a compatible public class method overrides a
 default, one unique applicable default can satisfy a requirement, and multiple applicable defaults
 require an explicit class method. A requiring contract may redeclare an inherited method with a
 compatible signature to replace its inherited default; redeclaration cannot change the inherited
-signature. Property requirements merge under the ordinary conformance rules. Identical named
-constructor requirements collapse to one obligation; incompatible same-name constructor
-requirements make the composition invalid.
+signature. Property requirements merge under the ordinary conformance rules.
 
 Cycles in the requirement graph are invalid. The compiler checks requirements after type
 substitution, rejects incompatible inherited member requirements, and emits nominal JVM contract
-interfaces as extending their required interfaces. Constructor requirements remain statically
-dispatched class-side factories: composition propagates their compile-time obligation and evidence,
-but creates no virtual constructor slot. Compiled-library metadata records applied requirement
-declarations so separate compilation performs the same substitution and conformance checks.
+interfaces as extending their required interfaces. Compiled-library metadata records applied
+requirement declarations so separate compilation performs the same substitution and conformance
+checks.
 
-### Contract constructor requirements
+### Factories and collection capabilities
 
-A contract may declare named constructor signatures without bodies:
+Contracts describe behavior of existing values and do not declare class-side constructor
+requirements. Call named class constructors directly; pass a factory value explicitly when a
+generic API needs to construct one particular type. For generic collection families, use
+`zeron.collections.Collector<C<_>>`:
 
 ```zeron
-public contract TokenFactory {
-    constructor from(value: Int);
-}
+public contract Collector<C<_>> {
+    empty<A: nullable + mut>(): &C<A>;
 
-public class Token is TokenFactory {
-    value: Int;
-    public constructor from(value: Int) = Token.new(value);
+    mut add<A: nullable + mut>(this: C<A>, value: A): Boolean;
 }
 ```
 
-The contract constructor describes a class-side factory requirement. Each conforming class must
-provide a public named constructor with the same name, compatible parameter and result types after
-substituting the contract's type arguments, and the same variadic shape. A contract constructor is
-not an instance method: it has no receiver and is not invoked by interface dispatch on a value.
-The implementation is called statically through the concrete class name (for example,
-`Token.from(42)`). Constructor requirements are carried in the compiled-library API index so
-conformance can also be checked across compiled-library boundaries.
-
-Generic functions can now make this statically dispatched call through an applied generic bound.
-The compiler selects a compatible same-name public named constructor from the target class's
-declared conformance and passes a method handle as hidden evidence. Applied contract arguments
-remain part of source-level selection even though they erase on the JVM; the factory result is
-`&Self`, which is `&T` through a bound on `T`. This adds no virtual constructor dispatch and does
-not reify generic arguments. Explicit witness declarations can remap factories to public named
-constructors, including generic target patterns; generic methods can call factories through bounds.
-The current overlap check rejects repeated nominal contract/target pairs, while complete generic
-pattern overlap analysis remains future work. The design and remaining questions are
-recorded in
-[design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
+`Collector.empty` returns a mutable reference so the caller can populate the new value through its
+mutating `add` operation. `Sink<T>` remains the behavioral contract for adding to an existing sink
+when the generic API does not need to create a collection. For receiver calls with both kinds of
+evidence, concrete methods win, behavioral contract methods take precedence over HKT receiver
+operations, and HKT operations are the fallback; an explicit constructor-qualified call selects an
+HKT operation directly.
 
 ### Mutation and references
 
@@ -577,9 +562,8 @@ internal array intrinsic registry does not introduce this language feature. See
 [design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md)
 for the current distinction between intrinsic IDs and future external/expected declarations.
 
-Class inheritance, abstract classes, variance, broader inference, intersection types, JPMS
-integration, serialization, public fields on Zeron classes, and ownership/borrow checking remain
-deferred.
+Class inheritance, abstract classes, broader inference, intersection types, JPMS integration,
+serialization, public fields on Zeron classes, and ownership/borrow checking remain deferred.
 Extension methods, generated property accessors, compiled library JARs, and Java classpath JAR
 discovery are implemented. Broader Java platform integration remains future work. Each deferred
 feature adds semantic rules that should build on tested nominal identity, construction, access

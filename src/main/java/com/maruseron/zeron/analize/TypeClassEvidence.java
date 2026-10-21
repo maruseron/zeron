@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.ast.SyntheticNames;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
@@ -106,53 +107,6 @@ final class TypeClassEvidence {
             validateWitnessMethods(context, witness, contract, targetSubstitutions, contractArguments);
         }
 
-        final var mappedRequirements = new java.util.HashSet<String>();
-        for (final var mapping : witness.mappings()) {
-            if (target == null) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                        mapping.constructorName(), "Factory mappings require a class target."));
-            }
-            if (!mappedRequirements.add(mapping.requirementName().lexeme())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        mapping.requirementName(), "Duplicate witness factory mapping."));
-            }
-            if (!mapping.targetType().equals(witness.targetType())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                        mapping.constructorName(),
-                        "A witness factory must target the witness's implementing class type."));
-            }
-            final var requiredSlot = ContractComposition.constructors(context,
-                            contractUse(witness.contractType()))
-                    .stream().filter(slot -> slot.constructor().name().lexeme()
-                            .equals(mapping.requirementName().lexeme()))
-                    .findFirst().orElse(null);
-            if (requiredSlot == null) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                        mapping.requirementName(), "Unknown contract factory requirement."));
-            }
-            final var implementation = target.namedConstructors().stream()
-                    .filter(value -> value.name().lexeme().equals(mapping.constructorName().lexeme()))
-                    .filter(Stmt.NamedConstructor::isPublic)
-                    .findFirst().orElse(null);
-            if (implementation == null) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
-                        mapping.constructorName(), "Witness target must be a public named constructor."));
-            }
-            final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
-                    (FunctionDescriptor) TypeSubstitution.substitute(
-                            requiredSlot.constructor().typeDescriptor(),
-                            requiredSlot.applied().substitutions()), targetSubstitutions);
-            final var implementationType = (FunctionDescriptor) TypeSubstitution.substitute(
-                    implementation.typeDescriptor(), targetSubstitutions);
-            if (requiredSlot.constructor().variadic() != implementation.variadic()
-                    || !DeclarationResolver.compatibleMethodSignatures(context, requiredType,
-                            requiredSlot.constructor().variadic(), implementationType,
-                            implementation.variadic())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
-                        mapping.constructorName(), "Mapped constructor does not satisfy the factory requirement."));
-            }
-        }
-
         context.typeClassWitnesses.add(new WitnessEntry(witness, packageName));
     }
 
@@ -170,10 +124,6 @@ final class TypeClassEvidence {
             return;
         }
         final var targetConstructor = (TypeConstructorDescriptor) witness.targetType();
-        if (!witness.mappings().isEmpty()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    witness.name(), "HKT witnesses cannot map class constructors."));
-        }
         if (context.classes.get(targetConstructor.baseType().name()) == null
                 && context.sums.get(targetConstructor.baseType().name()) == null
                 && context.products.get(targetConstructor.baseType().name()) == null
@@ -292,7 +242,7 @@ final class TypeClassEvidence {
             final var syntheticName = new Token(TokenType.IDENTIFIER,
                     "$zeron$derived$" + name.lexeme() + "$" + derived.lexeme(), null, derived.span());
             final var witness = new Stmt.Witness(syntheticName, parameters, requiredContract, target,
-                    List.of(), List.of(), true, requirements);
+                    List.of(), true, requirements);
             register(context, witness, packageName);
         }
     }
@@ -432,8 +382,7 @@ final class TypeClassEvidence {
                     required.variadic());
             final var helperName = new com.maruseron.zeron.scan.Token(
                     com.maruseron.zeron.scan.TokenType.IDENTIFIER,
-                    "$zeron$witness$" + witness.name().span().start().offset()
-                            + "$" + required.name().lexeme(),
+                    SyntheticNames.witnessMethod(witness.name(), required.name().lexeme()),
                     null, required.name().span());
             final var helperParameters = new ArrayList<com.maruseron.zeron.scan.Token>();
             helperParameters.add(new com.maruseron.zeron.scan.Token(
@@ -481,7 +430,7 @@ final class TypeClassEvidence {
                         method.requirementName(),
                         "The implementation receiver marker must match the contract operation."));
             }
-            if (required.isMutating()) {
+            if (required.isMutating() && !contract.higherKinded()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                         method.requirementName(), "Witnesses cannot implement mutating contract methods."));
             }
@@ -489,7 +438,17 @@ final class TypeClassEvidence {
                     (FunctionDescriptor) TypeSubstitution.substitute(
                             required.typeDescriptor(), requiredSlot.applied().substitutions()),
                     targetSubstitutions);
-            if (!DeclarationResolver.compatibleMethodSignatures(context, requiredType, required.variadic(),
+            final var implementationType = method.methodSignature().typeDescriptor();
+            if (required.isMutating()
+                    && (!Stmt.hasReceiverParameter(method.methodSignature().parameters())
+                    || !(implementationType.parameters().getFirst() instanceof ReferenceDescriptor))) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                        method.requirementName(), "A mutating HKT operation must implement its receiver by reference."));
+            }
+            final var compatibleRequiredType = required.isMutating()
+                    ? withReferenceReceiver(requiredType)
+                    : requiredType;
+            if (!DeclarationResolver.compatibleMethodSignatures(context, compatibleRequiredType, required.variadic(),
                     method.methodSignature().typeDescriptor(), method.methodSignature().variadic())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
                         method.requirementName(), "Witness method does not satisfy the contract requirement."));
@@ -497,7 +456,7 @@ final class TypeClassEvidence {
         }
         for (final var slot : methodSlots) {
             final var required = slot.method();
-            if (required.isMutating()) {
+            if (required.isMutating() && !contract.higherKinded()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                         required.name(), "Witnesses cannot implement contracts with mutating methods."));
             }
@@ -507,6 +466,13 @@ final class TypeClassEvidence {
                                 + required.name().lexeme() + "'."));
             }
         }
+    }
+
+    private static FunctionDescriptor withReferenceReceiver(final FunctionDescriptor function) {
+        final var parameters = new ArrayList<>(function.parameters());
+        parameters.set(0, new ReferenceDescriptor(parameters.getFirst()));
+        return TypeDescriptor.functionWithEffectsOf(function.name(), function.returnType(),
+                parameters, function.typeParameters(), function.raisedEffects());
     }
 
     private static List<TypeDescriptor> typeArguments(final TypeDescriptor type) {
@@ -587,29 +553,6 @@ final class TypeClassEvidence {
         return packageOf(nominalName(base));
     }
 
-    static Stmt.WitnessFactoryMapping explicitMapping(final ResolutionContext context,
-                                                      final TypeDescriptor contractType,
-                                                      final TypeDescriptor targetType,
-                                                      final String requirementName) {
-        final var matches = new ArrayList<Stmt.WitnessFactoryMapping>();
-        for (final var entry : context.typeClassWitnesses) {
-            if (!isActive(context, entry)) continue;
-            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-            if (!matchPattern(entry.declaration().targetType(), targetType,
-                    entry.declaration().typeParameters(), substitutions)
-                    || !witnessEntails(context, entry.declaration(), substitutions, contractType)) continue;
-            entry.declaration().mappings().stream()
-                    .filter(mapping -> mapping.requirementName().lexeme().equals(requirementName))
-                    .forEach(matches::add);
-        }
-        if (matches.size() > 1) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                    matches.getFirst().requirementName(),
-                    "Ambiguous constructor witness for '" + contractType + "'."));
-        }
-        return matches.isEmpty() ? null : matches.getFirst();
-    }
-
     static List<Expr.EvidenceArgument> requirements(final ResolutionContext context,
                                                    final TypeParameterDescriptor parameter) {
         final var result = new ArrayList<Expr.EvidenceArgument>();
@@ -617,12 +560,6 @@ final class TypeClassEvidence {
             final var bound = parameter.bounds().get(boundIndex);
             final var use = contractUse(bound);
             if (use == null) continue;
-            for (final var slot : ContractComposition.constructors(context, use)) {
-                final var constructor = (FunctionDescriptor) TypeSubstitution.substitute(
-                        slot.constructor().typeDescriptor(), slot.applied().substitutions());
-                result.add(new Expr.EvidenceArgument(parameter, boundIndex, slot.index(),
-                        null, null, constructor, null));
-            }
             for (final var slot : ContractComposition.methods(context, use)) {
                 final var method = slot.method();
                 final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
@@ -652,32 +589,17 @@ final class TypeClassEvidence {
             for (final var slot : requirements(context, parameter)) {
                 final var requiredBound = TypeSubstitution.substitute(
                         parameter.bounds().get(slot.boundIndex()), substitutions);
-                if (slot.instanceMethod()) {
-                    final var use = contractUse(requiredBound);
-                    if (use == null) continue;
-                    final var methods = ContractComposition.methods(context, use);
-                    if (slot.constructorIndex() >= methods.size()) continue;
-                    final var methodSlot = methods.get(slot.constructorIndex());
-                    final var appliedBound = appliedType(methodSlot.applied(), substitutions);
-                    if (methodSlot.applied().declaration().higherKinded()) {
-                        evidence.add(selectMethodEvidence(context, parameter, slot.boundIndex(),
-                                slot.constructorIndex(), appliedBound, actual,
-                                methodSlot.method(), where));
-                        continue;
-                    }
-                    evidence.add(selectMethodEvidence(context, parameter, slot.boundIndex(),
-                            slot.constructorIndex(), appliedBound, actual,
-                            methodSlot.method(), where));
-                    continue;
-                }
+                final var evidenceTarget = applyHigherKindedBound(
+                        context, requiredBound, actual);
+                if (!slot.instanceMethod()) continue;
                 final var use = contractUse(requiredBound);
                 if (use == null) continue;
-                final var constructors = ContractComposition.constructors(context, use);
-                if (slot.constructorIndex() >= constructors.size()) continue;
-                final var constructorSlot = constructors.get(slot.constructorIndex());
-                evidence.add(select(context, parameter, slot.boundIndex(), slot.constructorIndex(),
-                        appliedType(constructorSlot.applied(), substitutions), actual,
-                        constructorSlot.constructor(), where));
+                final var methods = ContractComposition.methods(context, use);
+                if (slot.constructorIndex() >= methods.size()) continue;
+                final var methodSlot = methods.get(slot.constructorIndex());
+                final var appliedBound = appliedType(methodSlot.applied(), substitutions);
+                evidence.add(selectMethodEvidence(context, parameter, slot.boundIndex(),
+                        slot.constructorIndex(), appliedBound, evidenceTarget, methodSlot.method(), where));
             }
         }
         return List.copyOf(evidence);
@@ -721,11 +643,16 @@ final class TypeClassEvidence {
         final var actual = actualType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : actualType;
         try {
+            final var constructorAppliedBound = applyHigherKindedBound(context, contractType, actual);
+            if (!constructorAppliedBound.equals(actual)) {
+                return hasEvidence(context, contractType, constructorAppliedBound, where, resolving);
+            }
             if (isEqContract(contractType) && actual instanceof NullableDescriptor nullable
                     && hasEvidence(context, eqType(context, nullable.baseType()), nullable.baseType(),
                             where, resolving)) {
                 return true;
             }
+
             if (isHashableContract(contractType) && actual instanceof NullableDescriptor nullable
                     && hasEvidence(context, hashableType(context, nullable.baseType()), nullable.baseType(),
                             where, resolving)) {
@@ -756,6 +683,17 @@ final class TypeClassEvidence {
         } finally {
             resolving.remove(evidenceKey);
         }
+    }
+
+    private static TypeDescriptor applyHigherKindedBound(final ResolutionContext context,
+                                                         final TypeDescriptor contractType,
+                                                         final TypeDescriptor actualType) {
+        if (!(actualType instanceof TypeConstructorDescriptor constructor)) return actualType;
+        final var use = contractUse(contractType);
+        if (use == null || use.typeArguments().size() != 1) return actualType;
+        final var declaration = context.contracts.get(use.name().lexeme());
+        if (declaration == null || declaration.higherKinded()) return actualType;
+        return constructor.apply(use.typeArguments().getFirst());
     }
 
     private static boolean prerequisitesAvailable(
@@ -1359,87 +1297,6 @@ final class TypeClassEvidence {
     private static boolean eqTargetMatches(final TypeDescriptor contractType, final TypeDescriptor actualType) {
         final var target = typeArguments(contractType).getFirst();
         return sameAppliedType(target, actualType);
-    }
-
-    static Expr.EvidenceArgument select(final ResolutionContext context,
-                                        final TypeParameterDescriptor targetParameter,
-                                        final int targetBoundIndex,
-                                        final int targetConstructorIndex,
-                                        final TypeDescriptor requiredBound,
-                                        final TypeDescriptor actualType,
-                                        final Stmt.NamedContractConstructor requirement,
-                                        final com.maruseron.zeron.scan.Token where) {
-        if (actualType instanceof TypeParameterDescriptor actualParameter) {
-            for (int boundIndex = 0; boundIndex < actualParameter.bounds().size(); boundIndex++) {
-                if (!actualParameter.bounds().get(boundIndex).equals(requiredBound)) continue;
-                final var name = nominalName(requiredBound);
-                final var contract = context.contracts.get(name);
-                if (contract == null) continue;
-                final int constructorIndex = contract.namedConstructors().indexOf(requirement);
-                if (constructorIndex >= 0) {
-                    return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetConstructorIndex,
-                            null, null, requirement.typeDescriptor(),
-                            Expr.evidenceToken(actualParameter, boundIndex, constructorIndex));
-                }
-            }
-        }
-        final var concrete = actualType instanceof ReferenceDescriptor reference ? reference.baseType() : actualType;
-        final var candidate = context.classes.get(nominalName(concrete));
-        final var matches = new ArrayList<Expr.EvidenceArgument>();
-        if (candidate != null && context.typeCompatibility.isContractProjection(requiredBound, concrete)) {
-            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-            final var explicitWitnesses = new ArrayList<Map.Entry<WitnessEntry,
-                    Map<TypeParameterDescriptor, TypeDescriptor>>>();
-            for (final var entry : context.typeClassWitnesses) {
-                if (!isActive(context, entry)) continue;
-                final var witnessSubstitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-                if (matchPattern(entry.declaration().targetType(), concrete,
-                        entry.declaration().typeParameters(), witnessSubstitutions)
-                        && witnessEntails(context, entry.declaration(), witnessSubstitutions, requiredBound)
-                        && prerequisitesAvailable(context, entry.declaration(), witnessSubstitutions,
-                                where, new HashSet<>())) {
-                    explicitWitnesses.add(Map.entry(entry, witnessSubstitutions));
-                }
-            }
-            if (explicitWitnesses.size() > 1) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
-                        "Ambiguous constructor witness for bound '" + TypeFormatter.format(requiredBound) + "'."));
-            }
-            final var explicitMapping = explicitWitnesses.isEmpty() ? null
-                    : explicitWitnesses.getFirst().getKey().declaration().mappings().stream()
-                            .filter(mapping -> mapping.requirementName().lexeme()
-                                    .equals(requirement.name().lexeme()))
-                            .findFirst().orElse(null);
-            for (int index = 0; index < candidate.typeParameters().size(); index++) {
-                substitutions.put(candidate.typeParameters().get(index),
-                        typeArguments(concrete).get(index));
-            }
-            final var implementation = candidate.namedConstructors().stream()
-                    .filter(value -> value.name().lexeme().equals(explicitMapping == null
-                            ? requirement.name().lexeme() : explicitMapping.constructorName().lexeme()))
-                    .filter(Stmt.NamedConstructor::isPublic)
-                    .filter(value -> value.variadic() == requirement.variadic())
-                    .filter(value -> DeclarationResolver.compatibleMethodSignatures(context,
-                            (FunctionDescriptor) TypeSubstitution.substitute(requirement.typeDescriptor(),
-                                    contractSubstitutions(context, requiredBound)),
-                            requirement.variadic(),
-                            (FunctionDescriptor) TypeSubstitution.substitute(value.typeDescriptor(), substitutions),
-                            value.variadic()))
-                    .findFirst().orElse(null);
-            if (implementation != null) {
-                matches.add(new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetConstructorIndex,
-                        candidate.name().lexeme(), implementation.name().lexeme(),
-                        implementation.typeDescriptor(), null));
-            }
-        }
-        if (matches.size() != 1) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
-                    matches.isEmpty() ? "No constructor witness satisfies bound '"
-                            + TypeFormatter.format(requiredBound) + "'."
-                            : "Ambiguous constructor witness for bound '"
-                                    + TypeFormatter.format(requiredBound) + "'."));
-        }
-        return matches.getFirst();
     }
 
     static WitnessMethodSelection selectMethod(final ResolutionContext context,

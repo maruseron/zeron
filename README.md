@@ -31,29 +31,36 @@ The implemented language includes:
   methods.
 - Classes, properties, constructors, contracts, contract composition, and statically dispatched
   extensions.
-- Generic bounds and witnesses, including applied contract types and compile-time evidence
-  selection.
-- Arrays, integer ranges, the `Iterable<T>`/`Iterator<T>` protocol, mutable lists, and lazy streams.
-- Lazy for-expressions with `map`, `flatMap`, `filter`, `drop`, `take`, `dropWhile`, and `takeWhile`,
-  or direct collection into a mutable sink.
+- Generic bounds and witnesses, higher-kinded abstractions, checked covariance, and use-site
+  projections, with compile-time evidence selection.
+- Arrays, integer ranges, the `Iterable<T>`/`Iterator<T>` protocol with `Step<T>` results, mutable
+  lists, and lazy streams.
+- Clause-based for-expressions with ordered generators, local bindings, guards, and lazy `yield` or
+  eager `collect` results.
+- Algebraic operator overloading through explicit contracts, plus class-defined numeric literal
+  suffixes.
 - Sum and product types, guarded newtypes, flow-sensitive type tests and casts, and pattern matching
   with public-property and class-defined patterns.
 - `Option<T>`, `Result<T, E>`, evidence-driven equality and ordering, and typed synchronous raised
   effects, with synchronous `using` scopes for disposable resources.
+- Generic admissibility markers for nullable, effect, and mutable-reference type arguments.
 - Packages, imports, separate compilation and library indexes, a REPL, project manifests, and
   selected Java interoperability.
 
 Zeron is currently **alpha**. Some areas are intentionally partial: the Java interop surface is
-curated rather than general, generic variance and some inference cases are unsupported, and
-generic type arguments are erased at runtime. Witness-overlap analysis and pattern exhaustiveness
-also have documented limits. The guide and design documents describe feature-specific rules and
-limitations. Zeron 0.4.1 targets stable Java 25 or later.
+curated rather than general, generic inference and variance have documented boundaries, and generic
+type arguments are erased at runtime. Witness-overlap analysis and pattern exhaustiveness also have
+documented limits. The guide and design documents describe feature-specific rules and limitations.
+Zeron 0.5.0 targets stable Java 25 or later.
 
 ## Get started
 
 See the [Zeron Guide](guide/README.md) for installation, project creation, language concepts, and
 examples. It assumes JDK 25 or later. The guide explains how to build and run projects with the
 packaged launcher or from a source checkout.
+
+Check which compiler distribution is active with `zeron version` (or `zeron --version`). The
+command works from any directory and does not require a project manifest.
 
 For contributors, build with Maven:
 

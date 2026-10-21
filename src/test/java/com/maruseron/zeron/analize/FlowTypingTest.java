@@ -132,6 +132,88 @@ public final class FlowTypingTest {
     }
 
     @Test
+    public void compilesNullTestsWithFlowRefinementAndStaticNonNullResults() throws Exception {
+        final var className = "NullTestFlow" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var statements = parse("""
+                fn isNull(value: Int?): Boolean = value is null;
+                fn isNotNull(value: Int?): Boolean = value is not null;
+                fn incrementAfterNullTest(value: Int?): Int {
+                    if (value is null) return 0;
+                    return value + 1;
+                }
+                fn incrementInIfExpression(value: Int?): Int =
+                    if (value is not null) then value + 2 else 0;
+                fn incrementAfterNegatedNullTest(value: Int?): Int {
+                    if (not (value is null)) return value + 3;
+                    return 0;
+                }
+                fn positive(value: Int?): Boolean = value is not null and value > 0;
+                fn intIsNull(value: Int): Boolean = value is null;
+                fn intIsNotNull(value: Int): Boolean = value is not null;
+                fn stringIsNull(value: String): Boolean = value is null;
+                fn literalIsNull(): Boolean = null is null;
+                fn literalIsNotNull(): Boolean = null is not null;
+                fn anyIsNull(value: Any?): Boolean = value is null;
+                fn incrementAny(value: Any?): Int {
+                    if (value is null) return 0;
+                    if (value is Int) return value + 4;
+                    return 0;
+                }
+                """);
+
+        try {
+            final var compiler = new CompilationService(statements, className);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(true, generated.getMethod("isNull", Integer.class).invoke(null, new Object[]{null}));
+                assertEquals(false, generated.getMethod("isNull", Integer.class).invoke(null, 4));
+                assertEquals(true, generated.getMethod("isNotNull", Integer.class).invoke(null, 4));
+                assertEquals(false, generated.getMethod("isNotNull", Integer.class).invoke(null, new Object[]{null}));
+                assertEquals(0, generated.getMethod("incrementAfterNullTest", Integer.class)
+                        .invoke(null, new Object[]{null}));
+                assertEquals(5, generated.getMethod("incrementAfterNullTest", Integer.class).invoke(null, 4));
+                assertEquals(6, generated.getMethod("incrementInIfExpression", Integer.class).invoke(null, 4));
+                assertEquals(0, generated.getMethod("incrementInIfExpression", Integer.class)
+                        .invoke(null, new Object[]{null}));
+                assertEquals(7, generated.getMethod("incrementAfterNegatedNullTest", Integer.class).invoke(null, 4));
+                assertEquals(true, generated.getMethod("positive", Integer.class).invoke(null, 3));
+                assertEquals(false, generated.getMethod("positive", Integer.class).invoke(null, new Object[]{null}));
+                assertEquals(false, generated.getMethod("intIsNull", int.class).invoke(null, 3));
+                assertEquals(true, generated.getMethod("intIsNotNull", int.class).invoke(null, 3));
+                assertEquals(false, generated.getMethod("stringIsNull", String.class).invoke(null, "value"));
+                assertEquals(true, generated.getMethod("literalIsNull").invoke(null));
+                assertEquals(false, generated.getMethod("literalIsNotNull").invoke(null));
+                assertEquals(true, generated.getMethod("anyIsNull", Object.class).invoke(null, new Object[]{null}));
+                assertEquals(false, generated.getMethod("anyIsNull", Object.class).invoke(null, "value"));
+                assertEquals(0, generated.getMethod("incrementAny", Object.class).invoke(null, new Object[]{null}));
+                assertEquals(7, generated.getMethod("incrementAny", Object.class).invoke(null, 3));
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn maybe(): Int? = 1;
+                fn invalid(): Int {
+                    if (maybe() is not null) return maybe() + 1;
+                    return 0;
+                }
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn invalid(value: Int?): Int {
+                    let mut current: Int? = value;
+                    if (current is not null) current = null;
+                    return current + 1;
+                }
+                """)));
+    }
+
+    @Test
     public void carriesFlowFactsAcrossLoopExitsAndNestedBreaks() throws Exception {
         final var className = "LoopFlowEdges" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
@@ -378,6 +460,100 @@ public final class FlowTypingTest {
                 "class Box<T> { value: T; } fn invalid(value: Any): Box<Int> = value as Box<Int>;",
                 "fn invalid(value: Any): (Int) -> Int = value as (Int) -> Int;",
                 "fn invalid<T>(value: Any): T = value as T;")) {
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+        }
+    }
+
+    @Test
+    public void genericRuntimeTestsRequireStaticApplicationProof() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var className = "GenericRuntimeTests" + suffix;
+        final var classFiles = List.of(
+                Path.of("dist", className + ".class"),
+                Path.of("dist", "Tagged" + suffix + ".class"),
+                Path.of("dist", "Implementation" + suffix + ".class"),
+                Path.of("dist", "Other" + suffix + ".class"),
+                Path.of("dist", "Box" + suffix + ".class"));
+        final var statements = parse("""
+                public contract Tagged%s<out T> {}
+                public class Implementation%s<T> is Tagged%s<T> {
+                    public constructor new;
+                }
+                public class Other%s<T> is Tagged%s<T> {
+                    public constructor new;
+                }
+                public class Box%s<T: nullable> {
+                    public constructor new;
+                }
+                fn isImplementation(value: Tagged%s<Int>): Boolean =
+                    value is Implementation%s<Int>;
+                fn safeImplementation(value: Tagged%s<Int>): Implementation%s<Int>? =
+                    value as? Implementation%s<Int>;
+                fn narrowImplementation(value: Tagged%s<Int>): Implementation%s<Int>? {
+                    if (value is Implementation%s<Int>) return value;
+                    return null;
+                }
+                fn projectedBox(value: Any): Box%s<out Any?>? =
+                    value as? Box%s<out Any?>;
+                """.formatted(suffix, suffix, suffix, suffix, suffix, suffix, suffix, suffix, suffix,
+                suffix, suffix, suffix, suffix, suffix, suffix, suffix));
+
+        try {
+            final var compiler = new CompilationService(statements, className);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                final var implementation = loader.loadClass("Implementation" + suffix)
+                        .getConstructor().newInstance();
+                final var other = loader.loadClass("Other" + suffix).getConstructor().newInstance();
+                final var box = loader.loadClass("Box" + suffix).getConstructor().newInstance();
+
+                assertEquals(true, generated.getMethod("isImplementation", loader.loadClass("Tagged" + suffix))
+                        .invoke(null, implementation));
+                assertEquals(false, generated.getMethod("isImplementation", loader.loadClass("Tagged" + suffix))
+                        .invoke(null, other));
+                assertSame(implementation, generated.getMethod("safeImplementation",
+                        loader.loadClass("Tagged" + suffix)).invoke(null, implementation));
+                assertNull(generated.getMethod("safeImplementation", loader.loadClass("Tagged" + suffix))
+                        .invoke(null, other));
+                assertSame(implementation, generated.getMethod("narrowImplementation",
+                        loader.loadClass("Tagged" + suffix)).invoke(null, implementation));
+                assertNull(generated.getMethod("projectedBox", Object.class).invoke(null, "not a box"));
+                assertSame(box, generated.getMethod("projectedBox", Object.class).invoke(null, box));
+            }
+        } finally {
+            for (final var classFile : classFiles) Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
+    public void rejectsAmbiguousGenericRuntimeTestTargets() {
+        for (final var source : List.of(
+                "contract Tagged<out T> {} "
+                        + "class Implementation<T> is Tagged<T> { public constructor new; } "
+                        + "fn invalid(value: Tagged<Any>): Boolean = value is Implementation<Int>;",
+                "contract Parent {} class Child is Parent { public constructor new; } "
+                        + "contract Tagged<out T> {} "
+                        + "class Implementation<T> is Tagged<T> { public constructor new; } "
+                        + "fn invalid(value: Tagged<Parent>): Boolean = value is Implementation<Parent>;",
+                "contract Parent {} class Child is Parent { public constructor new; } "
+                        + "class Box<out T> { public constructor new; } "
+                        + "contract Tagged<out T> {} "
+                        + "class Implementation<T> is Tagged<T> { public constructor new; } "
+                        + "fn invalid(value: Tagged<Box<Parent>>): Boolean = "
+                        + "value is Implementation<Box<Parent>>;",
+                "contract Tagged<out T> {} "
+                        + "class FixedImplementation<T> is Tagged<Int> { public constructor new; } "
+                        + "fn invalid(value: Tagged<Int>): Boolean = "
+                        + "value is FixedImplementation<String>;",
+                "class Box<T> { public constructor new; } "
+                        + "fn invalid(value: Any): Boolean = value is Box<out Int>;",
+                "contract Tagged<out T> {} "
+                        + "class Implementation<T> is Tagged<T> { public constructor new; } "
+                        + "fn invalid(value: Tagged<Int>): Implementation<Int> = value as Implementation<Int>;")) {
             assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }

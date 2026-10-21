@@ -57,6 +57,76 @@ public final class SourceFormatterTest {
     }
 
     @Test
+    public void preservesNumericSeparatorsAndRadixLiteralSpelling() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = "fn main(){let decimal=1_000;let hex=0xFF_FF;let fraction=3.141_592;}";
+
+        final var formatted = SourceFormatter.format(source, "NumericLiterals.zn", style)
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted.contains("1_000"));
+        assertTrue(formatted.contains("0xFF_FF"));
+        assertTrue(formatted.contains("3.141_592"));
+        assertEquals(formatted, SourceFormatter.format(formatted, "NumericLiterals.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
+    public void keepsCustomNumericSuffixesAdjacent() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = "fn main(){let scaled=3.5m;}";
+
+        final var formatted = SourceFormatter.format(source, "SuffixedLiteral.zn", style)
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted.contains("3.5m"));
+        assertEquals(formatted, SourceFormatter.format(formatted, "SuffixedLiteral.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
+    public void formatsCustomSuffixDeclarationsCanonically() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = "public class BigInteger{suffix n{integer:string fromLiteralText;}}";
+
+        final var formatted = SourceFormatter.format(source, "BigInteger.zn", style)
+                .formattedSource().orElseThrow();
+
+        assertEquals("""
+                public class BigInteger {
+                    suffix n {
+                        integer: string fromLiteralText;
+                    }
+                }
+                """, formatted);
+        assertEquals(formatted, SourceFormatter.format(formatted, "BigInteger.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
+    public void formatsNamedAndFirstClassHandlerSyntax() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = """
+                public handler Named{case Failure.message(_)->"";}
+                fn apply(value:String~>{Failure}):String=handle(raise Failure.new())with value;
+                fn inline(value:String):String=handle(raise Failure.new())with handler{case Failure.message(_)->value;};
+                """;
+
+        final var result = SourceFormatter.format(source, "Handler.zn", style);
+        assertTrue(result.diagnostics().toString(), result.formattedSource().isPresent());
+        final var formatted = result.formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains("public handler Named {"));
+        assertTrue(formatted, formatted.contains("String ~> {Failure}"));
+        assertTrue(formatted, formatted.contains(") with value;"));
+        assertTrue(formatted, formatted.contains("with handler {"));
+        assertTrue(formatted, formatted.contains("case Failure.message(_) -> value;"));
+        assertTrue(formatted, formatted.contains("fn inline(value: String): String ="));
+        assertEquals(formatted, SourceFormatter.format(formatted, "Handler.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
     public void normalizesMultilineCommentLineEndingsToTheFileConvention() throws Exception {
         final var style = CanonicalStyle.load();
         final var source = "fn main(){/* first\r\nsecond */let value=1;}\n";
@@ -365,7 +435,9 @@ public final class SourceFormatterTest {
             assertTrue(path + ": source line exceeds the canonical width",
                     output.lines().allMatch(line -> line.length() <= style.maximumLineLength()));
             if (path.getFileName().toString().equals("iterable.zn")) {
-                assertTrue(output.contains("public contract Iterable<T> {"));
+                assertTrue(path + ": " + output,
+                        output.replaceAll("\\s+", " ")
+                                .contains("public contract Iterable<T: nullable + mut> {"));
                 assertTrue(output.contains("iterator(): &Iterator<T>;"));
                 assertTrue(output.contains("default stream(): Stream<T> = Stream.from(this);"));
                 assertTrue(output.contains("for (let element in this) consumer(element);"));

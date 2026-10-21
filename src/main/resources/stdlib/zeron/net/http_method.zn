@@ -1,0 +1,19 @@
+package zeron.net;
+
+import zeron.lang.Option;
+import zeron.lang.Result;
+
+external fn httpValidateMethod(value: String?): Boolean;
+
+public type HttpMethodError = InvalidMethod(value: String);
+
+public newtype HttpMethod = String where httpValidateMethod(value);
+
+namespace HttpMethod {
+    public fn parse(value: String): Result<HttpMethod, HttpMethodError> =
+        match (HttpMethod.tryNew(value)) {
+            case Option.Some(method) -> Result<HttpMethod, HttpMethodError>.Ok(method);
+            case Option.None() -> Result<HttpMethod, HttpMethodError>.Err(
+                HttpMethodError.InvalidMethod(value));
+        };
+}

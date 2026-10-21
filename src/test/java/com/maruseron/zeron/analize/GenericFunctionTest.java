@@ -48,6 +48,82 @@ public final class GenericFunctionTest {
     }
 
     @Test
+    public void nullableAdmissibilityDefaultsToNonNullAndCanBeOptedInto() {
+        new ResolutionService().resolve(parse("""
+                fn identity<T>(value: T): T = value;
+                fn preserve<T: nullable>(value: T): T = value;
+                fn useNullable(value: String?): String? = preserve(value);
+                """));
+
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn identity<T>(value: T): T = value;
+                fn rejectNullable(value: String?): String? = identity(value);
+                """)));
+    }
+
+    @Test
+    public void mutableAdmissibilityDefaultsToReadOnlyAndCanBeOptedInto() {
+                new ResolutionService().resolve(parse("""
+                        class Widget { public constructor new; }
+                        fn carry<T: mut>(value: T): T = value;
+                        fn nullableAndMutable<T: nullable + mut>(value: T): T = value;
+                        fn useMutable(value: &Widget): &Widget = carry(value);
+                        fn useNullable(value: Widget?): Widget? = nullableAndMutable(value);
+                        """));
+
+                for (final var source : List.of(
+                        "class Widget { public constructor new; } "
+                                + "fn identity<T>(value: T): T = value; "
+                                + "fn invalid(value: &Widget): &Widget = identity(value);",
+                        "fn identity<T>(value: T): T = value; "
+                                + "fn forward<T: mut>(value: T): T = identity(value);")) {
+                    assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+                }
+    }
+
+    @Test
+    public void effectAdmissibilityRequiresEffectTypeArguments() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                fn relay<E: effect>(value: E): E raises E = value;
+                fn invalid(): String = relay<String>("not an effect");
+                """)));
+    }
+
+    @Test
+    public void nullableMarkersApplyToClassesMethodsAndFunctionReferences() {
+        new ResolutionService().resolve(parse("""
+                class NullableBox<T: nullable> {
+                    value: T;
+                    public constructor from(value: T) {
+                        let box = NullableBox<T>.new(value);
+                        return box;
+                    }
+                }
+                class Operations {
+                    public constructor new;
+                    public preserve<T: nullable>(value: T): T = value;
+                }
+                fn identity<T: nullable>(value: T): T = value;
+                let nullableIdentity: (String?) -> String? = identity;
+                fn construct(value: String?): NullableBox<String?> = NullableBox<String?>.from(value);
+                fn invoke(value: String?): String? = Operations.new().preserve(value);
+                """));
+
+        for (final var source : List.of(
+                "class Box<T> { value: T; public constructor from(value: T) { "
+                        + "let box = Box<T>.new(value); return box; } } "
+                        + "fn invalid(value: String?): Box<String?> = Box<String?>.from(value);",
+                "class Operations { public constructor new; "
+                        + "public identity<T>(value: T): T = value; } "
+                        + "fn invalid(value: String?): String? = Operations.new().identity(value);",
+                "fn identity<T>(value: T): T = value; "
+                        + "fn invalid(value: String?): String? = identity(value);",
+                "fn invalid(value: Int?): Result<Int?, String> = Result<Int?, String>.Ok(value);")) {
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+        }
+    }
+
+    @Test
     public void infersAndExecutesGenericClassAndContractMethods() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var className = "GenericMethods" + suffix;
@@ -179,10 +255,10 @@ public final class GenericFunctionTest {
                     public name(): String = this.value;
                 }
                 fn readName(value: Named): String = value.name();
-                fn display<T: Named>(value: T): String = value.name();
+                fn display<T: mut + Named>(value: T): String = value.name();
                 fn inferred(): String = display(Person.new("Ada"));
                 fn explicit(): String = display<Person>(Person.new("Grace"));
-                fn passesBound<T: Named>(value: T): String = readName(value);
+                fn passesBound<T: mut + Named>(value: T): String = readName(value);
                 fn passThrough(): String = passesBound(Person.new("Lin"));
                 """);
         final var compiler = new CompilationService(source, className);
@@ -219,7 +295,7 @@ public final class GenericFunctionTest {
                     encode(): String;
                 }
                 public contract Formatter {
-                    format<T: Named + Encodable>(value: T): String;
+                    format<T: mut + Named + Encodable>(value: T): String;
                 }
                 public class MultiBoundItem is Named, Encodable {
                     label: String;
@@ -229,10 +305,10 @@ public final class GenericFunctionTest {
                 }
                 public class FormatterImpl is Formatter {
                     public constructor new;
-                    public format<T: Named + Encodable>(value: T): String =
+                    public format<T: mut + Named + Encodable>(value: T): String =
                         value.name() + value.encode();
                 }
-                fn combine<T: Named + Encodable>(value: T): String =
+                fn combine<T: mut + Named + Encodable>(value: T): String =
                     value.name() + value.encode();
                 fn inferredFunctionCall(): String = combine(MultiBoundItem.new("A"));
                 fn explicitFunctionCall(): String = combine<MultiBoundItem>(MultiBoundItem.new("B"));
@@ -514,29 +590,29 @@ public final class GenericFunctionTest {
                     public constructor new;
                     public name(): String = this.label;
                 }
-                fn display<T: Named>(value: T): String = value.name();
-                fn apply<T: Named>(value: T, operation: (T) -> String): String = operation(value);
+                fn display<T: mut + Named>(value: T): String = value.name();
+                fn apply<T: mut + Named>(value: T, operation: (T) -> String): String = operation(value);
                 fn directMembers(): String {
-                    let readName = value -> value.name();
+                    let readName: (Named) -> String = value -> value.name();
                     let person = readName(Person.new("Ada"));
                     let place = readName(Place.new("Paris"));
                     return person + place;
                 }
                 fn inheritedBounds(): String {
-                    let readName = value -> display(value);
+                    let readName: (Named) -> String = value -> display(value);
                     return readName(Person.new("Grace"));
                 }
                 fn callbackArgument(): String {
-                    let readName = value -> value.name();
-                    return apply(Person.new("Lin"), readName);
+                    let readName: (Named) -> String = value -> value.name();
+                    return apply<Named>(Person.new("Lin"), readName);
                 }
                 fn callbackReturn(): (Person) -> String {
-                    let readName = value -> value.name();
+                    let readName: (Person) -> String = value -> value.name();
                     return readName;
                 }
                 fn capturedMemberUse(): String {
                     let prefix = "name:";
-                    let describe = value -> prefix + value.name();
+                    let describe: (Named) -> String = value -> prefix + value.name();
                     return describe(Person.new("Mira"));
                 }
                 fn invokeReturnedCallback(): String {
@@ -544,7 +620,7 @@ public final class GenericFunctionTest {
                     return callback(Person.new("Nia"));
                 }
                 fn multipleBounds(): String {
-                    let describe = value -> value.name() + value.encode();
+                    let describe: (Person) -> String = value -> value.name() + value.encode();
                     return describe(Person.new("Zeron"));
                 }
                 """);
@@ -788,7 +864,7 @@ public final class GenericFunctionTest {
                 final var adapterCount = java.util.Arrays.stream(program.getDeclaredMethods())
                         .filter(method -> method.getName().startsWith("$adapter$"))
                         .count();
-                assertEquals(8, adapterCount);
+                assertEquals(9, adapterCount);
             }
         } finally {
             Files.deleteIfExists(classFile);

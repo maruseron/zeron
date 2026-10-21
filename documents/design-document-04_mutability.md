@@ -107,6 +107,12 @@ For arrays, distinguish changing the array binding from changing its contents. `
 
 Treat `&T` as permission to mutate, not as proof of exclusive access. Multiple references may alias, and mutation through one is visible through the others unless a later ownership design says otherwise. Do not promise Rust-like borrow checking, uniqueness, or data-race safety from this marker alone.
 
+Generic admissibility is separate from the capability itself. A type parameter rejects mutable
+reference arguments by default; declaring `T: mut` permits either a read-only or mutable-reference
+argument but does not authorize mutation through `T`. Nested generic applications apply the policy
+declared by their own type parameters. See
+[ZEP-0062](./zeps/ZEP-0062.md) for the generic boundary rules.
+
 ## Type and Compiler Model
 
 Keep binding policy outside `TypeDescriptor`. Mutation capability is represented as a distinct

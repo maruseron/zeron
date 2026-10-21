@@ -40,8 +40,14 @@ a source package a JVM module.
   `println(Object)`, selected `java.io.File` constructors and instance methods, and the NIO members
   required by `zeron.fs.Path` and whole-file text I/O; this does not enable package scanning or
   wildcard discovery.
-  Ordinary Java member interop supports `Object[]` parameters and results with explicit mappings;
-  typed reference and primitive array signatures remain unsupported.
+  Ordinary Java member interop supports `Object[]` and selected primitive-array parameters and
+  results with copying mappings; typed reference arrays and unsupported primitive-array shapes
+  remain unsupported. Explicitly imported generic Java classes and interfaces support the implemented
+  class-level generic signatures, exact type arguments, and ZEP-0052 wildcard projections for member
+  access; invocation still uses erased JVM descriptors. Generic method and constructor type
+  parameters are supported when their signatures and bounds are representable. Raw Java types,
+  generic arrays, and generic `throws` type variables remain unsupported, as specified by
+  [ZEP-0048](zeps/ZEP-0048.md).
 - Compiler intrinsic IDs and lowering are described separately in
   [design-document-12_intrinsics-and-external-bindings.md](design-document-12_intrinsics-and-external-bindings.md).
 
@@ -175,8 +181,8 @@ contract changes incompatibly or the binary index format changes; the two versio
 The index schema is independent of its JAR packaging. It includes extension exports,
 extension-property markers, effect markers, raised-effect signatures, witness and pattern metadata,
 applied contract requirements, ordered nominal product components, newtype representation and
-validation markers, and external-facade checked-exception mappings alongside callable and value
-exports.
+validation markers, external-facade checked-exception mappings, and class-owned numeric literal
+suffix declarations with their factory mappings alongside callable and value exports.
 
 `ZeronLibraryIndexDump` accepts an index file, a class directory, or a Zeron library JAR.
 
@@ -224,9 +230,12 @@ diagnostics rather than guessed source types.
 
 The supported source mappings are intentionally narrow:
 
-- Java `int`, `double`, and `boolean` map to Zeron `Int`, `Float`, and `Boolean`; `void` maps to
-  `Unit`.
-- `String` and boxed scalar parameters/results are nullable scalar types.
+- Java `int`, `long`, `double`, and `boolean` map to Zeron `Int`, `Long`, `Float`, and `Boolean`;
+  `void` maps to `Unit`. Java `float` results and field reads widen to Zeron `Float`; Java `float`
+  parameters and writes are rejected to avoid narrowing.
+- Unannotated Java reference and array parameters/results are nullable. Facades may promise
+  non-null results, which are checked at runtime. Boxed supported scalar types map to nullable
+  scalar types.
 - Other Java reference parameters/results map to nullable mutable views (`&T?`). Constructors
   return non-null mutable views (`&T`), and instance calls require a mutable receiver.
 - Java method overloads are selected by supported argument types. Applicable fixed-arity Java
@@ -237,22 +246,34 @@ The supported source mappings are intentionally narrow:
 - Expanded Java varargs calls pack trailing arguments into the JVM's typed array, including an empty
   tail. Primitive and reference components are supported when their component type is mapped. Passing
   an already-packed Java array is not supported.
-- Ordinary Java method parameters support only `Object[]`. Zeron arrays are shallow-copied to a fresh
-  `Object[]` before invocation so Java writes cannot inject values that violate Zeron's invariant
-  element type; element objects themselves remain shared. Java `Object[]` results map to nullable
-  `Array<Any?>` without adaptation. Typed reference arrays and primitive arrays are rejected during
-  resolution; Java array fields remain unsupported.
-- Java exceptions from direct Java interop propagate to the host, except that direct calls to
-  methods declaring checked exceptions are rejected. An external-class method may explicitly map
-  checked exceptions to declared Zeron effects; unchecked exceptions and `Error`s always propagate
-  unchanged.
+- Java `int[]`, `long[]`, `double[]`, and `boolean[]` map to nullable `Array<Int>`, `Array<Long>`,
+  `Array<Float>`, and `Array<Boolean>`. Java `Object[]` maps to nullable `Array<Any?>`. These arrays
+  are copied on arguments and results; object-array elements remain shared. Java `byte[]` maps
+  directly to nullable `ByteArray`; `zeron.io.byteArrayToArray` and
+  `zeron.io.arrayToByteArray` provide explicit copying conversions between non-null `ByteArray` and
+  `Array<Byte>`. These mappings apply to method and constructor calls and expanded varargs, not Java
+  array fields. Passing an already-packed array to a Java varargs method remains unsupported.
+- Java `float[]`, `short[]`, `char[]`, typed reference arrays other than `Object[]`, and
+  multidimensional arrays remain unsupported.
+- Java exceptions from direct Java interop propagate to the host, except that calls declaring
+  checked exceptions are rejected unless they resolve through an explicitly mapped declaration.
+  External-class methods and constructors can map checked exceptions to declared Zeron effects;
+  external functions can do so when their configured Java binding exposes class-file exception
+  metadata. Every declared checked exception must be covered, and the original exception object is
+  retained as the effect payload. Unchecked exceptions and `Error`s always propagate unchanged.
 
-Java generics, typed reference/primitive Java array signatures, callbacks/SAM conversion, inherited members,
-static field writes, and JPMS module-path/readability configuration are deferred. JDK module exports
-are honored for discovered classes; only unqualified exports are accessible to generated unnamed
-modules. Java classpath roots provide compile-time metadata lookup. Generated programs also require the
-corresponding Java classes at runtime: `zeron run` reuses the roots declared in the project manifest,
-while any external launcher must configure its own runtime classpath.
+Imported Java generic classes can be used with explicit type arguments and `out T` / `in T`
+projections. Supported class and member generic signatures, including `? extends`, `? super`, and
+unbounded wildcards, are checked against the projected owner view; generated calls still use the
+erased JVM descriptor. Raw Java generic types, generic `throws` type variables, and signatures with
+unsupported bounds or forms remain unsupported. Java generic arrays, typed reference arrays and
+remaining primitive-array shapes, callbacks/SAM
+conversion, inherited members, static field writes, and JPMS module-path/readability configuration
+are deferred. JDK module exports are honored for discovered classes; only unqualified exports are
+accessible to generated unnamed modules. Java classpath roots provide compile-time metadata lookup.
+Generated programs also require the corresponding Java classes at runtime: `zeron run` reuses the
+roots declared in the project manifest, while any external launcher must configure its own runtime
+classpath.
 Zeron library JAR support remains separate from `--java-classpath` and must not be inferred from the
 Zeron API-index reader.
 
@@ -273,16 +294,11 @@ exports use ordinary Zeron function behavior. Curated platform bindings can use 
 static-field/instance-method plan, such as `System.out` followed by `PrintStream.println`, without
 general JDK class discovery or a source-level invocation DSL.
 
-The curated bundled facade uses `external class` declarations and ordinary Java member invocation.
-It is limited to two JDK owners and three members. Other public types in exported JDK packages are
-available through direct Java symbol discovery, subject to the supported interop mappings; generic
-types and unsupported signatures remain unavailable.
-
-The standard library also binds a small set of immutable `java.lang.String` instance methods through
-typed external function bindings. These are curated compiler bindings, not a general relaxation of
-Java interop receiver mutability or arbitrary instance method access. The Zeron `String` extension
-API exposes UTF-16 code-unit `length`, `isEmpty`, `indexOf`/`lastIndexOf` (returning `-1` when absent),
-`contains`, `startsWith`, `endsWith`, and bounds-checked `substring(start, end): Option<String>`.
+Zeron's `String` extensions use curated bindings for selected immutable `java.lang.String` operations.
+These bindings do not relax Java interop receiver mutability or expose arbitrary members through the
+extension API. The Zeron `String` extension API exposes UTF-16 code-unit `length`, `isEmpty`,
+`indexOf`/`lastIndexOf` (returning `-1` when absent), `contains`, `startsWith`, `endsWith`, and
+bounds-checked `substring(start, end): Option<String>`.
 `Char` represents a Unicode scalar and uses JVM `int`; Java `char` remains unsupported and has no
 implicit conversion to or from `Char`. Scalar-indexed `codePoint*` String extensions normalize lone
 surrogates to U+FFFD, while their `Strict` variants return `Result<_, UnicodeError>`. The compiler

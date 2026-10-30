@@ -14,6 +14,8 @@ import com.maruseron.zeron.scan.SuffixableNumber;
 
 import java.util.List;
 import java.util.Objects;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 
 public sealed interface Expr {
 
@@ -65,10 +67,13 @@ public sealed interface Expr {
     static Token methodEvidenceToken(final TypeParameterDescriptor parameter,
                                     final int boundIndex,
                                     final int methodIndex) {
-        return new Token(TokenType.IDENTIFIER,
-                "$zeron$evidence$" + parameter.scopeId() + "$" + parameter.name()
-                        + "$" + boundIndex + "$method$" + methodIndex,
-                null, -1);
+        final var token = new Token(
+            TokenType.IDENTIFIER,
+            "$zeron$evidence$" + parameter.scopeId() + "$" + parameter.name()
+                    + "$" + boundIndex + "$method$" + methodIndex,
+            null, -1);
+
+        return token;
     }
 
     TypeDescriptor getType();
@@ -133,9 +138,11 @@ public sealed interface Expr {
         private Token witnessEvidenceToken;
         private FunctionDescriptor witnessFactoryType;
         private boolean witnessEvidenceIsMethod;
+        private boolean witnessEvidenceHasReceiver = true;
         private String witnessMethodOwner;
         private String witnessMethodName;
         private FunctionDescriptor witnessMethodType;
+        private boolean witnessMethodHasReceiver = true;
         private TypeDescriptor requiredContractType;
         private List<EvidenceArgument> evidenceArguments = List.of();
 
@@ -200,32 +207,54 @@ public sealed interface Expr {
         public Token witnessEvidenceToken() { return witnessEvidenceToken; }
         public FunctionDescriptor witnessFactoryType() { return witnessFactoryType; }
         public boolean witnessEvidenceIsMethod() { return witnessEvidenceIsMethod; }
+        public boolean witnessEvidenceHasReceiver() { return witnessEvidenceHasReceiver; }
         public void setWitnessEvidence(final Token token, final FunctionDescriptor factoryType) {
             witnessEvidenceToken = token;
             witnessFactoryType = factoryType;
             witnessEvidenceIsMethod = false;
+            witnessEvidenceHasReceiver = false;
         }
         public void setWitnessMethodEvidence(final Token token, final FunctionDescriptor methodType) {
+            setWitnessMethodEvidence(token, methodType, true);
+        }
+        public void setWitnessMethodEvidence(final Token token, final FunctionDescriptor methodType,
+                                             final boolean hasReceiver) {
             witnessEvidenceToken = token;
             witnessFactoryType = methodType;
             witnessEvidenceIsMethod = true;
+            witnessEvidenceHasReceiver = hasReceiver;
         }
         public String witnessMethodOwner() { return witnessMethodOwner; }
         public String witnessMethodName() { return witnessMethodName; }
         public FunctionDescriptor witnessMethodType() { return witnessMethodType; }
+        public boolean witnessMethodHasReceiver() { return witnessMethodHasReceiver; }
         public TypeDescriptor requiredContractType() { return requiredContractType; }
         public void setRequiredContractType(final TypeDescriptor contractType) {
             requiredContractType = contractType;
         }
         public void setWitnessMethod(final String owner, final String methodName,
                                      final FunctionDescriptor methodType) {
+            setWitnessMethod(owner, methodName, methodType, true);
+        }
+        public void setWitnessMethod(final String owner, final String methodName,
+                                     final FunctionDescriptor methodType, final boolean hasReceiver) {
             witnessMethodOwner = owner;
             witnessMethodName = methodName;
             witnessMethodType = methodType;
+            witnessMethodHasReceiver = hasReceiver;
         }
         public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
         public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
             evidenceArguments = List.copyOf(arguments);
+        }
+
+        @Override
+        public String toString() {
+            return "MemberCall["
+                + receiver
+                + "."
+                + name
+                + "]";
         }
     }
 
@@ -317,6 +346,8 @@ public sealed interface Expr {
         public final Expr value;
         private TypeDescriptor type;
         private Token resolvedSymbolToken;
+        private String dataFieldOwner;
+        private TypeDescriptor dataFieldType;
 
         public Assignment(Token name, Expr value, TypeDescriptor type) {
             this.name = name;
@@ -333,6 +364,12 @@ public sealed interface Expr {
         }
         public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? name : resolvedSymbolToken; }
         public void setResolvedSymbolToken(final Token token) { resolvedSymbolToken = token; }
+        public String dataFieldOwner() { return dataFieldOwner; }
+        public TypeDescriptor dataFieldType() { return dataFieldType; }
+        public void setDataFieldTarget(final String owner, final TypeDescriptor fieldType) {
+            dataFieldOwner = owner;
+            dataFieldType = fieldType;
+        }
 
         public boolean equals(Object obj) {
             if (obj == this) return true;
@@ -1365,11 +1402,29 @@ public sealed interface Expr {
     final class Literal implements Expr {
         public final Object value;
         private TypeDescriptor type;
+        private final BigInteger exactInteger;
+        private final BigDecimal exactDecimal;
+        private final Token numericToken;
+        private MemberCall numericConversionCall;
 
         public Literal(Object value, TypeDescriptor type) {
+            this(value, type, null, null, null);
+        }
+
+        public Literal(Object value, TypeDescriptor type, final BigInteger exactInteger,
+                       final BigDecimal exactDecimal, final Token numericToken) {
             this.value = value;
             this.type = type;
+            this.exactInteger = exactInteger;
+            this.exactDecimal = exactDecimal;
+            this.numericToken = numericToken;
         }
+
+        public BigInteger exactInteger() { return exactInteger; }
+        public BigDecimal exactDecimal() { return exactDecimal; }
+        public Token numericToken() { return numericToken; }
+        public MemberCall numericConversionCall() { return numericConversionCall; }
+        public void setNumericConversionCall(final MemberCall call) { numericConversionCall = call; }
 
         public TypeDescriptor getType() {
             return type;

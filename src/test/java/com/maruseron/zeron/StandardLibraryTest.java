@@ -168,7 +168,7 @@ public final class StandardLibraryTest {
 
                 type List<T> = Nil | Cons(head: T, tail: List<T>);
 
-                fn stringify<T: Display<T>>(value: T): String = value.toString();
+                fn stringify<T: Display>(value: T): String = value.toString();
                 fn main() {}
                 """;
         final var userUnit = parse("main.zn", source);
@@ -801,6 +801,19 @@ public final class StandardLibraryTest {
     }
 
     @Test
+    public void vector2DelegatingWitnessUsesItsVectorContractType() {
+        final var result = new com.maruseron.zeron.analize.ResolutionService()
+                .resolveUnitsWithDiagnostics(StandardLibrary.bundledUnits());
+        final var vector2Errors = result.errors().stream()
+                .filter(diagnostic -> diagnostic.primarySpan().sourcePath() != null
+                        && diagnostic.primarySpan().sourcePath().replace('\\', '/')
+                                .endsWith("/zeron/numeric/vector2.zn"))
+                .toList();
+
+        assertTrue(vector2Errors.toString(), vector2Errors.isEmpty());
+    }
+
+    @Test
     public void installedStandardLibrarySourcesResolveFromDistributionRoot() throws Exception {
         final var distribution = Files.createTempDirectory("zeron-stdlib-distribution");
         final var relativePath = Path.of("zeron", "lang", "option.zn");
@@ -1139,8 +1152,8 @@ public final class StandardLibraryTest {
                     source: F<A>, transform: (A) -> F<B>
                 ): F<B> = source.flatMap(transform);
                 fn applyAll<F<_>: Monad<F>, A, B>(
-                    functions: F<(A) -> B>, values: F<A>
-                ): F<B> = functions.ap(values);
+                    values: F<A>, functions: F<(A) -> B>
+                ): F<B> = values.ap(functions);
                 fn pureAll<F<_>: Monad<F>, A>(value: A): F<A> = F.pure(value);
                 fn foldAll<F<_>: Foldable<F>>(values: F<Int>): Int =
                     values.foldLeft(0, (total, value) -> total + value);
@@ -1153,8 +1166,8 @@ public final class StandardLibraryTest {
                         Stream<Int>.of(1, 2), value -> Stream<Int>.of(value, value + 10)));
                 fn streamApply(): Int =
                     foldAll<Stream<_>>(applyAll<Stream<_>, Int, Int>(
-                        Stream<(Int) -> Int>.of(value -> value + 1, value -> value * 2),
-                        Stream<Int>.of(1, 2)));
+                        Stream<Int>.of(1, 2),
+                        Stream<(Int) -> Int>.of(value -> value + 1, value -> value * 2)));
                 fn streamPure(): Int = foldAll<Stream<_>>(pureAll<Stream<_>, Int>(7));
 
                 fn optionMap(): Int =
@@ -1166,7 +1179,7 @@ public final class StandardLibraryTest {
                 fn optionApply(): Int {
                     let transform: (Int) -> Int = value -> value * 3;
                     return foldAll<Option<_>>(applyAll<Option<_>, Int, Int>(
-                        Option.Some(transform), Option.Some(4)));
+                        Option.Some(4), Option.Some(transform)));
                 }
                 fn optionPure(): Int = foldAll<Option<_>>(pureAll<Option<_>, Int>(8));
 
@@ -1179,8 +1192,8 @@ public final class StandardLibraryTest {
                         Result.ok<Int, String>(5), value -> Result.ok<Int, String>(value + 2)));
                 fn resultApply(): Int =
                     foldAll<Result<_, String>>(applyAll<Result<_, String>, Int, Int>(
-                        Result.ok<(Int) -> Int, String>(value -> value + 10),
-                        Result.ok<Int, String>(2)));
+                        Result.ok<Int, String>(2),
+                        Result.ok<(Int) -> Int, String>(value -> value + 10)));
                 fn resultPure(): Int =
                     foldAll<Result<_, String>>(pureAll<Result<_, String>, Int>(9));
                 fn resultErrorFold(): Int =
@@ -1755,6 +1768,7 @@ public final class StandardLibraryTest {
                 package %s;
                 import zeron.collections.List;
                 import zeron.collections.Stream;
+                import zeron.collections.Step;
                 class Calls {
                     value: Int;
                     public constructor new;
@@ -1777,12 +1791,112 @@ public final class StandardLibraryTest {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
                         collect item * 3 into List<Int>.empty();
-                    return values.size * 100 + values.at(0) + values.at(1);
+                    return values.size * 100 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1);
+                }
+                fn collectedArrayPipelineSize(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        if item %% 2 == 0
+                        collect item * 3 into List<Int>.empty();
+
+                    return values.size;
+                }
+                fn collectedArrayPipelineFirst(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        if item %% 2 == 0
+                        collect item * 3 into List<Int>.empty();
+
+                    return values.at(0).getOrElse(-1);
+                }
+                fn collectedArrayPipelineSecond(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        if item %% 2 == 0
+                        collect item * 3 into List<Int>.empty();
+
+                    return values.at(1).getOrElse(-1);
+                }
+                fn collectedArrayPipelineReversed(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        if item %% 2 == 0
+                        collect item * 3 into List<Int>.empty();
+                    return values.at(1).getOrElse(-1)
+                        + values.at(0).getOrElse(-1) * 100;
+                }
+                fn collectedFirstElementTimes100(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        if item %% 2 == 0
+                        collect item * 3 into List<Int>.empty();
+                    return values.at(0).getOrElse(-1) * 100;
+                }
+                fn collectedArrayWithoutFilter(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        collect item into List<Int>.empty();
+                    return values.size * 1000
+                        + values.at(0).getOrElse(-1) * 100
+                        + values.at(1).getOrElse(-1) * 10
+                        + values.at(2).getOrElse(-1);
+                }
+                fn collectedArrayWithFilter(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        if item %% 2 == 0
+                        collect item into List<Int>.empty();
+                    return values.size * 100 + values.at(0).getOrElse(-1) * 10
+                        + values.at(1).getOrElse(-1);
+                }
+                fn collectedArrayWithMap(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        collect item * 3 into List<Int>.empty();
+                    return values.size * 100 + values.at(0).getOrElse(-1) * 10
+                        + values.at(1).getOrElse(-1);
+                }
+                fn collectedArrayFilterThenMap(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        if item %% 2 == 0
+                        collect item * 3 into List<Int>.empty();
+                    return values.size * 100 + values.at(0).getOrElse(-1) * 10
+                        + values.at(1).getOrElse(-1);
+                }
+                fn collectedArrayPipelineAlternativeFilter(): Int {
+                    let values = for item in [1, 2, 3, 4]
+                        if item == 2 or item == 4
+                        collect item * 3 into List<Int>.empty();
+                    return values.size * 100 + values.at(0).getOrElse(-1) * 10
+                        + values.at(1).getOrElse(-1);
+                }
+                fn mappedFilteredStream(): Int {
+                    let stream = Stream<Int>.fromArray([1, 2, 3, 4])
+                        .filter(item -> item %% 2 == 0)
+                        .map(item -> item * 3);
+
+                    let iterator = stream.iterator();
+                    let first = iterator.next();
+                    let second = iterator.next();
+
+                    return match (first) {
+                        case Step.Yield(a) ->
+                            match (second) {
+                                case Step.Yield(b) -> a * 100 + b;
+                                case Step.Done() -> -1;
+                            };
+                        case Step.Done() -> -2;
+                    };
+                }
+                fn mappedFilteredFold(): Int {
+                    let stream = Stream<Int>.fromArray([1, 2, 3, 4])
+                        .filter(item -> item %% 2 == 0)
+                        .map(item -> item * 3);
+
+                    return stream.fold(0, (acc, item) -> acc * 100 + item);
+                }
+                fn directListAccess(): Int {
+                    let values = List<Int>.of(6, 12);
+                    return values.size * 100
+                        + values.at(0).getOrElse(-1)
+                        + values.at(1).getOrElse(-1);
                 }
                 fn collectedIterablePipeline(): Int {
                     let values = for item in Stream<Int>.fromArray([2, 5])
                         collect item + 1 into List<Int>.empty();
-                    return values.at(0) * 10 + values.at(1);
+                    return values.at(0).getOrElse(-1) * 10 + values.at(1).getOrElse(-1);
                 }
                 fn collectedCapturePipeline(factor: Int): Int {
                     let values = for item in [1, 2, 3]
@@ -1790,8 +1904,8 @@ public final class StandardLibraryTest {
                         if scaled > factor
                         for expanded in List<Int>.of(scaled, scaled + factor)
                         collect expanded into List<Int>.empty();
-                    return values.size * 100 + values.at(0) + values.at(1)
-                        + values.at(2) + values.at(3);
+                    return values.size * 100 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1)
+                        + values.at(2).getOrElse(-1) + values.at(3).getOrElse(-1);
                 }
                 fn lazyFlatMapPipeline(): Int {
                     let calls = Calls.new(0);
@@ -1807,14 +1921,14 @@ public final class StandardLibraryTest {
                         for output in List<Int>.of(item, item + 1)
                         if output %% 2 == 0
                         collect output into List<Int>.empty();
-                    return values.size * 100 + values.at(0) + values.at(1) + values.at(2);
+                    return values.size * 100 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1) + values.at(2).getOrElse(-1);
                 }
                 fn nestedFlatMapPipeline(): Int {
                     let values = for outer in [1, 2]
                         for middle in List<Int>.of(outer, outer + 1)
                         for inner in List<Int>.of(middle * 10, middle * 100)
                         collect inner into List<Int>.empty();
-                    return values.size * 1000 + values.at(0) + values.at(1) + values.at(7);
+                    return values.size * 1000 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1) + values.at(7).getOrElse(-1);
                 }
                 fn lazyLimitAndWhilePipeline(): Int {
                     let values: Stream<Int> = (for item in [1, 2, 3, 4, 5, 6, 7]
@@ -1828,19 +1942,19 @@ public final class StandardLibraryTest {
                         yield item).drop(1).take(6)
                             .dropWhile((item) -> item < 4)
                             .takeWhile((item) -> item < 7).toList();
-                    return values.size * 100 + values.at(0) * 10 + values.at(1) + values.at(2);
+                    return values.size * 100 + values.at(0).getOrElse(-1) * 10 + values.at(1).getOrElse(-1) + values.at(2).getOrElse(-1);
                 }
                 fn collectedLimitsAfterFlatMap(): Int {
                     let values = (for item in [1, 2, 3]
                         for output in List<Int>.of(item, item * 10)
                         yield output).drop(2).take(3).toList();
-                    return values.size * 1000 + values.at(0) * 100 + values.at(1) * 10 + values.at(2);
+                    return values.size * 1000 + values.at(0).getOrElse(-1) * 100 + values.at(1).getOrElse(-1) * 10 + values.at(2).getOrElse(-1);
                 }
                 fn collectedTakeStopsUpstream(): Int {
                     let calls = Calls.new(0);
                     let values = (for item in [1, 2, 3, 4]
                         yield calls.record(item)).take(2).toList();
-                    return calls.read() * 100 + values.size * 10 + values.at(0) + values.at(1);
+                    return calls.read() * 100 + values.size * 10 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1);
                 }
                 fn collectedTakeWithFilteredDownstream(): Int {
                     let calls = Calls.new(0);
@@ -1853,15 +1967,15 @@ public final class StandardLibraryTest {
                     let values = (for item in [1, 2, 3]
                         for output in [item, item * 10]
                         yield output).take(4).toList();
-                    return values.size * 100 + values.at(0) + values.at(1)
-                        + values.at(2) + values.at(3);
+                    return values.size * 100 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1)
+                        + values.at(2).getOrElse(-1) + values.at(3).getOrElse(-1);
                 }
                 fn collectedTakeWhileStopsUpstream(): Int {
                     let calls = Calls.new(0);
                     let values = (for item in [1, 2, 3, 4]
                         yield calls.record(item))
                             .takeWhile((item) -> item < 3).toList();
-                    return calls.read() * 100 + values.size * 10 + values.at(0) + values.at(1);
+                    return calls.read() * 100 + values.size * 10 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1);
                 }
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(List.of(source), className, packageName);
@@ -1875,6 +1989,19 @@ public final class StandardLibraryTest {
                 final var test = loader.loadClass(className);
                 assertEquals(52, test.getMethod("lazyArrayPipeline").invoke(null));
                 assertEquals(218, test.getMethod("collectedArrayPipeline").invoke(null));
+                assertEquals(2, test.getMethod("collectedArrayPipelineSize").invoke(null));
+                assertEquals(6, test.getMethod("collectedArrayPipelineFirst").invoke(null));
+                assertEquals(12, test.getMethod("collectedArrayPipelineSecond").invoke(null));
+                assertEquals(612, test.getMethod("collectedArrayPipelineReversed").invoke(null));
+                assertEquals(600, test.getMethod("collectedFirstElementTimes100").invoke(null));
+                assertEquals(218, test.getMethod("directListAccess").invoke(null));
+                assertEquals(4123, test.getMethod("collectedArrayWithoutFilter").invoke(null));
+                assertEquals(436, test.getMethod("collectedArrayWithMap").invoke(null));
+                assertEquals(272, test.getMethod("collectedArrayFilterThenMap").invoke(null));
+                assertEquals(272, test.getMethod("collectedArrayPipelineAlternativeFilter").invoke(null));
+                assertEquals(224, test.getMethod("collectedArrayWithFilter").invoke(null));
+                assertEquals(612, test.getMethod("mappedFilteredStream").invoke(null));
+                assertEquals(612, test.getMethod("mappedFilteredFold").invoke(null));
                 assertEquals(36, test.getMethod("collectedIterablePipeline").invoke(null));
                 assertEquals(424, test.getMethod("collectedCapturePipeline", int.class).invoke(null, 2));
                 assertEquals(642, test.getMethod("lazyFlatMapPipeline").invoke(null));
@@ -2008,10 +2135,6 @@ public final class StandardLibraryTest {
                     let values = Stream<Int>.fromArray([2, 3]);
                     return values.count() * 10 + values.count();
                 }
-                fn nullableStreamElements(): Int {
-                    let values = Stream<String?>.fromArray(["a", null, "b"]);
-                    return values.count();
-                }
                 fn generatedArray(): Int {
                     let calls = Total.new(0);
                     let values = generateArray<Int>(4, index -> calls.recordIndex(index));
@@ -2057,7 +2180,6 @@ public final class StandardLibraryTest {
                 assertEquals(12122, test.getMethod("lazyCallbackOrder").invoke(null));
                 assertEquals(33, test.getMethod("zeroAndNegativeCounts").invoke(null));
                 assertEquals(22, test.getMethod("repeatedStreamTraversal").invoke(null));
-                assertEquals(3, test.getMethod("nullableStreamElements").invoke(null));
                 assertEquals(123136, test.getMethod("generatedArray").invoke(null));
                 assertEquals(0, test.getMethod("generatedEmptyArray").invoke(null));
                 assertEquals(0, test.getMethod("contextuallyEmptyArray").invoke(null));
@@ -2089,7 +2211,7 @@ public final class StandardLibraryTest {
                     let readonly: List<Int> = values;
                     let mut total = 0;
                     for (let value in readonly) total += value;
-                    return total + replaced + removed + readonly.size;
+                    return total + replaced.getOrElse(-1) + removed.getOrElse(-1) + readonly.size;
                 }
                 fn empty(): Boolean = List<Int>.empty().isEmpty();
                 fn copied(): Int {
@@ -2097,22 +2219,7 @@ public final class StandardLibraryTest {
                     values.add(10);
                     values.clear();
                     values.add(11);
-                    return values.at(0) + values.size;
-                }
-                fn nullableElements(): Boolean {
-                    let mut values: &List<String?> = List<String?>.empty();
-                    values.add(null);
-                    values.add("present");
-                    let mut sawNull = false;
-                    let mut iterated = 0;
-                    for (let value in values) {
-                        if (value == null) sawNull = true;
-                        iterated += 1;
-                    }
-                    return (values.at(0) ?? "missing") == "missing"
-                        and (values.at(1) ?? "missing") == "present"
-                        and sawNull
-                        and iterated == 2;
+                    return values.at(0).getOrElse(-1) + values.size;
                 }
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(List.of(source), className, packageName);
@@ -2128,7 +2235,6 @@ public final class StandardLibraryTest {
                 assertEquals(43, test.getMethod("result").invoke(null));
                 assertEquals(true, test.getMethod("empty").invoke(null));
                 assertEquals(12, test.getMethod("copied").invoke(null));
-                assertEquals(true, test.getMethod("nullableElements").invoke(null));
             }
         } finally {
             deleteTree(Path.of("dist"));
@@ -2295,10 +2401,11 @@ public final class StandardLibraryTest {
                 import zeron.collections.ArrayIterator;
                 import zeron.collections.Step;
                 import zeron.lang.Cell;
-                import zeron.algebra.Add;
-                import zeron.algebra.Addition;
-                import zeron.algebra.Mult;
-                import zeron.algebra.Multiplication;
+                import zeron.numeric.Fractional;
+                import zeron.numeric.Integral;
+                import zeron.numeric.Numeric;
+                import zeron.numeric.Floating;
+                import zeron.numeric.Ratio;
                 import zeron.io.print;
                 import zeron.io.println;
                 fn cellResult(): Int = Cell<Int>.new(42).get();
@@ -2335,11 +2442,11 @@ public final class StandardLibraryTest {
                     }
                     return 0;
                 }
-                fn add<T: Add<T>>(left: T, right: T): T = left + right;
-                fn subtract<T: Addition<T>>(left: T, right: T): T = left - right;
-                fn multiply<T: Mult<T>>(left: T, right: T): T = left * right;
-                fn reciprocal<T: Multiplication<T>>(value: T): T = value.reciprocal();
-                fn algebraicResult(): Int = subtract(add(20, 24), 2);
+                fn add<T: mut + Numeric<T>>(left: T, right: T): T = left + right;
+                fn subtract<T: mut + Numeric<T>>(left: T, right: T): T = left - right;
+                fn multiply<T: mut + Numeric<T>>(left: T, right: T): T = left * right;
+                fn reciprocal<T: mut + Fractional<T>>(value: T): T = value.reciprocal();
+                fn numericResult(): Int = subtract(add(20, 24), 2);
                 fn reciprocalResult(): Float = reciprocal(2.0);
                 fn announce(): Unit {
                     print("compiled");
@@ -2371,8 +2478,9 @@ public final class StandardLibraryTest {
                     .map(ZeronLibraryIndex.ContractExport.class::cast)
                     .map(ZeronLibraryIndex.ContractExport::qualifiedName)
                     .toList()
-                    .containsAll(List.of("zeron.algebra.Add", "zeron.algebra.Addition",
-                            "zeron.algebra.Mult", "zeron.algebra.Multiplication")));
+                    .containsAll(List.of("zeron.numeric.Ratio", "zeron.numeric.Numeric",
+                            "zeron.numeric.Integral", "zeron.numeric.Fractional",
+                            "zeron.numeric.Floating")));
             try (final var jar = new JarFile(libraryJar.toFile())) {
                 assertTrue(jar.getJarEntry(ZeronVersions.API_INDEX_JAR_ENTRY) != null);
                 assertTrue(jar.getJarEntry("zeron/collections/Stream.class") != null);
@@ -2394,7 +2502,7 @@ public final class StandardLibraryTest {
                     assertEquals(6, client.getMethod("result").invoke(null));
                     assertEquals(10, client.getMethod("arrayIteratorResult").invoke(null));
                     assertEquals(1, client.getMethod("nullableArrayIteratorResult").invoke(null));
-                    assertEquals(42, client.getMethod("algebraicResult").invoke(null));
+                    assertEquals(42, client.getMethod("numericResult").invoke(null));
                     assertEquals(0.5, client.getMethod("reciprocalResult").invoke(null));
                     client.getMethod("announce").invoke(null);
                 } finally {

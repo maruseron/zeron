@@ -31,9 +31,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 final class LspFeatures {
-    private static final int SUM_TYPE_HOVER_CHARACTER_LIMIT = 180;
+    private static final int TYPE_HOVER_CHARACTER_LIMIT = 180;
     private static final List<String> KEYWORDS = List.of(
             "as", "and", "break", "case", "class", "contract", "constructor", "continue",
             "default", "else", "effect", "extension", "external", "false", "fn", "for",
@@ -667,7 +668,8 @@ final class LspFeatures {
             details.add("witness method " + token.lexeme());
         }
         } else if (symbol != null) {
-        details.add(symbol.detail());
+            details.add(symbol.detail());
+            details.addAll(typeEvidenceDetails(snapshot, path, symbol));
         }
         if (type != null && callSiteType == null) {
             final var formatted = TypeFormatter.format(type);
@@ -678,10 +680,31 @@ final class LspFeatures {
             }
         }
         final var contents = new MarkupContent(MarkupKind.MARKDOWN,
-                "```zeron\n" + String.join("\n", details) + "\n```");
+                "```zeron\n" + String.join("\n", details) + "\n```"
+                        + documentation(snapshot, symbol));
         final var hover = new Hover(contents);
         hover.setRange(DocumentCoordinates.rangeOf(text, token));
         return hover;
+    }
+
+    private static String documentation(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                        final SymbolIndex.Symbol symbol) {
+        if (symbol == null) return "";
+        if (symbol.path() == null) {
+            final var libraryDocumentation = snapshot.libraryDocumentation().get(symbol.qualifiedName());
+            return libraryDocumentation == null || libraryDocumentation.isBlank()
+                    ? "" : "\n\n" + libraryDocumentation;
+        }
+        if (symbol.token() == null) return "";
+        final var unit = snapshot.units().stream()
+                .filter(candidate -> Objects.equals(candidate.sourcePath(),
+                        snapshot.filesByCompilerPath().entrySet().stream()
+                                .filter(entry -> entry.getValue().equals(symbol.path()))
+                                .map(Map.Entry::getKey).findFirst().orElse(null)))
+                .findFirst().orElse(null);
+        if (unit == null) return "";
+        final var markdown = unit.documentation().get(symbol.token());
+        return markdown == null || markdown.isBlank() ? "" : "\n\n" + markdown;
     }
 
     private static String symbolHeader(final String detail) {
@@ -690,6 +713,208 @@ final class LspFeatures {
         final var boundary = newline < 0 ? description
                 : description < 0 ? newline : Math.min(newline, description);
         return boundary < 0 ? detail : detail.substring(0, boundary);
+    }
+
+    private static List<String> typeEvidenceDetails(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                                    final Path path,
+                                                    final SymbolIndex.Symbol symbol) {
+        if (symbol.kind() != CompletionItemKind.Class || symbol.token() == null) return List.of();
+        final var declarationUnit = snapshot.units().stream()
+                .filter(unit -> Objects.equals(snapshot.filesByCompilerPath().get(unit.sourcePath()), symbol.path()))
+                .filter(unit -> NamespaceMembers.flatten(unit.declarations()).stream()
+                        .anyMatch(member -> sourceTypeName(member.declaration()) == symbol.token()))
+                .findFirst().orElse(null);
+        if (declarationUnit == null) return List.of();
+        final var declaration = NamespaceMembers.flatten(declarationUnit.declarations()).stream()
+                .map(NamespaceMembers.Member::declaration)
+                .filter(candidate -> sourceTypeName(candidate) == symbol.token())
+                .findFirst().orElse(null);
+        if (declaration == null) return List.of();
+
+        final var currentUnit = snapshot.units().stream()
+                .filter(unit -> Objects.equals(snapshot.filesByCompilerPath().get(unit.sourcePath()), path))
+                .findFirst().orElse(null);
+        if (currentUnit == null) return List.of();
+        final var visibleWitnesses = new LinkedHashSet<String>();
+        if (witnessPackageIsVisible(currentUnit, declarationUnit.packageName())) {
+            visibleWitnesses.addAll(derivedEvidenceDetails(declaration, snapshot, currentUnit));
+        }
+        for (final var unit : snapshot.units()) {
+            if (!witnessPackageIsVisible(currentUnit, unit.packageName())) continue;
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (!(member.declaration() instanceof Stmt.Witness witness)
+                        || !witnessTargetsType(witness.targetType(), witness.typeParameters(), declaration)) {
+                    continue;
+                }
+                visibleWitnesses.add(shortTypeNames(
+                        TypeFormatter.format(witness.contractType()), snapshot, currentUnit));
+            }
+        }
+        if (visibleWitnesses.isEmpty()) return List.of();
+        final var details = new ArrayList<String>();
+        details.add("\nEvidence available here:");
+        visibleWitnesses.stream().sorted().map(contract -> "  " + contract).forEach(details::add);
+        return List.copyOf(details);
+    }
+
+    private static List<String> derivedEvidenceDetails(final Stmt declaration,
+                                                       final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                                       final CompilationUnit contextUnit) {
+        final var requested = new LinkedHashSet<String>();
+        final var derivedContracts = switch (declaration) {
+            case Stmt.ClassDecl value -> value.derivedContracts();
+            case Stmt.ProductDecl value -> value.derivedContracts();
+            case Stmt.SumDecl value -> value.derivedContracts();
+            case Stmt.NewtypeDecl value -> value.derivedContracts();
+            default -> List.<Token>of();
+        };
+        derivedContracts.stream().map(Token::lexeme).forEach(requested::add);
+        if (declaration instanceof Stmt.ClassDecl classDeclaration && classDeclaration.dataClass()) {
+            requested.add("Eq");
+        }
+        if (requested.contains("Codec")) {
+            requested.add("Encode");
+            requested.add("Decode");
+        }
+        if (requested.contains("Encode") && requested.contains("Decode")) {
+            requested.add("Codec");
+        }
+
+        final var qualifiedContractNames = new LinkedHashSet<String>();
+        for (final var derived : requested) {
+            final var contractName = switch (derived) {
+                case "Eq" -> "zeron.lang.Eq";
+                case "Hashable" -> "zeron.lang.Hashable";
+                case "Encode" -> "zeron.serialization.Encode";
+                case "Decode" -> "zeron.serialization.Decode";
+                case "Codec" -> "zeron.serialization.Codec";
+                default -> null;
+            };
+            if (contractName != null) qualifiedContractNames.add(contractName);
+        }
+        final var name = sourceTypeName(declaration).lexeme();
+        final var parameters = sourceTypeParameters(declaration);
+        final TypeDescriptor target = parameters.isEmpty()
+                ? TypeDescriptor.ofName(name)
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(name),
+                        parameters.stream().map(parameter -> (TypeDescriptor) parameter).toList());
+        return qualifiedContractNames.stream()
+                .map(contractName -> TypeDescriptor.genericOf(TypeDescriptor.ofName(contractName), List.of(target)))
+                .map(TypeFormatter::format)
+                .map(formatted -> shortTypeNames(formatted, snapshot, contextUnit))
+                .toList();
+    }
+
+    private static Token sourceTypeName(final Stmt declaration) {
+        return switch (declaration) {
+            case Stmt.ClassDecl value -> value.name();
+            case Stmt.ExternalClass value -> value.name();
+            case Stmt.ProductDecl value -> value.name();
+            case Stmt.SumDecl value -> value.name();
+            case Stmt.NewtypeDecl value -> value.name();
+            default -> null;
+        };
+    }
+
+    private static List<TypeParameterDescriptor> sourceTypeParameters(final Stmt declaration) {
+        return switch (declaration) {
+            case Stmt.ClassDecl value -> value.typeParameters();
+            case Stmt.ProductDecl value -> value.typeParameters();
+            case Stmt.SumDecl value -> value.typeParameters();
+            default -> List.of();
+        };
+    }
+
+    private static boolean witnessPackageIsVisible(final CompilationUnit unit, final String witnessPackage) {
+        if (unit.packageName().equals(witnessPackage)) return true;
+        return unit.imports().stream().anyMatch(imported -> {
+            if (imported.onDemand()) return imported.qualifiedName().equals(witnessPackage);
+            final var separator = imported.qualifiedName().lastIndexOf('.');
+            final var importedPackage = separator < 0 ? "" : imported.qualifiedName().substring(0, separator);
+            return importedPackage.equals(witnessPackage);
+        });
+    }
+
+    private static boolean witnessTargetsType(final TypeDescriptor targetType,
+                                              final List<TypeParameterDescriptor> witnessParameters,
+                                              final Stmt declaration) {
+        final var target = targetType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : targetType;
+        final TypeDescriptor base;
+        final List<TypeDescriptor> arguments;
+        if (target instanceof GenericDescriptor generic) {
+            base = generic.baseType();
+            arguments = generic.typeParameters();
+        } else {
+            base = target;
+            arguments = List.of();
+        }
+        final var declaredName = sourceTypeName(declaration);
+        final var declarationParameters = sourceTypeParameters(declaration);
+        if (declaredName == null
+                || !simpleTypeName(base.name()).equals(simpleTypeName(declaredName.lexeme()))
+                || arguments.size() != declarationParameters.size()) return false;
+        for (var index = 0; index < arguments.size(); index++) {
+            if (!(arguments.get(index) instanceof TypeParameterDescriptor argument)
+                    || witnessParameters.stream().noneMatch(parameter ->
+                            parameter.name().equals(argument.name()))) return false;
+        }
+        return true;
+    }
+
+    private static String shortTypeNames(final String type) {
+        return type.replaceAll("(?<![A-Za-z0-9_$])(?:[A-Za-z_$][A-Za-z0-9_$]*\\.)+"
+                + "([A-Za-z_$][A-Za-z0-9_$]*)", "$1");
+    }
+
+    private static String shortTypeNames(final String type,
+                                         final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                         final CompilationUnit contextUnit) {
+        final var qualifiedNamesBySimpleName = new LinkedHashMap<String, Set<String>>();
+        for (final var unit : snapshot.units()) {
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                final var name = switch (member.declaration()) {
+                    case Stmt.ClassDecl declaration -> declaration.name().lexeme();
+                    case Stmt.ContractDecl declaration -> declaration.name().lexeme();
+                    case Stmt.SumDecl declaration -> declaration.name().lexeme();
+                    case Stmt.ProductDecl declaration -> declaration.name().lexeme();
+                    case Stmt.NewtypeDecl declaration -> declaration.name().lexeme();
+                    case Stmt.ExternalClass declaration -> declaration.name().lexeme();
+                    default -> null;
+                };
+                if (name == null || !typeIsVisible(contextUnit, unit.packageName(), name)) continue;
+                final var simpleName = simpleTypeName(name);
+                final var qualifiedName = unit.packageName().isEmpty()
+                        ? simpleName : unit.packageName() + "." + simpleName;
+                qualifiedNamesBySimpleName.computeIfAbsent(simpleName, _ -> new LinkedHashSet<>())
+                        .add(qualifiedName);
+            }
+        }
+        var shortened = type;
+        for (final var entry : qualifiedNamesBySimpleName.entrySet()) {
+            if (entry.getValue().size() != 1) continue;
+            final var qualifiedName = entry.getValue().iterator().next();
+            shortened = Pattern.compile("(?<![A-Za-z0-9_$.])" + Pattern.quote(qualifiedName)
+                            + "(?![A-Za-z0-9_$])")
+                    .matcher(shortened).replaceAll(entry.getKey());
+        }
+        return shortened;
+    }
+
+    private static boolean typeIsVisible(final CompilationUnit contextUnit,
+                                         final String candidatePackage,
+                                         final String typeName) {
+        if (contextUnit.packageName().equals(candidatePackage)) return true;
+        final var qualifiedName = candidatePackage.isEmpty() ? simpleTypeName(typeName)
+                : candidatePackage + "." + simpleTypeName(typeName);
+        return contextUnit.imports().stream().anyMatch(imported -> imported.onDemand()
+                ? imported.qualifiedName().equals(candidatePackage)
+                : imported.qualifiedName().equals(qualifiedName));
+    }
+
+    private static String simpleTypeName(final String name) {
+        final var separator = name.lastIndexOf('.');
+        return separator < 0 ? name : name.substring(separator + 1);
     }
 
     private static boolean isTypeNamePosition(final List<Token> tokens, final Token token) {
@@ -929,12 +1154,21 @@ final class LspFeatures {
                         final var implementations = java.util.stream.Stream.concat(
                                         value.contractUses().stream(),
                                         value.higherKindedContractUses().stream())
-                                .map(SymbolIndex::formatContractUse)
-                                .collect(java.util.stream.Collectors.joining(", ", "{", "}"));
+                                .map(contractUse -> formatContractUse(contractUse, unit))
+                                .collect(java.util.stream.Collectors.joining(", "));
                         final var typeParameters = formatTypeParameters(value.typeParameters());
+                        final var components = value.dataClass()
+                                ? value.dataComponents().stream()
+                                        .map(component -> component.name().lexeme() + ": "
+                                                + TypeFormatter.format(component.type()))
+                                        .collect(java.util.stream.Collectors.joining(", ", "(", ")"))
+                                : "";
+                        final var declarationKind = value.dataClass() ? "data class " : "class ";
                         addType(value.name(), unit.packageName(), value.isPublic(), path,
-                                "class", typeParameters, "class " + simpleTypeName(value.name().lexeme())
-                                        + typeParameters + " : " + implementations);
+                                value.dataClass() ? "data class" : "class", typeParameters,
+                                declarationKind + simpleTypeName(value.name().lexeme())
+                                        + typeParameters + components + (implementations.isBlank() ? "" : " is ")
+                                        + implementations);
                     }
                     if (value.constructor() != null) {
                         final var ownerType = value.typeParameters().isEmpty()
@@ -986,7 +1220,7 @@ final class LspFeatures {
                                     method.parameters().stream().map(Token::lexeme).toList(), "external "));
                 } else if (declaration instanceof Stmt.ContractDecl value) {
                     final var requirements = value.requiredContracts().stream()
-                            .map(SymbolIndex::formatContractUse)
+                            .map(contractUse -> formatContractUse(contractUse, unit))
                             .collect(java.util.stream.Collectors.joining(", "));
                     final var typeParameters = formatTypeParameters(value.typeParameters());
                     addType(value.name(), unit.packageName(), value.isPublic(), path,
@@ -1004,7 +1238,7 @@ final class LspFeatures {
                             property.name().lexeme(), TypeFormatter.format(property.type()))));
                 } else if (declaration instanceof Stmt.SumDecl value) {
                     final var typeParameters = formatTypeParameters(value.typeParameters());
-                    addType(value.name(), unit.packageName(), value.isPublic(), path, "sum",
+                    addType(value.name(), unit.packageName(), value.isPublic(), path, "type",
                             typeParameters, sumTypeDetail(value));
                     for (final var sumCase : value.cases()) {
                         final var resultType = value.typeParameters().isEmpty()
@@ -1020,7 +1254,8 @@ final class LspFeatures {
                                 value.name().lexeme(), path, value.isPublic());
                     }
                 } else if (declaration instanceof Stmt.ProductDecl value) {
-                    addType(value.name(), unit.packageName(), value.isPublic(), path, "product");
+                    addType(value.name(), unit.packageName(), value.isPublic(), path, "type",
+                            formatTypeParameters(value.typeParameters()), productTypeDetail(value));
                     value.components().forEach(component -> add(new Symbol(component.name().lexeme(),
                             value.name().lexeme() + "." + component.name().lexeme(),
                             unit.packageName(), null,
@@ -1052,7 +1287,8 @@ final class LspFeatures {
                     final var witnessDetail = witnessMethods.get(value.name());
                     final var functionSignature = signature(value);
                     final var detail = witnessDetail == null
-                            ? (value instanceof Stmt.ExternalFunction ? "external " : "") + functionSignature
+                            ? (value instanceof Stmt.ExternalFunction ? "external " : "")
+                            + functionSignature
                             : witnessDetail + "\n" + functionSignature;
                     add(new Symbol(value.name().lexeme(), qualified, unit.packageName(), namespace,
                             detail, CompletionItemKind.Function, value.name(), path, value.isPublic(),
@@ -1128,15 +1364,19 @@ final class LspFeatures {
             if (parameter.admitsNullableArguments()) constraints.add("nullable");
             if (parameter.isEffectKind()) constraints.add("effect");
             if (parameter.admitsMutableArguments()) constraints.add("mut");
-            parameter.bounds().stream().map(TypeFormatter::format).forEach(constraints::add);
+            parameter.bounds().stream().map(TypeFormatter::format)
+                    .map(LspFeatures::shortTypeNames).forEach(constraints::add);
             return constraints.isEmpty() ? "" : ": " + String.join(" + ", constraints);
         }
 
-        private static String formatContractUse(final Stmt.ContractUse contractUse) {
+        private String formatContractUse(final Stmt.ContractUse contractUse,
+                                         final CompilationUnit unit) {
             final var arguments = contractUse.typeArguments().stream()
                     .map(TypeFormatter::format)
+                    .map(type -> shortTypeNames(type, snapshot, unit))
                     .collect(java.util.stream.Collectors.joining(", ", "<", ">"));
-            return contractUse.name().lexeme() + (contractUse.typeArguments().isEmpty() ? "" : arguments);
+            return simpleTypeName(contractUse.name().lexeme())
+                    + (contractUse.typeArguments().isEmpty() ? "" : arguments);
         }
 
         private void addMethod(final Token token, final FunctionDescriptor type,
@@ -1437,7 +1677,7 @@ final class LspFeatures {
         }
 
         private static String sumTypeDetail(final Stmt.SumDecl declaration) {
-            final var prefix = "sum " + simpleTypeName(declaration.name().lexeme())
+            final var prefix = "type " + simpleTypeName(declaration.name().lexeme())
                     + formatTypeParameters(declaration.typeParameters()) + " = ";
             final var cases = declaration.cases().stream().map(sumCase -> sumCase.name().lexeme()
                     + (sumCase.payloads().isEmpty() ? "" : sumCase.payloads().stream()
@@ -1445,8 +1685,22 @@ final class LspFeatures {
                             .collect(java.util.stream.Collectors.joining(", ", "(", ")"))))
                     .collect(java.util.stream.Collectors.joining(" | "));
             final var detail = prefix + cases;
-            return detail.length() <= SUM_TYPE_HOVER_CHARACTER_LIMIT ? detail
-                    : detail.substring(0, SUM_TYPE_HOVER_CHARACTER_LIMIT - 3) + "...";
+            return truncateTypeDetail(detail);
+        }
+
+        private static String productTypeDetail(final Stmt.ProductDecl declaration) {
+            final var members = declaration.components().stream()
+                    .map(component -> component.name().lexeme() + ": "
+                            + TypeFormatter.format(component.type()))
+                    .collect(java.util.stream.Collectors.joining(", ", "(", ")"));
+            final var detail = "type " + simpleTypeName(declaration.name().lexeme())
+                    + formatTypeParameters(declaration.typeParameters()) + " = " + members;
+            return truncateTypeDetail(detail);
+        }
+
+        private static String truncateTypeDetail(final String detail) {
+            return detail.length() <= TYPE_HOVER_CHARACTER_LIMIT ? detail
+                    : detail.substring(0, TYPE_HOVER_CHARACTER_LIMIT - 3) + "...";
         }
     }
 }

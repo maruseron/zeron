@@ -141,7 +141,7 @@ so `T: nullable + mut` accepts both nullable types and mutable-reference types.
 
 Effect-kinded parameters use the exclusive `effect` marker to accept effect types for generic
 propagation. For the marker rules and nested generic boundaries, see the
-[generic type-system design](../documents/design-document-19_generic-type-system.md).
+[generic type-system design](../documents/design_documents/design-document-19_generic-type-system.md).
 
 ## Type erasure
 

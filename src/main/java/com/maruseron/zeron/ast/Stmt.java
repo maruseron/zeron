@@ -228,22 +228,46 @@ public sealed interface Stmt {
         private final TypeDescriptor contractType;
         private final TypeDescriptor targetType;
         private final List<WitnessMethod> methods;
+        private final List<WitnessMethod> declaredMethods;
         private final boolean derived;
+        private final boolean delegating;
         private final List<WitnessRequirement> requirements;
         private final boolean higherKinded;
+        private final Token closingBrace;
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
                        final TypeDescriptor contractType, final TypeDescriptor targetType,
                        final List<WitnessMethod> methods, final boolean derived,
                        final List<WitnessRequirement> requirements, final boolean higherKinded) {
+            this(name, typeParameters, contractType, targetType, methods, derived,
+                    requirements, higherKinded, null, false);
+        }
+
+        public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
+                       final TypeDescriptor contractType, final TypeDescriptor targetType,
+                       final List<WitnessMethod> methods, final boolean derived,
+                       final List<WitnessRequirement> requirements, final boolean higherKinded,
+                       final Token closingBrace) {
+            this(name, typeParameters, contractType, targetType, methods, derived,
+                    requirements, higherKinded, closingBrace, false);
+        }
+
+        public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
+                       final TypeDescriptor contractType, final TypeDescriptor targetType,
+                       final List<WitnessMethod> methods, final boolean derived,
+                       final List<WitnessRequirement> requirements, final boolean higherKinded,
+                       final Token closingBrace, final boolean delegating) {
             this.name = name;
             this.typeParameters = List.copyOf(typeParameters);
             this.contractType = contractType;
             this.targetType = targetType;
             this.methods = new ArrayList<>(methods);
+            this.declaredMethods = List.copyOf(methods);
             this.derived = derived;
+            this.delegating = delegating;
             this.requirements = List.copyOf(requirements);
             this.higherKinded = higherKinded;
+            this.closingBrace = closingBrace;
         }
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
@@ -271,15 +295,25 @@ public sealed interface Stmt {
         public TypeDescriptor targetType() { return targetType; }
         public List<WitnessMethod> methods() { return List.copyOf(methods); }
         public boolean derived() { return derived; }
+        public boolean delegating() { return delegating; }
         public List<WitnessRequirement> requirements() { return requirements; }
         public boolean higherKinded() { return higherKinded; }
+        public Token closingBrace() { return closingBrace; }
         public void addMethod(final WitnessMethod method) { methods.add(method); }
+        public void resetMethodsToDeclarations() {
+            methods.clear();
+            methods.addAll(declaredMethods);
+        }
     }
 
     record WitnessRequirement(TypeDescriptor contractType, TypeDescriptor targetType) {}
 
     record WitnessMethod(Token requirementName, Function methodSignature,
-                         Function implementation) {
+                         Function implementation, boolean isStatic) {
+        public WitnessMethod(final Token requirementName, final Function methodSignature,
+                            final Function implementation) {
+            this(requirementName, methodSignature, implementation, false);
+        }
     }
 
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -290,7 +324,11 @@ public sealed interface Stmt {
                      List<Token> derivedContracts, List<Token> storedStateOrder,
                      List<ContractUse> higherKindedContractUses,
                      List<Witness> higherKindedImplementations,
-                     List<LiteralSuffix> literalSuffixes) implements Stmt, Decl {
+                     List<LiteralSuffix> literalSuffixes,
+                     boolean dataClass, List<ProductComponent> dataComponents,
+                     List<InitializerBlock> initializerBlocks,
+                     List<TypeDescriptor> declaredConstructorEffects,
+                     Token closingBrace) implements Stmt, Decl {
         public ClassDecl {
             patterns = List.copyOf(patterns);
             derivedContracts = List.copyOf(derivedContracts);
@@ -298,6 +336,62 @@ public sealed interface Stmt {
             higherKindedContractUses = List.copyOf(higherKindedContractUses);
             higherKindedImplementations = List.copyOf(higherKindedImplementations);
             literalSuffixes = List.copyOf(literalSuffixes);
+            dataComponents = List.copyOf(dataComponents);
+            initializerBlocks = List.copyOf(initializerBlocks);
+            declaredConstructorEffects = List.copyOf(declaredConstructorEffects);
+            if (!dataClass && (!dataComponents.isEmpty() || !initializerBlocks.isEmpty())) {
+                throw new IllegalArgumentException("Only data classes may have components or initializer blocks.");
+            }
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, List<Pattern> patterns,
+                         boolean isPublic, boolean isEffect,
+                         List<Token> derivedContracts, List<Token> storedStateOrder,
+                         List<ContractUse> higherKindedContractUses,
+                         List<Witness> higherKindedImplementations,
+                         List<LiteralSuffix> literalSuffixes,
+                         boolean dataClass, List<ProductComponent> dataComponents,
+                         List<InitializerBlock> initializerBlocks,
+                         List<TypeDescriptor> declaredConstructorEffects) {
+            this(name, typeParameters, contractUses, fields, properties, constructor, namedConstructors,
+                    methods, patterns, isPublic, isEffect, derivedContracts, storedStateOrder,
+                    higherKindedContractUses, higherKindedImplementations, literalSuffixes,
+                    dataClass, dataComponents, initializerBlocks, declaredConstructorEffects, null);
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, List<Pattern> patterns,
+                         boolean isPublic, boolean isEffect,
+                         List<Token> derivedContracts, List<Token> storedStateOrder,
+                         List<ContractUse> higherKindedContractUses,
+                         List<Witness> higherKindedImplementations,
+                         List<LiteralSuffix> literalSuffixes,
+                         boolean dataClass, List<ProductComponent> dataComponents,
+                         List<InitializerBlock> initializerBlocks) {
+            this(name, typeParameters, contractUses, fields, properties, constructor, namedConstructors,
+                    methods, patterns, isPublic, isEffect, derivedContracts, storedStateOrder,
+                    higherKindedContractUses, higherKindedImplementations, literalSuffixes,
+                    dataClass, dataComponents, initializerBlocks, List.of());
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, List<Pattern> patterns,
+                         boolean isPublic, boolean isEffect,
+                         List<Token> derivedContracts, List<Token> storedStateOrder,
+                         List<ContractUse> higherKindedContractUses,
+                         List<Witness> higherKindedImplementations,
+                         List<LiteralSuffix> literalSuffixes) {
+            this(name, typeParameters, contractUses, fields, properties, constructor, namedConstructors,
+                    methods, patterns, isPublic, isEffect, derivedContracts, storedStateOrder,
+                    higherKindedContractUses, higherKindedImplementations, literalSuffixes,
+                    false, List.of(), List.of());
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -371,12 +465,39 @@ public sealed interface Stmt {
         }
 
         public List<TypeDescriptor> canonicalConstructorTypes() {
+            if (dataClass) return dataComponents.stream().map(ProductComponent::type).toList();
             final var types = new java.util.ArrayList<TypeDescriptor>();
             fields.stream().filter(field -> field.initializer() == null)
                     .map(Field::type).forEach(types::add);
             properties.stream().filter(Property::canonicalConstructorParameter)
                     .map(Property::type).forEach(types::add);
             return List.copyOf(types);
+        }
+
+        public List<Field> dataComponentFields() {
+            return dataComponents.stream()
+                    .map(component -> new Field(component.name(), component.type()))
+                    .toList();
+        }
+
+        public boolean isDataComponent(final String name) {
+            return dataClass && dataComponents.stream()
+                    .anyMatch(component -> component.name().lexeme().equals(name));
+        }
+
+        public List<TypeDescriptor> constructorEffects() {
+            return java.util.stream.Stream.concat(
+                            initializerBlocks.stream().flatMap(block -> block.raisedEffects().stream()),
+                            declaredConstructorEffects.stream())
+                    .distinct()
+                    .toList();
+        }
+    }
+
+    record InitializerBlock(List<TypeDescriptor> raisedEffects, List<Stmt> body) {
+        public InitializerBlock {
+            raisedEffects = List.copyOf(raisedEffects);
+            body = List.copyOf(body);
         }
     }
 
@@ -487,7 +608,7 @@ public sealed interface Stmt {
     record ContractMethod(Token name, List<Token> parameters,
                           FunctionDescriptor typeDescriptor, boolean isMutating,
                           boolean isDefault, List<Stmt> body, List<Expr> defaultValues,
-                          int minimumArity, boolean variadic) {
+                          int minimumArity, boolean variadic, boolean isStatic) {
         public ContractMethod {
             parameters = List.copyOf(parameters);
             body = List.copyOf(body);
@@ -503,21 +624,29 @@ public sealed interface Stmt {
         public ContractMethod(Token name, List<Token> parameters,
                               FunctionDescriptor typeDescriptor, boolean isMutating) {
             this(name, parameters, typeDescriptor, isMutating, false, List.of(), List.of(),
-                    parameters.size(), false);
+                    parameters.size(), false, false);
+        }
+
+        public ContractMethod(Token name, List<Token> parameters,
+                              FunctionDescriptor typeDescriptor, boolean isMutating,
+                              boolean isDefault, List<Stmt> body, List<Expr> defaultValues,
+                              int minimumArity, boolean variadic) {
+            this(name, parameters, typeDescriptor, isMutating, isDefault, body, defaultValues,
+                    minimumArity, variadic, false);
         }
 
         public ContractMethod(Token name, List<Token> parameters,
                               FunctionDescriptor typeDescriptor, boolean isMutating,
                               boolean isDefault, List<Stmt> body) {
             this(name, parameters, typeDescriptor, isMutating, isDefault, body, List.of(),
-                    parameters.size(), false);
+                    parameters.size(), false, false);
         }
 
         public ContractMethod(Token name, List<Token> parameters,
                               FunctionDescriptor typeDescriptor, boolean isMutating,
                               boolean isDefault, List<Stmt> body, List<Expr> defaultValues) {
             this(name, parameters, typeDescriptor, isMutating, isDefault, body, defaultValues,
-                    Stmt.minimumArity(parameters, defaultValues), false);
+                    Stmt.minimumArity(parameters, defaultValues), false, false);
         }
 
         public ContractMethod(Token name, List<Token> parameters,

@@ -8,6 +8,7 @@ import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
 import java.lang.classfile.*;
+import java.lang.classfile.CodeBuilder.BlockCodeBuilder;
 import java.lang.constant.*;
 import java.util.*;
 

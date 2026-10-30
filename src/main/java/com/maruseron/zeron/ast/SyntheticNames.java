@@ -16,6 +16,14 @@ public final class SyntheticNames {
         return "$zeron$witness$" + sourceId + "$" + witnessName.span().start().offset() + "$" + methodName;
     }
 
+    public static String hktDefaultMethod(final String contractName, final String methodName) {
+        return "$zeron$hkt$default$" + sourceId(contractName + "#" + methodName) + "$" + methodName;
+    }
+
+    public static String hktDefaultOwner(final String contractName) {
+        return contractName + "$zeron$defaults";
+    }
+
     private static String sourceId(final String sourcePath) {
         try {
             final var digest = MessageDigest.getInstance("SHA-256");

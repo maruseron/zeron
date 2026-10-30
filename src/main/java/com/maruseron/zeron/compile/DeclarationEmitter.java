@@ -2,7 +2,6 @@ package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
-import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.scan.Token;
 
 import java.lang.classfile.*;

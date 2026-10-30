@@ -831,8 +831,8 @@ public final class JavaInteropTest {
         final var className = "interop.ByteArrayConversions" + UUID.randomUUID().toString().replace("-", "");
         final var source = parse("ByteArrayConversions.zn", """
                 package interop;
-                import zeron.io.arrayToByteArray;
-                import zeron.io.byteArrayToArray;
+                import zeron.internal.arrayToByteArray;
+                import zeron.internal.byteArrayToArray;
                 fn toValues(bytes: ByteArray): &Array<Byte> = byteArrayToArray(bytes);
                 fn toBytes(values: Array<Byte>): ByteArray = arrayToByteArray(values);
                 """);

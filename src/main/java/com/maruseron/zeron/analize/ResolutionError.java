@@ -51,6 +51,10 @@ public final class ResolutionError extends RuntimeException {
         return new ResolutionError(diagnostic);
     }
 
+    public ResolutionError withHelp(final DiagnosticHelp help) {
+        return new ResolutionError(diagnostic.withHelps(List.of(Objects.requireNonNull(help))), token);
+    }
+
     public Diagnostic toDiagnostic(final String fallbackSourcePath) {
         final var span = diagnostic.primarySpan();
         final var diagnosticSourcePath = span.sourcePath() == null ? fallbackSourcePath : span.sourcePath();

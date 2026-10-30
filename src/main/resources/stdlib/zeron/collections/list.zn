@@ -1,13 +1,17 @@
 package zeron.collections;
 
+import java.util.Arrays;
+
 import zeron.control.Foldable;
+import zeron.internal.unwrapSome;
+
 // These private self-calls are compiler intrinsics lowered to direct array operations.
 fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
 
 fn clearArraySlot<T: nullable + mut>(values: &Array<T>, index: Int): Unit =
     clearArraySlot<T>(values, index);
 
-class ListIterator<T: nullable + mut> is Iterator<T> {
+class ListIterator<T: mut> is Iterator<T> {
     values: List<T>;
     position: Int;
 
@@ -19,19 +23,23 @@ class ListIterator<T: nullable + mut> is Iterator<T> {
         if (this.position >= this.values.size) return Step<T>.Done();
         let value = this.values.at(this.position);
         this.position = this.position + 1;
-        return Step.Yield(value);
+        return Step.Yield(unwrapSome(value));
     }
 }
 
-public class List<T: nullable + mut> is Iterable<T>, Sink<T>, Foldable<List<_>>, Collector<List<_>> {
+public class List<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>, 
+                                        Reversible<List<_>>, Foldable<List<_>>, 
+                                        Collector<List<_>> {
     values: &Array<T>;
     count: Int;
 
     private constructor new;
 
-    public constructor of(elements: T...) = List<T>.fromArray(elements);
+    public constructor of(elements: T...) = 
+        List<T>.fromArray(elements);
 
-    public constructor empty() = List<T>.new(allocateArray<T>(4), 0);
+    public constructor empty() = 
+        List<T>.new(allocateArray<T>(4), 0);
 
     public constructor fromArray(source: Array<T>) {
         let result = List<T>.empty();
@@ -44,81 +52,85 @@ public class List<T: nullable + mut> is Iterable<T>, Sink<T>, Foldable<List<_>>,
     }
 
     private mut ensureCapacity(required: Int): Unit {
-        if (required > this.values.length) {
-            let mut capacity = this.values.length * 2;
+        if (required > values.length) {
+            let mut capacity = values.length * 2;
             if (capacity < required) capacity = required;
             let mut expanded = allocateArray<T>(capacity);
             let mut index = 0;
-            while (index < this.count) {
-                expanded[index] = this.values[index];
+            while (index < count) {
+                expanded[index] = values[index];
                 index = index + 1;
             }
             this.values = expanded;
         }
     }
 
-    private checkIndex(index: Int): Unit {
-        if (index < 0 or index >= this.count) {
-            this.values[this.values.length];
-        }
-    }
+    private checkIndex(index: Int): Boolean = 
+        index >= 0 and index < count;
 
     public property size: Int {
-        get = this.count;
+        get = count;
     }
 
-    public isEmpty(): Boolean = this.count == 0;
+    public isEmpty(): Boolean = count == 0;
 
-    public at(index: Int): T {
-        this.checkIndex(index);
-        return this.values[index];
-    }
+    public at(index: Int): Option<T> =
+        if (checkIndex(index)) 
+        then Option.Some(values[index]) 
+        else Option.None<T>();
 
-    public mut replaceAt(index: Int, value: T): T {
-        this.checkIndex(index);
-        let previous = this.at(index);
-        this.values[index] = value;
-        return previous;
+    public first(): Option<T> = at(0);
+
+    public last(): Option<T> = at(count - 1);
+
+    public mut replaceAt(index: Int, value: T): Option<T> {
+        if (checkIndex(index)) {
+            let previous = at(index);
+            this.values[index] = value;
+            return previous;
+        }
+        return Option.None<T>();
     }
 
     public mut add(value: T): Boolean {
-        this.ensureCapacity(this.count + 1);
-        this.values[this.count] = value;
-        this.count = this.count + 1;
+        this.ensureCapacity(count + 1);
+        this.values[count] = value;
+        this.count = count + 1;
         return true;
     }
 
     public mut insert(index: Int, value: T): Unit {
-        if (index < 0 or index > this.count) {
-            this.values[this.values.length];
-        }
-        this.ensureCapacity(this.count + 1);
-        let mut cursor = this.count;
+        if (index < 0 or index > count) return;
+    
+        this.ensureCapacity(count + 1);
+        let mut cursor = count;
         while (cursor > index) {
-            this.values[cursor] = this.values[cursor - 1];
+            this.values[cursor] = values[cursor - 1];
             cursor = cursor - 1;
         }
         this.values[index] = value;
-        this.count = this.count + 1;
+        this.count = count + 1;
     }
 
-    public mut removeAt(index: Int): T {
-        this.checkIndex(index);
-        let removed = this.at(index);
-        let mut cursor = index;
-        while (cursor + 1 < this.count) {
-            this.values[cursor] = this.values[cursor + 1];
-            cursor = cursor + 1;
+    public mut removeAt(index: Int): Option<T> {
+        if (checkIndex(index)) {
+            let removed = at(index);
+            let mut cursor = index;
+            while (cursor + 1 < count) {
+                this.values[cursor] = values[cursor + 1];
+                cursor = cursor + 1;
+            }
+            this.count = count - 1;
+            clearArraySlot<T>(values, count);
+            return removed;
         }
-        this.count = this.count - 1;
-        clearArraySlot<T>(this.values, this.count);
-        return removed;
+        return Option.None();
     }
 
     public mut clear(): Unit {
         let mut index = 0;
-        while (index < this.count) {
-            clearArraySlot<T>(this.values, index);
+        while (index < count) {
+            clearArraySlot<T>(values, index);
             index = index + 1;
         }
         this.count = 0;
@@ -127,22 +139,48 @@ public class List<T: nullable + mut> is Iterable<T>, Sink<T>, Foldable<List<_>>,
     public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         let mut index = 0;
-        while (index < this.count) {
-            result = combine(result, this.values[index]);
+        while (index < count) {
+            result = combine(result, values[index]);
             index = index + 1;
         }
         return result;
     }
 
-    implementation Foldable<List<_>> {
-        fn foldLeft<A: mut, B: mut>(this: List<A>, initial: B, combine: (B, A) -> B): B =
-            this.foldLeft(initial, combine);
+    private mut swapAt(left: Int, right: Int): Unit {
+        let tmp = this.values[left];
+        this.values[left] = this.values[right];
+        this.values[right] = tmp;
     }
 
-    implementation Collector<List<_>> {
-        fn empty<A: nullable + mut>(): &List<A> = List<A>.empty();
+    implementation Reversible<List<_>> {
+        fn reverse<A>(this: &List<A>): &List<A> {
+            let mut left = 0;
+            let mut right = this.count - 1;
 
-        fn add<A: nullable + mut>(this: &List<A>, value: A): Boolean = this.add(value);
+            while (left < right) {
+                this.swapAt(left, right);
+                left += 1;
+                right -= 1;
+            }
+
+            return this;
+        }
+
+        fn reversed<A>(this: List<A>): List<A> {
+            let mut result = List.empty<A>();
+            let mut index = this.count - 1;
+            while (index >= 0) {
+                result.add(this.values[index]);
+                index -= 1;
+            }
+            return result;
+        }
+    }
+
+    delegating implementation Foldable<List<_>> {}
+
+    delegating implementation Collector<List<_>> {
+        fn empty<A: mut>(): &List<A> = List<A>.empty();
     }
 
     public iterator(): &Iterator<T> = ListIterator<T>.from(this);

@@ -105,12 +105,12 @@ final class LambdaCompilationPlan {
                 .toList();
     }
 
-        List<NullableFunctionAdapter> nullableAdapters() {
-        return nullableFunctionAdapterNames.entrySet().stream()
-            .map(entry -> new NullableFunctionAdapter(
-                entry.getKey().source(), entry.getKey().target(), entry.getValue()))
-            .toList();
-        }
+    List<NullableFunctionAdapter> nullableAdapters() {
+    return nullableFunctionAdapterNames.entrySet().stream()
+        .map(entry -> new NullableFunctionAdapter(
+            entry.getKey().source(), entry.getKey().target(), entry.getValue()))
+        .toList();
+    }
 
     String adapterName(final FunctionDescriptor source, final FunctionDescriptor target) {
         return functionAdapterNames.get(new FunctionAdapterKey(source, target));
@@ -502,9 +502,9 @@ final class LambdaCompilationPlan {
     }
 
     private void collectCapturedVariables(final List<Stmt> statements,
-                                         final Set<String> locals,
-                                         final List<Token> captured,
-                                         final Set<String> seen) {
+                                          final Set<String> locals,
+                                          final List<Token> captured,
+                                          final Set<String> seen) {
         final var scopedNames = new HashSet<>(locals);
         for (final var statement : statements) {
             collectCapturedVariables(statement, scopedNames, captured, seen);
@@ -515,9 +515,9 @@ final class LambdaCompilationPlan {
     }
 
     private void collectCapturedVariables(final Stmt statement,
-                                         final Set<String> localNames,
-                                         final List<Token> captured,
-                                         final Set<String> seen) {
+                                          final Set<String> localNames,
+                                          final List<Token> captured,
+                                          final Set<String> seen) {
         switch (statement) {
             case Stmt.Block(List<Stmt> block) -> {
                 final var nestedNames = new HashSet<>(localNames);
@@ -580,9 +580,9 @@ final class LambdaCompilationPlan {
     }
 
     private void collectCapturedVariables(final Expr expr,
-                                         final Set<String> localNames,
-                                         final List<Token> captured,
-                                         final Set<String> seen) {
+                                          final Set<String> localNames,
+                                          final List<Token> captured,
+                                          final Set<String> seen) {
         if (expr == null) return;
         switch (expr) {
             case Expr.MemberCall call -> {
@@ -630,6 +630,18 @@ final class LambdaCompilationPlan {
                 collectCapturedVariables(binary.right, localNames, captured, seen);
             }
             case Expr.Call call -> {
+                final var callee = call.resolvedSymbolToken();
+                final var calleeName = callee.lexeme();
+                if (!localNames.contains(calleeName)
+                        && (symbols.containsSymbol(callee) || symbols.containsAnySymbol(callee))) {
+                    final var binding = lookupCapture(callee);
+                    if (binding.lvt() != SymbolTable.GLOBAL
+                            && functionView(binding.type()) != null
+                            && seen.add(calleeName)) {
+                        captured.add(callee);
+                        activeCaptureTypes.putIfAbsent(calleeName, binding.type());
+                    }
+                }
                 if (call.implicitMemberCall() != null) {
                     final var implicitCall = call.implicitMemberCall();
                     lambdaMethodCalls.add(new LambdaMemberKey(
@@ -733,14 +745,14 @@ final class LambdaCompilationPlan {
                     collectCapturedVariables(variable.implicitFieldReceiver(), localNames, captured, seen);
                     return;
                 }
-                final var name = variable.name.lexeme();
-                if (localNames.contains(name)) return;
-                if ((symbols.containsSymbol(variable.name) || symbols.containsAnySymbol(variable.name))
-                        && lookupCapture(variable.name).lvt() != SymbolTable.GLOBAL
-                        && !seen.contains(name)) {
-                    seen.add(name);
-                    captured.add(variable.name);
-                    activeCaptureTypes.putIfAbsent(name, variable.getType());
+                final var sourceName = variable.name.lexeme();
+                if (localNames.contains(sourceName)) return;
+                final var resolvedName = variable.resolvedSymbolToken();
+                if ((symbols.containsSymbol(resolvedName) || symbols.containsAnySymbol(resolvedName))
+                        && lookupCapture(resolvedName).lvt() != SymbolTable.GLOBAL
+                        && seen.add(resolvedName.lexeme())) {
+                    captured.add(resolvedName);
+                    activeCaptureTypes.putIfAbsent(resolvedName.lexeme(), variable.getType());
                 }
             }
             default -> {}
@@ -782,7 +794,7 @@ final class LambdaCompilationPlan {
     private void collectMemberCallAdapters(final Expr.MemberCall call) {
         if (call.witnessEvidenceToken() != null) {
             final var witnessType = call.witnessFactoryType();
-            final var receiverOffset = call.witnessEvidenceIsMethod() ? 1 : 0;
+            final var receiverOffset = call.witnessEvidenceHasReceiver() ? 1 : 0;
             for (int index = 0; index < call.arguments.size(); index++) {
                 collectFunctionAdapters(call.arguments.get(index).getType(),
                         TypeSubstitution.erase(witnessType.parameters().get(index + receiverOffset)));

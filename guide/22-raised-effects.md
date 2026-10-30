@@ -114,6 +114,14 @@ cases may raise. Omitting it means the handler cases raise no effects; an explic
 equivalent and remains accepted. Both sets are finite and may be empty. Effect names are exact
 concrete types; assignment requires the same result and the same two effect sets.
 
+Function types and handler types can look similar at first glance because both describe what
+happens when some logic is applied, and both can mention effects with `raises`. But they describe
+different things. A function type describes the function's inputs and normal result; a `raises`
+clause says which effects may escape when the function is called. A handler type instead describes
+the normal result of a protected computation, which effects the handler handles, and which effects
+its cases may raise. You can think of a handler as a policy for dealing with some effects around a
+computation.
+
 Applying a handler removes its fully handled effects from the protected expression and adds its
 case-raised effects. Guarded or refutable cases do not count as complete coverage. If a case does not
 match at runtime, the original raised effect continues outward. Handler composition is not supported;
@@ -161,4 +169,4 @@ automatic Java-exception translation. An unhandled effect escaping generated `ma
 across the host boundary; the compiler does not currently add a launcher that formats it.
 
 For declaration, checking, and runtime details, see the
-[typed raised effects design document](../documents/design-document-13_typed-raised-effects.md).
+[typed raised effects design document](../documents/design_documents/design-document-13_typed-raised-effects.md).

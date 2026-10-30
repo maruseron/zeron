@@ -32,6 +32,49 @@ to a separately mutable object, that object may still provide mutable operations
 receive structural `Eq` evidence when their components support it, but this does not give them
 `Hashable` automatically.
 
+## Data classes
+
+A data class keeps the named components of a product while also allowing methods and auxiliary
+state:
+
+```zeron
+import zeron.lang.Eq;
+import zeron.lang.Hashable;
+
+public data class Point(x: Int, y: Int) deriving Hashable {
+    coordinateSum: Int = x + y;
+
+    public squaredDistance(): Int = this.x * this.x + this.y * this.y;
+}
+
+let origin = Point.new(0, 0);
+let isOrigin = origin == Point.new(0, 0);
+```
+
+The component list in the header is the data class's canonical representation and constructor
+signature. Components are immutable, read-only properties. A data class is nominal, so another
+class with the same components is still a different type. Components must all be supplied to
+`.new`; component defaults and alternate named constructors are not supported.
+
+The compiler provides structural `Eq` when every component supports equality, comparing only those
+components. Do not write `deriving Eq`; it is intrinsic. `Hashable` is optional and must be requested
+with `deriving Hashable`, as in the example. Auxiliary fields such as `coordinateSum`, methods, and
+computed properties are not included in either equality or hashing. Component immutability is
+shallow: a component may refer to mutable state, which can still affect equality and hash results.
+
+Initialization assigns components first, evaluates direct field initializers in declaration order,
+then runs initializer blocks in source order. Direct initializers may call only effect-free
+functions. An initializer block can declare its raised effects on the data class name, for example
+`Point raises InitializationFailure { ... }`; those effects become part of construction and must be
+handled or propagated by the caller. See [Raised effects](./22-raised-effects.md) for the effect
+model.
+
+The standard library defines streaming `Encoder`/`Decoder` protocols and `Encode`/`Decode` capability
+contracts. Products, sums, and data classes can derive capability evidence when their components
+support it. The `zeron.serialization.json` package provides JSON parsing, a JSON value model, and
+stringification; generated value operations and the typed JSON adapter are not implemented yet, so
+values cannot yet be encoded or decoded through a generic codec API.
+
 ## Sum types
 
 A sum type describes one value chosen from a closed set of named alternatives. Declare its cases
@@ -84,4 +127,4 @@ semantics remain explicit.
 In short, products group components that belong together, sums represent one of several
 alternatives, and newtypes distinguish a value by what it means. These forms and their current
 limitations are described further in
-[design document 14](../documents/design-document-14_sum-product-types-and-newtypes.md).
+[design document 14](../documents/design_documents/design-document-14_sum-product-types-and-newtypes.md).

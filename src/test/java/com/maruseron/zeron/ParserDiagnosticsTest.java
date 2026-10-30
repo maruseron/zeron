@@ -3,6 +3,7 @@ package com.maruseron.zeron;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.domain.GenericDescriptor;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
 
@@ -80,8 +81,8 @@ public final class ParserDiagnosticsTest {
     @Test
     public void preservesUnqualifiedTypeNamesForResolution() {
         final var result = Parser.of(Scanner.from("""
-                import zeron.collections.*;
-                fn stringify<T: Display<T>>(value: T): String = "";
+                import zeron.lang.Display;
+                fn stringify<T: Display>(value: T): String = "";
                 """).scanWithDiagnostics())
                 .parseCompilationUnitWithDiagnostics("display-bound.zn");
 
@@ -89,6 +90,7 @@ public final class ParserDiagnosticsTest {
         final var function = (Stmt.Function) result.compilationUnit().declarations().getFirst();
         assertEquals("Display",
                 function.typeDescriptor().typeParameters().getFirst().bound().name());
+        assertEquals("T", function.typeDescriptor().parameters().getFirst().name());
     }
 
     @Test

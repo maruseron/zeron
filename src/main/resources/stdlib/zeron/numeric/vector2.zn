@@ -1,0 +1,44 @@
+package zeron.numeric;
+
+import zeron.lang.Display;
+
+public class Vector2<T: Numeric<T>> {
+    public property x: T;
+    public property y: T;
+
+    public add(other: Vector2<T>): Vector2<T> = Vector2.new(
+        this.x + other.x,
+        this.y + other.y);
+
+    public subtract(other: Vector2<T>): Vector2<T> = Vector2.new(
+        this.x - other.x,
+        this.y - other.y);
+
+    public multiply(other: Vector2<T>): Vector2<T> = Vector2.new(
+        this.x * other.x,
+        this.y * other.y);
+
+    public scaled(scale: T): Vector2<T> = 
+        Vector2.new(this.x * scale, this.y * scale);
+
+    public dot(other: Vector2<T>): T =
+        this.x * other.x + this.y * other.y;
+
+    public cross(other: Vector2<T>): T =
+        this.x * other.y - this.y * other.x;
+
+    public negate(): Vector2<T> = Vector2.new(-this.x, -this.y);
+
+    public abs(): Vector2<T> = Vector2.new(this.x.abs(), this.y.abs());
+
+    public signum(): Vector2<T> = Vector2.new(this.x.signum(), this.y.signum());
+}
+
+delegating witness<T: Numeric<T>> Numeric<Vector2<T>> for Vector2<T> {
+    static fn fromInteger(value: zeron.numeric.Integer): Vector2<T> =
+        Vector2<T>.new(T.fromInteger(value), T.fromInteger(value));
+}
+
+witness<T: Numeric<T> + Display> Display for Vector2<T> {
+    fn toString(): String = "<" + this.x + ", " + this.y + ">";
+}

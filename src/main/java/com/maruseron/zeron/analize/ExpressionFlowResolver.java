@@ -18,9 +18,9 @@ final class ExpressionFlowResolver {
         new LambdaCaptureValidator(context.symbols).validate(lambda);
     }
 
-    private record ResolvedAlgebraicOperator(TypeDescriptor type, Expr.MemberCall call) {}
+    private record ResolvedNumericOperator(TypeDescriptor type, Expr.MemberCall call) {}
 
-    private static ResolvedAlgebraicOperator resolveAlgebraicOperator(
+    private static ResolvedNumericOperator resolveNumericOperator(
             final ResolutionContext context, final Expr receiver, final TypeDescriptor receiverType,
             final String contractName, final String methodName, final List<Expr> arguments,
             final Token operator) {
@@ -49,34 +49,8 @@ final class ExpressionFlowResolver {
         ensureExact(context, operator, targetType, resolved);
         RaisedEffectFlow.add(context,
                 new LinkedHashSet<>(call.resolvedDescriptor().raisedEffects()), operator);
-        return new ResolvedAlgebraicOperator(targetType, call);
+        return new ResolvedNumericOperator(targetType, call);
     }
-
-    private static ResolvedAlgebraicOperator resolveAlgebraicBinary(
-            final ResolutionContext context, final Expr.Binary binary, final TypeDescriptor receiverType) {
-        final var operator = switch (binary.operator.type()) {
-            case PLUS -> new AlgebraicOperator("zeron.algebra.Add", "add");
-            case STAR -> new AlgebraicOperator("zeron.algebra.Mult", "multiply");
-            default -> throw new IllegalArgumentException("Unsupported algebraic binary operator.");
-        };
-        return resolveAlgebraicOperator(context, binary.left, receiverType,
-                operator.contractName(), operator.methodName(), List.of(binary.right), binary.operator);
-    }
-
-    private static ResolvedAlgebraicOperator resolveAlgebraicSubtraction(
-            final ResolutionContext context, final Expr.Binary binary, final TypeDescriptor receiverType) {
-        final var targetType = operatorTargetType(receiverType);
-        final var additionContract = operatorContractType(
-                context, "zeron.algebra.Addition", targetType, binary.operator);
-        final var addition = new Token(TokenType.IDENTIFIER, "negate", null, binary.operator.span());
-        final var negatedRight = new Expr.MemberCall(binary.right, addition, binary.operator,
-                List.of(), List.of(), TypeDescriptor.ofInfer());
-        negatedRight.setRequiredContractType(additionContract);
-        return resolveAlgebraicOperator(context, binary.left, receiverType,
-                "zeron.algebra.Add", "add", List.of(negatedRight), binary.operator);
-    }
-
-    private record AlgebraicOperator(String contractName, String methodName) {}
 
     private static TypeDescriptor operatorContractType(
             final ResolutionContext context, final String contractName,
@@ -100,8 +74,102 @@ final class ExpressionFlowResolver {
                 || baseType instanceof FloatDescriptor;
     }
 
-    private static boolean isAlgebraicOperator(final TokenType operator) {
-        return operator == TokenType.PLUS || operator == TokenType.MINUS || operator == TokenType.STAR;
+    private static boolean isNumericOperator(final TokenType operator) {
+        return operator == TokenType.PLUS || operator == TokenType.MINUS
+                || operator == TokenType.STAR || operator == TokenType.SLASH;
+    }
+
+    static TypeDescriptor resolveExpectedExpression(final ResolutionContext context,
+                                                    final Expr expression,
+                                                    final TypeDescriptor expectedType) {
+        if (expression instanceof Expr.Literal literal
+                && (literal.exactInteger() != null || literal.exactDecimal() != null)
+                && resolveNumericLiteral(context, literal, expectedType)) {
+            return literal.getType();
+        }
+        if (expression instanceof Expr.Grouping grouping) {
+            final var type = resolveExpectedExpression(context, grouping.expression, expectedType);
+            grouping.setType(type);
+            return type;
+        }
+        if (expression instanceof Expr.Unary unary && unary.operator.type() == TokenType.MINUS
+                && isNumericExpression(unary.right)) {
+            resolveExpectedExpression(context, unary.right, expectedType);
+            return resolve(context, unary);
+        }
+        if (expression instanceof Expr.Binary binary && isNumericOperator(binary.operator.type())
+                && isNumericExpression(binary.left) && isNumericExpression(binary.right)) {
+            resolveExpectedExpression(context, binary.left, expectedType);
+            resolveExpectedExpression(context, binary.right, expectedType);
+            return resolve(context, binary);
+        }
+        return resolve(context, expression);
+    }
+
+    private static boolean isNumericExpression(final Expr expression) {
+        return expression instanceof Expr.Literal literal
+                && (literal.exactInteger() != null || literal.exactDecimal() != null)
+                || expression instanceof Expr.Grouping grouping && isNumericExpression(grouping.expression)
+                || expression instanceof Expr.Unary unary && unary.operator.type() == TokenType.MINUS
+                    && isNumericExpression(unary.right)
+                || expression instanceof Expr.Binary binary && isNumericOperator(binary.operator.type())
+                    && isNumericExpression(binary.left) && isNumericExpression(binary.right);
+    }
+
+    private static boolean resolveNumericLiteral(final ResolutionContext context,
+                                                 final Expr.Literal literal,
+                                                 final TypeDescriptor expectedType) {
+        if (expectedType.isNullable() || expectedType instanceof NullDescriptor
+                || expectedType instanceof InferDescriptor) return false;
+        final var targetType = operatorTargetType(expectedType);
+        final boolean decimal = literal.exactDecimal() != null;
+        final var contractName = decimal ? "zeron.numeric.Fractional" : "zeron.numeric.Numeric";
+        final var contract = context.contracts.get(contractName);
+        if (contract == null) return false;
+        final var requiredContract = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName(contract.name().lexeme()), targetType);
+        final var where = literal.numericToken() == null ? SYNTHETIC_IDENTIFIER : literal.numericToken();
+        if (!TypeClassEvidence.hasEvidence(context, requiredContract, targetType, where)) return false;
+
+        if (targetType instanceof IntDescriptor && literal.exactInteger() != null
+                && (literal.exactInteger().compareTo(java.math.BigInteger.valueOf(Integer.MIN_VALUE)) < 0
+                || literal.exactInteger().compareTo(java.math.BigInteger.valueOf(Integer.MAX_VALUE)) > 0)
+                || targetType instanceof LongDescriptor && literal.exactInteger() != null
+                && (literal.exactInteger().compareTo(java.math.BigInteger.valueOf(Long.MIN_VALUE)) < 0
+                || literal.exactInteger().compareTo(java.math.BigInteger.valueOf(Long.MAX_VALUE)) > 0)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                    where, "Integer literal is outside the expected type's range."));
+        }
+
+        final var carrierType = TypeDescriptor.ofName(decimal
+                ? "zeron.numeric.Rational" : "zeron.numeric.Integer");
+        final var carrierValue = decimal
+                ? literal.exactDecimal().toString()
+                : literal.exactInteger().toString();
+        final var carrierToken = new Token(TokenType.IDENTIFIER, carrierType.name(), null, where.span());
+        final var carrierReceiver = new Expr.Variable(carrierToken, TypeDescriptor.ofInfer());
+        final var constructorName = new Token(TokenType.IDENTIFIER, "fromLiteralText", null, where.span());
+        final var carrierCall = new Expr.MemberCall(carrierReceiver, constructorName, where,
+                List.of(new Expr.Literal(carrierValue, TypeDescriptor.ofString())),
+                List.of(), TypeDescriptor.ofInfer());
+        MemberInteropResolver.resolveMemberCall(context, carrierCall);
+
+        final var methodName = decimal ? "fromRational" : "fromInteger";
+        final var methodToken = new Token(TokenType.IDENTIFIER, methodName, null, where.span());
+        final var receiver = new Expr.Literal(null, targetType);
+        final var conversionCall = new Expr.MemberCall(receiver, methodToken, where,
+                List.of(carrierCall), List.of(), TypeDescriptor.ofInfer());
+        final var resolvedType = MemberInteropResolver.resolveOperatorContractCall(
+                context, conversionCall, targetType, requiredContract);
+        if (resolvedType == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
+                    "No " + TypeFormatter.format(requiredContract)
+                            + " witness provides the required literal conversion."));
+        }
+        ensureExact(context, where, expectedType, resolvedType);
+        literal.setNumericConversionCall(conversionCall);
+        literal.setType(expectedType);
+        return true;
     }
 
     private static TypeDescriptor resolveSuffixedLiteral(
@@ -456,6 +524,29 @@ final class ExpressionFlowResolver {
                 final var symbolName = context.symbols.containsSymbol(assignment.name)
                         ? assignment.name : MemberInteropResolver.resolveTopLevelValueSymbol(context, assignment.name);
                 if (symbolName == null) {
+                    if (context.frame.dataInitializerOwner != null) {
+                        final var field = context.frame.dataInitializerOwner.fields().stream()
+                                .filter(candidate -> candidate.name().lexeme().equals(assignment.name.lexeme()))
+                                .findFirst().orElse(null);
+                        if (field != null) {
+                            final var writable = context.frame.dataInitializerWritableFields
+                                    .get(assignment.name.lexeme());
+                            if (writable == null) {
+                                Zeron.resolutionError(new ResolutionError(
+                                        DiagnosticCatalog.INVALID_INITIALIZER, assignment.name,
+                                        "An initializer block may assign only an auxiliary field without a direct initializer."));
+                            }
+                            final var expectedType = field.type();
+                            final var resolvedType = MemberInteropResolver.resolveArgument(
+                                    context, assignment.value, expectedType);
+                            ensureAssignable(context, expectedType, resolvedType, assignment.name);
+                            assignment.setDataFieldTarget(
+                                    context.frame.dataInitializerOwner.name().lexeme(), expectedType);
+                            context.frame.flowState.recordWrite(field.name());
+                            assignment.setType(expectedType);
+                            yield expectedType;
+                        }
+                    }
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                             assignment.name,
                             "Unknown value '" + assignment.name.lexeme() + "'."));
@@ -543,12 +634,20 @@ final class ExpressionFlowResolver {
                     binary.setType(stringType);
                     yield stringType;
                 }
-                if (isAlgebraicOperator(binary.operator.type())
+                if (isNumericOperator(binary.operator.type())
                         && !isBuiltInArithmeticType(leftType)
                         && !(leftType instanceof InferDescriptor)) {
-                    final var resultType = binary.operator.type() == TokenType.MINUS
-                            ? resolveAlgebraicSubtraction(context, binary, leftType)
-                            : resolveAlgebraicBinary(context, binary, leftType);
+                    final var contractName = binary.operator.type() == TokenType.SLASH
+                            ? "zeron.numeric.Fractional" : "zeron.numeric.Numeric";
+                    final var methodName = switch (binary.operator.type()) {
+                        case PLUS -> "add";
+                        case MINUS -> "subtract";
+                        case STAR -> "multiply";
+                        case SLASH -> "divide";
+                        default -> throw new IllegalArgumentException("Unsupported numeric operator.");
+                    };
+                    final var resultType = resolveNumericOperator(context, binary.left, leftType,
+                            contractName, methodName, List.of(binary.right), binary.operator);
                     final var call = (Expr.MemberCall) resultType.call();
                     ensureExact(context, binary.operator, leftType, binary.right.getType());
                     binary.setOperatorCall(call);
@@ -754,8 +853,7 @@ final class ExpressionFlowResolver {
                 yield resolvedType;
             }
             case Expr.AnonymousObject object -> resolveAnonymousObject(context, object);
-            case Expr.Literal literal ->
-                    literal.getType();
+            case Expr.Literal literal -> resolveLiteral(context, literal);
             case Expr.SuffixedLiteral literal -> resolveSuffixedLiteral(context, literal);
             case Expr.TypeTest test -> {
                 yield resolveTypeTest(context, test);
@@ -795,8 +893,8 @@ final class ExpressionFlowResolver {
                 final var operandType = resolve(context, unary.right);
                 if (unary.operator.type() == TokenType.MINUS
                         && !isBuiltInArithmeticType(operandType)) {
-                    final var resultType = resolveAlgebraicOperator(context, unary.right, operandType,
-                            "zeron.algebra.Addition", "negate", List.of(), unary.operator);
+                    final var resultType = resolveNumericOperator(context, unary.right, operandType,
+                            "zeron.numeric.Numeric", "negate", List.of(), unary.operator);
                     unary.setOperatorCall((Expr.MemberCall) resultType.call());
                     unary.setType(resultType.type());
                     yield resultType.type();
@@ -838,7 +936,7 @@ final class ExpressionFlowResolver {
             }
             case Expr.Variable variable -> {
                 if (variable.getType() instanceof TypeParameterDescriptor parameter) {
-                    yield parameter;
+                    yield context.activeTypeSubstitutions.getOrDefault(parameter, parameter);
                 }
                 if (variable.resolvedFunctionName() != null) {
                     final var resolvedType = variable.specializedFunctionType();
@@ -912,6 +1010,10 @@ final class ExpressionFlowResolver {
                                                          final Expr.AnonymousObject object) {
         if (object.generatedClassName() == null) {
             final var declaration = object.declaration();
+            for (final var contract : object.contracts()) {
+                contract.resolveName(TypeResolver.resolveTypeName(
+                        context, contract.name().lexeme(), contract.name()));
+            }
             final var captureValidator = new LambdaCaptureValidator(context.symbols, "an anonymous object");
             final var captures = captureValidator.validateAnonymousObject(declaration);
             object.initializers().forEach(captureValidator::validateAnonymousInitializer);
@@ -994,11 +1096,11 @@ final class ExpressionFlowResolver {
         final var display = context.contracts.values().stream()
                 .filter(contract -> contract.name().lexeme().equals("zeron.lang.Display"))
                 .findFirst().orElse(null);
-        if (display == null || display.typeParameters().size() != 1) {
+        if (display == null || !display.typeParameters().isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                     binary.operator, "String concatenation requires the zeron.lang.Display contract."));
         }
-        final var displayType = TypeDescriptor.genericOf(TypeDescriptor.ofName(display.name().lexeme()), valueType);
+        final var displayType = TypeDescriptor.ofName(display.name().lexeme());
         final var method = display.methods().stream()
                 .filter(candidate -> candidate.name().lexeme().equals("toString"))
                 .findFirst().orElse(null);
@@ -1014,7 +1116,7 @@ final class ExpressionFlowResolver {
         if (valueType instanceof TypeParameterDescriptor parameter) {
             if (parameter.bounds().stream().noneMatch(displayType::equals)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                        binary.operator, "String concatenation requires an explicit Display<T> bound."));
+                        binary.operator, "String concatenation requires an explicit Display bound."));
             }
             MemberInteropResolver.resolveMemberCall(context, call);
             binary.setDisplayCall(call);
@@ -1022,12 +1124,9 @@ final class ExpressionFlowResolver {
         }
 
         if (context.typeCompatibility.isContractProjection(displayType, valueType)) {
-            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-            substitutions.put(display.typeParameters().getFirst(), valueType);
             call.setResolvedOwnerName(display.name().lexeme());
             call.setResolvedContractMethod(method);
-            call.setResolvedDescriptor((FunctionDescriptor) TypeSubstitution.substitute(
-                    method.typeDescriptor(), substitutions));
+            call.setResolvedDescriptor(method.typeDescriptor());
             call.setType(TypeDescriptor.ofString());
             binary.setDisplayCall(call);
             return TypeDescriptor.ofString();
@@ -2419,6 +2518,19 @@ final class ExpressionFlowResolver {
             case Expr.Grouping grouping -> directVariable(context, grouping.expression);
             default -> null;
         };
+    }
+
+    private static TypeDescriptor resolveLiteral(final ResolutionContext context, final Expr.Literal literal) {
+        if (literal.numericConversionCall() == null
+                && literal.exactInteger() != null
+                && literal.getType() instanceof IntDescriptor
+                && (literal.exactInteger().compareTo(java.math.BigInteger.valueOf(Integer.MIN_VALUE)) < 0
+                || literal.exactInteger().compareTo(java.math.BigInteger.valueOf(Integer.MAX_VALUE)) > 0)) {
+            final var where = literal.numericToken() == null ? SYNTHETIC_IDENTIFIER : literal.numericToken();
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
+                    where, "Integer literal is outside the default Int range."));
+        }
+        return literal.getType();
     }
 
     private static boolean isNullLiteral(final ResolutionContext context, final Expr expression) {

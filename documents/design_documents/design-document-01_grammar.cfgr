@@ -1,0 +1,371 @@
+module ZeronGrammar;
+
+# IDENTIFIER, INT, LONG, DOUBLE, SUFFIXABLE_NUMBER, STRING, and CHAR denote scanner token kinds;
+# LONG is an integer literal with an `L` suffix. SUFFIXABLE_NUMBER preserves a raw numeric spelling
+# when an adjacent identifier may be a custom suffix. Decimal digits may use `_` separators only between digits. Integer literals may
+# use case-insensitive `0b`, `0o`, and `0x` prefixes for binary, octal, and hexadecimal values.
+# Radix-prefixed literals use INT by default and LONG with an `L` suffix; decimal leading zeroes remain
+# decimal, and radix prefixes do not support floating-point literals.
+# CHAR is a single-quoted Unicode scalar literal; its escapes are `\\`, `\'`, `\n`, `\r`, `\t`, and
+# braced hexadecimal `\u{...}`.
+# // and /* */ comments are retained as ranged scanner tokens and exposed by ParseResult,
+# but are excluded from the grammar and the compilation unit.
+# `type` below is source syntax; design-document-02 describes encoded descriptors.
+# soft("word") denotes a soft keyword: it is scanned as IDENTIFIER and recognized by exact spelling
+# only at the indicated grammatical position. Other quoted words are hard keywords.
+
+program                    : [packageDeclaration] {importDeclaration} {topLevelDeclaration} EOF ;
+packageDeclaration         : "package" qualifiedName ";" ;
+qualifiedName              : IDENTIFIER {"." IDENTIFIER} ;
+importDeclaration          : "import" [soft("suffix")] qualifiedName ["as" IDENTIFIER] ";" ;
+
+topLevelDeclaration        : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl | typeDecl
+                           | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
+                           | handlerDecl | publicHandlerDecl
+                           | externalClassDecl | publicExternalClassDecl
+                           | effectDecl | publicEffectDecl | extensionDecl | publicExtensionDecl
+                           | publicClassDecl | publicContractDecl | publicSealedContractDecl | publicTypeDecl
+                           | witnessDecl ;
+publicFunDecl              : "public" funDecl ;
+publicExternalFunctionDecl : "public" externalFunctionDecl ;
+publicEffectDecl           : "public" effectDecl ;
+publicExtensionDecl        : "public" extensionDecl ;
+publicExternalClassDecl    : "public" externalClassDecl ;
+publicClassDecl            : "public" classDecl ;
+publicContractDecl         : "public" contractDecl ;
+publicSealedContractDecl   : "public" sealedContractDecl ;
+publicTypeDecl             : "public" typeDecl ;
+publicHandlerDecl          : "public" handlerDecl ;
+handlerDecl                : soft("handler") IDENTIFIER handlerBody ;
+sealedContractDecl         : "sealed" contractDecl ;
+typeDecl                   : "type" IDENTIFIER [typeParameters] [derivingClause] "="
+                             (productComponents | sumCase {"|" sumCase}) ";" ;
+derivingClause             : soft("deriving") IDENTIFIER {"," IDENTIFIER} ;
+productComponents          : "(" productComponent "," productComponent {"," productComponent} ")" ;
+productComponent           : IDENTIFIER ":" type ;
+newtypeDecl                : soft("newtype") IDENTIFIER [derivingClause] "=" builtinType
+                             [soft("where") expression] ";" ;
+builtinType                : "Int" | "Long" | "Byte" | "Float" | "Boolean" | "String" ;
+sumCase                    : IDENTIFIER ["(" [sumPayload {"," sumPayload}] ")"] ;
+sumPayload                 : IDENTIFIER ":" type ;
+declaration                : varDecl | funDecl | handlerDecl | statement ;
+
+varDecl                    : "let" ["mut"] IDENTIFIER [":" type] ["=" expression] ";" ;
+funDecl                    : "fn" IDENTIFIER [typeParameters] "(" parameters ")" [":" type] [raisesClause]
+                             ("=" expression ";" | block) ;
+raisesClause               : "raises" type {"," type} ;
+externalFunctionDecl       : "external" "fn" IDENTIFIER "(" parameters ")" ":" type ";" ;
+externalClassDecl          : "external" "class" IDENTIFIER "=" STRING "{" externalClassMember* "}" ;
+externalClassMember        : ["public"] ["mut"] IDENTIFIER "(" plainParameters ")" ":" type ";"
+                           | ["public"] "static" "property" IDENTIFIER ":" type ";" ;
+typeParameters             : "<" typeParameter {"," typeParameter} ">" ;
+typeParameter              : IDENTIFIER [":" type {"+" type}] ;
+parameters                 : [parameter {"," parameter}] ;
+parameter                  : IDENTIFIER ":" type ["..."] ["=" expression] ;
+plainParameters            : [plainParameter {"," plainParameter}] ;
+plainParameter             : IDENTIFIER ":" type ;
+
+classDecl                  : "class" IDENTIFIER [typeParameters]
+                             ["is" contractUse {"," contractUse}]
+                             [derivingClause]
+                             "{" classMember* "}" ;
+effectDecl                 : "effect" IDENTIFIER "{" classMember* "}" ;
+extensionDecl              : "extension" [typeParameters] type "{" extensionMethod* "}" ;
+extensionMethod            : ["public"] ["mut"] "fn" memberName [typeParameters]
+                             "(" parameters ")" ":" type [raisesClause]
+                             ("=" expression ";" | block) ;
+contractUse                : qualifiedName [typeArguments] ;
+classMember                : fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl
+                           | suffixDeclaration | hktImplementationDecl
+                           | methodDecl | patternDecl ;
+hktImplementationDecl      : [soft("delegating")] soft("implementation") contractUse
+                             "{" hktImplementationMethod* "}" ;
+hktImplementationMethod    : "fn" memberName [typeParameters] "(" parameters ")" ":" type
+                             [raisesClause] ("=" expression ";" | block) ;
+suffixDeclaration          : soft("suffix") IDENTIFIER "{" suffixFactory+ "}" ;
+suffixFactory              : (soft("integer") | soft("decimal")) ":" [soft("string")] IDENTIFIER ";" ;
+fieldDecl                  : IDENTIFIER ":" type ";" ;
+propertyDecl               : [visibility] ["mut"] "property" IDENTIFIER ":" type ["=" expression]
+                             (";" | "{" propertyAccessor+ "}") ;
+propertyAccessor           : soft("get") ("=" expression ";" | block)
+                           | soft("set") "(" IDENTIFIER ")" ("=" expression ";" | block) ;
+constructorDecl            : visibility "constructor" "new" ";" ;
+namedConstructorDecl       : visibility "constructor" IDENTIFIER "(" namedConstructorParameters ")" [raisesClause]
+                             ("=" expression ";" | block) ;
+namedConstructorParameters : [namedConstructorParameter {"," namedConstructorParameter}] ;
+namedConstructorParameter  : IDENTIFIER ":" type ["..."] ;
+methodDecl                 : [visibility] ["mut"] memberName [typeParameters] "(" parameters ")" ":" type
+                             [raisesClause]
+                             ("=" expression ";" | block) ;
+patternDecl                : visibility "pattern" IDENTIFIER "(" [patternOutput {"," patternOutput}] ")"
+                             [soft("when") expression] block ;
+patternOutput              : IDENTIFIER ":" type ;
+contractDecl               : "contract" IDENTIFIER [typeParameters] [soft("requires") contractUse
+                             {"+" contractUse}] [soft("permits") permittedClass {"," permittedClass}]
+                             "{" contractMember* "}" ;
+permittedClass             : qualifiedName [typeArguments] ;
+witnessDecl                : [soft("delegating")] "witness" [typeParameters] type "for" type
+                             "{" witnessMethod* "}" ;
+witnessMethod              : ["static"] "fn" memberName [typeParameters] "(" parameters ")" ":" type
+                             [raisesClause] ("=" expression ";" | block) ;
+contractMember             : contractProperty | contractMethod ;
+contractProperty           : ["mut"] "property" IDENTIFIER ":" type ";" ;
+contractMethod             : ["default"] ["mut"] memberName [typeParameters] "(" parameters ")" ":" type
+                             [raisesClause]
+                             (";" | "=" expression ";" | block) ;
+visibility                 : "public" | "private" ;
+memberName                 : IDENTIFIER ;
+
+statement                  : exprStmt
+                           | breakStmt
+                           | continueStmt
+                           | forStmt
+                           | ifStmt
+                           | returnStmt
+                           | usingStmt
+                           | loopStmt
+                           | whileStmt
+                           | untilStmt
+                           | block ;
+exprStmt                   : expression ";" ;
+breakStmt                  : "break" ";" ;
+continueStmt               : "continue" ";" ;
+forStmt                    : "for" "(" "let" IDENTIFIER "in" expression ")" statement ;
+usingStmt                  : "using" "(" usingBinding {"," usingBinding} ")" block ;
+usingBinding               : "let" IDENTIFIER [":" type] "=" expression ;
+ifStmt                     : "if" "(" expression ")" statement ["else" statement] ;
+returnStmt                 : "return" [expression] ";" ;
+loopStmt                   : "loop" statement ;
+whileStmt                  : "while" "(" expression ")" statement ;
+untilStmt                  : "until" "(" expression ")" statement ;
+block                      : "{" { declaration } "}" ;
+
+expression                 : assignment ;
+assignment                 : coalesce [assignmentOperator assignment] ;
+assignmentOperator         : "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                           | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>=" | "??=" ;
+coalesce                   : logicOr ["??" coalesce] ;
+logicOr                    : logicAnd {"or" logicAnd} ;
+logicAnd                   : bitwiseOr {"and" bitwiseOr} ;
+bitwiseOr                  : bitwiseXor {"|" bitwiseXor} ;
+bitwiseXor                 : bitwiseAnd {"^" bitwiseAnd} ;
+bitwiseAnd                 : equality {"&" equality} ;
+equality                   : typeTest {("!=" | "==" | "===") typeTest} ;
+typeTest                   : comparison ["is" ["not"] (type | "null") | soft("matches") matchPattern] ;
+comparison                 : shift {(">" | ">=" | "<" | "<=") shift} ;
+shift                      : term {("<<" | ">>" | ">>>") term} ;
+term                       : factor {("-" | "+") factor} ;
+factor                     : unary {("/" | "*" | "%") unary} ;
+unary                      : "raise" unary
+                           | ("not" | "-" | "+" | "~" | "typeof") unary
+                           | cast ;
+cast                       : call {"as" ["?"] type} ;
+call                       : (genericFunctionCall | genericClassFactoryCall | functionValueReference | primary)
+                             {callSuffix} ;
+callSuffix                 : arguments | "[" expression "]" | ("." | "?.") memberName ;
+genericFunctionCall        : IDENTIFIER typeArguments arguments ;
+functionValueReference     : IDENTIFIER "::" typeArguments ;
+genericClassFactoryCall    : IDENTIFIER [typeArguments] "." IDENTIFIER arguments ;
+arguments                  : "(" [expression {"," expression}] ")" ;
+typeArguments              : "<" type {"," type} ">" ;
+type                       : ["&"] typeAtom ["~>" effectSet ["raises" effectSet]] ["?"] ;
+effectSet                  : "{" [type {"," type}] "}" ;
+typeAtom                   : qualifiedName ["<" typeArgumentsBody ">"]
+                           | "(" ")" "->" type [raisesClause]
+                           | "(" type ")" ["->" type [raisesClause]]
+                           | "(" type "," type {"," type} ")" "->" type [raisesClause] ;
+typeArgumentsBody          : type {"," type} ;
+
+primary                    : INT
+                           | LONG
+                           | DOUBLE
+                           | suffixedNumericLiteral
+                           | STRING
+                           | CHAR
+                           | IDENTIFIER
+                           | handleExpr
+                           | handlerLiteral
+                           | arrayLiteral
+                           | lambda
+                           | "true" | "false" | "null" | "this"
+                           | ifExpr
+                           | matchExpr
+                           | forExpr
+                           | anonymousObjectExpr
+                           | "(" ")"
+                           | "(" expression ")"
+                           | range ;
+suffixedNumericLiteral     : SUFFIXABLE_NUMBER IDENTIFIER ;
+handleExpr                 : "handle" "(" expression ")" soft("with") (handlerBody | expression) ;
+handlerLiteral             : soft("handler") handlerBody ;
+handlerBody                : "{" handleArm+ "}" ;
+handleArm                  : "case" matchPattern ["if" expression]
+                             [soft("with") soft("suppressed") "as" IDENTIFIER]
+                             "->" expression ";" ;
+arrayLiteral               : "[" expression {"," expression} "]" ;
+ifExpr                     : "if" "(" expression ")" "then" expression "else" expression ;
+matchExpr                  : "match" "(" expression ")" "{" matchArm+ "}" ;
+matchArm                   : "case" matchCasePattern ["if" expression] "->" expression ";" ;
+matchCasePattern            : matchCaseAlternative {"|" matchCaseAlternative} ;
+matchCaseAlternative        : IDENTIFIER "(" [patternArgument {"," patternArgument}] ")"
+                            | patternAlternative ;
+matchPattern               : patternAlternative {"|" patternAlternative} ;
+patternAlternative         : "_" | IDENTIFIER | type ["." IDENTIFIER "("
+                             [patternArgument {"," patternArgument}] ")"] ["as" IDENTIFIER] ;
+patternArgument            : "_" | IDENTIFIER | matchPattern ;
+forExpr                    : "for" IDENTIFIER "in" expression { forClause } forResult ;
+forClause                  : "for" IDENTIFIER "in" expression
+                           | "let" IDENTIFIER "=" expression
+                           | "if" expression ;
+forResult                  : soft("yield") expression
+                           | soft("collect") expression soft("into") expression ;
+lambda                     : IDENTIFIER "->" lambdaBody
+                           | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
+lambdaBody                 : expression | block ;
+range                      : INT ".." INT ;
+anonymousObjectExpr        : "object" ":" contractUse {"+" contractUse}
+                             "{" anonymousObjectMember* "}" ;
+anonymousObjectMember      : ["public"] ["mut"] "property" IDENTIFIER ":" type
+                             ["=" expression]
+                             (";" | "{" propertyAccessor+ "}")
+                           | methodDecl
+                           | IDENTIFIER ":" type "=" expression ";" ;
+
+# Semantic/parser constraints:
+# - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
+# - Each package/namespace callable name and each class/contract method name identifies one
+#   declaration. Ordinary Zeron functions and methods do not overload. Extension methods may share
+#   a name only for non-equivalent receiver types; calls select by receiver applicability alone,
+#   and multiple applicable extensions are ambiguous.
+# - A for-expression has ordered generator, local-binding, and guard clauses, followed by exactly one
+#   final result clause. The result clause is either `yield expression` for a lazy Stream<T> or
+#   `collect expression into sink` for eager collection into a mutable Sink<T>.
+# - Generator expressions are evaluated for each path that reaches them and are traversed in lexical,
+#   depth-first order. Bindings introduced by `for` and `let` clauses are visible to later clauses.
+#   Guards skip the remainder of the current path when false.
+# - A lazy comprehension evaluates its outer source expression once at construction and defers
+#   traversal and per-element clause expressions until values are requested. It does not guarantee
+#   source replayability. Eager collection evaluates the outer source and sink once before traversal;
+#   projected values are added in traversal order, and the expression returns the sink.
+# - The words `yield`, `collect`, and `into` are contextual identifiers used in for-expression result
+#   clauses, not globally reserved keywords.
+# - Contracts describe instance behavior and do not declare class-side constructor requirements.
+# - `delegating` is a soft keyword permitted only before a witness declaration or a class HKT
+#   implementation block; elsewhere it remains an ordinary identifier.
+# - A class HKT implementation block must match one class-header constructor conformance. Prefixing
+#   it with `delegating` forwards compatible receiver-based operations to public methods on that
+#   class; explicit block methods take precedence and receiverless operations remain explicit.
+# - Contract bounds are permitted only on generic functions and generic methods; class and contract
+#   declaration type parameters remain unbounded. Multiple ordinary contract bounds use `+`.
+# - Sealed contracts require a non-empty permits list. Permitted classes must be in the contract's
+#   package; public sealed contracts permit only public classes. Generic arity and type parameters
+#   correspond by position. Permitted implementation classes are final.
+# - Nominal sums use `type Name<T> = Case(value: T) | Empty;`. Cases are closed, share the sum's
+#   visibility, have immutable positional payloads, and are constructed as `Name.Case(args)` (including
+#   `Name.Empty()`). Generic arguments infer from payloads and expected type; underconstrained cases
+#   require explicit arguments. Each zero-payload case is a singleton by identity. Sum matches use
+#   `case Name.Case(binding, _)`, require exact payload arity, and are exhaustive over unguarded cases
+#   or a final unguarded wildcard. Nullable sums, nested/OR sum patterns, named args, defaults,
+#   methods, and contract conformance are not part of the MVP.
+# - `value is Name.Case` refines the value to that case on the true path; generic case arguments
+#   come from the sum value. Named payloads can be read only while that case refinement is active.
+#   `value matches Name.Case(binding, _)` is supported as a direct `if` or `while` condition and
+#   binds immutable payload locals only in the successful branch. Composing `matches` with logical
+#   operators, negation, or other expressions is not supported yet. Payloads are read-only.
+# - Extensions may target the nominal sum type and remain statically dispatched. A witness may target
+#   a sum once for its complete generic pattern; its methods receive the sum value and may inspect it
+#   with `match`. This does not make generated case classes conform to the witnessed contract.
+#   Sum-target witnesses cannot map class named constructors.
+# - Match expressions require a non-null sealed-contract value. Every permitted class must be covered
+#   by an unguarded case, unless a final unguarded `_` covers remaining values. Case generic arguments
+#   must match the scrutinee's contract arguments. Cases may invoke declared class patterns with
+#   positional nested/bound/ignored outputs, OR alternatives with identical binding environments,
+#   an immutable whole-value alias with `as`, and an optional Boolean guard. Guard- or
+#   refutation-failing cases do not count toward exhaustiveness. Nullable matches are unsupported.
+# - For expressions require a non-null valid iterable as per Resolver.resolveIterable semantics.
+# - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
+#   An explicit `private constructor new;` makes canonical construction private.
+# - Fields and auto-properties may have initializers. Initialized members are omitted from canonical
+#   constructor parameters. Uninitialized fields are parameters first, followed by uninitialized
+#   auto-properties, each in declaration order within its group.
+# - A visibility-marked class `property` has a generated getter; `mut` adds a generated setter which
+#   requires a mutable receiver. A custom accessor block replaces generated accessors. Custom
+#   properties require a getter and use explicitly declared fields for backing storage.
+# - Contracts may require read-only properties (`property name: Type;`) or writable properties
+#   (`mut property name: Type;`). Implementations may use auto or custom accessors.
+# - Named constructors are static factories with explicit visibility and either expression or block
+#   bodies. Their result type is implicitly `&Class`, they have no `this`, and every reachable normal
+#   path in a block must return an `&Class` value. Allocation still uses the canonical `Class.new`.
+# - Anonymous objects list one or more contracts. Auto-properties and private fields require
+#   initializers; constructors and patterns are not valid object members. Initializers, methods, and
+#   property accessors use the existing immutable-capture restrictions.
+# - Generic functions and methods must have explicit return types. Method type parameters are
+#   scoped to that method and cannot shadow enclosing class or contract parameters. Function and
+#   method type parameters may each have multiple contract bounds joined by `+`.
+#   Calls infer type arguments from arguments or accept explicit arguments before the argument list.
+# - Generic function values use `name::<Type, ...>` for explicit specialization, or a bare name
+#   when an expected function type determines every type parameter. These values are monomorphic.
+# - Class and contract declaration type parameters remain unbounded. Bounds on generic function or
+#   method type parameters must name contracts; only non-mutating contract methods are available
+#   through a bounded type parameter. Operator constraints remain unsupported.
+# - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
+# - Generic type applications on Zeron classes/contracts and imported Java generic types may
+#   project an argument as `out Type` or `in Type`. Projections are type-only views; they do not
+#   apply to arrays, generic type constructors, sums, products, or raw Java generic types.
+# - Project compilation uses explicit source roots and an entry file. Cross-package source units may
+#   declare classes, contracts, functions, and immutable top-level values. Selective imports may use
+#   `as` aliases and require public declarations. Compiled libraries export public immutable
+#   top-level and namespace values; public mutable values remain unsupported.
+# - Non-entry functions require explicit return annotations so signatures are available up front.
+# - External functions are top-level signature-only declarations. Their implementation is selected
+#   by a compiler-side typed binding registry keyed by the source-qualified function name.
+# - Parameters may have defaults only as a trailing suffix. Calls supply a positional prefix;
+#   defaults run once per call, left to right, in declaration scope and may refer to earlier
+#   parameters. Full function types retain full arity. Defaults are supported on functions,
+#   class methods, contract methods, and external functions; constructors and external-class
+#   methods do not support defaults.
+# - Contract method defaults belong to the contract and are available through contract- and
+#   implementing-class-typed calls. Implementations provide only the full-arity method. Compiled
+#   libraries export minimum arity and generate shorter-arity JVM wrappers.
+# - Functions, methods, external functions, and named constructors allow at most one variadic
+#   parameter, and it must be last. Its declared element type is
+#   exposed as Array<T>; direct calls pack positional arguments after fixed parameters, while
+#   function values retain the full Array<T> parameter. Defaults may precede it but cannot apply to
+#   it. Named constructors do not support defaults. Spread calls, canonical constructors, and
+#   external-class methods do not support variadics.
+# - `..` constructs an inclusive `zeron.ranges.IntRange`; `for` accepts arrays and values conforming
+#   to the bundled Iterable<T> contract.
+# - Class patterns declare typed outputs and may be refutable with `when`. Output names are assigned
+#   exactly once on every completing path. Pattern bodies cannot call `mut` methods.
+# - Match patterns support named class patterns, nested patterns, ignored/bound outputs, and OR
+#   alternatives. OR alternatives must bind the same names with compatible types. Legacy
+#   one-public-property match patterns remain supported when no class pattern has that name.
+# - Output uses ordinary imported calls to `zeron.io.print` and `zeron.io.println`; `print` is not a
+#   statement keyword.
+# - Assignment targets are variables, properties, or array indices. Compound assignment is supported
+#   for variables and writable properties; property receivers are evaluated once, then the getter,
+#   operator, and setter run in that order. Indexed assignment accepts '=' only.
+# - `%` accepts matching `Int`, `Long`, or `Float` operands and follows JVM remainder semantics.
+#   Bitwise `&`, `|`, `^`, `~` and shifts require `Int` or `Long`; `>>>` is zero-filling. Shift
+#   distances are `Int` and follow JVM behavior (only the low five bits for Int and low six for Long).
+# - Array literals are non-empty. A valueless `return` has type Unit and is rejected in non-Unit functions.
+# - Effects are nominal non-generic payload classes. Effects are supported in callable signatures,
+#   function types, and entry-point `main`, but not in external Java signatures or top-level
+#   initializers. Named `handler` declarations are immutable top-level or namespace values; anonymous
+#   `handler { ... }` expressions may capture immutable locals. Handler types use
+#   `R ~> {HandledEffect, ...} [raises {HandlerEffect, ...}]` with finite concrete effect sets.
+#   The optional raised-effect set defaults to empty.
+#   Applying a handler subtracts only completely handled effects and adds effects from its cases.
+#   Handler cases reuse nested and OR `matchPattern` syntax, allow Boolean guards, and require their
+#   OR alternatives to name the same effect type. Only an unguarded, irrefutable pattern establishes
+#   effect coverage; unmatched effects propagate at runtime. Java checked exceptions can be mapped
+#   only by explicit external-class method declarations; there is no automatic translation. There
+#   are no catch-all cases or effect subtyping in this slice.
+#   `Result` remains an ordinary value type.
+# - Sum declarations introduce closed nominal types. Cases are constructed and matched through
+#   qualified calls/patterns; payload positions are positional, and generic case patterns inherit
+#   type arguments from the scrutinee unless arguments are explicitly supplied. Nullary cases are
+#   singletons. Public compiled-library metadata preserves the sum declaration and ordered payloads.
+#   Type argument arity is checked by resolution.
+# Parser productions describe syntax; declaration, type-argument, and return-flow constraints are
+# enforced by resolution.

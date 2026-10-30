@@ -77,6 +77,7 @@ public class LspProtocolTest {
 
             final var initialized = remote.initialize(new InitializeParams()).get(5, TimeUnit.SECONDS);
             assertEquals("utf-16", initialized.getCapabilities().getPositionEncoding());
+            assertNotNull(initialized.getCapabilities().getCodeActionProvider());
             remote.initialized();
             final var uri = entry.toUri().toString();
             remote.getTextDocumentService().didOpen(new DidOpenTextDocumentParams(

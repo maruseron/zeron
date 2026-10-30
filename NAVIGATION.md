@@ -67,7 +67,7 @@ JVM interface name for semantic equality or resolution.
 
 Current lambda lowering emits one SAM interface per function shape, one private static helper per
 lambda body, and uses `LambdaMetafactory` at `invokedynamic` call sites. See
-[`design-document-03_lambda-lowering.md`](./documents/design-document-03_lambda-lowering.md)
+[`design-document-03_lambda-lowering.md`](./documents/design_documents/design-document-03_lambda-lowering.md)
 before changing this behavior.
 
 `target/` contains Maven build output, and `dist/` contains generated Zeron program artifacts. Do

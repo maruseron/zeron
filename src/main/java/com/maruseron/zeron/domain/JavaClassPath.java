@@ -21,6 +21,8 @@ import java.util.jar.JarFile;
 
 public final class JavaClassPath {
     private static final URI JRT_URI = URI.create("jrt:/");
+    private static final String INTERNAL_RUNTIME_PACKAGE_PREFIX = "com.maruseron.zeron.runtime.";
+    private static final Path INTERNAL_RUNTIME_ROOT = internalRuntimeRoot();
     private static final Map<String, String> EXPORTED_JDK_PACKAGES = exportedJdkPackages();
 
     public record JavaMethod(String name,
@@ -95,13 +97,34 @@ public final class JavaClassPath {
             cache.put(binaryName, javaClass);
             return javaClass;
         }
+        if (binaryName.startsWith(INTERNAL_RUNTIME_PACKAGE_PREFIX)) {
+            final var model = readClass(binaryName, INTERNAL_RUNTIME_ROOT, classEntry);
+            if (model != null) {
+                final var internalRuntimeClass = toJavaClass(binaryName, INTERNAL_RUNTIME_ROOT, classEntry, model);
+                cache.put(binaryName, internalRuntimeClass);
+                return internalRuntimeClass;
+            }
+        }
         final var javaClass = findJdkClass(binaryName);
         if (javaClass != null) {
             cache.put(binaryName, javaClass);
             return javaClass;
         }
+
         cache.put(binaryName, null);
         return null;
+    }
+
+    private static Path internalRuntimeRoot() {
+        final var codeSource = JavaClassPath.class.getProtectionDomain().getCodeSource();
+        if (codeSource == null) {
+            throw new IllegalStateException("The Zeron runtime code source is unavailable.");
+        }
+        try {
+            return Path.of(codeSource.getLocation().toURI()).toAbsolutePath().normalize();
+        } catch (final java.net.URISyntaxException exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
     }
 
     public boolean isSubtypeOf(final String binaryName, final String supertypeName) {

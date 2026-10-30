@@ -45,6 +45,7 @@ public final class ProjectAnalysisWorkspace {
         private final List<Diagnostic> unassociatedDiagnostics;
         private final Optional<ResolutionResult> resolution;
         private final Optional<PublicMemberCatalog> memberCatalog;
+        private final Map<String, String> libraryDocumentation;
 
         private Snapshot(final Map<Path, List<Diagnostic>> diagnostics,
                          final Map<Path, List<Token>> tokens,
@@ -53,7 +54,8 @@ public final class ProjectAnalysisWorkspace {
                          final List<CompilationUnit> units,
                          final List<Diagnostic> unassociatedDiagnostics,
                          final Optional<ResolutionResult> resolution,
-                         final Optional<PublicMemberCatalog> memberCatalog) {
+                         final Optional<PublicMemberCatalog> memberCatalog,
+                         final Map<String, String> libraryDocumentation) {
             this.diagnostics = immutableLists(diagnostics);
             this.tokens = immutableLists(tokens);
             this.sourceText = Map.copyOf(sourceText);
@@ -62,6 +64,7 @@ public final class ProjectAnalysisWorkspace {
             this.unassociatedDiagnostics = List.copyOf(unassociatedDiagnostics);
             this.resolution = resolution;
             this.memberCatalog = memberCatalog;
+            this.libraryDocumentation = Map.copyOf(libraryDocumentation);
         }
 
         public Map<Path, List<Diagnostic>> diagnostics() { return diagnostics; }
@@ -72,6 +75,7 @@ public final class ProjectAnalysisWorkspace {
         public List<Diagnostic> unassociatedDiagnostics() { return unassociatedDiagnostics; }
         public Optional<ResolutionResult> resolution() { return resolution; }
         public Optional<PublicMemberCatalog> memberCatalog() { return memberCatalog; }
+        public Map<String, String> libraryDocumentation() { return libraryDocumentation; }
 
         private static <T> Map<Path, List<T>> immutableLists(final Map<Path, List<T>> source) {
             final var copy = new LinkedHashMap<Path, List<T>>();
@@ -222,7 +226,8 @@ public final class ProjectAnalysisWorkspace {
                         .findFirst().orElse(null);
         if (analysisUnit == null) {
             return new Snapshot(diagnostics, tokenLists, sourceText, filesByCompilerPath,
-                    units, unassociatedDiagnostics, Optional.empty(), Optional.empty());
+                    units, unassociatedDiagnostics, Optional.empty(), Optional.empty(),
+                    libraryDocumentation());
         }
 
         final List<CompilationUnit> compilerUnits;
@@ -247,7 +252,14 @@ public final class ProjectAnalysisWorkspace {
         }
         final var catalog = PublicMemberCatalog.fromSource(resolution);
         return new Snapshot(diagnostics, tokenLists, sourceText, filesByCompilerPath,
-                units, unassociatedDiagnostics, Optional.of(resolution), Optional.of(catalog));
+                units, unassociatedDiagnostics, Optional.of(resolution), Optional.of(catalog),
+                libraryDocumentation());
+    }
+
+    private Map<String, String> libraryDocumentation() {
+        final var documentation = new LinkedHashMap<String, String>();
+        libraries.forEach(library -> documentation.putAll(library.documentationByQualifiedName()));
+        return documentation;
     }
 
     private static void checkCancellation() {

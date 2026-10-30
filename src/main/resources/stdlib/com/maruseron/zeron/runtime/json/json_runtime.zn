@@ -1,0 +1,60 @@
+package com.maruseron.zeron.runtime.json;
+
+public external class JsonValue = "com.maruseron.zeron.runtime.json.JsonValue" {
+    public static nullValue(): &JsonValue;
+    public static booleanValue(value: Boolean): &JsonValue;
+    public static stringValue(value: String): &JsonValue;
+    public static arrayValue(value: &JsonArray): &JsonValue;
+    public static objectValue(value: &JsonObject): &JsonValue;
+
+    public kind(): String;
+    public booleanValue(): Boolean?;
+    public stringValue(): String?;
+    public numberLexeme(): String?;
+    public arrayValue(): &JsonArray?;
+    public objectValue(): &JsonObject?;
+    public intValue(): Int?;
+    public longValue(): Long?;
+}
+
+public external class JsonArray = "com.maruseron.zeron.runtime.json.JsonArray" {
+    public constructor new();
+    public mut add(value: &JsonValue): Unit;
+    public size(): Int;
+    public at(index: Int): &JsonValue?;
+}
+
+public external class JsonObject = "com.maruseron.zeron.runtime.json.JsonObject" {
+    public constructor new();
+    public mut add(key: String, value: &JsonValue): Boolean;
+    public size(): Int;
+    public containsKey(key: String): Boolean;
+    public get(key: String): &JsonValue?;
+    public keyAt(index: Int): String?;
+    public valueAt(index: Int): &JsonValue?;
+}
+
+public external class JsonParseResult = "com.maruseron.zeron.runtime.json.JsonParseResult" {
+    public isSuccess(): Boolean;
+    public value(): &JsonValue;
+    public error(): &JsonErrorInfo;
+}
+
+public external class JsonTextResult = "com.maruseron.zeron.runtime.json.JsonTextResult" {
+    public isSuccess(): Boolean;
+    public text(): String;
+    public error(): &JsonErrorInfo;
+}
+
+public external class JsonErrorInfo = "com.maruseron.zeron.runtime.json.JsonErrorInfo" {
+    public message(): String;
+    public offset(): Int;
+    public line(): Int;
+    public column(): Int;
+}
+
+public external class JsonSupport = "com.maruseron.zeron.runtime.json.JsonSupport" {
+    public static parse(text: String): &JsonParseResult;
+    public static number(lexeme: String): &JsonParseResult;
+    public static stringify(value: &JsonValue): &JsonTextResult;
+}

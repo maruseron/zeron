@@ -116,6 +116,20 @@
     "declarations": {
       "patterns": [
         {
+          "match": "\\b(data)(\\s+)(class)(\\s+)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.zeron"
+            },
+            "3": {
+              "name": "keyword.declaration.type.zeron"
+            },
+            "5": {
+              "name": "entity.name.type.zeron"
+            }
+          }
+        },
+        {
           "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
@@ -123,6 +137,17 @@
             },
             "2": {
               "name": "entity.name.function.zeron"
+            }
+          }
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\s+)(raises)\\b(?=[^{};]*\\{)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.zeron"
+            },
+            "3": {
+              "name": "keyword.control.zeron"
             }
           }
         },
@@ -212,6 +237,10 @@
         {
           "name": "keyword.control.zeron",
           "match": "\\bhandler\\b(?=\\s*(?:\\{|[A-Za-z_][A-Za-z0-9_]*\\s*\\{))"
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\bdelegating\\b(?=\\s+(?:witness\\b|implementation\\b(?=\\s+[A-Za-z_][A-Za-z0-9_]*\\s*<[^{};]*_[^{};]*>\\s*\\{)))"
         },
         {
           "name": "keyword.control.zeron",

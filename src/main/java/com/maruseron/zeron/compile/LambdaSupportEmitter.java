@@ -3,7 +3,6 @@ package com.maruseron.zeron.compile;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
-import com.maruseron.zeron.domain.BindingMutability;
 
 import java.lang.classfile.*;
 import java.lang.constant.*;
@@ -97,7 +96,7 @@ final class LambdaSupportEmitter {
     }
 
 
-    static void emitLambdaImplementation(CompilationContext context, final CodeBuilder composer, final Expr.Lambda lambda ){
+    static void emitLambdaImplementation(CompilationContext context, final CodeBuilder composer, final Expr.Lambda lambda) {
         if (!(lambda.getType() instanceof FunctionDescriptor functionType)) {
             throw new IllegalStateException("Lambda has no resolved function type");
         }
@@ -106,6 +105,7 @@ final class LambdaSupportEmitter {
         final var evidenceFields = BytecodeEmitter.evidenceFields(
                 context, functionType.typeParameters(), "lambda",
                 context.lambdaPlan.lambdaMethodName(lambda));
+
         final var methodHandleType = TypeDescriptor.ofName("java.lang.invoke.MethodHandle");
         final var allParameters = new ArrayList<TypeDescriptor>();
         allParameters.addAll(context.lambdaPlan.captureTypes(lambda));

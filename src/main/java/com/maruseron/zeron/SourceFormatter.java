@@ -126,6 +126,8 @@ final class SourceFormatter {
     private record Parenthesis(boolean wrapped) {}
 
     private static final class TokenFormatter {
+        private record DataClassBody(int depth, String name) {}
+
         private final List<Token> tokens;
         private final CanonicalStyle style;
         private final Set<Integer> genericAngles;
@@ -134,6 +136,8 @@ final class SourceFormatter {
         private final Deque<Parenthesis> parentheses = new ArrayDeque<>();
         private final Deque<Integer> declarationBodyDepths = new ArrayDeque<>();
         private final Deque<Integer> externalDeclarationBodyDepths = new ArrayDeque<>();
+        private final Deque<DataClassBody> dataClassBodies = new ArrayDeque<>();
+        private final Deque<Integer> dataClassInitializerBodyDepths = new ArrayDeque<>();
         private int blockIndent;
         private int continuationIndent;
         private int braceDepth;
@@ -182,7 +186,7 @@ final class SourceFormatter {
         }
 
         private void formatComment(final Token token) {
-            if (token.type() == TokenType.LINE_COMMENT) {
+            if (token.type() == TokenType.LINE_COMMENT || token.type() == TokenType.DOC_COMMENT) {
                 if (lineLength > 0) space();
                 else indent();
                 append(token.lexeme());
@@ -276,11 +280,15 @@ final class SourceFormatter {
             }
             if (type == TokenType.LEFT_BRACE) {
                 final var declarationBody = isDeclarationBodyOpen(index);
+                final var dataClassName = declarationBody ? dataClassNameForBodyOpen(index) : null;
+                final var dataClassInitializer = isDataClassInitializerBodyOpen(index);
                 if (lineLength > 0 && needsSpace(previous, type, index)) space();
                 append(token.lexeme());
                 blockIndent += style.indentWidth();
                 braceDepth++;
                 if (declarationBody) declarationBodyDepths.push(braceDepth);
+                if (dataClassName != null) dataClassBodies.push(new DataClassBody(braceDepth, dataClassName));
+                if (dataClassInitializer) dataClassInitializerBodyDepths.push(braceDepth);
                 if (declarationBody && isExternalDeclarationBodyOpen(index)) {
                     externalDeclarationBodyDepths.push(braceDepth);
                 }
@@ -405,9 +413,15 @@ final class SourceFormatter {
         }
 
         private void closeBrace(final int index, final TokenType next) {
+            final var dataClassInitializerEnd = !dataClassInitializerBodyDepths.isEmpty()
+                    && dataClassInitializerBodyDepths.peek() == braceDepth;
+            if (dataClassInitializerEnd) dataClassInitializerBodyDepths.pop();
             if (lineLength > 0) newline();
             blockIndent = Math.max(0, blockIndent - style.indentWidth());
             braceDepth = Math.max(0, braceDepth - 1);
+            while (!dataClassBodies.isEmpty() && dataClassBodies.peek().depth() > braceDepth) {
+                dataClassBodies.pop();
+            }
             if (!declarationBodyDepths.isEmpty() && declarationBodyDepths.peek() > braceDepth) {
                 declarationBodyDepths.pop();
             }
@@ -422,7 +436,7 @@ final class SourceFormatter {
                 functionBraceDepth = -1;
                 functionParameterOpenIndex = -1;
             }
-            final var memberEnd = isDeclarationMemberLevel()
+            final var memberEnd = (isDeclarationMemberLevel() || dataClassInitializerEnd)
                     && next != TokenType.RIGHT_BRACE && next != TokenType.SEMICOLON && next != TokenType.EOF;
             if (isTrailingLineComment(index)) {
                 blankLineAfterTrailingComment = braceDepth == 0 || memberEnd;
@@ -635,6 +649,40 @@ final class SourceFormatter {
                 if (token.type() == TokenType.IDENTIFIER && token.lexeme().equals("implementation")) return true;
             }
             return false;
+        }
+
+        private String dataClassNameForBodyOpen(final int braceIndex) {
+            for (var index = braceIndex - 1; index >= 0; index--) {
+                final var type = tokens.get(index).type();
+                if (type == TokenType.LEFT_BRACE || type == TokenType.RIGHT_BRACE
+                        || type == TokenType.SEMICOLON) return null;
+                if (type != TokenType.CLASS) continue;
+                final var dataIndex = previousNonCommentIndex(tokens, index);
+                if (dataIndex < 0 || tokens.get(dataIndex).type() != TokenType.IDENTIFIER
+                        || !tokens.get(dataIndex).lexeme().equals("data")) return null;
+                final var nameIndex = nextNonCommentIndex(tokens, index + 1);
+                return nameIndex < tokens.size() && tokens.get(nameIndex).type() == TokenType.IDENTIFIER
+                        ? tokens.get(nameIndex).lexeme() : null;
+            }
+            return null;
+        }
+
+        private boolean isDataClassInitializerBodyOpen(final int braceIndex) {
+            if (dataClassBodies.isEmpty() || dataClassBodies.peek().depth() != braceDepth
+                    || !isDeclarationMemberLevel()) return false;
+            var start = braceIndex - 1;
+            while (start >= 0) {
+                final var type = tokens.get(start).type();
+                if (type == TokenType.SEMICOLON || type == TokenType.LEFT_BRACE
+                        || type == TokenType.RIGHT_BRACE) break;
+                start--;
+            }
+            final var nameIndex = nextNonCommentIndex(tokens, start + 1);
+            if (nameIndex >= braceIndex || tokens.get(nameIndex).type() != TokenType.IDENTIFIER
+                    || !tokens.get(nameIndex).lexeme().equals(dataClassBodies.peek().name())) return false;
+            final var afterName = nextNonCommentIndex(tokens, nameIndex + 1);
+            return afterName == braceIndex || afterName < braceIndex
+                    && tokens.get(afterName).type() == TokenType.RAISES;
         }
 
         private boolean isFunctionHeaderToken(final int index) {
@@ -1036,6 +1084,13 @@ final class SourceFormatter {
                 if (!tokens.get(index).type().isComment()) return index;
             }
             return tokens.size() - 1;
+        }
+
+        private static int previousNonCommentIndex(final List<Token> tokens, final int start) {
+            for (var index = start; index >= 0; index--) {
+                if (!tokens.get(index).type().isComment()) return index;
+            }
+            return -1;
         }
 
         private static TokenType nextNonComment(final List<Token> tokens, final int start) {

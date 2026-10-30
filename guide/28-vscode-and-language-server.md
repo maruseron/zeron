@@ -1,9 +1,9 @@
 # VS Code and the language server
 
 The Zeron VS Code extension combines TextMate syntax highlighting with compiler-backed language
-features. The language server provides diagnostics, completion, hover information, and definition
-navigation. Definitions in bundled standard-library sources open in read-only virtual documents;
-project source files remain editable.
+features. The language server provides diagnostics, completion, hover information, definition navigation,
+and quick fixes for missing contract and witness method implementations. Definitions in bundled
+standard-library sources open in read-only virtual documents; project source files remain editable.
 
 ## Requirements
 
@@ -13,6 +13,22 @@ project source files remain editable.
 
 The extension starts `zeron lsp` from the workspace folder. The language server currently supports
 one project per VS Code workspace, not a multi-root workspace.
+
+## Declaration documentation
+
+Write consecutive `///` comments immediately before a declaration to show Markdown documentation
+in hover:
+
+```zeron
+/// Parses a value without converting through Float.
+public fn parseExact(value: String): Rational;
+```
+
+Place the comments before visibility or other declaration modifiers. A blank line or ordinary
+comment breaks the documentation group. Hover shows documentation for declarations in the current
+source and for public declarations loaded from compiled libraries. Private documentation is
+available only while working from source; it is not included in compiled-library metadata. The
+formatter preserves documentation comments.
 
 ## Try the extension from a source checkout
 

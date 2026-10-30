@@ -36,7 +36,7 @@ public final class NominalDescriptor implements TypeDescriptor {
         return Objects.hash(qualifiedName);
     }
 
-    // e.g TypeDescriptor.Nominal[#&String?]
+    // e.g TypeDescriptor.Nominal[&String?]
     @Override
     public String toString() {
         return "TypeDescriptor.Nominal[" + name() + "]";

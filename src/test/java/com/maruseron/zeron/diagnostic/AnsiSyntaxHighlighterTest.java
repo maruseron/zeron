@@ -52,7 +52,7 @@ public class AnsiSyntaxHighlighterTest {
     public void highlightsEffectAndNullableAdmissibilityMarkersContextually() {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 public effect IoFailure {}
-                fn resolveEffects<E: effect, T: nullable + Display<T>>(value: T): String =
+                fn resolveEffects<E: effect, T: nullable + Display>(value: T): String =
                     value.toString();
                 let nullable = 1;
                 """);
@@ -98,11 +98,28 @@ public class AnsiSyntaxHighlighterTest {
                     implementation Functor<Box<_>> {
                         fn map<A, B>(this: Box<A>, transform: (A) -> B): Box<B> = this;
                     }
+                    delegating implementation Functor<Box<_>> {}
                 }
                 let implementation = 1;
+                let delegating = 1;
                 """);
 
-        assertEquals(1, occurrences(highlighted, AnsiColor.apply("implementation", "35")));
+        assertEquals(2, occurrences(highlighted, AnsiColor.apply("implementation", "35")));
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("delegating", "35")));
+    }
+
+    @Test
+    public void highlightsDataClassesAndTheirInitializerBlocks() {
+        final var highlighted = AnsiSyntaxHighlighter.highlight("""
+                public effect Failure {}
+                data class Point(x: Int) {
+                    Point raises Failure {}
+                }
+                """);
+
+        assertTrue(highlighted.contains(AnsiColor.apply("data", "35")));
+        assertTrue(highlighted.contains(AnsiColor.apply("raises", "35")));
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("Point", "36")));
     }
 
     @Test

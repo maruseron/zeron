@@ -82,5 +82,5 @@ fn comesBefore<T: Comparable<T>>(left: T, right: T): Boolean = left < right;
 
 Equality and ordering use evidence selected according to the same scope and ambiguity rules as
 other witnesses. The
-[equality and hashing design](../documents/design-document-17_structural-equality-and-hashing.md)
+[equality and hashing design](../documents/design_documents/design-document-17_structural-equality-and-hashing.md)
 describes the current evidence rules, supported types, and limitations.

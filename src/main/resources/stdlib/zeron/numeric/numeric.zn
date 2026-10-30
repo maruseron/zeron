@@ -1,0 +1,46 @@
+package zeron.numeric;
+
+public contract Ratio<T: mut> {
+    numerator(): T;
+    denominator(): T;
+}
+
+public contract Numeric<T: mut> {
+    add(other: T): T;
+    subtract(other: T): T;
+    multiply(other: T): T;
+    negate(): T;
+    abs(): T;
+    signum(): T;
+    static fromInteger(value: Integer): T;
+}
+
+public contract Integral<T: mut> requires Numeric<T> + Hashable<T> + Comparable<T> {
+    quot(other: T): T;
+    rem(other: T): T;
+    div(other: T): T;
+    mod(other: T): T;
+    toInteger(): Integer;
+    toRational(): Rational;
+}
+
+public contract Fractional<T: mut> requires Numeric<T> {
+    divide(other: T): T;
+    reciprocal(): T;
+    static fromRational(value: Rational): T;
+}
+
+public contract Floating<T: mut> requires Fractional<T> {
+    sqrt(): T;
+    pow(exponent: T): T;
+    exp(): T;
+    ln(): T;
+    log10(): T;
+    sin(): T;
+    cos(): T;
+    tan(): T;
+    asin(): T;
+    acos(): T;
+    atan(): T;
+    atan2(x: T): T;
+}

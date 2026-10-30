@@ -62,4 +62,4 @@ multiple types match, the most-specific mapping is selected. `RuntimeException` 
 Mappings and the derived raised-effect signatures are preserved in compiled-library API indexes.
 
 The exact supported signatures and limitations are tracked in
-[design document 11](../documents/design-document-11_compilation-libraries-and-host-integration.md).
+[design document 11](../documents/design_documents/design-document-11_compilation-libraries-and-host-integration.md).

@@ -4,7 +4,7 @@ import zeron.control.Foldable;
 import zeron.control.Functor;
 import zeron.control.Monad;
 
-fn applyResultFunction<A: mut, B: mut>(transform: (A) -> B, value: A): B = transform(value);
+// fn applyResultFunction<A: mut, B: mut>(transform: (A) -> B, value: A): B = transform(value);
 
 public type Result<T: mut, E: mut> =
       Ok(value: T)
@@ -58,10 +58,10 @@ witness<E: mut> Monad<Result<_, E>> for Result<_, E> {
 
     fn pure<A: mut>(value: A): Result<A, E> = Result<A, E>.Ok(value);
 
-    fn ap<A: mut, B: mut>(this: Result<(A) -> B, E>, values: Result<A, E>): Result<B, E> =
+    fn ap<A: mut, B: mut>(this: Result<A, E>, function: Result<(A) -> B, E>): Result<B, E> =
         match (this) {
-            case Result.Ok(transform) -> match (values) {
-                case Result.Ok(value) -> Result<B, E>.Ok(applyResultFunction(transform, value));
+            case Result.Ok(value) -> match (function) {
+                case Result.Ok(f) -> Result<B, E>.Ok(f(value));
                 case Result.Err(error) -> Result<B, E>.Err(error);
             };
             case Result.Err(error) -> Result<B, E>.Err(error);

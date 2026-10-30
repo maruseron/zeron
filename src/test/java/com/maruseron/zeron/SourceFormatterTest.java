@@ -43,6 +43,33 @@ public final class SourceFormatterTest {
     }
 
     @Test
+    public void formatsDelegatingWitnessDeclarations() throws Exception {
+        final var source = """
+                contract Render<T>{label():String;}
+                class Box{public constructor new;public label():String="box";}
+                delegating witness Render<Box> for Box{}
+                """;
+
+        final var formatted = SourceFormatter.format(source, "DelegatingWitness.zn", CanonicalStyle.load())
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains("delegating witness Render<Box> for Box"));
+        assertEquals(formatted, SourceFormatter.format(
+                formatted, "DelegatingWitness.zn", CanonicalStyle.load()).formattedSource().orElseThrow());
+    }
+
+    @Test
+    public void preservesDocumentationCommentsBeforeDeclarations() throws Exception {
+        final var source = "/// API summary\n/// More detail\npublic fn run(): Unit {}\n";
+        final var formatted = SourceFormatter.format(source, "Documented.zn", CanonicalStyle.load())
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted.contains("/// API summary\n/// More detail\npublic fn run(): Unit"));
+        assertEquals(formatted, SourceFormatter.format(formatted, "Documented.zn", CanonicalStyle.load())
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
     public void preservesDetectedLineEndingsAndDoesNotFormatInvalidSource() throws Exception {
         final var style = CanonicalStyle.load();
         final var source = "fn main(){\r\nlet value=1;\r\n}\r\n";
@@ -397,6 +424,48 @@ public final class SourceFormatterTest {
     }
 
     @Test
+    public void formatsDelegatingHigherKindedImplementationBlocks() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = """
+                contract Mapper<F<_>> {
+                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                }
+                class Box<T: mut> is Mapper<Box<_>> {
+                    public property value: T;
+                    public constructor new;
+                    public map<R: mut>(transform: (T) -> R): Box<R> =
+                        Box<R>.new(transform(this.value));
+                    delegating implementation Mapper<Box<_>> {}
+                }
+                """;
+
+        final var formatted = SourceFormatter.format(source, "DelegatingImplementation.zn", style)
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains(
+                "    delegating implementation Mapper<Box<_>> {\n    }\n}"));
+        assertFalse(formatted, formatted.contains("delegating\nimplementation"));
+        assertEquals(formatted, SourceFormatter.format(
+                formatted, "DelegatingImplementation.zn", style).formattedSource().orElseThrow());
+    }
+
+    @Test
+    public void formatsDataClassInitializerBlocksAsClassMembers() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = """
+                data class Point(x:Int,y:Int){magnitude:Float;Point raises Failure{magnitude=1.0;}public value():Int=x;}
+                """;
+
+        final var formatted = SourceFormatter.format(source, "DataClassFormatter.zn", style)
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains("data class Point(x: Int, y: Int) {"));
+        assertTrue(formatted, formatted.contains("    Point raises Failure {\n        magnitude = 1.0;\n    }\n\n    public value()"));
+        assertEquals(formatted, SourceFormatter.format(formatted, "DataClassFormatter.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
     public void doesNotBreakGenericTypeArgumentsInsideWrappedCalls() throws Exception {
         final var style = new CanonicalStyle(4, 50, true);
         final var source = "fn process(): Unit = outer(inner<Pair<Int, String>>(value), fallback);";
@@ -430,6 +499,7 @@ public final class SourceFormatterTest {
         for (final var path : paths) {
             final var source = Files.readString(path, StandardCharsets.UTF_8);
             final var formatted = SourceFormatter.format(source, path.toString(), style);
+            System.out.println(formatted);
             assertTrue(path + ": " + formatted.diagnostics(), formatted.formattedSource().isPresent());
             final var output = formatted.formattedSource().orElseThrow();
             assertTrue(path + ": source line exceeds the canonical width",
@@ -437,15 +507,15 @@ public final class SourceFormatterTest {
             if (path.getFileName().toString().equals("iterable.zn")) {
                 assertTrue(path + ": " + output,
                         output.replaceAll("\\s+", " ")
-                                .contains("public contract Iterable<T: nullable + mut> {"));
+                                .contains("public contract Iterable<T: mut> {"));
                 assertTrue(output.contains("iterator(): &Iterator<T>;"));
                 assertTrue(output.contains("default stream(): Stream<T> = Stream.from(this);"));
                 assertTrue(output.contains("for (let element in this) consumer(element);"));
             }
             if (path.getFileName().toString().equals("result.zn")) {
                 assertTrue(path + ": wrapped an expression that fits the canonical width",
-                        output.contains("case Result.Ok(value) -> Result<B, E>.Ok("
-                                + "applyResultFunction(transform, value));"));
+                        output.contains("case Result.Ok(f) -> Result<B, E>.Ok("
+                                + "f(value));"));
             }
             final var repeated = SourceFormatter.format(output, path.toString(), style);
             assertTrue(path + ": " + repeated.diagnostics(), repeated.formattedSource().isPresent());

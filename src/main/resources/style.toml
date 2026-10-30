@@ -1,5 +1,5 @@
 # Starter canonical style rules keyed by productions in
-# documents/design-document-01_grammar.cfgr.
+# documents/design_documents/design-document-01_grammar.cfgr.
 # Placeholders refer to recursively formatted syntax fields. Lists use the
 # separator declared for that field. {?field}...{/field} emits its contents
 # only when the field is present; whitespace and punctuation inside the

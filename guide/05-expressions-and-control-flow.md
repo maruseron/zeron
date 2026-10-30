@@ -41,20 +41,20 @@ right side is not evaluated. For example, `hasValue and value > 0` does not test
 `hasValue` is false.
 
 Built-in arithmetic operators work on numeric values. `+` also joins strings, so
-`"Hello, " + "Ada"` produces `"Hello, Ada"`. User-defined types can opt in to `+`, `*`, and unary
-or binary `-` through the standard library's `zeron.algebra` contracts. Import the contract you
-need; generic functions must declare the corresponding bound explicitly:
+`"Hello, " + "Ada"` produces `"Hello, Ada"`. Numeric types opt into arithmetic through the
+`Numeric<T>` contract; `/` requires `Fractional<T>`. Generic functions must declare the
+corresponding bound explicitly:
 
 ```zeron
-import zeron.algebra.Addition;
-fn subtract<T: Addition<T>>(left: T, right: T): T = left - right;
+import zeron.numeric.Numeric;
+fn add<T: Numeric<T>>(left: T, right: T): T = left + right;
 ```
 
-`Addition<T>` supplies negation and requires `Add<T>`; binary subtraction adds the negated right
-operand. `Multiplication<T>` adds reciprocal capability to `Mult<T>`, but `/` remains a built-in
-numeric operator. `String + T` keeps its existing display behavior. Not every operator applies to
-every type: for example, adding two numbers is meaningful, but adding a number to a Boolean is not
-unless that type deliberately provides the required contract evidence.
+`Integral<T>` adds quotient and remainder operations, while `Fractional<T>` adds division and
+reciprocal. Unsuffixed numeric literals use their expected numeric type when one is available;
+without context, integer literals still default to `Int` and fractional literals to `Float`.
+`String + T` keeps its existing display behavior. See
+[Numeric hierarchy and exact literals](33-numeric-hierarchy-and-exact-literals.md) for details.
 
 Zeron also has bitwise and shift operators for integer values: `&`, `|`, and `^` combine bits,
 `~` flips them, and `<<`, `>>`, and `>>>` shift them. The unsigned right shift `>>>` fills from

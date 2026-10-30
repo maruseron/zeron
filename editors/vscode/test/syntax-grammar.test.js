@@ -10,6 +10,10 @@ const projectionPattern = grammar.repository['contextual-keywords'].patterns
 const forExpressionPattern = grammar.repository['for-expression'];
 const handlerDeclarationPattern = grammar.repository.declarations.patterns
   .find(pattern => pattern.match.includes('(handler)'));
+const dataClassPattern = grammar.repository.declarations.patterns
+  .find(pattern => pattern.match.includes('(data)') && pattern.match.includes('(class)'));
+const dataClassInitializerPattern = grammar.repository.declarations.patterns
+  .find(pattern => pattern.match.includes('(raises)'));
 
 test('highlights out only in generic type-argument positions', () => {
   const matcher = new RegExp(projectionPattern.match, 'g');
@@ -57,6 +61,22 @@ test('keeps effect recognized in declaration and generic constraint syntax', () 
   assert.ok(grammar.repository.declarations.patterns.some(pattern => pattern.match.includes('effect')));
 });
 
+test('highlights data class declarations and initializer headers', () => {
+  assert.ok(dataClassPattern);
+  const dataClass = new RegExp(dataClassPattern.match).exec('public data class Point');
+  assert.ok(dataClass);
+  assert.equal(dataClass[1], 'data');
+  assert.equal(dataClass[3], 'class');
+  assert.equal(dataClass[5], 'Point');
+
+  assert.ok(dataClassInitializerPattern);
+  const initializer = new RegExp(dataClassInitializerPattern.match)
+    .exec('Point raises Failure {');
+  assert.ok(initializer);
+  assert.equal(initializer[1], 'Point');
+  assert.equal(initializer[3], 'raises');
+});
+
 test('highlights named handlers, anonymous handler expressions, and handler types', () => {
   assert.ok(handlerDeclarationPattern);
   const declarationMatcher = new RegExp(handlerDeclarationPattern.match);
@@ -89,4 +109,16 @@ test('highlights implementation only before HKT implementation blocks', () => {
   const matcher = new RegExp(implementationPattern.match);
   assert.ok(matcher.test('implementation Functor<Box<_>> {'));
   assert.equal(matcher.test('let implementation = 1;'), false);
+});
+
+test('highlights delegating only before witness and HKT implementation declarations', () => {
+  const delegatingPattern = grammar.repository['contextual-keywords'].patterns
+    .find(pattern => pattern.match.includes('delegating'));
+  assert.ok(delegatingPattern);
+
+  const matcher = new RegExp(delegatingPattern.match);
+  assert.ok(matcher.test('delegating witness Render<Box> for Box {}'));
+  assert.ok(matcher.test('delegating implementation Functor<Box<_>> {}'));
+  assert.equal(matcher.test('delegating implementation = 1;'), false);
+  assert.equal(matcher.test('let delegating = 1;'), false);
 });

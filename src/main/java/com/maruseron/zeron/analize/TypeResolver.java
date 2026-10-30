@@ -11,18 +11,26 @@ import java.util.*;
 import static com.maruseron.zeron.analize.Resolver.*;
 
 final class TypeResolver {
+    private static final Set<String> DEFAULT_ZERON_LANG_TYPES = Set.of("Option", "Result", "Ok", "Err");
+
     static String resolveTypeName(final ResolutionContext context, final String name, final Token where) {
+        return resolveTypeName(context, name, where, true);
+    }
+
+    private static String resolveTypeName(final ResolutionContext context, final String name, final Token where,
+                                          final boolean reportAmbiguity) {
         if (name.contains(".")) return name;
+        if (BuiltinTypes.NAMES.contains(name)) return name;
         context.skipInvalidImportAlias(name);
 
         final var currentPackageName = qualify(context.packageName, name);
-        if (context.types.contains(currentPackageName)) return currentPackageName;
+        if (context.types.contains(currentPackageName)
+                || context.externalClasses.containsKey(currentPackageName)) {
+            return currentPackageName;
+        }
 
         final var importedName = context.currentImports.types().get(name);
-        if (importedName != null && (context.types.contains(importedName)
-                || context.javaClassPath.find(importedName) != null)) {
-            return importedName;
-        }
+        if (importedName != null) return importedName;
 
         final var starCandidates = context.currentImports.onDemandPackages().stream()
                 .filter(importedPackage -> !importedPackage.equals(context.packageName))
@@ -36,11 +44,144 @@ final class TypeResolver {
                 .distinct()
                 .toList();
         if (starCandidates.size() > 1) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT, where,
-                    "Ambiguous type '" + name + "' from star imports; add an explicit import or alias."));
+            if (reportAmbiguity) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT, where,
+                        "Ambiguous type '" + name + "' from star imports; add an explicit import or alias."));
+            }
+            return name;
         }
         if (starCandidates.size() == 1) return starCandidates.getFirst();
-        return name;
+        if (DEFAULT_ZERON_LANG_TYPES.contains(name)) {
+            final var defaultType = qualify("zeron.lang", name);
+            if (context.types.contains(defaultType)) return defaultType;
+        }
+        return !context.packageName.isEmpty()
+                        && context.currentImports.explicitOnDemandPackages().isEmpty()
+                ? currentPackageName
+                : name;
+    }
+
+    static void resolveTypeNames(final ResolutionContext context, final TypeDescriptor type, final Token where) {
+        switch (type) {
+            case NominalDescriptor nominal ->
+                    nominal.resolveName(resolveTypeName(context, nominal.name(), where, false));
+            case GenericDescriptor generic -> {
+                generic.baseType().resolveName(
+                        resolveTypeName(context, generic.baseType().name(), where, false));
+                generic.typeParameters().forEach(argument -> resolveTypeNames(context, argument, where));
+            }
+            case TypeConstructorDescriptor constructor -> {
+                constructor.baseType().resolveName(
+                        resolveTypeName(context, constructor.baseType().name(), where, false));
+                constructor.arguments().forEach(argument -> resolveTypeNames(context, argument, where));
+            }
+            case ArrayDescriptor array -> resolveTypeNames(context, array.elementType(), where);
+            case NullableDescriptor nullable -> resolveTypeNames(context, nullable.baseType(), where);
+            case ReferenceDescriptor reference -> resolveTypeNames(context, reference.baseType(), where);
+            case AppliedConstructorDescriptor applied -> resolveTypeNames(context, applied.argument(), where);
+            case FunctionDescriptor function -> {
+                function.parameters().forEach(parameter -> resolveTypeNames(context, parameter, where));
+                resolveTypeNames(context, function.returnType(), where);
+                function.raisedEffects().forEach(effect -> resolveTypeNames(context, effect, where));
+                function.handledEffects().forEach(effect -> resolveTypeNames(context, effect, where));
+                function.typeParameters().forEach(parameter -> resolveTypeNames(context, parameter, where));
+            }
+            case TypeParameterDescriptor parameter ->
+                    parameter.bounds().forEach(bound -> resolveTypeNames(context, bound, where));
+            case TypeProjectionDescriptor projection -> resolveTypeNames(context, projection.bound(), where);
+            default -> { }
+        }
+    }
+
+    static void resolveTypeNames(final ResolutionContext context, final Stmt declaration) {
+        switch (declaration) {
+            case Stmt.FunctionDeclaration function -> {
+                resolveTypeNames(context, function.typeDescriptor(), function.name());
+                if (function instanceof Stmt.ExtensionMethod extension) {
+                    resolveTypeNames(context, extension.receiverType(), function.name());
+                    extension.receiverTypeParameters().forEach(parameter ->
+                            resolveTypeNames(context, parameter, function.name()));
+                }
+            }
+            case Stmt.Var variable -> resolveTypeNames(context, variable.type(), variable.name());
+            case Stmt.ClassDecl classDeclaration -> {
+                classDeclaration.typeParameters().forEach(parameter ->
+                        resolveTypeNames(context, parameter, classDeclaration.name()));
+                resolveContractUses(context, classDeclaration.contractUses(), classDeclaration.name());
+                resolveContractUses(context, classDeclaration.higherKindedContractUses(), classDeclaration.name());
+                classDeclaration.fields().forEach(field ->
+                        resolveTypeNames(context, field.type(), field.name()));
+                classDeclaration.properties().forEach(property ->
+                        resolveTypeNames(context, property.type(), property.name()));
+                classDeclaration.dataComponents().forEach(component ->
+                        resolveTypeNames(context, component.type(), component.name()));
+                classDeclaration.namedConstructors().forEach(constructor ->
+                        resolveTypeNames(context, constructor.typeDescriptor(), constructor.name()));
+                classDeclaration.methods().forEach(method ->
+                        resolveTypeNames(context, method.typeDescriptor(), method.name()));
+                classDeclaration.patterns().forEach(pattern -> pattern.outputs().forEach(output ->
+                        resolveTypeNames(context, output.type(), output.name())));
+                classDeclaration.initializerBlocks().forEach(block ->
+                        block.raisedEffects().forEach(effect ->
+                                resolveTypeNames(context, effect, classDeclaration.name())));
+                classDeclaration.declaredConstructorEffects().forEach(effect ->
+                        resolveTypeNames(context, effect, classDeclaration.name()));
+                classDeclaration.higherKindedImplementations().forEach(witness ->
+                        resolveTypeNames(context, witness));
+            }
+            case Stmt.ContractDecl contract -> {
+                contract.typeParameters().forEach(parameter ->
+                        resolveTypeNames(context, parameter, contract.name()));
+                resolveContractUses(context, contract.requiredContracts(), contract.name());
+                resolveContractUses(context, contract.permittedClasses(), contract.name());
+                contract.methods().forEach(method ->
+                        resolveTypeNames(context, method.typeDescriptor(), method.name()));
+                contract.properties().forEach(property ->
+                        resolveTypeNames(context, property.type(), property.name()));
+            }
+            case Stmt.Witness witness -> resolveTypeNames(context, witness);
+            case Stmt.SumDecl sum -> {
+                sum.typeParameters().forEach(parameter -> resolveTypeNames(context, parameter, sum.name()));
+                sum.cases().forEach(sumCase -> sumCase.payloads().forEach(payload ->
+                        resolveTypeNames(context, payload.type(), payload.name())));
+            }
+            case Stmt.ProductDecl product -> {
+                product.typeParameters().forEach(parameter ->
+                        resolveTypeNames(context, parameter, product.name()));
+                product.components().forEach(component ->
+                        resolveTypeNames(context, component.type(), component.name()));
+            }
+            case Stmt.NewtypeDecl newtype -> resolveTypeNames(context, newtype.underlyingType(), newtype.name());
+            case Stmt.ExternalClass externalClass -> {
+                externalClass.methods().forEach(method ->
+                        resolveTypeNames(context, method.typeDescriptor(), method.name()));
+                externalClass.constructors().forEach(constructor -> constructor.parameterTypes().forEach(type ->
+                        resolveTypeNames(context, type, constructor.name())));
+                externalClass.staticProperties().forEach(property ->
+                        resolveTypeNames(context, property.type(), property.name()));
+            }
+            default -> { }
+        }
+    }
+
+    private static void resolveTypeNames(final ResolutionContext context, final Stmt.Witness witness) {
+        witness.typeParameters().forEach(parameter ->
+                resolveTypeNames(context, parameter, witness.name()));
+        resolveTypeNames(context, witness.contractType(), witness.name());
+        resolveTypeNames(context, witness.targetType(), witness.name());
+        witness.requirements().forEach(requirement -> {
+            resolveTypeNames(context, requirement.contractType(), witness.name());
+            resolveTypeNames(context, requirement.targetType(), witness.name());
+        });
+        witness.methods().forEach(method -> {
+            resolveTypeNames(context, method.methodSignature().typeDescriptor(), method.requirementName());
+            resolveTypeNames(context, method.implementation().typeDescriptor(), method.requirementName());
+        });
+    }
+
+    private static void resolveContractUses(final ResolutionContext context,
+                                           final List<Stmt.ContractUse> uses, final Token where) {
+        uses.forEach(use -> use.typeArguments().forEach(argument -> resolveTypeNames(context, argument, where)));
     }
 
     private static String qualify(final String packageName, final String name) {

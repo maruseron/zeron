@@ -128,7 +128,7 @@ final class TypeUnifier {
         if (!pattern.equals(actual)
                 && !(actual instanceof ReferenceDescriptor reference && pattern.equals(reference.baseType()))) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, where,
-                    "Expected " + pattern + ", found " + actual + "."));
+                    "Expected " + TypeFormatter.format(pattern) + ", found " + TypeFormatter.format(actual) + "."));
         }
     }
 

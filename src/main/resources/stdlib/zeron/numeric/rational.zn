@@ -1,0 +1,88 @@
+package zeron.numeric;
+
+import com.maruseron.zeron.runtime.RationalValue;
+
+import zeron.lang.Comparable;
+import zeron.lang.Display;
+import zeron.lang.Eq;
+import zeron.lang.Hashable;
+import zeron.lang.Ordering;
+
+external fn rationalFromLiteralText(value: String): &RationalValue;
+external fn rationalAdd(left: &RationalValue, right: &RationalValue): &RationalValue;
+external fn rationalSubtract(left: &RationalValue, right: &RationalValue): &RationalValue;
+external fn rationalMultiply(left: &RationalValue, right: &RationalValue): &RationalValue;
+external fn rationalDivide(left: &RationalValue, right: &RationalValue): &RationalValue;
+external fn rationalNegate(value: &RationalValue): &RationalValue;
+external fn rationalAbs(value: &RationalValue): &RationalValue;
+external fn rationalSignum(value: &RationalValue): &RationalValue;
+external fn rationalReciprocal(value: &RationalValue): &RationalValue;
+external fn rationalNumerator(value: &RationalValue): String;
+external fn rationalDenominator(value: &RationalValue): String;
+external fn rationalToFloat(value: &RationalValue): Float;
+external fn rationalEquals(left: &RationalValue, right: &RationalValue): Boolean;
+external fn rationalCompare(left: &RationalValue, right: &RationalValue): Int;
+external fn rationalHash(value: &RationalValue): Int;
+external fn rationalToString(value: &RationalValue): String;
+
+/// Immutable arbitrary-precision rational type.
+///
+/// Internally backed by an arbitrary-size numerator and denominator.
+public class Rational is Ratio<Integer>, Hashable<Rational>, Comparable<Rational> {
+    value: &RationalValue;
+
+    private constructor new;
+
+    public constructor fromLiteralText(value: String) =
+        Rational.new(rationalFromLiteralText(value));
+
+    public constructor fromInteger(value: Integer) =
+        Rational.fromLiteralText(value.toString());
+
+    public add(other: Rational): Rational = Rational.new(rationalAdd(this.value, other.value));
+
+    public subtract(other: Rational): Rational =
+        Rational.new(rationalSubtract(this.value, other.value));
+
+    public multiply(other: Rational): Rational =
+        Rational.new(rationalMultiply(this.value, other.value));
+
+    public divide(other: Rational): Rational =
+        Rational.new(rationalDivide(this.value, other.value));
+
+    public negate(): Rational = Rational.new(rationalNegate(this.value));
+
+    public abs(): Rational = Rational.new(rationalAbs(this.value));
+
+    public signum(): Rational = Rational.new(rationalSignum(this.value));
+
+    public reciprocal(): Rational = Rational.new(rationalReciprocal(this.value));
+
+    public numerator(): Integer = Integer.fromLiteralText(rationalNumerator(this.value));
+
+    public denominator(): Integer =
+        Integer.fromLiteralText(rationalDenominator(this.value));
+
+    public toFloat(): Float = rationalToFloat(this.value);
+
+    public toString(): String = rationalToString(this.value);
+
+    public eq(other: Rational): Boolean =
+        rationalEquals(this.value, other.value);
+
+    public hash(): Int = rationalHash(this.value);
+
+    public compareTo(other: Rational): Ordering {
+        let comparison = rationalCompare(this.value, other.value);
+        if (comparison < 0) return Ordering.LT();
+        if (comparison > 0) return Ordering.GT();
+        return Ordering.EQ();
+    }
+}
+
+delegating witness Fractional<Rational> for Rational {
+    static fn fromInteger(value: Integer): Rational = Rational.fromInteger(value);
+    static fn fromRational(value: Rational): Rational = value;
+}
+
+delegating witness Display for Rational {}

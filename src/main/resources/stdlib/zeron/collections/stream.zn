@@ -3,7 +3,7 @@ package zeron.collections;
 import zeron.control.Foldable;
 import zeron.control.Monad;
 
-class ArrayStream<T: nullable + mut> is Iterable<T> {
+class ArrayStream<T: mut> is Iterable<T> {
     values: Array<T>;
 
     public iterator(): &Iterator<T> {
@@ -22,7 +22,7 @@ class ArrayStream<T: nullable + mut> is Iterable<T> {
     }
 }
 
-class MappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R> {
+class MappedStream<T: mut, R: mut> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> R;
 
@@ -43,7 +43,7 @@ class MappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R> {
     }
 }
 
-class FlatMappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R> {
+class FlatMappedStream<T: mut, R: mut> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> Iterable<R>;
 
@@ -74,7 +74,7 @@ class FlatMappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R> {
     }
 }
 
-class MonadFlatMappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R> {
+class MonadFlatMappedStream<T: mut, R: mut> is Iterable<R> {
     source: Iterable<T>;
     transform: (T) -> Stream<R>;
 
@@ -105,9 +105,9 @@ class MonadFlatMappedStream<T: nullable + mut, R: nullable + mut> is Iterable<R>
     }
 }
 
-class AppliedStream<A: nullable + mut, B: nullable + mut> is Iterable<B> {
-    functions: Iterable<(A) -> B>;
+class AppliedStream<A: mut, B: mut> is Iterable<B> {
     values: Iterable<A>;
+    functions: Iterable<(A) -> B>;
 
     public iterator(): &Iterator<B> {
         let functionSource = functions.iterator();
@@ -137,7 +137,7 @@ class AppliedStream<A: nullable + mut, B: nullable + mut> is Iterable<B> {
     }
 }
 
-class FilteredStream<T: nullable + mut> is Iterable<T> {
+class FilteredStream<T: mut> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -164,7 +164,7 @@ class FilteredStream<T: nullable + mut> is Iterable<T> {
     }
 }
 
-class TakenStream<T: nullable + mut> is Iterable<T> {
+class TakenStream<T: mut> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
 
@@ -184,7 +184,7 @@ class TakenStream<T: nullable + mut> is Iterable<T> {
     }
 }
 
-class DroppedStream<T: nullable + mut> is Iterable<T> {
+class DroppedStream<T: mut> is Iterable<T> {
     source: Iterable<T>;
     count: Int;
 
@@ -215,7 +215,7 @@ class DroppedStream<T: nullable + mut> is Iterable<T> {
     }
 }
 
-class DroppedWhileStream<T: nullable + mut> is Iterable<T> {
+class DroppedWhileStream<T: mut> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -245,7 +245,7 @@ class DroppedWhileStream<T: nullable + mut> is Iterable<T> {
     }
 }
 
-class TakenWhileStream<T: nullable + mut> is Iterable<T> {
+class TakenWhileStream<T: mut> is Iterable<T> {
     source: Iterable<T>;
     predicate: (T) -> Boolean;
 
@@ -277,13 +277,10 @@ class TakenWhileStream<T: nullable + mut> is Iterable<T> {
     }
 }
 
-fn streamMonadAp<A: mut, B: mut>(functions: Stream<(A) -> B>, values: Stream<A>): Stream<B> =
-    Stream<B>.from(AppliedStream<A, B>.new(functions, values));
+fn streamMonadAp<A: mut, B: mut>(values: Stream<A>, functions: Stream<(A) -> B>): Stream<B> =
+    Stream<B>.from(AppliedStream<A, B>.new(values, functions));
 
-fn streamMonadFlatMap<A: mut, B: mut>(source: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
-    Stream<B>.from(MonadFlatMappedStream<A, B>.new(source, transform));
-
-public class Stream<T: nullable + mut> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>> {
+public class Stream<T: mut> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>> {
     source: Iterable<T>;
 
     private constructor new;
@@ -296,23 +293,6 @@ public class Stream<T: nullable + mut> is Iterable<T>, Monad<Stream<_>>, Foldabl
         Stream<T>.from(ArrayStream<T>.new(source));
 
     public iterator(): &Iterator<T> = source.iterator();
-
-    implementation Monad<Stream<_>> {
-        fn map<A: mut, B: mut>(this: Stream<A>, transform: (A) -> B): Stream<B> = this.map(transform);
-
-        fn pure<A: mut>(value: A): Stream<A> = Stream<A>.of(value);
-
-        fn ap<A: mut, B: mut>(this: Stream<(A) -> B>, values: Stream<A>): Stream<B> =
-            streamMonadAp(this, values);
-
-        fn flatMap<A: mut, B: mut>(this: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
-            streamMonadFlatMap(this, transform);
-    }
-
-    implementation Foldable<Stream<_>> {
-        fn foldLeft<A: mut, B: mut>(this: Stream<A>, initial: B, combine: (B, A) -> B): B =
-            this.fold(initial, combine);
-    }
 
     public map<R: mut>(transform: (T) -> R): Stream<R> =
         Stream<R>.new(MappedStream<T, R>.new(source, transform));
@@ -351,6 +331,21 @@ public class Stream<T: nullable + mut> is Iterable<T>, Monad<Stream<_>>, Foldabl
     public all(predicate: (T) -> Boolean): Boolean {
         for (let item in this) if (not predicate(item)) return false;
         return true;
+    }
+
+    delegating implementation Monad<Stream<_>> {
+        fn pure<A: mut>(value: A): Stream<A> = Stream<A>.of(value);
+
+        fn flatMap<A: mut, B: mut>(this: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
+            Stream<B>.new(MonadFlatMappedStream<A, B>.new(this.source, transform));
+
+        fn ap<A: mut, B: mut>(this: Stream<A>, functions: Stream<(A) -> B>): Stream<B> =
+            streamMonadAp(this, functions);
+    }
+
+    delegating implementation Foldable<Stream<_>> {
+        fn foldLeft<A: mut, B: mut>(this: Stream<A>, initial: B, combine: (B, A) -> B): B =
+            this.fold(initial, combine);
     }
 
     public toList(): List<T> {

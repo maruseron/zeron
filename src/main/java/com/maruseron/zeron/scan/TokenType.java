@@ -30,7 +30,7 @@ public enum TokenType {
 
     // Literals
     IDENTIFIER, STRING, CHAR, INT, LONG, DOUBLE, SUFFIXABLE_NUMBER,
-    LINE_COMMENT, BLOCK_COMMENT,
+    LINE_COMMENT, DOC_COMMENT, BLOCK_COMMENT,
 
     AND, AS, BREAK, CLASS, CONTRACT, CONSTRUCTOR, DEFAULT, ELSE, EXTENSION, EXTERNAL, FALSE, FN,
         CONTINUE,
@@ -42,6 +42,6 @@ public enum TokenType {
     NEWLINE, EOF;
 
     public boolean isComment() {
-        return this == LINE_COMMENT || this == BLOCK_COMMENT;
+        return this == LINE_COMMENT || this == DOC_COMMENT || this == BLOCK_COMMENT;
     }
 }

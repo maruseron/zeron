@@ -139,13 +139,73 @@ public final class FunctionBindingRegistry {
                 TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.lang.Option"), TypeDescriptor.ofInt()),
                 TypeDescriptor.ofFloat());
         final var bigInteger = new ReferenceDescriptor(TypeDescriptor.ofName("java.math.BigInteger"));
+        final var bigIntegerFromInt = TypeDescriptor.functionOf(
+                "bigIntegerFromInt", bigInteger, TypeDescriptor.ofInt());
+        final var bigIntegerFromLong = TypeDescriptor.functionOf(
+                "bigIntegerFromLong", bigInteger, TypeDescriptor.ofLong());
         final var bigIntegerAdd = TypeDescriptor.functionOf("bigIntegerAdd",
+                bigInteger, bigInteger, bigInteger);
+        final var bigIntegerSubtract = TypeDescriptor.functionOf("bigIntegerSubtract",
                 bigInteger, bigInteger, bigInteger);
         final var bigIntegerMultiply = TypeDescriptor.functionOf("bigIntegerMultiply",
                 bigInteger, bigInteger, bigInteger);
+        final var bigIntegerDivide = TypeDescriptor.functionOf("bigIntegerDivide",
+                bigInteger, bigInteger, bigInteger);
+        final var bigIntegerRemainder = TypeDescriptor.functionOf("bigIntegerRemainder",
+                bigInteger, bigInteger, bigInteger);
+        final var bigIntegerFloorDivide = TypeDescriptor.functionOf("bigIntegerFloorDivide",
+                bigInteger, bigInteger, bigInteger);
+        final var bigIntegerFloorRemainder = TypeDescriptor.functionOf("bigIntegerFloorRemainder",
+                bigInteger, bigInteger, bigInteger);
         final var bigIntegerNegate = TypeDescriptor.functionOf("bigIntegerNegate", bigInteger, bigInteger);
+        final var bigIntegerAbs = TypeDescriptor.functionOf("bigIntegerAbs", bigInteger, bigInteger);
+        final var bigIntegerSignum = TypeDescriptor.functionOf("bigIntegerSignum", bigInteger, bigInteger);
+        final var bigIntegerToIntExact = TypeDescriptor.functionOf(
+                "bigIntegerToIntExact", TypeDescriptor.ofInt(), bigInteger);
+        final var bigIntegerToLongExact = TypeDescriptor.functionOf(
+                "bigIntegerToLongExact", TypeDescriptor.ofLong(), bigInteger);
+        final var bigIntegerToFloat = TypeDescriptor.functionOf(
+                "bigIntegerToFloat", TypeDescriptor.ofFloat(), bigInteger);
         final var bigIntegerToString = TypeDescriptor.functionOf(
                 "bigIntegerToString", TypeDescriptor.ofString(), bigInteger);
+        final var bigIntegerEquals = TypeDescriptor.functionOf(
+                "bigIntegerEquals", TypeDescriptor.ofBoolean(), bigInteger, bigInteger);
+        final var bigIntegerCompare = TypeDescriptor.functionOf(
+                "bigIntegerCompare", TypeDescriptor.ofInt(), bigInteger, bigInteger);
+        final var bigIntegerHash = TypeDescriptor.functionOf(
+                "bigIntegerHash", TypeDescriptor.ofInt(), bigInteger);
+        final var rationalValue = new ReferenceDescriptor(
+                TypeDescriptor.ofName("com.maruseron.zeron.runtime.RationalValue"));
+        final var rationalFromLiteralText = TypeDescriptor.functionOf(
+                "rationalFromLiteralText", rationalValue, TypeDescriptor.ofString());
+        final var rationalAdd = TypeDescriptor.functionOf(
+                "rationalAdd", rationalValue, rationalValue, rationalValue);
+        final var rationalSubtract = TypeDescriptor.functionOf(
+                "rationalSubtract", rationalValue, rationalValue, rationalValue);
+        final var rationalMultiply = TypeDescriptor.functionOf(
+                "rationalMultiply", rationalValue, rationalValue, rationalValue);
+        final var rationalDivide = TypeDescriptor.functionOf(
+                "rationalDivide", rationalValue, rationalValue, rationalValue);
+        final var rationalNegate = TypeDescriptor.functionOf(
+                "rationalNegate", rationalValue, rationalValue);
+        final var rationalAbs = TypeDescriptor.functionOf("rationalAbs", rationalValue, rationalValue);
+        final var rationalSignum = TypeDescriptor.functionOf("rationalSignum", rationalValue, rationalValue);
+        final var rationalReciprocal = TypeDescriptor.functionOf(
+                "rationalReciprocal", rationalValue, rationalValue);
+        final var rationalNumerator = TypeDescriptor.functionOf(
+                "rationalNumerator", TypeDescriptor.ofString(), rationalValue);
+        final var rationalDenominator = TypeDescriptor.functionOf(
+                "rationalDenominator", TypeDescriptor.ofString(), rationalValue);
+        final var rationalToFloat = TypeDescriptor.functionOf(
+                "rationalToFloat", TypeDescriptor.ofFloat(), rationalValue);
+        final var rationalEquals = TypeDescriptor.functionOf(
+                "rationalEquals", TypeDescriptor.ofBoolean(), rationalValue, rationalValue);
+        final var rationalCompare = TypeDescriptor.functionOf(
+                "rationalCompare", TypeDescriptor.ofInt(), rationalValue, rationalValue);
+        final var rationalHash = TypeDescriptor.functionOf(
+                "rationalHash", TypeDescriptor.ofInt(), rationalValue);
+        final var rationalToString = TypeDescriptor.functionOf(
+                "rationalToString", TypeDescriptor.ofString(), rationalValue);
         final var string = TypeDescriptor.ofString().toNullable();
         final var stringSearch = TypeDescriptor.functionOf("stringIndexOf",
                 TypeDescriptor.ofInt(), string, string);
@@ -209,27 +269,167 @@ public final class FunctionBindingRegistry {
                 Map.entry("zeron.lang.floatToInt",
                         new Binding(checkedNumericConversion,
                                 new IntrinsicBinding(IntrinsicId.FLOAT_TO_INT_OPTION))),
-                Map.entry("zeron.math.bigIntegerFromLiteralText",
+                Map.entry("zeron.numeric.bigIntegerFromLiteralText",
                         intrinsicBinding(TypeDescriptor.functionOf("bigIntegerFromLiteralText",
                                 bigInteger, TypeDescriptor.ofString()),
                                 IntrinsicId.BIG_INTEGER_FROM_LITERAL_TEXT)),
-                Map.entry("zeron.math.bigIntegerAdd",
+                Map.entry("zeron.numeric.bigIntegerFromInt",
+                        new Binding(bigIntegerFromInt, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"),
+                                "fromInt", MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ConstantDescs.CD_int)))),
+                Map.entry("zeron.numeric.bigIntegerFromLong",
+                        new Binding(bigIntegerFromLong, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"),
+                                "fromLong", MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ConstantDescs.CD_long)))),
+                Map.entry("zeron.numeric.bigIntegerAdd",
                         new Binding(bigIntegerAdd, new InstanceMethod(ClassDesc.of("java.math.BigInteger"), "add",
                                 MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
                                         ClassDesc.of("java.math.BigInteger"))))),
-                Map.entry("zeron.math.bigIntegerMultiply",
+                Map.entry("zeron.numeric.bigIntegerSubtract",
+                        new Binding(bigIntegerSubtract, new InstanceMethod(ClassDesc.of("java.math.BigInteger"),
+                                "subtract", MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerMultiply",
                         new Binding(bigIntegerMultiply,
                                 new InstanceMethod(ClassDesc.of("java.math.BigInteger"), "multiply",
                                         MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
                                                 ClassDesc.of("java.math.BigInteger"))))),
-                Map.entry("zeron.math.bigIntegerNegate",
+                Map.entry("zeron.numeric.bigIntegerDivide",
+                        new Binding(bigIntegerDivide, new InstanceMethod(ClassDesc.of("java.math.BigInteger"),
+                                "divide", MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerRemainder",
+                        new Binding(bigIntegerRemainder, new InstanceMethod(ClassDesc.of("java.math.BigInteger"),
+                                "remainder", MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerFloorDivide",
+                        new Binding(bigIntegerFloorDivide, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"),
+                                "floorDivide", MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerFloorRemainder",
+                        new Binding(bigIntegerFloorRemainder, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"),
+                                "floorRemainder", MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerNegate",
                         new Binding(bigIntegerNegate,
                                 new InstanceMethod(ClassDesc.of("java.math.BigInteger"), "negate",
                                         MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"))))),
-                Map.entry("zeron.math.bigIntegerToString",
+                Map.entry("zeron.numeric.bigIntegerAbs",
+                        new Binding(bigIntegerAbs, new InstanceMethod(ClassDesc.of("java.math.BigInteger"),
+                                "abs", MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerSignum",
+                        new Binding(bigIntegerSignum, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"), "signum",
+                                MethodTypeDesc.of(ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerToIntExact",
+                        new Binding(bigIntegerToIntExact, new InstanceMethod(ClassDesc.of("java.math.BigInteger"),
+                                "intValueExact", MethodTypeDesc.of(ConstantDescs.CD_int)))),
+                Map.entry("zeron.numeric.bigIntegerToLongExact",
+                        new Binding(bigIntegerToLongExact, new InstanceMethod(ClassDesc.of("java.math.BigInteger"),
+                                "longValueExact", MethodTypeDesc.of(ConstantDescs.CD_long)))),
+                Map.entry("zeron.numeric.bigIntegerToFloat",
+                        new Binding(bigIntegerToFloat, new InstanceMethod(ClassDesc.of("java.math.BigInteger"),
+                                "doubleValue", MethodTypeDesc.of(ConstantDescs.CD_double)))),
+                Map.entry("zeron.numeric.bigIntegerToString",
                         new Binding(bigIntegerToString,
                                 new InstanceMethod(ClassDesc.of("java.math.BigInteger"), "toString",
                                         MethodTypeDesc.of(ConstantDescs.CD_String)))),
+                Map.entry("zeron.numeric.bigIntegerEquals",
+                        new Binding(bigIntegerEquals, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"),
+                                "bigIntegerEquals", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+                                        ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerCompare",
+                        new Binding(bigIntegerCompare, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"),
+                                "bigIntegerCompare", MethodTypeDesc.of(ConstantDescs.CD_int,
+                                        ClassDesc.of("java.math.BigInteger"),
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.bigIntegerHash",
+                        new Binding(bigIntegerHash, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"),
+                                "bigIntegerHash", MethodTypeDesc.of(ConstantDescs.CD_int,
+                                        ClassDesc.of("java.math.BigInteger"))))),
+                Map.entry("zeron.numeric.rationalFromLiteralText",
+                        new Binding(rationalFromLiteralText, new StaticMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"),
+                                "fromLiteralText", MethodTypeDesc.of(
+                                        ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"),
+                                        ConstantDescs.CD_String)))),
+                Map.entry("zeron.numeric.rationalAdd",
+                        new Binding(rationalAdd, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "add",
+                                MethodTypeDesc.of(ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"),
+                                        ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalSubtract",
+                        new Binding(rationalSubtract, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "subtract",
+                                MethodTypeDesc.of(ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"),
+                                        ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalMultiply",
+                        new Binding(rationalMultiply, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "multiply",
+                                MethodTypeDesc.of(ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"),
+                                        ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalDivide",
+                        new Binding(rationalDivide, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "divide",
+                                MethodTypeDesc.of(ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"),
+                                        ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalNegate",
+                        new Binding(rationalNegate, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "negate",
+                                MethodTypeDesc.of(ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalAbs",
+                        new Binding(rationalAbs, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "abs",
+                                MethodTypeDesc.of(ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalSignum",
+                        new Binding(rationalSignum, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "signum",
+                                MethodTypeDesc.of(ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalReciprocal",
+                        new Binding(rationalReciprocal, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "reciprocal",
+                                MethodTypeDesc.of(ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalNumerator",
+                        new Binding(rationalNumerator, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "numeratorText",
+                                MethodTypeDesc.of(ConstantDescs.CD_String)))),
+                Map.entry("zeron.numeric.rationalDenominator",
+                        new Binding(rationalDenominator, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "denominatorText",
+                                MethodTypeDesc.of(ConstantDescs.CD_String)))),
+                Map.entry("zeron.numeric.rationalToFloat",
+                        new Binding(rationalToFloat, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "toDouble",
+                                MethodTypeDesc.of(ConstantDescs.CD_double)))),
+                Map.entry("zeron.numeric.rationalEquals",
+                        new Binding(rationalEquals, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "equalTo",
+                                MethodTypeDesc.of(ConstantDescs.CD_boolean,
+                                        ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalCompare",
+                        new Binding(rationalCompare, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "compareTo",
+                                MethodTypeDesc.of(ConstantDescs.CD_int,
+                                        ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"))))),
+                Map.entry("zeron.numeric.rationalHash",
+                        new Binding(rationalHash, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "hashValue",
+                                MethodTypeDesc.of(ConstantDescs.CD_int)))),
+                Map.entry("zeron.numeric.rationalToString",
+                        new Binding(rationalToString, new InstanceMethod(
+                                ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "displayText",
+                                MethodTypeDesc.of(ConstantDescs.CD_String)))),
                 Map.entry("zeron.lang.stringLength",
                         new Binding(stringLength, new InstanceMethod(stringClass, "length",
                                 MethodTypeDesc.of(ConstantDescs.CD_int)))),

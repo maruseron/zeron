@@ -24,6 +24,14 @@ final class FlowState {
         return copy;
     }
 
+    void restoreFrom(final FlowState source) {
+        facts.clear();
+        facts.putAll(source.facts);
+        writeCounts.clear();
+        writeCounts.putAll(source.writeCounts);
+        reachable = source.reachable;
+    }
+
     static FlowState unreachable() {
         final var state = new FlowState();
         state.reachable = false;

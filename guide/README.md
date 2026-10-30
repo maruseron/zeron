@@ -1,5 +1,7 @@
 # The Zeron Guide
 
+Note: do not use the numbers preceding a file name as a chapter order. They're chronological, not sequential. Refer to this document for lesson order.
+
 ## Part I — Get a program running
 
 1. [Install Zeron and create a project](01-install-and-create-a-project.md)
@@ -35,6 +37,7 @@
 1. [Equality and ordering](21-equality-and-ordering.md)
 1. [Operator overloading](31-operator-overloading.md)
 1. [Custom numeric literal suffixes](32-custom-numeric-literal-suffixes.md)
+1. [Numeric hierarchy and exact literals](33-numeric-hierarchy-and-exact-literals.md)
 1. [Raised effects](22-raised-effects.md)
 1. [Resource management](26-resource-management.md)
 

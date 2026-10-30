@@ -1,6 +1,7 @@
 package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
@@ -61,46 +62,31 @@ public final class OperatorTest {
     }
 
     @Test
-    public void compilesAlgebraicOperatorsThroughWitnessesAndGenericBounds() throws Exception {
-        final var className = "AlgebraicOperators" + UUID.randomUUID().toString().replace("-", "");
+    public void compilesNumericOperatorsThroughWitnessesAndGenericBounds() throws Exception {
+        final var className = "NumericOperators" + UUID.randomUUID().toString().replace("-", "");
         final var source = """
-                import zeron.algebra.Add;
-                import zeron.algebra.Addition;
-                import zeron.algebra.Mult;
-                import zeron.algebra.Multiplication;
+                import zeron.numeric.Fractional;
+                import zeron.numeric.Integer;
+                import zeron.numeric.Numeric;
                 class Vector {
                     public property value: Int;
                     public constructor new;
                 }
-                witness Addition<Vector> for Vector {
+                witness Numeric<Vector> for Vector {
                     fn add(other: Vector): Vector = Vector.new(this.value + other.value);
-                    fn zero(): Vector = Vector.new(0);
-                    fn negate(): Vector = Vector.new(-this.value);
-                }
-                witness Mult<Vector> for Vector {
+                    fn subtract(other: Vector): Vector = Vector.new(this.value - other.value);
                     fn multiply(other: Vector): Vector = Vector.new(this.value * other.value);
-                    fn one(): Vector = Vector.new(1);
+                    fn negate(): Vector = Vector.new(-this.value);
+                    fn abs(): Vector = Vector.new(this.value.abs());
+                    fn signum(): Vector = Vector.new(this.value.signum());
+                    static fn fromInteger(value: Integer): Vector = Vector.new(value.toIntExact());
                 }
-                class NominalVector is Addition<&NominalVector>,
-                        Mult<&NominalVector> {
-                    public property value: Int;
-                    public constructor new;
-                    public add(other: &NominalVector): &NominalVector =
-                        NominalVector.new(this.value + other.value);
-                    public zero(): &NominalVector = NominalVector.new(0);
-                    public negate(): &NominalVector = NominalVector.new(-this.value);
-                    public multiply(other: &NominalVector): &NominalVector =
-                        NominalVector.new(this.value * other.value);
-                    public one(): &NominalVector = NominalVector.new(1);
-                }
-                fn add<T: mut + Add<T>>(left: T, right: T): T = left + right;
-                fn subtract<T: mut + Addition<T>>(left: T, right: T): T = left - right;
-                fn negate<T: mut + Addition<T>>(value: T): T = -value;
-                fn multiply<T: mut + Mult<T>>(left: T, right: T): T = left * right;
-                fn reciprocal<T: mut + Multiplication<T>>(value: T): T = value.reciprocal();
-                fn additiveIdentity<T: mut + Add<T>>(value: T): T = value.zero();
-                fn multiplicativeIdentity<T: mut + Mult<T>>(value: T): T = value.one();
-                fn forwarded<T: mut + Addition<T>>(left: T, right: T): T = subtract(left, right);
+                fn add<T: mut + Numeric<T>>(left: T, right: T): T = left + right;
+                fn subtract<T: mut + Numeric<T>>(left: T, right: T): T = left - right;
+                fn negate<T: mut + Numeric<T>>(value: T): T = -value;
+                fn multiply<T: mut + Numeric<T>>(left: T, right: T): T = left * right;
+                fn reciprocal<T: mut + Fractional<T>>(value: T): T = value.reciprocal();
+                fn forwarded<T: mut + Numeric<T>>(left: T, right: T): T = subtract(left, right);
                 fn builtinAdd(): Int = add(2, 3);
                 fn builtinLongAdd(): Long = add(2L, 3L);
                 fn builtinFloatAdd(): Float = add(2.0, 3.0);
@@ -111,22 +97,18 @@ public final class OperatorTest {
                 fn builtinLongMultiply(): Long = multiply(2L, 3L);
                 fn builtinFloatMultiply(): Float = multiply(2.0, 3.0);
                 fn builtinReciprocal(): Float = reciprocal(2.0);
-                fn builtinZero(): Int = additiveIdentity(1);
-                fn builtinOne(): Int = multiplicativeIdentity(0);
                 fn forwardedEvidence(): Int = forwarded(5, 2);
                 fn witnessAdd(): Int = add(Vector.new(2), Vector.new(3)).value;
                 fn witnessSubtract(): Int = subtract(Vector.new(5), Vector.new(2)).value;
                 fn witnessNegate(): Int = negate(Vector.new(3)).value;
                 fn witnessMultiply(): Int = multiply(Vector.new(2), Vector.new(3)).value;
                 fn directSubtract(): Int = (Vector.new(5) - Vector.new(2)).value;
-                fn nominalAdd(): Int = add(NominalVector.new(2), NominalVector.new(3)).value;
-                fn nominalMultiply(): Int = multiply(NominalVector.new(2), NominalVector.new(3)).value;
                 """;
         final var classFile = Path.of("dist", className + ".class");
         final var vectorFile = Path.of("dist", "Vector.class");
-        final var nominalVectorFile = Path.of("dist", "NominalVector.class");
         try {
-            final var compiler = new CompilationService(parse(source), className);
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(parseUnit(source)), className, "", List.of(), true, List.of());
             compiler.resolve();
             compiler.compile();
 
@@ -143,36 +125,26 @@ public final class OperatorTest {
                 assertEquals(6L, generated.getMethod("builtinLongMultiply").invoke(null));
                 assertEquals(6.0, generated.getMethod("builtinFloatMultiply").invoke(null));
                 assertEquals(0.5, generated.getMethod("builtinReciprocal").invoke(null));
-                assertEquals(0, generated.getMethod("builtinZero").invoke(null));
-                assertEquals(1, generated.getMethod("builtinOne").invoke(null));
                 assertEquals(3, generated.getMethod("forwardedEvidence").invoke(null));
                 assertEquals(5, generated.getMethod("witnessAdd").invoke(null));
                 assertEquals(3, generated.getMethod("witnessSubtract").invoke(null));
                 assertEquals(-3, generated.getMethod("witnessNegate").invoke(null));
                 assertEquals(6, generated.getMethod("witnessMultiply").invoke(null));
                 assertEquals(3, generated.getMethod("directSubtract").invoke(null));
-                assertEquals(5, generated.getMethod("nominalAdd").invoke(null));
-                assertEquals(6, generated.getMethod("nominalMultiply").invoke(null));
             }
         } finally {
             Files.deleteIfExists(classFile);
             Files.deleteIfExists(vectorFile);
-            Files.deleteIfExists(nominalVectorFile);
         }
     }
 
     @Test
-    public void requiresTheSpecificAlgebraicContractForEachOperator() {
+    public void requiresNumericEvidenceForEachOperator() {
         for (final var source : List.of(
                 "fn invalid<T>(left: T, right: T): T = left + right;",
-                "fn invalid<T: Add<T>>(left: T, right: T): T = left + right;",
                 """
-                class AddOnly { public constructor new; }
-                witness zeron.algebra.Add<AddOnly> for AddOnly {
-                    fn add(other: AddOnly): AddOnly = this;
-                    fn zero(): AddOnly = AddOnly.new();
-                }
-                fn invalid(left: AddOnly, right: AddOnly): AddOnly = left - right;
+                import zeron.numeric.Numeric;
+                fn invalid<T: Numeric<T>>(left: T, right: T): T = left / right;
                 """,
                 """
                 class Fake {
@@ -348,5 +320,9 @@ public final class OperatorTest {
 
     private static List<Stmt> parse(final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
+    }
+
+    private static CompilationUnit parseUnit(final String source) {
+        return Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit(null);
     }
 }

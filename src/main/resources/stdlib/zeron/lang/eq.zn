@@ -1,5 +1,30 @@
 package zeron.lang;
 
+/// Defines equality (`==`) comparison between values of type `T`.
+/// This contract can be derived by the compiler for Algebraic Data Types, 
+/// newtypes and classes.
+/// 
+/// Though it is not strictly enforced, any type implementing `Eq` should form
+/// an equivalence relation (reflexive, symmetric, transitive and negation):
+///
+/// **Reflexivity**:
+/// ```zeron
+/// a == a
+/// ```
+/// **Transitivity**:
+/// ```zeron
+/// if (a == b and b == c) then a == c
+/// ```
+/// **Symmetry**:
+/// ```zeron
+/// (a == b) == (b == a)
+/// ```
+/// **Negation**:
+/// ```zeron
+/// (a != b) == not (a == b)
+/// ```
 public contract Eq<T: nullable + mut> {
+
+    /// Determines whether the current instance is equal to `other`.
     eq(other: T): Boolean;
 }

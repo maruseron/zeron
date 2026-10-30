@@ -1,0 +1,820 @@
+# Language Design Notes 00: Zeron design features overview
+
+## Contents
+
+- [Types](#types)
+- [Variables](#variables)
+- [Functions](#functions)
+- [Generic functions](#generic-functions-first-slice)
+- [Type-class witnesses](design-document-15_type-class-witnesses-and-generic-bounds.md)
+- [Simplest program](#sidetrack-simplest-zeron-program)
+- [Higher order functions and Lambdas](#higher-order-functions-and-lambdas)
+- [Control flow](#control-flow)
+- [Ranges and Iterables](#ranges-and-iterables)
+- [Classes](#classes)
+- [Typed raised effects](#typed-raised-effects)
+- [Resource management](#resource-management)
+- [Names, Packages, and Imports](#names-packages-and-imports)
+
+## Languages to review for alternatives (from should influence most to least)
+
+Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, F#, Zig, Haxe, Julia, CoffeeScript (see until!)
+
+### Current implementation and roadmap
+
+#### Implemented foundations
+
+- Core scalar types, `Unit`, function declarations, and type inference for ordinary bindings and
+    function results.
+- `Int` decimal, binary (`0b`), octal (`0o`), and hexadecimal (`0x`) integer literals, with digit
+    separators (`_`) allowed only between digits. `Long` literals use the `L` suffix and support the
+    same integer radices; decimal leading zeroes remain decimal. Existing signed 32-bit `Int` and
+    signed 64-bit `Long` ranges, arithmetic, bitwise and shift operators, plus checked
+    `Long.toInt(): Option<Int>` and widening `Int.toLong()` conversions remain unchanged.
+- Class-owned custom numeric literal suffixes are explicitly imported and resolve to typed
+    constructor factories. The bundled arbitrary-precision `Integer` uses an integer suffix that
+    preserves the exact literal value.
+- The `zeron.numeric` hierarchy provides `Numeric`, `Integral`, `Fractional`, and `Floating`
+    evidence for arithmetic and numeric conversions. Unsuffixed literals convert from exact integer
+    or rational carriers when an expected type is available; otherwise their defaults remain `Int`
+    and `Float`. These numeric capabilities do not imply algebraic laws such as associativity or
+    identity.
+- `zeron.time.Duration` provides signed nanoseconds with checked arithmetic; `Instant` uses a
+    monotonic clock for elapsed-time measurement. Wall-clock time remains out of scope.
+- Remainder for `Int`, `Long`, and `Float`, 32-bit `Int` and 64-bit `Long` bitwise and shift operators,
+    and their variable-only
+    compound assignments. `++`/`--` are not part of the language; use `+= 1` or `-= 1`.
+- Built-in `Any` as a non-null top type: non-null values widen to `Any`, nullable values and `null`
+    widen to `Any?`; supported type tests and checked/safe casts are implemented.
+- Generic top-level functions with explicit return types, call-site type inference or explicit type
+    arguments, recursive substitution, and erased JVM lowering.
+- Generic functions accept and return callback values involving type parameters; generated bridge
+    methods adapt concrete lambda shapes to and from erased callback interfaces.
+- Higher-order function calls and lambda values, including zero- and multi-parameter lambdas.
+- Nominal classes and contracts with private fields, declaration-ordered field initialization,
+    canonical construction, methods, static conformance checking, and contract dispatch.
+- Nominal non-generic effect payload classes, declared `raises` sets, `raise` expressions, and
+    typed expression handlers. Calls propagate effects until handled or declared; `Result` remains
+    an ordinary value type. See [typed raised effects](design-document-13_typed-raised-effects.md).
+- Synchronous lexical `using` scopes over `zeron.resource.Disposable`, with reverse-order cleanup,
+    primary-failure preservation, and observable suppressed outcomes.
+- Explicitly imported extension methods for Zeron classes, contracts, and nominal sums. Extensions resolve
+    statically, lower to receiver-first static functions, and cannot access private members.
+    Ordinary callable names are unique rather than overloaded; extensions may share a name for
+    different receiver types and resolve only by receiver applicability, with overlap reported as
+    ambiguous. Instance and contract-default methods take precedence over same-named extensions.
+    Mutating extensions require `&T`.
+- Generic classes and contracts with invariant defaults and checked declaration-site covariance,
+    inferred or explicit constructor arguments, member substitution, declaration-site conformance,
+    raw JVM erasure, erased-signature bridges, and callback adaptation across erased nominal fields
+    and members. Use-site `in` and `out` projections are implemented for supported Zeron and Java
+    generic types; see [ZEP-0052](../zeps/ZEP-0052.md).
+- Fixed-size `Array<T>` values with non-empty and contextually typed empty literals, indexed reads
+  and writes, and a `length` property; writes require a mutable reference view.
+- `for` loops over arrays, inline integer ranges, and user-defined types conforming to the bundled
+    `Iterable<T>` and `Iterator<T>` contracts. Arrays retain specialized lowering; ranges are
+    ordinary `zeron.ranges.IntRange` values and use protocol dispatch.
+- Callable `zeron.io.print` and `zeron.io.println` standard-library functions, implemented as
+    ordinary Zeron functions through the curated Java external-class facade. The former print
+    statement syntax has been removed.
+- A lexical `zeron.fs.Path` value with path composition, filesystem queries and mutations, plus
+    whole-file UTF-8 text reading and writing through `zeron.io.text`. I/O failures are typed effects;
+    writer cleanup uses `Disposable`.
+- `zeron.lang.Option<T>` as the nominal sum `Some(value: T) | None`. Cases are constructed and
+    matched through `Option.Some(value)` and `Option<T>.None()`. Public extension operations provide
+    `isSome`, `getOrElse`, `fold`, `map`, and `filter`.
+- `zeron.collections.Step<T>` as the iterator result sum `Yield(value: T) | Done`.
+    `Iterator<T>.next()` returns `Step<T>`, keeping iterator exhaustion distinct from optional
+    values, including `Option.Some(null)`.
+- Higher-kinded `Functor<F<_>>`, `Applicative<F<_>>`, `Monad<F<_>>`, and `Foldable<F<_>>` contracts
+    in `zeron.control`. `Stream` implements lazy `Monad` and `Foldable` operations; `Option` and
+    `Result` provide `Monad` and `Foldable` witnesses. `List` and intrinsic `Array` expose eager
+    `foldLeft` terminal operations through `Foldable` without eager mapping or filtering pipelines.
+- `zeron.lang.Result<T, E>` as the nominal sum `Ok(value: T) | Err(error: E)`, constructed with
+    `Result.Ok(value)` / `Result.Err(error)` or the `Result.ok` / `Result.err` factories. Its `fold`,
+    `map`, `mapError`, and `andThen` operations compose explicit error values. No propagation
+    operator or source-level exception handling is introduced.
+- Exhaustive `match` expressions over non-null sealed-contract values. Cases name permitted classes,
+    may bind the whole value with `as`, use declared class-defined extractor patterns with nested or
+    ignored outputs, and combine patterns with OR alternatives. Pattern guards and refutation
+    continue to later arms and do not count toward exhaustiveness; a final unguarded `_` may cover
+    remaining variants. The legacy one-public-property form remains compatible; see
+    [design-document-16](design-document-16_patterns-and-pattern-matching.md).
+- Compiled Zeron libraries can be packaged as JARs and loaded from either JARs or class directories;
+    consumers validate both API-index schema and standard-library API compatibility.
+- Initial Java classpath interop for public constructors and methods, including expanded varargs
+    calls with supported component types. Explicit directory/JAR roots are searched in order, with
+    runtime-version-aware multi-release JAR lookup. Public JDK class metadata is discovered directly
+    from exported system-module packages, without class initialization or default imports. Arbitrary
+    Java field reads and mutable-instance writes support public declared fields with mapped
+    descriptors; static writes and final-field writes are rejected. Java methods support `Object[]`
+    parameters/results; Zeron array arguments are shallow-copied at the boundary, while typed
+    reference and primitive array signatures remain unsupported.
+- Checked exceptions declared by Java methods are rejected for direct interop calls. External
+    facades may opt into explicit checked-exception-to-effect mappings; unchecked exceptions and
+    `Error`s continue to propagate unchanged, and Java constructors with checked exceptions are not
+    yet supported.
+- Binding reassignment as a declaration property: `let` bindings are immutable and `let mut`
+    bindings may be reassigned.
+- Reference mutation capability (`&T`) is distinct from binding reassignment and is enforced for
+    arrays, functions, and class/contract views.
+- Basic nullable types: a non-null value can be widened to `T?`, and `null` can initialize an
+    explicitly nullable binding or parameter.
+- Single-expression function bodies and range-literal syntax.
+- For-expressions use ordered `for`, `let`, and `if` clauses followed by exactly one final result
+    clause. `yield expression` produces a lazy `Stream<T>`; `collect expression into sink` eagerly
+    adds each projected value to a mutable `Sink<T>` and returns that sink. Generators nest in
+    lexical, depth-first order, and bindings are visible to subsequent clauses. A lazy comprehension
+    evaluates its outer source expression when constructed and evaluates per-element clauses only as
+    traversal requests values; it does not guarantee that a source is replayable. Eager collection
+    evaluates the outer source and sink once before traversal. `Stream<T>` methods such as `map`,
+    `filter`, `flatMap`, `take`, and `drop` remain ordinary library operations and can be composed
+    with the resulting stream. Fusion is not a semantic guarantee.
+
+#### Prototypes and partial support
+
+- Safe immutable let-bound lambdas with identity or constant-result bodies generalize unresolved
+    parameters into rank-1 schemes; each call or expected function type instantiates them separately.
+    Operator-constrained lambdas remain on the contextual monomorphic inference path. Mutable
+    bindings and nested schemes are not generalized.
+- Lambdas are reusable first-class values and lower to generated function-shape interfaces. Named
+    functions can be used as values when an expected function type is available; generic named
+    functions require explicit or contextual specialization. Lambdas capture immutable bindings by
+    value, but cannot implicitly capture and mutate reassignable local bindings.
+- Nullable descriptors and basic `T`/`T?` assignments exist. Flow refinement for direct local and
+    parameter null/type tests in statement branches and `if` expressions is implemented, including
+    short-circuit Boolean conditions. Checked and safe casts are implemented for supported targets.
+    Loop exits join condition-false and `break` paths; loop-written bindings are conservatively
+    invalidated at assignments, and loop-header facts converge across backedges; `for` retains its
+    zero-iteration path. See
+    [design-document-08](design-document-08_flow-typing-type-tests-and-casts.md).
+    Arrays support nullable element types, while broader nullable collection behavior remains limited.
+- Generic functions and methods support multiple contract bounds per type parameter. Generic
+    function references can be specialized explicitly with `name::<Type>` or inferred from an
+    expected function type; these are monomorphic values, not polymorphic lambdas. Checked
+    declaration-site covariance and use-site projections are implemented, while full
+    contravariance and first-class generic function values without specialization remain
+    unsupported. Applied contract bounds are supported on generic functions, methods, classes, and
+    contracts; class and contract evidence is carried through instances for member and
+    default-method dispatch. Higher-kinded evidence and non-nominal witness dispatch are
+    implemented. Generic witness overlap analysis remains incomplete. See
+    [design-document-15](design-document-15_type-class-witnesses-and-generic-bounds.md).
+      Generic callback adaptation works across top-level functions, specialized function references,
+      and nominal members; broader shape coverage and adapter reuse remain.
+- Class-defined extractor patterns, nested patterns, OR-patterns, literal patterns, and product
+    destructuring are implemented. Direct matching on a concrete class root without a literal test
+    remains pending; see
+    [design-document-16](design-document-16_patterns-and-pattern-matching.md).
+
+#### Implemented features with limits and remaining proposals
+
+- **Planned — method delegation:** allow a wrapper method to forward its parameters and result to a receiver method
+    reference, such as `get(index: Int): T` delegating to `contents::get`. Define this as a distinct
+    forwarding form, not as a function-reference value or a change to `=` expression bodies; syntax,
+    generic substitution, and receiver mutability rules remain to be designed.
+- **Implemented with limits — default parameters:** they are implemented separately from field initializers. They may appear only on a
+    trailing parameter suffix; positional calls supply a prefix, and each omitted default is evaluated
+    once per call, left to right, in declaration scope; explicit arguments (including `null`) remain
+    ordinary call-site arguments. Defaults may refer to earlier parameters, while function values
+    retain the full-arity type. Functions, class methods, contract methods, and
+    signature-only external functions use generated shorter-arity JVM wrappers. Contract defaults
+    belong to the contract and are available through contract- and implementing-class-typed calls;
+    implementations provide only the full-arity method. Compiled-library APIs record minimum arity.
+    Defaults on named/canonical constructors and curated external-class methods remain deferred.
+- **Implemented in a curated slice — external declarations:** typed signature-only external
+    functions and explicit external-class facades are supported for registered JVM targets. Facades
+    expose selected Java constructors, methods, and properties; unrestricted Java declarations and
+    inherited-member discovery remain out of scope. See the
+    [intrinsic and external binding roadmap](design-document-12_intrinsics-and-external-bindings.md).
+- **Implemented — native sums, nominal products, and guarded newtypes.** Direct-carrier newtype
+    lowering and discriminated unions beyond native sums and sealed contracts remain deferred; see
+    [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
+- **Planned — additional immutable collection types and dedicated list-comprehension syntax.**
+- **Implemented — safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`),
+    and explicit reference identity (`===`).** Value equality uses `Eq<T>` evidence, and custom
+    relational comparisons use `Comparable<T>` and `Ordering`. See the
+    [small language features discussion](design-document-10_small-miscelaneous.md) and the
+    [equality and hashing design](design-document-17_structural-equality-and-hashing.md).
+- **Implemented with limits — one trailing `T...` parameter** is supported on functions, class methods, contract methods, and
+    signature-only external functions. Its body type and full function-value parameter type are
+    `Array<T>`; direct calls pack the positional arguments after fixed parameters, while indirect
+    function-value calls take one array argument. Trailing defaults may precede the variadic
+    parameter and apply only to fixed parameters; positional arguments fill fixed parameters first,
+    then become variadic elements. Compiled-library metadata preserves the variadic marker. Spread
+    syntax, canonical `new` constructors, and external-class methods remain deferred. Named
+    constructors are static factories and accept the same variadic parameters as functions. The
+    bundled `zeron.collections.List<T>.of(elements: T...)` factory provides a standard example.
+- **Proposed — trailing-lambda syntax:** allow one block lambda after a call, as in `repeat(3) { index ->
+    println(index) }`, with parentheses optional when the lambda is the only argument (`run {
+    initialize() }`). Use unparenthesized comma-separated parameter names; a body without `->`
+    denotes a zero-parameter lambda. Multiline call chains and nested trailing lambdas need
+    readability evaluation; ordinary parenthesized lambdas remain an escape hatch. Multiple
+    trailing lambdas per call are out of scope.
+- **Implemented — anonymous objects** can explicitly implement named contracts for one-off adapters
+    and test doubles. Anonymous record values remain excluded because they would introduce
+    structural typing.
+- **Planned — pattern assignment and derived creation.**
+- **Implemented with limits — typed raised effects:** callable `raises` clauses and function-type
+    annotations, `raise` expressions, and `handle (...) with { case Effect [as value] -> ...; }`.
+    Property patterns, catch-all cases, effect generics, effects in top-level initializers, and
+    automatic Java-exception conversion remain unsupported. Entry-point `main` may declare effects
+    like any other callable. See
+    [design-document-13](design-document-13_typed-raised-effects.md) for semantics and next steps.
+- **Low priority proposal — optional `do` notation** for sequencing short-circuiting `Option`/`Result` values.
+    A block may mix ordinary statements with `<-` binds; a bind short-circuits on the context's
+    failure case, and all binds in the initial design use the same context and `Result` error type.
+    The final expression must explicitly construct its `Option`/`Result` value; plain results are
+    not implicitly lifted. This sequences value-level failures and does not handle declared
+    `raises` effects. Reconsider only if ordinary `map`/`flatMap` chains prove awkward in practice.
+- **Implemented — generic admissibility markers:** parameters admit non-null, read-only arguments by
+    default; `nullable` and `mut` opt in independently, while `effect` is exclusive and enables
+    exact generic effect propagation with runtime checks at generic raise sites. These markers do
+    not enable handler cases on unresolved type parameters. Numeric operators use explicit
+    `Numeric<T>` and `Fractional<T>` contract bounds as described in
+    [ZEP-0071](../zeps/ZEP-0071.md); a closed-set `numeric` marker is not part of the design.
+    `Stable<T>` for hash-key admissibility was rejected in
+    [ZEP-0014](../zeps/ZEP-0014.md); reconsider it only if a sound, useful guarantee can be enforced.
+- **Low priority proposal — type-predicate return types** such as `isSome(): this is Option.Some`, which connect a
+    successful Boolean check to flow refinement of a stable receiver. Define how predicate bodies
+    are verified so the refinement is sound, which receivers may be narrowed, and how generic
+    arguments are preserved despite runtime erasure before using this for `Result`.
+- **Low priority proposal — an explicit pipe operator** where `value |> f` means `f(value)` and
+    `value |> f(option)` means `f(value, option)`. The piped value becomes the first argument;
+    stages evaluate left to right. No partial application, method lookup, or implicit nullable/result
+    propagation is intended.
+
+---
+
+### Names, Packages, and Imports
+
+Package headers, qualified nominal identities, selective imports, aliases, and public/package
+visibility are implemented. Named namespaces are reopenable compile-time groups of functions and
+immutable values within a package; qualified member access and individual member imports are
+supported. Namespace values use ordinary top-level initialization rules and have no special
+constant syntax or folding guarantee. Packages define declaration identity, while namespaces group
+declarations without runtime identity. Namespace sealing is deferred. Imports are compile-time name
+bindings, not runtime loading. Project discovery, library artifacts, and Java interop are covered in
+[design-document-11](design-document-11_compilation-libraries-and-host-integration.md); intrinsic
+bindings are covered in [design-document-12](design-document-12_intrinsics-and-external-bindings.md).
+Source-level name resolution is specified in
+[design-document-09](design-document-09_namespaces-packages-and-imports.md).
+
+### Types
+
+Every expression and binding is assigned a `TypeDescriptor` during resolution. A descriptor is the
+language's static type identity; it is separate from the JVM representation chosen by the compiler.
+Some descriptors are source types, while others (`Infer` and `Null`) are internal tools and cannot
+be written as ordinary declared types.
+
+#### Built-in types
+
+| Type | Meaning | Current status |
+| --- | --- | --- |
+| `Never` | Bottom type: an expression that does not produce a value or return normally. | Descriptor exists; throw expressions and complete control-flow integration are not implemented. |
+| `Any` | Top type for all non-null values. | Implicit widening is implemented; it lowers to JVM `Object`. `Any?` also accepts nullable values and `null`. `is`-based narrowing and checked/safe casts are implemented for supported targets. |
+| `Unit` | The single unit value, used when a computation has no useful result. | Supported as a type; the `()` literal is distinct from `Never` and has a shared non-null runtime singleton. |
+| `Int` | Integer values. | Supported. |
+| `Char` | One Unicode scalar value, represented as an integer at runtime. | Supported; single-quoted literals and explicit scalar-aware String operations are available. |
+| `Float` | Floating-point values. | Supported. |
+| `Boolean` | Truth values. | Supported. |
+| `String` | Immutable text values backed by `java.lang.String`. | Supported; existing length, search, and substring operations use UTF-16 code-unit indices. Explicit `codePoint*` operations use Unicode scalar indices and replace lone surrogates with U+FFFD; strict variants return `Result<_, UnicodeError>`. |
+
+#### Internal and nominal types
+
+- `Infer` marks a type that resolution has not determined yet. It is not a user-declarable type.
+- `Null` is the internal type of the `null` literal, not a type users can declare. It is assignable
+  to a nullable type, but a binding initialized only with `null` needs an explicit nullable
+  annotation, such as `let value: Int? = null;`.
+- Class and contract declarations resolve to package-qualified nominal types across the current
+    compilation set. Module-qualified identity remains future work.
+
+#### Function types
+
+Function types are structural signatures consisting of an ordered parameter list and a return type:
+
+```zeron
+(Int, String) -> Boolean
+() -> Unit
+```
+
+The function's source name is not part of its structural shape. Lambdas can be stored in bindings
+and passed to or returned from functions; parameter inference is currently contextual and remains a
+prototype. Lambdas may capture immutable bindings by value, including references to shared heap
+objects, but may not implicitly capture reassignable local bindings. The compiler lowers function
+shapes to generated JVM interfaces, but those generated names are not the language-level type
+identity.
+
+#### Nullable types
+
+`T?` describes values of `T` together with `null`. Nullability wraps one non-nullable base type;
+applying `?` to an already-nullable type or to the internal `Null` type is not allowed.
+
+The current assignment rules allow `T` to widen to `T?`, and allow `null` to initialize `T?`. A
+nullable local or parameter can be used as non-null after a proven null check; an `Any` value can be
+refined by a supported `is` test in statement branches and `if` expressions. Refinement does not
+apply to properties, array slots, or globals, and facts after an `if` expression reflect the join of
+both branches. Nullable operands still require proof before ordinary use; see
+the [flow-typing, type-test, and cast design](design-document-08_flow-typing-type-tests-and-casts.md).
+Nullable primitive types have boxed JVM representations, while their source-level identity remains
+distinct from the non-nullable type.
+
+`Any` is the non-null top type and accepts implicit widening from every non-null source type,
+including `Unit`; scalar values are boxed as needed. `Any?` accepts all source types, including
+nullable types and `null`, while `Any?` cannot implicitly narrow to `Any` or another specific type.
+All Unit values use a shared generated `zeron.lang.Unit` singleton, so widening Unit to `Any` preserves the
+non-null distinction from `null`. Conditional `is` tests are implemented for supported runtime
+types. `as T` performs a checked cast whose failure propagates as a JVM runtime exception; `as? T`
+returns null on mismatch or null. Casts to erased generic, array-element, and function-shape types
+are not supported.
+
+#### Type modifiers and compound or structural types
+
+The following is a mix of current syntax, partial representations, and future design sketches; it is
+not a statement that every form is fully implemented.
+
+```text
+Nullable type:       Type?
+Function type:       (Type, ...) -> Type
+Generic type:        Type<Argument, ...>
+Array type:          Array<Type>
+Mutable reference:   &Type
+Discriminated union: type Type = A | B
+```
+
+Nullable and function types have working language-level representations. Generic functions and
+invariant generic classes/contracts support type parameters, substitution, and erased JVM lowering.
+Generic top-level function callbacks have bridge adaptation. Callback values crossing generic nominal
+member boundaries are also adapted through generated helpers and erased contract bridges; broader
+shape coverage remains follow-up work. `Array<T>` is an implemented built-in invariant type
+constructor with its own descriptor, not a user-defined generic class; literals, indexing, and
+`.length` are supported. Empty literals require an expected array type, and
+`zeron.internal.generateArray` initializes every slot through an index callback. The `Type[]`
+spelling remains a syntax proposal; native sums, products, and newtypes are implemented with the
+limits described in [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
+Mutable-reference capability (`&Type`) is preserved in resolved
+types and enforced for array-slot writes, function-view projection, class member mutation, and
+mutable-to-read-only projections.
+
+---
+
+### Variables
+
+In Zeron, a variable is a binding from a name to a value. A binding may omit
+its initializer only when it has an explicit nullable type.
+
+#### Variable declaration
+
+Current variable declaration syntax:
+
+```zeron
+let mut accumulator = 0;
+let ITERATION_LIMIT = 16;
+```
+
+#### Variable type inference
+
+Zeron can infer types for variable declarations whenever the initialization
+expression is resolvable to a well-formed type. If this is not possible,
+the types should be explicitly stated:
+
+```zeron
+let mut currentHighest: Person? = null;
+```
+
+#### Binding declaration grammar
+
+```text
+BindingDeclaration ::= "let" [Mutability] Identifier [TypeAnnotation] [Initializer] ";"
+Mutability         ::= "mut"
+TypeAnnotation     ::= ":" Type
+Initializer        ::= "=" Expression
+```
+
+If a type annotation is omitted, the initializer must provide an inferable type; a bare `null`
+initializer therefore requires an explicit nullable annotation. If the initializer is omitted, the
+type annotation must be nullable. `mut` makes the binding reassignable; it does not modify the type.
+
+---
+
+### Functions
+
+In Zeron, functions are arbitrarily invocable pieces of logic bound to
+a name.
+
+#### Function declaration
+
+Function declarations use `fn` with either a block body or an expression body:
+
+```zeron
+fn multiply(a: Int, b: Int): Int {
+    return a * b;
+}
+
+fn product(a: Int, b: Int): Int = a * b;
+```
+
+#### Invocation
+
+In Zeron, functions invocations follow the C syntax convention:
+
+```zeron
+multiply(a, b);
+```
+
+#### Function type inference
+
+Zeron can infer the return types for functions, given the returned
+expression can be inferred as well:
+
+```zeron
+// can be inferred to (String) -> String
+fn greeting(name: String) {
+    return "Hello, " + name;
+}
+```
+
+#### Function declaration grammar
+
+```text
+FunctionDeclaration ::= "fn" Identifier "(" [ParameterList] ")" [ReturnAnnotation] FunctionBody
+ParameterList       ::= Parameter ("," Parameter)*
+Parameter           ::= Identifier ":" Type
+ReturnAnnotation    ::= ":" Type
+FunctionBody        ::= "=" Expression ";" | Block
+Block               ::= "{" Statement* "}"
+```
+
+Every parameter has an explicit type annotation. The return annotation is optional: an expression
+body without one infers its return type, while a block body without one has type `Unit`. When a
+return annotation is present, the resolver checks an expression body against that type. The `=`
+form is the single-expression body syntax; `->` is used in function types and lambdas, not as an
+alternative named-function body delimiter.
+
+#### Generic functions (first slice)
+
+See the [generic type system status and roadmap](design-document-19_generic-type-system.md) for
+current generic features, limitations, acceptance criteria, and roadmap.
+
+Generic functions declare type parameters after the name and require an explicit return type:
+
+```zeron
+fn identity<T>(value: T): T = value;
+fn apply<T, R>(value: T, transform: (T) -> R): R = transform(value);
+
+identity(42);                  // infer T as Int
+identity<String>("zeron");    // explicit type argument
+```
+
+Type parameters are scoped to the declaration and may appear recursively in parameter, return,
+array, nullable, reference, and function types. Direct calls infer substitutions from arguments;
+explicit type arguments are available when inference is underconstrained. Lambdas receive their
+contextual parameter types after known substitutions are applied, and their body results can infer
+remaining type variables. Generic functions require annotated returns so their schemes are known
+before body resolution.
+
+Unbounded type parameters are opaque in function bodies. A contract-bounded parameter can call that
+contract's non-mutating methods; arithmetic operators on user-defined types require explicit
+`Numeric<T>` evidence, while `/` requires `Fractional<T>`. Built-in primitive arithmetic retains
+intrinsic dispatch, and numeric evidence does not imply algebraic laws. Other type-specific
+operations still need their own contracts or constraints. Contextually typed lambdas remain
+monomorphic; safe immutable let-bound lambdas have a limited rank-1 generalization slice. Generic
+named functions can be referenced as monomorphic
+function values by explicit specialization or expected function type. At runtime, type parameters
+erase to `Object`; direct callback parameters/results and specialized function references crossing
+between erased and concrete function shapes use generated bridge helpers. Nested callbacks, nullable
+callback values, and mutable function views are adapted recursively; broader primitive/reference
+combinations and bridge-reuse coverage remain. Generic classes and contracts are invariant by
+default, with checked declaration-site covariance and use-site projections implemented. Callback
+adaptation across erased member boundaries is implemented. Contract bounds are supported on generic
+functions, methods, classes, and contracts. Class and contract evidence is carried through instances
+for member and default-method dispatch; broader inference remains deferred. See the
+[generic type system roadmap](design-document-19_generic-type-system.md).
+
+---
+
+### Sidetrack: simplest Zeron program
+
+A minimal program using the standard output function is:
+
+```zeron
+import zeron.io.println;
+
+fn main(): Unit {
+    println("Hello world");
+}
+```
+
+---
+
+### Higher order functions and Lambdas
+
+Zeron supports higher-order functions that receive function values. Lambdas and named functions can
+be passed directly when an expected function type is available. Generic named functions may also be
+specialized explicitly:
+
+```zeron
+import zeron.io.println;
+
+fn doSomething(number: Int, action: (Int) -> Unit) {
+    action(number);
+}
+
+doSomething(5, item -> {
+    if (item % 2 == 0) println(item);
+});
+
+fn identity<T>(value: T): T = value;
+let intIdentity: (Int) -> Int = identity::<Int>;
+let stringIdentity: (String) -> String = identity;
+```
+
+#### Lambda syntax
+
+```text
+LambdaExpression             ::= SingleParameterLambda | ParenthesizedLambda
+SingleParameterLambda        ::= Identifier "->" LambdaBody
+ParenthesizedLambda          ::= "(" [LambdaParameterList] ")" "->" LambdaBody
+LambdaParameterList          ::= Identifier ("," Identifier)*
+LambdaBody                   ::= Expression | Block
+Block                        ::= "{" Statement* "}"
+```
+
+Lambda parameters are identifiers without annotations; their types are inferred from the body or
+an expected function type. The bare form is available only for a single parameter. Parentheses are
+required for zero or multiple parameters. An expression body consists of one expression; a block
+body contains statements and uses `return` when it returns a value. Lambdas can be stored and
+returned as values and capture immutable bindings by value; capturing a reassignable local binding
+is rejected. Shared mutation can be performed through a captured mutable reference to a heap object.
+
+### Control Flow
+
+An `if` statement evaluates a Boolean condition and executes exactly one branch. Its `else` branch
+is optional. `return` inside a selected branch exits the current function immediately. Names such as
+`isMalformed`, `Response.error`, and `Json.from` in this example are illustrative APIs, not built-in
+language features.
+
+```zeron
+if (isMalformed(uri)) {
+    return Response.error("URI is malformed: " + uri);
+} else {
+    return Response.success(Json.from(uri));
+}
+```
+
+`if` is also an expression. In this form, each branch produces a value, and the resolver requires
+the branch types to agree. The selected branch supplies the expression's value; nested `else if`
+expressions can represent a multi-way choice.
+
+```zeron
+let x = if (n < 0) then 0 else n;
+
+let x =      if (n <  0) then "negative" 
+        else if (n == 0) then "zero"
+        else if (n >  0) then "positive";
+```
+
+`while` is a pre-test loop: it checks the condition before each iteration, so the body may run zero
+times. The condition must have type `Boolean`.
+
+```zeron
+let mut next = iterator.next();
+while (next.isSome()) {
+    next.fold(value -> consume(value), () -> ());
+    next = iterator.next();
+}
+```
+
+`until` expresses the inverse stopping condition. The body runs while its condition is false and
+stops once that condition becomes true; like `while`, it may run zero times.
+
+```zeron
+import zeron.io.println;
+
+let i = 0;
+until (i == 5) {
+    println(i);
+    i += 1;
+}
+```
+
+`loop` has no condition and therefore continues indefinitely unless control leaves the loop, for
+example with `break;` or by returning from the function. `break;` exits the innermost enclosing
+loop. `continue;` starts the next iteration of the innermost loop: it rechecks the condition for
+`while`, `until`, and `loop`, or advances the element/range before checking again for `for`. Neither
+statement can cross a function or lambda boundary. These constructs are compiled to JVM control
+flow, and loop conditions must have type `Boolean`.
+
+```zeron
+loop {
+    let value = waitForRequest();
+    consume(value);
+}
+```
+
+### Error handling
+
+`zeron.lang.Result<T, E>` represents recoverable failures as ordinary values. Its sum cases `Ok` and
+`Err` can be consumed with exhaustive matching or `fold`, and composed explicitly with `map`,
+`mapError`, and `andThen`. It is a `Monad` over its success type and a `Foldable` that combines an
+`Ok` payload while leaving the accumulator unchanged for `Err`. Propagation syntax remains deferred
+while its interaction with nullability and other sequencing notation is explored. `using` provides
+synchronous lexical resource cleanup; it does not catch arbitrary Java exceptions or make `Result`
+interoperate with raised effects.
+
+For now, scanner/parser and resolver failures are compile-time diagnostics that stop code generation.
+Runtime exceptions from generated JVM code propagate to the host caller; Zeron does not catch or
+translate them or automatically convert them to `Err`. This is the current runtime boundary behavior,
+not a source-level recovery mechanism. Nullable values represent absence only when that is the intended
+meaning, not general errors. Values such as `Response.error(...)` remain ordinary API-level values.
+
+### Ranges and Iterables
+
+`for` supports `Array<T>` values, `zeron.ranges.IntRange` values, and values conforming to the bundled
+`Iterable<T>` contract. The loop evaluates its iterable expression once, binds an immutable element
+name, and supports `break` and `continue`. Arrays use dedicated index-based lowering. Integer range
+literals construct ordinary `IntRange` values whose `next()` returns `Option<Int>` through contract
+dispatch. `None` signals exhaustion; `Some` carries an element. Ranges are inclusive, choose an
+ascending or descending unit step from their
+endpoints, and do not increment after yielding the final endpoint, avoiding integer overflow.
+
+#### Range syntax
+
+You can create a Range with the `..`  operator:
+
+```zeron
+let oneThroughTen = 1..10;
+```
+
+#### Iterables
+
+The `for` form binds an immutable name for each value:
+
+```zeron
+let mut accumulator = 0;
+for (let i in 1..10) {
+    accumulator += i;
+}
+```
+
+The parser requires `let` in the loop header. Empty array literals require a contextual `Array<T>`
+type. Range values can be stored and iterated later like any other iterable.
+
+#### Making an iterable
+
+`Iterator<T>` and `Iterable<T>` are ordinary generic contracts in package `zeron.collections`.
+Collection abstractions also include a lazy `Stream<T>`, a `Sink<T>` contract, and an array-backed
+mutable `List<T>`. The
+`for` protocol recognizes only the fully-qualified `zeron.collections.Iterable<T>` contract; a
+same-named contract in another package
+does not make a type iterable. A custom iterable imports and implements these public contracts
+through ordinary class conformance; arrays retain specialized lowering and ranges use ordinary
+protocol dispatch.
+
+`Stream<T>` operators `map`, `flatMap`, `filter`, `take`, `drop`, `dropWhile`, and `takeWhile` are
+lazy; each traversal requests a fresh iterator from the source, without guaranteeing that the source
+is replayable. `flatMap` traverses each returned `Iterable<T>` before advancing the source. Negative
+`take`/`drop` counts behave like zero. Terminal operations `forEach`, `fold`, `count`, `any`, and
+`all` consume the sequence, with `any` and `all` short-circuiting. Stream adapter iterators are
+anonymous `Iterator<T>` contract objects whose mutable traversal state belongs to each iterator
+instance. `Stream.fromArray` adapts arrays to `Iterable<T>`, while `ArrayIterator` is a public
+array-backed iterator; direct array `for` loops keep their specialized index-based lowering.
+For-expressions over arrays likewise retain direct array iteration in the collected form, while an
+uncollected expression builds a lazy stream.
+
+`List<T>.empty()` creates a growable list, and `List<T>.fromArray(values)` copies an array. Its
+read operations (`size`, `isEmpty`, `at`, and iteration) work through `List<T>`; structural
+mutations (`add`, `insert`, `replaceAt`, `removeAt`, and `clear`) require `&List<T>`. Assigning a
+mutable list reference to a `List<T>` variable gives a read-only view of the same list.
+The backing array stores elements directly; unused capacity is tracked by the list size, so nullable
+elements remain valid without allocating a wrapper object per element.
+
+`Map<K, V>` and `Set<T>` are mutable hash-based collections in `zeron.collections`. Their key types
+must satisfy `Hashable<K>`/`Hashable<T>`; `Hashable<T>` entails `Eq<T>`. The map API provides
+`empty`, `of`, `size`, `isEmpty`, `containsKey`, `lookup`, `put`, `remove`, `clear`, and iteration
+over `Pair<K, V>` values. `lookup` and `remove` return `Option<V>`; `put` returns the previous value
+as an `Option<V>`, so a stored nullable value is distinct from an absent key. The set API provides
+`empty`, `of`, `size`, `isEmpty`, `contains`, `add`, `remove`, `clear`, and iteration over its
+elements; `add` and `remove` report whether the collection changed.
+
+Both collections support nullable keys/elements through nullable `Hashable` evidence. Iteration order
+is unspecified. Lookup and updates are expected constant time on average, with linear worst-case
+behavior under heavy collisions. Keys must retain equality- and hash-relevant state while stored;
+mutating such state can make a key unreachable.
+
+```zeron
+package geometry;
+
+import zeron.collections.Iterable;
+
+public class PersonList is Iterable<Person> {
+    people: Array<Person>;
+    public constructor new;
+    public iterator(): &Iterator<Person> = ...;
+}
+```
+
+### Classes
+
+Classes are nominal reference types with object identity. A class has private fields, one canonical
+constructor that initializes every field in declaration order, and methods with explicit visibility
+and return types. Fields may have fixed initializers; these are evaluated during construction and
+are not overrideable constructor defaults. Only fields without initializers become canonical
+constructor parameters, in declaration order. Initializers may contain literals, operators, and
+reads of earlier fields, but not calls, writes, or lambdas. The canonical constructor is public by
+default; an explicit private declaration can restrict direct construction. Implemented named
+constructors are static factory methods with expression or block bodies and an implicit `&Class`
+result:
+
+```zeron
+class Person {
+    name: String;
+    age: Int;
+    private constructor new;
+    public readAge(): Int = this.age;
+    public constructor fromName(name: String) = Person.new(name, 0);
+    public mut birthday(): Unit {
+        this.age = this.age + 1;
+    }
+}
+
+let person = Person.fromName("Ada");
+```
+
+Construction initializes every field and auto-property exactly once. Omitting a canonical
+declaration synthesizes a public constructor; `private constructor new;` restricts direct
+construction. Fields remain private. Visibility-marked properties generate getters, and `mut`
+properties also generate setters; custom accessors use explicitly declared backing fields. Named
+factories have no `this`; block bodies must return `&Class` on every normal path, and all object
+allocation still goes through canonical `new`. Contracts describe instance behavior and do not
+require named factories; generic construction uses higher-kinded evidence or an explicit factory.
+Methods and properties provide the instance API. Contracts can require method signatures and
+read-only or writable properties; the source design permits multiple declaration-site conformances,
+checked statically, and calls through contract-typed references use interface dispatch, including
+when a class conforms to multiple contracts. Default contract methods and applied contract
+composition with `requires` are implemented. Separate
+`implement` declarations and class inheritance remain deferred.
+
+```zeron
+class PersonList is Iterable<Person> { ... }
+```
+
+#### Mutability
+
+Binding mutability and reference mutation capability are independent. `let mut` allows a name to be
+rebound; it does not grant permission to mutate the referenced object. A plain `T` is a read-only
+view, while `&T` is a mutable view. An immutable binding may hold an `&T`, and a reassignable binding
+may hold a read-only `T`.
+
+Methods that mutate their receiver are marked `mut`; calling them, or a setter that mutates state,
+requires a mutable receiver view. A newly constructed object has a mutable reference view (`&T`),
+which may be projected to read-only `T`; the reverse conversion is not implicit. `&T` does not imply
+exclusive access or borrow checking: aliases may observe mutations.
+
+```zeron
+class Person {
+    age: Int;
+    public constructor new;
+    public mut grow(): Unit {
+        this.age = this.age + 1;
+    }
+}
+
+fn growPerson(person: &Person): Unit {
+    person.grow();
+}
+```
+
+### Typed raised effects
+
+An effect declaration names a nominal payload class. Functions, methods, extension methods, named
+constructors, and function types can declare the effects they may raise:
+
+```zeron
+public effect NotFound {
+    public property path: String;
+}
+
+fn read(path: String): String raises NotFound = raise NotFound.new(path);
+
+fn readOrEmpty(path: String): String = handle (read(path)) with {
+    case NotFound as failure -> "";
+};
+```
+
+Every raised effect in a callable body must either appear in its `raises` clause or be handled by
+an enclosing expression handler. A handler catches only its listed payload types; unmatched raised
+effects are rethrown. Handler arms are expressions, and their raised effects remain visible to the
+enclosing callable. The handler's result type includes the protected expression's normal result and
+the arm results. `raise` has type `Never`. `Result<T, E>` remains an ordinary value and is not
+implicitly translated to or from raised effects. See
+[design-document-13](design-document-13_typed-raised-effects.md) for compatibility, runtime, and
+roadmap details.
+
+### Resource management
+
+Statement-style `using` scopes acquire one or more `&T` values conforming to
+`zeron.resource.Disposable`, dispose them in reverse order, and preserve a primary failure while
+attempting every cleanup. `DisposeFailure` is a typed raised effect, and handlers may bind
+suppressed cleanup outcomes with `with suppressed as name`. The construct is synchronous and does
+not implicitly return a block's final expression. See the
+[resource-management guide](../../guide/26-resource-management.md).

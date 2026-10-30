@@ -7,10 +7,7 @@ import com.maruseron.zeron.analize.Bind;
 import com.maruseron.zeron.analize.ContractComposition;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.*;
-import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.domain.*;
-import com.maruseron.zeron.domain.BindingMutability;
-import com.maruseron.zeron.domain.FloatDescriptor;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
@@ -37,6 +34,7 @@ final class BytecodeEmitter {
         RuntimeSupportEmitter.emitHashSupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitStringUnicodeSupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitBigIntegerSupportClass(context.outputDirectory);
+        RuntimeSupportEmitter.emitNumericSupportClasses(context.outputDirectory);
         RuntimeSupportEmitter.emitJavaArraySupportClass(context.outputDirectory);
         RuntimeSupportEmitter.emitHttpSupportClasses(context.outputDirectory);
         final var signatureDeclarations = context.compilationUnits.stream()
@@ -534,20 +532,44 @@ final class BytecodeEmitter {
             case Expr.Index index -> emitIntrinsicOperation(context, composer, index, true);
             case Expr.IndexAssignment assignment -> emitIntrinsicOperation(context, composer, assignment, true);
             case Expr.Assignment assignment -> {
-                final var binding = context.symbols.getSymbol(assignment.resolvedSymbolToken());
-                emitExpr(context, composer, assignment.value);
-                emitConversion(context, composer, context.lastEmittedType, binding.type());
-                duplicateValue(context, composer, binding.type());
-                if (binding.lvt() == SymbolTable.GLOBAL) {
-                    composer.putstatic(ClassDesc.of(holderForDeclaration(context, binding.declaration())),
-                            globalFieldName(binding, assignment.name),
-                            TypeDescriptor.toJavaClassDesc(binding.type()));
+                if (assignment.dataFieldOwner() != null) {
+                    final var fieldType = TypeSubstitution.erase(assignment.dataFieldType());
+                    emitExpr(context, composer, assignment.value);
+                    emitConversion(context, composer, context.lastEmittedType, fieldType);
+                    final var temporary = new Token(TokenType.IDENTIFIER,
+                            "$dataFieldAssign$" + assignment.name.span().start().line()
+                                    + "$" + assignment.name.span().start().column()
+                                    + "$" + assignment.name.lexeme(), null, assignment.name.span());
+                    final var slot = context.symbols.declareSymbol(
+                            Resolver.SYNTHETIC_VAR, temporary, fieldType, BindingMutability.IMMUTABLE);
+                    context.symbols.define(temporary);
+                    composer.storeLocal(TypeKind.fromDescriptor(
+                            TypeDescriptor.toJavaClassDesc(fieldType).descriptorString()),
+                            slot + context.localSlotOffset);
+                    composer.aload(0);
+                    NominalTypeEmitter.loadLocal(context, composer,
+                            slot + context.localSlotOffset, fieldType);
+                    composer.putfield(ClassDesc.of(assignment.dataFieldOwner()),
+                            assignment.name.lexeme(), TypeDescriptor.toJavaClassDesc(fieldType));
+                    NominalTypeEmitter.loadLocal(context, composer,
+                            slot + context.localSlotOffset, fieldType);
+                    context.lastEmittedType = fieldType;
                 } else {
-                    composer.storeLocal(
-                            TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(binding.type()).descriptorString()),
-                            binding.lvt() + context.localSlotOffset);
+                    final var binding = context.symbols.getSymbol(assignment.resolvedSymbolToken());
+                    emitExpr(context, composer, assignment.value);
+                    emitConversion(context, composer, context.lastEmittedType, binding.type());
+                    duplicateValue(context, composer, binding.type());
+                    if (binding.lvt() == SymbolTable.GLOBAL) {
+                        composer.putstatic(ClassDesc.of(holderForDeclaration(context, binding.declaration())),
+                                globalFieldName(binding, assignment.name),
+                                TypeDescriptor.toJavaClassDesc(binding.type()));
+                    } else {
+                        composer.storeLocal(
+                                TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(binding.type()).descriptorString()),
+                                binding.lvt() + context.localSlotOffset);
+                    }
+                    context.lastEmittedType = binding.type();
                 }
-                context.lastEmittedType = binding.type();
             }
             case Expr.CoalesceAssignment assignment -> ExpressionFlowEmitter.emitCoalesceAssignment(context, composer, assignment);
             case Expr.Binary binary -> {
@@ -727,7 +749,10 @@ final class BytecodeEmitter {
                 context.lastEmittedType = literal.getType();
             }
             case Expr.Literal literal -> {
-                switch (literal.value) {
+                if (literal.numericConversionCall() != null) {
+                    emitMemberCall(context, composer, literal.numericConversionCall());
+                    context.lastEmittedType = literal.getType();
+                } else switch (literal.value) {
                     case String s -> {
                         composer.ldc(s);
                         context.lastEmittedType = TypeDescriptor.ofString();
@@ -818,7 +843,16 @@ final class BytecodeEmitter {
                                 variable.resolvedSymbolToken(), variable.storedFunctionType(),
                                 (FunctionDescriptor) variable.getType(), variable.evidenceArguments());
                     } else {
-                        emitVariable(context, composer, variable.resolvedSymbolToken());
+                        final var declaration = variable.resolvedValueDeclaration();
+                        final var owner = declaration == null ? null : context.metadata.valueOwner(declaration);
+                        if (owner == null) {
+                            emitVariable(context, composer, variable.resolvedSymbolToken());
+                        } else {
+                            composer.invokestatic(ClassDesc.of(owner),
+                                    DeclarationEmitter.topLevelValueAccessorName(declaration.name().lexeme()),
+                                    MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(variable.getType())));
+                            context.lastEmittedType = variable.getType();
+                        }
                     }
                     if (!(variable.getType() instanceof InferDescriptor)
                             && !context.lastEmittedType.equals(variable.getType())) {
@@ -1027,9 +1061,9 @@ final class BytecodeEmitter {
     }
 
     static List<EvidenceField> evidenceFields(final CompilationContext context,
-                                             final List<TypeParameterDescriptor> typeParameters,
-                                             final String namespace,
-                                             final String ownerName) {
+                                              final List<TypeParameterDescriptor> typeParameters,
+                                              final String namespace,
+                                              final String ownerName) {
         final var fields = new ArrayList<EvidenceField>();
         final var ownerKey = ownerName.replace('.', '$');
         for (int parameterIndex = 0; parameterIndex < typeParameters.size(); parameterIndex++) {
@@ -1092,8 +1126,8 @@ final class BytecodeEmitter {
     }
 
     static void emitEvidenceArguments(final CompilationContext context,
-                                     final CodeBuilder composer,
-                                     final List<Expr.EvidenceArgument> evidence) {
+                                      final CodeBuilder composer,
+                                      final List<Expr.EvidenceArgument> evidence) {
         for (final var argument : evidence) {
             if (argument.forwardToken() != null) {
                 emitVariable(context, composer, argument.forwardToken());
@@ -1328,8 +1362,8 @@ final class BytecodeEmitter {
         if (call.witnessEvidenceToken() != null) {
             emitVariable(context, composer, call.witnessEvidenceToken());
             final var factoryType = call.witnessFactoryType();
-            final var receiverOffset = call.witnessEvidenceIsMethod() ? 1 : 0;
-            if (call.witnessEvidenceIsMethod() && !receiverOnStack) {
+            final var receiverOffset = call.witnessEvidenceHasReceiver() ? 1 : 0;
+            if (call.witnessEvidenceHasReceiver() && !receiverOnStack) {
                 emitExpr(context, composer, call.receiver);
                 emitConversion(context, composer, context.lastEmittedType,
                         TypeSubstitution.erase(factoryType.parameters().getFirst()));
@@ -1358,13 +1392,14 @@ final class BytecodeEmitter {
             if (owner == null) {
                 throw new IllegalStateException("Resolved witness helper owner not found.");
             }
-            if (!receiverOnStack) {
+            if (call.witnessMethodHasReceiver() && !receiverOnStack) {
                 emitExpr(context, composer, call.receiver);
             }
             for (int index = 0; index < call.arguments.size(); index++) {
                 emitExpr(context, composer, call.arguments.get(index));
                 emitConversion(context, composer, context.lastEmittedType,
-                        TypeSubstitution.erase(helperType.parameters().get(index + 1)));
+                        TypeSubstitution.erase(helperType.parameters().get(
+                                index + (call.witnessMethodHasReceiver() ? 1 : 0))));
             }
             emitEvidenceArguments(context, composer, call.evidenceArguments());
             composer.invokestatic(ClassDesc.of(owner), call.witnessMethodName(),

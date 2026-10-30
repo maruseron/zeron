@@ -1,17 +1,46 @@
 package zeron.lang;
 
-import zeron.algebra.Addition;
-import zeron.algebra.Mult;
+import zeron.numeric.Integral;
+import zeron.numeric.Integer;
+import zeron.numeric.Rational;
 
-witness Addition<Long> for Long {
+witness Integral<Long> for Long {
     fn add(other: Long): Long = this + other;
-    fn zero(): Long = 0L;
-    fn negate(): Long = -this;
-}
-
-witness Mult<Long> for Long {
+    fn subtract(other: Long): Long = this - other;
     fn multiply(other: Long): Long = this * other;
-    fn one(): Long = 1L;
+    fn negate(): Long = -this;
+    fn abs(): Long = if (this < 0L) then -this else this;
+    fn signum(): Long = if (this < 0L) then -1L else if (this > 0L) then 1L else 0L;
+    static fn fromInteger(value: Integer): Long = value.toLongExact();
+
+    fn quot(other: Long): Long = this / other;
+    fn rem(other: Long): Long = this % other;
+    fn div(other: Long): Long {
+        let quotient = this / other;
+        let remainder = this % other;
+        if (remainder != 0L and ((this < 0L and other > 0L) or (this > 0L and other < 0L))) {
+            return quotient - 1L;
+        }
+        return quotient;
+    }
+    fn mod(other: Long): Long {
+        let remainder = this % other;
+        if (remainder != 0L and ((this < 0L and other > 0L) or (this > 0L and other < 0L))) {
+            return remainder + other;
+        }
+        return remainder;
+    }
+    fn toInteger(): Integer = Integer.fromLong(this);
+    fn toRational(): Rational = Rational.fromInteger(this.toInteger());
+
+    fn hash(): Int = java.lang.Long.hashCode(this);
+    fn eq(other: Long): Boolean = this == other;
+
+    fn compareTo(other: Long): Ordering {
+             if (this == other) return Ordering.EQ();
+        else if (this  < other) return Ordering.LT();
+        else                    return Ordering.GT();
+    }
 }
 
 public extension Long {

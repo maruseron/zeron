@@ -1,50 +1,26 @@
 # Operator overloading
 
-Zeron supports a small set of user-defined and generic operators through explicit algebraic
-contracts. A type does not gain operator behavior merely because it has a similarly named method:
-the required contract must be in its conformance or available as witness evidence.
-
-## Algebraic capabilities
-
-The standard library defines four contracts in `zeron.algebra`:
-
-- `Add<T>` provides `add(other)` and the additive identity `zero()`.
-- `Addition<T>` requires `Add<T>` and adds `negate()`.
-- `Mult<T>` provides `multiply(other)` and the multiplicative identity `one()`.
-- `Multiplication<T>` requires `Mult<T>` and adds `reciprocal()`.
-
-The initial operator mapping is:
-
-| Operator | Required contract | Operation |
-| -------- | ---------------- | --------- |
-| `+` | `Add<T>` | Add the right value to the left. |
-| `*` | `Mult<T>` | Multiply the values. |
-| unary `-` | `Addition<T>` | Negate the value. |
-| binary `-` | `Addition<T>` | Add the negation of the right value. |
-
-For example, a generic addition function states its requirement explicitly:
+Arithmetic operators use numeric contract evidence; a similarly named method alone does not
+enable an operator. Generic code must state the required numeric bound explicitly:
 
 ```zeron
-import zeron.algebra.Add;
+import zeron.numeric.Numeric;
+import zeron.numeric.Fractional;
 
-fn add<T: mut + Add<T>>(left: T, right: T): T = left + right;
+fn add<T: Numeric<T>>(left: T, right: T): T = left + right;
+fn divide<T: Fractional<T>>(left: T, right: T): T = left / right;
 ```
 
-The same function can use the compiler-provided evidence for supported numeric types or an
-applicable implementation for a user-defined type. `Int` and `Long` support additive and
-multiplicative operations but do not provide `Multiplication`, because zero has no multiplicative
-inverse. `Float` supports all four contracts.
+`Numeric<T>` provides `+`, `-`, unary `-`, and `*`. `/` requires `Fractional<T>`. Built-in
+`Int`, `Long`, and `Float` operations retain their intrinsic behavior; numeric evidence enables the
+same syntax for types such as `Integer` and `Rational`. `String + T` keeps its existing display
+behavior. Operands and results use the same type, and the compiler does not infer numeric bounds or
+mixed-type promotions.
 
-## Built-in behavior and limits
+Numeric operators do not imply associativity, identity, inverse, commutativity, or other algebraic
+laws. General algebraic abstractions can remain independent of the numeric hierarchy.
 
-Concrete arithmetic on `Int`, `Long`, and `Float` keeps its intrinsic behavior. `String + T` keeps
-its existing `Display<T>` behavior and takes precedence over algebraic `Add<T>` evidence. For
-generic code, operator requirements are not inferred: declare the corresponding contract bound.
-Operands and results in this initial operator set use the same type; mixed-type promotion is not
-inferred.
-
-Although `Multiplication<T>` provides `reciprocal`, `/` is not overloaded. The compiler checks
-required methods and types, but it does not prove associativity, identities, inverses, commutativity,
-or any other algebraic law. The
-[operator-overloading proposal](../documents/zeps/ZEP-0036.md) records the complete evidence matrix
-and compatibility rules.
+For the complete hierarchy, exact literal conversion, and built-in numeric types, see
+[Numeric hierarchy and exact literals](33-numeric-hierarchy-and-exact-literals.md). The historical
+[ZEP-0036](../documents/zeps/ZEP-0036.md) describes the original algebraic-operator design; its
+operator mapping was superseded by [ZEP-0071](../documents/zeps/ZEP-0071.md).

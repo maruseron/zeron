@@ -1,0 +1,114 @@
+package zeron.function;
+
+import zeron.collections.Map;
+
+/// The identity function.
+public fn identity<A: mut>(a: A): A = a;
+
+/*
+
+/// Returns a new nullary function that, given a value `c`, will always
+/// return `c`.
+public fn supply<A: mut>(c: A): () -> A = 
+    () -> c;
+
+/// Returns a new function that, given a value `c` and regardless of input, 
+/// will always return `c`.
+public fn constant<A: mut, B: mut>(c: B): (A) -> B =
+    x -> c;
+
+// core combiners 
+
+/// Returns a new function that, given two functions `f` and `g` passes an 
+/// argument through `f`, then `g`, so that
+/// ```zeron
+/// compose(g, f)(x) == g(f(x))
+/// ```
+/// `pipe` is the inverse of this function.
+public fn compose<A: mut, B: mut, C: mut>(g: (B) -> C, f: (A) -> B): (A) -> C =
+    x -> g(f(x));
+
+/// Returns a new function that, given two functions `f` and `g` passes an 
+/// argument through `f`, then `g`, so that
+/// ```zeron
+/// pipe(f, g)(x) == g(f(x))
+/// ```
+/// `compose` is the inverse of this function.
+public fn pipe<A: mut, B: mut, C: mut>(f: (A) -> B, g: (B) -> C): (A) -> C =
+    x -> g(f(x));
+
+/// Returns a new function that flips the order of the arguments in `f`.
+public fn flip<A: mut, B: mut, C: mut>(f: (A, B) -> C): (B, A) -> C =
+    (b, a) -> f(a, b);
+
+// TODO: the inference engine cannot infer b. work on this!
+// NOTE: the inference engine CAN infer it, the plumbing is just not set up
+//public fn curry2<A: mut, B: mut, C: mut>(f: (A, B) -> C): (A) -> (B) -> C =
+//    a -> b -> f(a, b);
+
+// helper for inference since nested lambdas don't work yet
+fn applyFirst<A: mut, B: mut, C: mut>(
+    f: (A, B) -> C,
+    a: A
+): (B) -> C = b -> f(a, b);
+
+public fn curry<A: mut, B: mut, C: mut>(f: (A, B) -> C): (A) -> (B) -> C =
+    a -> applyFirst(f, a);
+
+//public fn curry3<A: mut, B: mut, C: mut, D: mut>(f: (A, B, C) -> D): (A) -> (B) -> (C) -> D =
+//    a -> b -> c -> f(a, b, c);
+
+// TODO: the resolver won't let you call an expression. work on this!
+//public fn uncurry2<A: mut, B: mut, C: mut>(f: (A) -> (B) -> C): (A, B) -> C
+//    (a, b) -> f(a)(b);
+
+*/
+
+// predicates
+
+/*
+
+// TODO: predicates cause an IllegalStateException for boolean boxing:
+// java.lang.IllegalStateException: Missing function adapter for 
+//           TypeDescriptor.Function(TypeDescriptor.Nominal[java.lang.Object]) -] TypeDescriptor.Boolean 
+//        to TypeDescriptor.Function(TypeDescriptor.Nominal[java.lang.Object]) -] TypeDescriptor.Nominal[java.lang.Object]
+//   at com.maruseron.zeron.compile.LambdaSupportEmitter.emitFunctionAdapter(LambdaSupportEmitter.java:259)
+
+/// Returns a new function that, given a boolean-valued function `p`,
+/// inverts its result.
+public fn negate<A: mut>(p: (A) -> Boolean): (A) -> Boolean =
+    a -> not p(a);
+
+/// Returns a new function that, given two boolean-valued functions `f` and `g` 
+/// and any value `a`, returns `true` when both f(a) and g(a) are true.
+/// This operation is short circuiting, and the predicates will be evaluated in order.
+public fn both<A: mut>(f: (A) -> Boolean, g: (A) -> Boolean): (A) -> Boolean =
+    a -> f(a) and g(a);
+
+/// Returns a new function that, given two boolean-valued functions `f` and `g` 
+/// and any value `a`, returns `true` when either f(a) or g(a) are true.
+/// This operation is short circuiting, and the predicates will be evaluated in order.
+public fn either<A: mut>(f: (A) -> Boolean, g: (A) -> Boolean): (A) -> Boolean =
+    a -> f(a) or g(a);
+
+*/
+
+/// Returns a new function that wraps a given unary function `f` with a caching mechanism 
+/// to store and reuse previously computed results for identical inputs.
+/// This operation requires the argument type `A` to satisfy the Hashable contract.
+public fn memoize<A: Hashable<A>, B: mut>(f: (A) -> B): (A) -> B {
+    let cache = Map.empty<A, B>();
+    
+    return a -> cache.computeIfAbsent(a, k -> f(k));
+}
+
+/// Debugging mixin that enables peeking operations on a container.
+/// Purity is not enforced, but mutating this or any object through
+/// `Peekable.peek` is heavily discouraged.
+public contract Peekable<T<_>> {
+
+    /// Invokes the provided function with `this` as an argument, then returns `this`.
+    /// This function only exists for debugging purposes and should generally be
+    /// avoided in production code.
+    peek<A>(this: T<A>, action: (A) -> Unit): A;
+}

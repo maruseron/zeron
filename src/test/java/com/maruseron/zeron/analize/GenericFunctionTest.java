@@ -864,7 +864,7 @@ public final class GenericFunctionTest {
                 final var adapterCount = java.util.Arrays.stream(program.getDeclaredMethods())
                         .filter(method -> method.getName().startsWith("$adapter$"))
                         .count();
-                assertEquals(9, adapterCount);
+                assertEquals(11, adapterCount);
             }
         } finally {
             Files.deleteIfExists(classFile);

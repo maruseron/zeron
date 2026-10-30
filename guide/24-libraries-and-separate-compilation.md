@@ -40,5 +40,5 @@ launches.
 
 Dependency fetching, lockfiles, incremental compilation, and configurable packaging are not
 provided by the current project model; dependencies are local paths. See
-[design document 11](../documents/design-document-11_compilation-libraries-and-host-integration.md)
+[design document 11](../documents/design_documents/design-document-11_compilation-libraries-and-host-integration.md)
 for the manifest and library compatibility details.

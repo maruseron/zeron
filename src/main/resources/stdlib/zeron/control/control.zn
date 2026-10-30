@@ -1,19 +1,96 @@
 package zeron.control;
 
+import zeron.function.identity;
+
+/// A functor is a type that, given a any types `A` and `B`, lets you
+/// apply a function `(A) -> B` to turn an `F<A>` into an `F<B>`.\
+/// This is a structure-preserving transformation.
+///
+/// Functors must adhere to the following laws:
+///
+/// ```zeron
+/// f.map(a -> a)       == f
+/// f.map(a -> g(h(a))) == f.map(h).map(g)
+/// ```
 public contract Functor<F<_>> {
     map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
 }
 
+fn applySecond<A: mut, B: mut, C: mut>(
+    combine: (A, B) -> C,
+    second: B
+): (A) -> C = first -> combine(first, second);
+
+/// An Applicative is a type that, given any types `A` and `B`, lets you
+/// pass expressions to a previously stored computation
 public contract Applicative<F<_>> requires Functor<F> {
     pure<A: mut>(value: A): F<A>;
+    ap<A: mut, B: mut>(this: F<A>, transform: F<(A) -> B>): F<B>;
 
-    ap<A: mut, B: mut>(this: F<(A) -> B>, values: F<A>): F<B>;
+    default map2<A: mut, B: mut, C: mut>(
+        first: F<A>,
+        second: F<B>,
+        combine: (A, B) -> C
+    ): F<C> = first.ap(second.map((b) -> applySecond(combine, b)));
 }
 
-public contract Monad<F<_>> requires Applicative<F> {
-    flatMap<A: mut, B: mut>(this: F<A>, transform: (A) -> F<B>): F<B>;
+public contract Monad<M<_>> requires Applicative<M> {
+    flatMap<A: mut, B: mut>(this: M<A>, transform: (A) -> M<B>): M<B>;
+
+    default flatten<A: mut>(this: M<M<A>>): M<A> =
+        // TODO: this.flatMap(identity);
+        //                    ^ Conflicting type inferences for 'A': 
+        //     AppliedConstructorDescriptor[constructor=TypeParameter[M], 
+        //                                  argument=TypeParameter[A]] 
+        // and AppliedConstructorDescriptor[constructor=TypeParameter[M], 
+        //                                  argument=TypeParameter[B]].
+        //
+        // identity::<M<A>> does fix it - why?
+        //this.flatMap(identity::<M<A>>);
+        this.flatMap(ma -> ma);
 }
+
+public contract Semigroup<A: mut> {
+    combine(other: A): A;
+}
+
+public contract Monoid<A: mut> requires Semigroup<A> {
+    static empty(): A;
+}
+
+public contract Alternative<F<_>> requires Applicative<F> {
+    empty<A: mut>(): F<A>;
+    orElse<A: mut>(this: F<A>, other: F<A>): F<A>;
+}
+
+public contract MonadPlus<M<_>> requires Alternative<M> + Monad<M> {}
 
 public contract Foldable<F<_>> {
     foldLeft<A: mut, B: mut>(this: F<A>, initial: B, combine: (B, A) -> B): B;
+
+    default count<A: mut>(this: F<A>): Int = 
+        this.foldLeft(0, (c, _) -> c + 1);
+
+    default isEmpty<A: mut>(this: F<A>): Boolean = 
+        this.foldLeft(true, (accumulator, item) -> false);
+}
+
+public contract Traversable<T<_>> requires Functor<T> + Foldable<T> {
+    traverse<G<_>: Applicative<G>, A: mut, B: mut>(this: T<A>, transform: (A) -> G<B>): G<T<B>>;
+
+    default sequence<G<_>: Applicative<G>, A: mut>(this: T<G<A>>): G<T<A>> =
+        this.traverse(ga -> ga);
+}
+
+public contract Comonad<W<_>> requires Functor<W> {
+    extract<A: mut>(this: W<A>): A;
+    extend<A: mut, B: mut>(this: W<A>, transform: (W<A>) -> B): W<B>;
+
+    default duplicate<A: mut>(this: W<A>): W<W<A>> = 
+        this.extend(wa -> wa);
+}
+
+public contract Category<Cat<_>> {
+    id<A: mut>(this: Cat<A>): A;
+    compose<A: mut, B: mut, C: mut>(this: (A) -> B, other: (B) -> C): (A) -> C;
 }

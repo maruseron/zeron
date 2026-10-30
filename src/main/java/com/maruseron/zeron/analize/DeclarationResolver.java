@@ -4,6 +4,8 @@ import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.diagnostic.DiagnosticHelp;
+import com.maruseron.zeron.diagnostic.SourceSpan;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
@@ -243,46 +245,56 @@ final class DeclarationResolver {
     private static void resolveContractMethod(final ResolutionContext context, final Stmt.ContractDecl owner,
                                        final Stmt.ContractMethod method) {
         final var enclosingEffects = method.isDefault() ? RaisedEffectFlow.beginCallable(context) : null;
+        final var methodType = owner.higherKinded() && method.isDefault()
+                ? HktDefaultSupport.effectiveMethodType(context.contracts, owner, method)
+                : method.typeDescriptor();
+        final var previousTypeSubstitutions = context.activeTypeSubstitutions;
+        context.activeTypeSubstitutions = owner.higherKinded() && method.isDefault()
+                ? HktDefaultSupport.ownerParameterSubstitutions(context.contracts, owner)
+                : Map.of();
         beginScope(context);
-        context.frame.expectedReturnTypes.push(method.typeDescriptor().returnType());
+        context.frame.expectedReturnTypes.push(methodType.returnType());
         final var enclosingFlow = context.frame.flowState;
         final var enclosingLoopDepth = context.frame.loopDepth;
         context.frame.flowState = new FlowState();
         context.frame.loopDepth = 0;
         final var thisToken = new Token(TokenType.THIS, "this", null, method.name().span());
-        final TypeDescriptor ownerType = owner.typeParameters().isEmpty()
-                ? TypeDescriptor.of(owner.name().lexeme())
-                : TypeDescriptor.genericOf(TypeDescriptor.ofName(owner.name().lexeme()),
-                        owner.typeParameters().stream().map(parameter -> (TypeDescriptor) parameter).toList());
-        final var thisType = method.isMutating()
-                ? new ReferenceDescriptor(ownerType)
-                : ownerType;
-        declare(context, SYNTHETIC_VAR, thisToken, thisType, BindingMutability.IMMUTABLE);
-        define(context, thisToken);
+        if (!owner.higherKinded()) {
+            final TypeDescriptor ownerType = owner.typeParameters().isEmpty()
+                    ? TypeDescriptor.of(owner.name().lexeme())
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(owner.name().lexeme()),
+                            owner.typeParameters().stream().map(parameter -> (TypeDescriptor) parameter).toList());
+            final var thisType = method.isMutating()
+                    ? new ReferenceDescriptor(ownerType)
+                    : ownerType;
+            declare(context, SYNTHETIC_VAR, thisToken, thisType, BindingMutability.IMMUTABLE);
+            define(context, thisToken);
+        }
         for (int i = 0; i < method.parameters().size(); i++) {
             final var parameter = method.parameters().get(i);
             if (i < Stmt.fixedArity(method.parameters(), method.variadic())
                     && !method.defaultValues().isEmpty() && i >= method.minimumArity()) {
                 final var defaultValue = method.defaultValues().get(i - method.minimumArity());
-                final var expected = method.typeDescriptor().parameters().get(i);
+                final var expected = methodType.parameters().get(i);
                 final var resolvedDefault = MemberInteropResolver.resolveArgument(context, defaultValue, expected);
                 ensureAssignable(context, expected, resolvedDefault, method.name());
             }
-            declare(context, SYNTHETIC_VAR, parameter, method.typeDescriptor().parameters().get(i),
+            declare(context, SYNTHETIC_VAR, parameter, methodType.parameters().get(i),
                     BindingMutability.IMMUTABLE);
             define(context, parameter);
         }
         try {
             if (method.isDefault()) {
                 resolveStmts(context, method.body());
-                ensureReturns(context, method.name(), method.typeDescriptor().returnType(), method.body());
-                RaisedEffectFlow.verifyCallable(context, method.typeDescriptor().raisedEffects(), method.name());
+                ensureReturns(context, method.name(), methodType.returnType(), method.body());
+                RaisedEffectFlow.verifyCallable(context, methodType.raisedEffects(), method.name());
             }
         } finally {
             context.frame.expectedReturnTypes.pop();
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            context.activeTypeSubstitutions = previousTypeSubstitutions;
             if (enclosingEffects != null) RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
@@ -297,139 +309,207 @@ final class DeclarationResolver {
     }
 
     static void resolveClass(final ResolutionContext context, final Stmt.ClassDecl declaration) {
-        declaration.typeParameters().forEach(parameter ->
-                TypeResolver.validateTypeParameterBound(context, parameter, declaration.name()));
+        for (final var parameter : declaration.typeParameters()) {
+            Resolver.attemptMember(context,
+                    () -> TypeResolver.validateTypeParameterBound(context, parameter, declaration.name()));
+        }
         if (declaration.isEffect() && (!declaration.typeParameters().isEmpty()
                 || !declaration.contractUses().isEmpty() || !declaration.methods().isEmpty()
                 || declaration.properties().stream().anyMatch(property -> !property.isPublic()))) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+            Resolver.attemptMember(context, () -> Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     declaration.name(),
                     "Effects are non-generic payload classes; they cannot implement contracts or declare methods, "
-                            + "and payload properties must be public."));
+                            + "and payload properties must be public.")));
         }
         final var fieldNames = new HashSet<String>();
+        final var invalidFields = Collections.newSetFromMap(new IdentityHashMap<Stmt.Field, Boolean>());
         for (final var field : declaration.fields()) {
-            if (!fieldNames.add(field.name().lexeme())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        field.name(), "Duplicate class member."));
-            }
-            TypeResolver.validateType(context, field.type(), field.name());
+            if (!Resolver.attemptMember(context, () -> {
+                if (!fieldNames.add(field.name().lexeme())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            field.name(), "Duplicate class member."));
+                }
+                TypeResolver.validateType(context, field.type(), field.name());
+            })) invalidFields.add(field);
         }
 
+        final var invalidNamedConstructors =
+                Collections.newSetFromMap(new IdentityHashMap<Stmt.NamedConstructor, Boolean>());
         for (final var constructor : declaration.namedConstructors()) {
-            if (declaration.namedConstructors().stream().anyMatch(existing -> existing != constructor
-                    && existing.name().lexeme().equals(constructor.name().lexeme()))) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        constructor.name(), "Duplicate class constructor name."));
-            }
-            TypeResolver.validateFunctionTypes(context, constructor.typeDescriptor(), constructor.name());
-            TypeResolver.validateTypeParameterBounds(context, constructor.typeDescriptor(), constructor.name());
+            if (!Resolver.attemptMember(context, () -> {
+                if (declaration.namedConstructors().stream().anyMatch(existing -> existing != constructor
+                        && existing.name().lexeme().equals(constructor.name().lexeme()))) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            constructor.name(), "Duplicate class constructor name."));
+                }
+                TypeResolver.validateFunctionTypes(context, constructor.typeDescriptor(), constructor.name());
+                TypeResolver.validateTypeParameterBounds(
+                        context, constructor.typeDescriptor(), constructor.name());
+            })) invalidNamedConstructors.add(constructor);
         }
-        validateLiteralSuffixes(declaration);
+        Resolver.attemptMember(context, () -> validateLiteralSuffixes(declaration));
 
+        final var invalidProperties =
+                Collections.newSetFromMap(new IdentityHashMap<Stmt.Property, Boolean>());
         for (final var property : declaration.properties()) {
-            if (!fieldNames.add(property.name().lexeme())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        property.name(), "Duplicate class member."));
-            }
-            TypeResolver.validateType(context, property.type(), property.name());
-            if (property.isMutating() && property.setterBody() == null && property.isCustom()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        property.name(),
-                        "A writable custom property requires a setter."));
-            }
+            if (!Resolver.attemptMember(context, () -> {
+                if (!fieldNames.add(property.name().lexeme())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            property.name(), "Duplicate class member."));
+                }
+                TypeResolver.validateType(context, property.type(), property.name());
+                if (property.isMutating() && property.setterBody() == null && property.isCustom()) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                            property.name(), "A writable custom property requires a setter."));
+                }
+            })) invalidProperties.add(property);
         }
         final var methodNames = new HashSet<String>();
+        final var invalidMethods = Collections.newSetFromMap(new IdentityHashMap<Stmt.Method, Boolean>());
         for (final var method : declaration.methods()) {
-            if (fieldNames.contains(method.name().lexeme()) || !methodNames.add(method.name().lexeme())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        method.name(), "Duplicate class member."));
-            }
-
-            TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
-            TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
+            if (!Resolver.attemptMember(context, () -> {
+                if (fieldNames.contains(method.name().lexeme()) || !methodNames.add(method.name().lexeme())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            method.name(), "Duplicate class member."));
+                }
+                TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
+                TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
+            })) invalidMethods.add(method);
         }
         final var patternNames = new HashSet<String>();
+        final var invalidPatterns = Collections.newSetFromMap(new IdentityHashMap<Stmt.Pattern, Boolean>());
         for (final var pattern : declaration.patterns()) {
-            if (!patternNames.add(pattern.name().lexeme())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        pattern.name(), "Duplicate class pattern name."));
-            }
-            if (declaration.properties().stream()
-                    .anyMatch(property -> property.name().lexeme().equals(pattern.name().lexeme()))) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        pattern.name(), "A class pattern cannot have the same name as a property."));
-            }
-            final var outputNames = new HashSet<String>();
-            for (final var output : pattern.outputs()) {
-                if (!outputNames.add(output.name().lexeme())) {
+            if (!Resolver.attemptMember(context, () -> {
+                if (!patternNames.add(pattern.name().lexeme())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                            output.name(), "Duplicate pattern output name."));
+                            pattern.name(), "Duplicate class pattern name."));
                 }
-                TypeResolver.validateType(context, output.type(), output.name());
-            }
+                if (declaration.properties().stream()
+                        .anyMatch(property -> property.name().lexeme().equals(pattern.name().lexeme()))) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            pattern.name(), "A class pattern cannot have the same name as a property."));
+                }
+                final var outputNames = new HashSet<String>();
+                for (final var output : pattern.outputs()) {
+                    if (!outputNames.add(output.name().lexeme())) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                                output.name(), "Duplicate pattern output name."));
+                    }
+                    TypeResolver.validateType(context, output.type(), output.name());
+                }
+            })) invalidPatterns.add(pattern);
         }
 
         final var contractNames = new HashSet<String>();
+        final var invalidContractUses =
+                Collections.newSetFromMap(new IdentityHashMap<Stmt.ContractUse, Boolean>());
         for (final var contractUse : declaration.contractUses()) {
-            final var contractName = contractUse.name();
-            if (!contractNames.add(contractName.lexeme())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        contractName, "Duplicate contract conformance."));
-            }
-            final var contract = context.contracts.get(contractName.lexeme());
-            if (contract == null) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND,
-                        contractName, "Unknown contract."));
-            }
-            ensureTypeAccessible(context, contractName.lexeme(), contractName, contract.isPublic());
-            if (contract.typeParameters().size() != contractUse.typeArguments().size()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                        contractName,
-                        "Expected " + contract.typeParameters().size() + " contract type arguments, found "
-                                + contractUse.typeArguments().size() + "."));
-            }
-            validateContractUse(context, contractUse);
-            if (contract.isSealed() && contract.permittedClasses().stream()
-                    .noneMatch(permitted -> permitted.name().lexeme().equals(declaration.name().lexeme()))) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                        contractName,
-                        "Class is not listed in the sealed contract's permits clause."));
-            }
-
+            if (!Resolver.attemptMember(context, () -> {
+                final var contractName = contractUse.name();
+                if (!contractNames.add(contractName.lexeme())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            contractName, "Duplicate contract conformance."));
+                }
+                final var contract = context.contracts.get(contractName.lexeme());
+                if (contract == null) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND,
+                            contractName, "Unknown contract."));
+                }
+                ensureTypeAccessible(context, contractName.lexeme(), contractName, contract.isPublic());
+                if (contract.typeParameters().size() != contractUse.typeArguments().size()) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                            contractName,
+                            "Expected " + contract.typeParameters().size() + " contract type arguments, found "
+                                    + contractUse.typeArguments().size() + "."));
+                }
+                validateContractUse(context, contractUse);
+                if (ContractComposition.hasStaticMethods(context, contractUse)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                            contractName,
+                            "Contracts with static methods must be implemented through a witness, not class "
+                                    + "conformance. Remove this 'is' clause and declare a witness instead."));
+                }
+                if (contract.isSealed() && contract.permittedClasses().stream()
+                        .noneMatch(permitted -> permitted.name().lexeme().equals(declaration.name().lexeme()))) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                            contractName, "Class is not listed in the sealed contract's permits clause."));
+                }
+            })) invalidContractUses.add(contractUse);
         }
-        validateHigherKindedConformances(context, declaration, contractNames);
-        VariancePositionValidator.validate(context, declaration);
+        Resolver.attemptMember(context,
+                () -> validateHigherKindedConformances(context, declaration, contractNames));
+        Resolver.attemptMember(context, () -> VariancePositionValidator.validate(context, declaration));
 
         final var previousClass = context.frame.currentClassName;
         final var previousInitializerFields = context.frame.initializerVisibleFields;
+        final var previousDataInitializerOwner = context.frame.dataInitializerOwner;
+        final var previousWritableFields = context.frame.dataInitializerWritableFields;
         context.frame.currentClassName = declaration.name().lexeme();
         try {
-            for (int fieldIndex = 0; fieldIndex < declaration.fields().size(); fieldIndex++) {
-                final var field = declaration.fields().get(fieldIndex);
-                if (field.initializer() == null) continue;
-                resolveFieldInitializer(context, declaration, field,
-                        declaration.fields().subList(0, fieldIndex));
+            final var dataComponents = declaration.dataComponentFields();
+            if (declaration.dataClass()) {
+                Resolver.attemptMember(context,
+                        () -> resolveDataClassDirectInitializers(context, declaration, dataComponents));
+            } else {
+                for (int fieldIndex = 0; fieldIndex < declaration.fields().size(); fieldIndex++) {
+                    final var field = declaration.fields().get(fieldIndex);
+                    if (field.initializer() == null || invalidFields.contains(field)) continue;
+                    final var currentFieldIndex = fieldIndex;
+                    final var earlierFields = new ArrayList<Stmt.Field>(dataComponents);
+                    earlierFields.addAll(declaration.fields().subList(0, currentFieldIndex));
+                    Resolver.attemptMember(context,
+                            () -> resolveFieldInitializer(context, declaration, field, earlierFields));
+                }
             }
             for (final var property : declaration.properties()) {
-                if (property.initializer() != null) {
-                    resolveFieldInitializer(context, declaration,
-                            new Stmt.Field(property.name(), property.type(), property.initializer()),
-                            declaration.fields());
-                }
-                if (property.isCustom()) resolvePropertyAccessors(context, declaration, property);
+                if (invalidProperties.contains(property)) continue;
+                Resolver.attemptMember(context, () -> {
+                    if (declaration.dataClass() && !property.isCustom()
+                            && !declaration.isDataComponent(property.name().lexeme())) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                                property.name(),
+                                "Data classes support auxiliary fields and computed properties, not stored properties."));
+                    }
+                    if (property.initializer() != null && !declaration.dataClass()) {
+                        final var earlierFields = new ArrayList<Stmt.Field>(dataComponents);
+                        earlierFields.addAll(declaration.fields());
+                        resolveFieldInitializer(context, declaration,
+                                new Stmt.Field(property.name(), property.type(), property.initializer()),
+                                earlierFields);
+                    }
+                    if (property.isCustom()) resolvePropertyAccessors(context, declaration, property);
+                });
             }
-            for (final var method : declaration.methods()) resolveMethod(context, declaration, method);
-            for (final var pattern : declaration.patterns()) resolvePattern(context, declaration, pattern);
+            Resolver.attemptMember(context, () -> resolveDataClassInitializerBlocks(context, declaration));
+            for (final var method : declaration.methods()) {
+                if (invalidMethods.contains(method)) continue;
+                Resolver.attemptMember(context, () -> resolveMethod(context, declaration, method));
+            }
+            for (final var pattern : declaration.patterns()) {
+                if (invalidPatterns.contains(pattern)) continue;
+                Resolver.attemptMember(context, () -> resolvePattern(context, declaration, pattern));
+            }
             for (final var constructor : declaration.namedConstructors()) {
-                resolveNamedConstructor(context, constructor);
+                if (invalidNamedConstructors.contains(constructor)) continue;
+                Resolver.attemptMember(context, () -> resolveNamedConstructor(context, constructor));
             }
             for (final var contractUse : declaration.contractUses()) {
-                checkConformance(context, declaration, contractUse, context.contracts.get(contractUse.name().lexeme()));
+                if (invalidContractUses.contains(contractUse)) continue;
+                final var contract = context.contracts.get(contractUse.name().lexeme());
+                if (contract == null) continue;
+                Resolver.attemptMember(context, () -> checkConformance(context, declaration, contractUse, contract));
             }
         } finally {
             context.frame.currentClassName = previousClass;
             context.frame.initializerVisibleFields = previousInitializerFields;
+            context.frame.dataInitializerOwner = previousDataInitializerOwner;
+            context.frame.dataInitializerWritableFields = previousWritableFields;
         }
     }
 
@@ -544,6 +624,36 @@ final class DeclarationResolver {
         }
     }
 
+    private static void resolveDataClassDirectInitializers(final ResolutionContext context,
+                                                           final Stmt.ClassDecl declaration,
+                                                           final List<Stmt.Field> componentFields) {
+        final var fields = declaration.fields().stream()
+                .collect(java.util.stream.Collectors.toMap(field -> field.name().lexeme(), field -> field));
+        final var properties = declaration.properties().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        property -> property.name().lexeme(), property -> property));
+        final var visibleFields = new ArrayList<>(componentFields);
+        for (final var member : declaration.storedStateOrder()) {
+            final var name = member.lexeme();
+            if (declaration.isDataComponent(name)) continue;
+            final var field = fields.get(name);
+            if (field != null) {
+                if (field.initializer() != null) {
+                    resolveFieldInitializer(context, declaration, field, visibleFields);
+                    visibleFields.add(field);
+                }
+                continue;
+            }
+            final var property = properties.get(name);
+            if (property != null && property.initializer() != null) {
+                final var initializedProperty = new Stmt.Field(
+                        property.name(), property.type(), property.initializer());
+                resolveFieldInitializer(context, declaration, initializedProperty, visibleFields);
+                visibleFields.add(initializedProperty);
+            }
+        }
+    }
+
     private static void resolvePattern(final ResolutionContext context,
                                        final Stmt.ClassDecl owner,
                                        final Stmt.Pattern pattern) {
@@ -597,10 +707,13 @@ final class DeclarationResolver {
     private static void resolveFieldInitializer(final ResolutionContext context, final Stmt.ClassDecl owner,
                                         final Stmt.Field field,
                                         final List<Stmt.Field> earlierFields) {
-        validateFieldInitializer(context, field.initializer(), earlierFields, field.name());
+        if (!owner.dataClass()) {
+            validateFieldInitializer(context, field.initializer(), earlierFields, field.name());
+        }
         final var previousMethodOwner = context.frame.currentMethodOwner;
         final var previousInitializerFields = context.frame.initializerVisibleFields;
         final var previousFlow = context.frame.flowState;
+        final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         context.frame.currentMethodOwner = owner;
         context.frame.initializerVisibleFields = List.copyOf(earlierFields);
         context.frame.flowState = new FlowState();
@@ -611,11 +724,81 @@ final class DeclarationResolver {
         try {
             final var initializerType = ExpressionFlowResolver.resolveExpression(context, field.initializer());
             ensureAssignable(context, field.type(), initializerType, field.name());
+            RaisedEffectFlow.verifyCallable(context, List.of(), field.name());
         } finally {
             endScope(context);
             context.frame.currentMethodOwner = previousMethodOwner;
             context.frame.initializerVisibleFields = previousInitializerFields;
             context.frame.flowState = previousFlow;
+            RaisedEffectFlow.endCallable(context, enclosingEffects);
+        }
+    }
+
+    private static void resolveDataClassInitializerBlocks(final ResolutionContext context,
+                                                          final Stmt.ClassDecl declaration) {
+        if (!declaration.dataClass()) return;
+        final var initializedFields = new HashSet<String>();
+        declaration.dataComponents().forEach(component -> initializedFields.add(component.name().lexeme()));
+        declaration.fields().stream().filter(field -> field.initializer() != null)
+                .map(field -> field.name().lexeme()).forEach(initializedFields::add);
+        for (final var block : declaration.initializerBlocks()) {
+            final var writableFields = new LinkedHashMap<String, Stmt.Field>();
+            declaration.fields().stream()
+                    .filter(field -> field.initializer() == null
+                            && !initializedFields.contains(field.name().lexeme()))
+                    .forEach(field -> writableFields.put(field.name().lexeme(), field));
+            final var visibleFields = new ArrayList<Stmt.Field>(declaration.dataComponentFields());
+            declaration.fields().stream()
+                    .filter(field -> initializedFields.contains(field.name().lexeme()))
+                    .forEach(visibleFields::add);
+            final var previousOwner = context.frame.currentMethodOwner;
+            final var previousVisibleFields = context.frame.initializerVisibleFields;
+            final var previousDataOwner = context.frame.dataInitializerOwner;
+            final var previousWritableFields = context.frame.dataInitializerWritableFields;
+            final var previousFlow = context.frame.flowState;
+            final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
+            context.frame.currentMethodOwner = declaration;
+            context.frame.initializerVisibleFields = List.copyOf(visibleFields);
+            context.frame.dataInitializerOwner = declaration;
+            context.frame.dataInitializerWritableFields = Map.copyOf(writableFields);
+            context.frame.flowState = new FlowState();
+            beginScope(context);
+            final var thisToken = new Token(TokenType.THIS, "this", null, declaration.name().span());
+            declare(context, SYNTHETIC_VAR, thisToken,
+                    new ReferenceDescriptor(TypeResolver.classType(context, declaration)),
+                    BindingMutability.IMMUTABLE);
+            define(context, thisToken);
+            try {
+                context.statementResolver.resolveStatements(block.body());
+                if (context.frame.flowState.isReachable()) {
+                    for (final var field : writableFields.values()) {
+                        final var writes = context.frame.flowState.writeCount(field.name());
+                        if (writes > 0) {
+                            if (writes != 1) {
+                                Zeron.resolutionError(new ResolutionError(
+                                        DiagnosticCatalog.INVALID_INITIALIZER, field.name(),
+                                        "An auxiliary field must be initialized exactly once."));
+                            }
+                            initializedFields.add(field.name().lexeme());
+                        }
+                    }
+                }
+                RaisedEffectFlow.verifyCallable(context, block.raisedEffects(), declaration.name());
+            } finally {
+                endScope(context);
+                context.frame.currentMethodOwner = previousOwner;
+                context.frame.initializerVisibleFields = previousVisibleFields;
+                context.frame.dataInitializerOwner = previousDataOwner;
+                context.frame.dataInitializerWritableFields = previousWritableFields;
+                context.frame.flowState = previousFlow;
+                RaisedEffectFlow.endCallable(context, enclosingEffects);
+            }
+        }
+        for (final var field : declaration.fields()) {
+            if (field.initializer() == null && !initializedFields.contains(field.name().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_INITIALIZER,
+                        field.name(), "An auxiliary field must be initialized before construction completes."));
+            }
         }
     }
 
@@ -756,6 +939,9 @@ final class DeclarationResolver {
         for (int i = 0; i < contract.typeParameters().size(); i++) {
             substitutions.put(contract.typeParameters().get(i), contractUse.typeArguments().get(i));
         }
+        final var methodErrors = new ArrayList<ResolutionError>();
+        ResolutionError firstMethodError = null;
+        var firstMethodErrorIndex = -1;
         for (final var required : contract.methods()) {
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
                     required.typeDescriptor(), substitutions);
@@ -770,10 +956,11 @@ final class DeclarationResolver {
                     ? defaultMethodsFor(context, declaration, requiredType, required.variadic())
                     : List.<Resolver.DefaultMethodSelection>of();
             if (defaults.size() > 1) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
+                methodErrors.add(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         contractUse.name(),
                         "Multiple default contract methods named '" + required.name().lexeme()
                                 + "' require an explicit class implementation."));
+                continue;
             }
             final var defaultMethod = defaults.size() == 1
                     && defaults.getFirst().method().isMutating() == required.isMutating()
@@ -784,13 +971,50 @@ final class DeclarationResolver {
                     || implementation.isMutating() != required.isMutating()
                     || !compatibleMethodSignatures(context, requiredType, required.variadic(),
                             implementation.typeDescriptor(), implementation.variadic()))) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                final var candidates = declaration.methods().stream()
+                        .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
+                        .map(DeclarationResolver::formatMethodCandidate)
+                        .toList();
+                final var contractType = contractUse.typeArguments().isEmpty()
+                        ? TypeDescriptor.ofName(contractUse.name().lexeme())
+                        : TypeDescriptor.genericOf(
+                                TypeDescriptor.ofName(contractUse.name().lexeme()),
+                                contractUse.typeArguments());
+                final var candidateDetails = candidates.isEmpty()
+                        ? "No method named '" + required.name().lexeme() + "' is declared."
+                        : "Found " + String.join("; ", candidates) + ".";
+                final var methodError = new ResolutionError(
+                        DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         contractUse.name(),
-                        "Class does not provide a compatible public contract method '"
-                                + required.name().lexeme() + "'."));
+                        "Contract '" + TypeFormatter.format(contractType) + "' requires "
+                                + formatMethodSignature(required.name().lexeme(), requiredType,
+                                        required.isMutating())
+                                + ", but this class does not provide a compatible public implementation. "
+                                + candidateDetails
+                                + " The implementation must match the required parameter and return types"
+                                + (required.isMutating() ? " and be mutating." : "."));
+                if (firstMethodError == null) {
+                    firstMethodError = methodError;
+                    firstMethodErrorIndex = methodErrors.size();
+                }
+                methodErrors.add(methodError);
             }
         }
+        if (!methodErrors.isEmpty()) {
+            final var missingMethodStubs = missingMethodStubs(context, declaration, contractUse);
+            if (!missingMethodStubs.isEmpty() && firstMethodError != null) {
+                final var closingBraceSpan = declaration.closingBrace().span();
+                final var position = closingBraceSpan.start();
+                firstMethodError = firstMethodError.withHelp(new DiagnosticHelp(
+                        "Add missing contract method stubs",
+                        new SourceSpan(closingBraceSpan.sourcePath(), position, position),
+                        String.join("\n", missingMethodStubs)));
+                methodErrors.set(firstMethodErrorIndex, firstMethodError);
+            }
+            methodErrors.forEach(error -> context.diagnostics.record(error, context.currentSourcePath));
+        }
 
+        final var propertyErrors = new ArrayList<ResolutionError>();
         for (final var required : contract.properties()) {
             final var implementation = declaration.properties().stream()
                     .filter(property -> property.name().lexeme().equals(required.name().lexeme()))
@@ -800,18 +1024,94 @@ final class DeclarationResolver {
             if (implementation == null || !implementation.isPublic()
                     || (required.isMutating() && !implementation.isMutating())
                     || !requiredType.equals(implementation.type())) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                propertyErrors.add(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
                         contractUse.name(),
                         "Class does not provide a compatible public contract property '"
                                 + required.name().lexeme() + "'."));
             }
         }
+        propertyErrors.forEach(error -> context.diagnostics.record(error, context.currentSourcePath));
 
         final var closure = ContractComposition.closure(context, contractUse);
         for (int index = 1; index < closure.size(); index++) {
             final var inherited = closure.get(index);
             checkConformance(context, declaration, inherited.use(), inherited.declaration());
         }
+    }
+
+    private static String formatMethodCandidate(final Stmt.Method method) {
+        final var visibility = method.isPublic() ? "public " : "non-public ";
+        return visibility + formatMethodSignature(method.name().lexeme(),
+                method.typeDescriptor(), method.isMutating());
+    }
+
+    private static String formatMethodSignature(final String name, final FunctionDescriptor type,
+                                                final boolean isMutating) {
+        return (isMutating ? "mut " : "") + "'" + name + TypeFormatter.format(type) + "'";
+    }
+
+    private static String formatMethodStub(final Stmt.ContractMethod required,
+                                           final FunctionDescriptor requiredType) {
+        if (required.parameters().size() != requiredType.parameters().size()
+                || required.parameters().stream().anyMatch(parameter ->
+                        parameter.lexeme().equals("this"))) return null;
+        final var formattedType = TypeFormatter.format(requiredType);
+        final var genericEnd = requiredType.typeParameters().isEmpty()
+                ? -1
+                : formattedType.indexOf(">(");
+        if (!requiredType.typeParameters().isEmpty() && genericEnd < 0) return null;
+        final var genericParameters = genericEnd < 0 ? "" : formattedType.substring(0, genericEnd + 1);
+        final var parameters = new ArrayList<String>();
+        for (var index = 0; index < required.parameters().size(); index++) {
+            parameters.add(required.parameters().get(index).lexeme() + ": "
+                    + TypeFormatter.format(requiredType.parameters().get(index)));
+        }
+        final var effects = requiredType.raisedEffects().isEmpty()
+                ? ""
+                : " raises " + requiredType.raisedEffects().stream()
+                        .map(TypeFormatter::format).collect(java.util.stream.Collectors.joining(", "));
+        return "public " + (required.isMutating() ? "mut " : "") + required.name().lexeme()
+                + genericParameters + parameters.stream().collect(
+                        java.util.stream.Collectors.joining(", ", "(", ")"))
+                + ": " + TypeFormatter.format(requiredType.returnType()) + effects
+                + " {\n    // TODO: Implement.\n}";
+    }
+
+    private static List<String> missingMethodStubs(final ResolutionContext context,
+                                                   final Stmt.ClassDecl declaration,
+                                                   final Stmt.ContractUse rootContractUse) {
+        if (declaration.closingBrace() == null) return List.of();
+        final var stubs = new ArrayList<String>();
+        final var stubNames = new HashSet<String>();
+        for (final var applied : ContractComposition.closure(context, rootContractUse)) {
+            for (final var required : applied.declaration().methods()) {
+                if (ContractComposition.isShadowedByAncestor(context, rootContractUse,
+                        applied.use(), required.name().lexeme())) continue;
+                final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
+                        required.typeDescriptor(), applied.substitutions());
+                final var implementation = declaration.methods().stream()
+                        .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
+                        .filter(method -> method.isPublic() && method.isMutating() == required.isMutating()
+                                && compatibleMethodSignatures(context, requiredType, required.variadic(),
+                                        method.typeDescriptor(), method.variadic()))
+                        .findFirst()
+                        .orElse(null);
+                final var defaults = implementation == null
+                        ? defaultMethodsFor(context, declaration, requiredType, required.variadic())
+                        : List.<Resolver.DefaultMethodSelection>of();
+                final var hasDefault = defaults.size() == 1
+                        && defaults.getFirst().method().isMutating() == required.isMutating();
+                if (implementation != null || hasDefault) continue;
+                if (defaults.size() > 1 || required.isStatic() || required.variadic()
+                        || !required.defaultValues().isEmpty() || !stubNames.add(required.name().lexeme())) {
+                    return List.of();
+                }
+                final var stub = formatMethodStub(required, requiredType);
+                if (stub == null) return List.of();
+                stubs.add(stub);
+            }
+        }
+        return List.copyOf(stubs);
     }
 
     static Resolver.DefaultMethodSelection defaultMethodFor(final ResolutionContext context, final Stmt.ClassDecl declaration,

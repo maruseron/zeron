@@ -1,22 +1,6 @@
 package zeron.io;
 
 import java.lang.System;
-import zeron.internal.generateArray;
-
-public fn allocateByteArray(size: Int): &ByteArray = allocateByteArray(size);
-
-public fn byteArrayToArray(bytes: ByteArray): &Array<Byte> =
-    generateArray<Byte>(bytes.length, (index) -> bytes[index]);
-
-public fn arrayToByteArray(values: Array<Byte>): ByteArray {
-    let mut bytes = allocateByteArray(values.length);
-    let mut index = 0;
-    while (index < values.length) {
-        bytes[index] = values[index];
-        index += 1;
-    }
-    return bytes;
-}
 
 public fn print(value: Any?): Unit {
     System.out?.print(value);

@@ -24,7 +24,7 @@ public final class ContractComposition {
     public static List<Applied> closure(final Map<String, Stmt.ContractDecl> contracts,
                                         final Stmt.ContractUse root) {
         final var result = new LinkedHashMap<String, Applied>();
-        collect(contracts, root, result, new ArrayList<>());
+        collect(contracts, root, null, result, new ArrayList<>());
         return List.copyOf(result.values());
     }
 
@@ -63,6 +63,10 @@ public final class ContractComposition {
             }
         }
         return List.copyOf(methods);
+    }
+
+    static boolean hasStaticMethods(final ResolutionContext context, final Stmt.ContractUse root) {
+        return methods(context, root).stream().anyMatch(slot -> slot.method().isStatic());
     }
 
     static boolean isShadowedByAncestor(final ResolutionContext context,
@@ -130,19 +134,20 @@ public final class ContractComposition {
     }
 
     private static void collect(final Map<String, Stmt.ContractDecl> contracts, final Stmt.ContractUse use,
-                                final LinkedHashMap<String, Applied> result,
+                                final String parentPackage, final LinkedHashMap<String, Applied> result,
                                 final List<String> path) {
-        final var name = use.name().lexeme();
-        final var contract = contracts.get(name);
-        if (contract == null || path.contains(name)
+        final var contract = findContract(contracts, use.name().lexeme(), parentPackage);
+        if (contract == null || path.contains(contract.name().lexeme())
                 || use.typeArguments().size() != contract.typeParameters().size()) return;
-        final var key = key(use);
+        final var resolvedUse = new Stmt.ContractUse(contract.name(), use.typeArguments());
+        final var name = contract.name().lexeme();
+        final var key = key(resolvedUse);
         if (result.containsKey(key)) return;
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < contract.typeParameters().size(); i++) {
             substitutions.put(contract.typeParameters().get(i), use.typeArguments().get(i));
         }
-        result.put(key, new Applied(contract, use, Map.copyOf(substitutions)));
+        result.put(key, new Applied(contract, resolvedUse, Map.copyOf(substitutions)));
 
         final var nestedPath = new ArrayList<>(path);
         nestedPath.add(name);
@@ -150,8 +155,35 @@ public final class ContractComposition {
             final var arguments = required.typeArguments().stream()
                     .map(type -> TypeSubstitution.substitute(type, substitutions))
                     .toList();
-            collect(contracts, new Stmt.ContractUse(required.name(), arguments), result, nestedPath);
+            collect(contracts, new Stmt.ContractUse(required.name(), arguments),
+                    packageName(name), result, nestedPath);
         }
+    }
+
+    private static Stmt.ContractDecl findContract(
+            final Map<String, Stmt.ContractDecl> contracts, final String name, final String parentPackage) {
+        if (name.contains(".")) return contracts.get(name);
+        if (parentPackage != null && !parentPackage.isEmpty()) {
+            final var samePackage = contracts.get(parentPackage + "." + name);
+            if (samePackage != null) return samePackage;
+        }
+        final var exact = contracts.get(name);
+        if (exact != null) return exact;
+        final var matches = contracts.values().stream()
+                .filter(contract -> simpleName(contract.name().lexeme()).equals(name))
+                .distinct()
+                .toList();
+        return matches.size() == 1 ? matches.getFirst() : null;
+    }
+
+    private static String packageName(final String qualifiedName) {
+        final var separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? "" : qualifiedName.substring(0, separator);
+    }
+
+    private static String simpleName(final String qualifiedName) {
+        final var separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
     }
 
     private static String key(final Stmt.ContractUse use) {

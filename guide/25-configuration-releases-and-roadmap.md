@@ -80,6 +80,6 @@ and raised effects. `Hashable` and hash-based collections are implemented; keys 
 equality- and hash-relevant state while stored. The design documents distinguish implemented
 behavior from proposals and deferred work; treat those documents' status sections as the source of
 truth rather than assuming a roadmap item is already part of the language. In particular, see
-[the compilation and host integration design](../documents/design-document-11_compilation-libraries-and-host-integration.md)
-for build/platform constraints and the [Zeron overview](../documents/design-document-00.md) for
+[the compilation and host integration design](../documents/design_documents/design-document-11_compilation-libraries-and-host-integration.md)
+for build/platform constraints and the [Zeron overview](../documents/design_documents/design-document-00.md) for
 the current feature summary.

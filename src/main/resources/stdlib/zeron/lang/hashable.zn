@@ -1,5 +1,23 @@
 package zeron.lang;
 
+/// Defines a hashing operation for types that can be mapped to an integer hash. 
+/// `Eq<T>` is a contract prerequisite. This contract can be derived by the compiler 
+/// for Algebraic Data Types, newtypes and classes.
 public contract Hashable<T: nullable + mut> requires Eq<T> {
+
+    /// Returns an integer hash value for this object.
+    ///
+    /// The general contract of `hash` is:
+    /// - Arbitrary `hash` invocations on the same object during the execution of a
+    /// Zeron program must produce the same result, provided no information used
+    /// in `equals` comparisons on the object is modified. This result does not need
+    /// to remain consistent from one execution of a program to another.
+    /// - If two objects are equal according to the `eq` method, then calling
+    /// `hash` on each of the two objets must produce the same integer result.
+    /// - It is **not** required that if two objects are unequal according to
+    /// `eq`, then calling `hash` on each of the two objects must produce distinct
+    /// integer results. However, the programmer should be aware that producing
+    /// distinct integer results for unequal objects may improve the performance
+    /// of hash-aware collections.
     hash(): Int;
 }

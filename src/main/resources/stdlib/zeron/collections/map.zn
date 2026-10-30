@@ -1,16 +1,18 @@
 package zeron.collections;
 
+import zeron.internal.unwrapSome;
 import zeron.internal.generateArray;
 import zeron.lang.Eq;
 import zeron.lang.Hashable;
 import zeron.lang.Option;
 import zeron.lang.Pair;
 
-fn hashKey<T: nullable + Hashable<T>>(key: T): Int = key.hash();
+// TODO: no hover on `key.hash`. work on this!
+fn hashKey<T: Hashable<T>>(key: T): Int = key.hash();
 
-fn equalKeys<T: nullable + Eq<T>>(left: T, right: T): Boolean = left == right;
+fn equalKeys<T: Eq<T>>(left: T, right: T): Boolean = left == right;
 
-class MapEntry<K: nullable, V: nullable + mut> {
+class MapEntry<K, V: mut> {
     keyValue: K;
     cachedHash: Int;
     storedValue: V;
@@ -30,7 +32,7 @@ class MapEntry<K: nullable, V: nullable + mut> {
     public next(): MapEntry<K, V>? = this.nextEntry;
 }
 
-class MapIterator<K: nullable, V: nullable + mut> is Iterator<Pair<K, V>> {
+class MapIterator<K, V: mut> is Iterator<Pair<K, V>> {
     buckets: &Array<MapEntry<K, V>?>;
     bucketIndex: Int;
     current: MapEntry<K, V>?;
@@ -41,24 +43,24 @@ class MapIterator<K: nullable, V: nullable + mut> is Iterator<Pair<K, V>> {
         MapIterator<K, V>.new(buckets, 0, null);
 
     public mut next(): Step<Pair<K, V>> {
-        while (this.current === null) {
+        while (this.current is null) {
             if (this.bucketIndex >= this.buckets.length) return Step<Pair<K, V>>.Done();
             let entry = this.buckets[this.bucketIndex];
             this.bucketIndex = this.bucketIndex + 1;
-            if (entry === null) {
+            if (entry is null) {
                 this.current = null;
             } else {
                 this.current = entry;
             }
         }
         let entry = this.current;
-        if (entry === null) return Step<Pair<K, V>>.Done();
+        if (entry is null) return Step<Pair<K, V>>.Done();
         this.current = entry.next();
         return Step.Yield(Pair<K, V>.new(entry.key(), entry.value()));
     }
 }
 
-class MapKeyIterator<K: nullable, V: nullable + mut> is Iterator<K> {
+class MapKeyIterator<K, V: mut> is Iterator<K> {
     buckets: &Array<MapEntry<K, V>?>;
     bucketIndex: Int;
     current: MapEntry<K, V>?;
@@ -69,24 +71,24 @@ class MapKeyIterator<K: nullable, V: nullable + mut> is Iterator<K> {
         MapKeyIterator<K, V>.new(buckets, 0, null);
 
     public mut next(): Step<K> {
-        while (this.current === null) {
+        while (this.current is null) {
             if (this.bucketIndex >= this.buckets.length) return Step<K>.Done();
             let entry = this.buckets[this.bucketIndex];
             this.bucketIndex = this.bucketIndex + 1;
-            if (entry === null) {
+            if (entry is null) {
                 this.current = null;
             } else {
                 this.current = entry;
             }
         }
         let entry = this.current;
-        if (entry === null) return Step<K>.Done();
+        if (entry is null) return Step<K>.Done();
         this.current = entry.next();
         return Step.Yield(entry.key());
     }
 }
 
-public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<K, V>> {
+public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
     buckets: &Array<MapEntry<K, V>?>;
     count: Int;
     hashFunction: (K) -> Int;
@@ -123,7 +125,7 @@ public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<
     private findEntry(key: K, hash: Int): MapEntry<K, V>? {
         let equalityFunction = this.equalityFunction;
         let mut entry = this.buckets[this.bucketIndex(hash, this.buckets.length)];
-        until (entry === null) {
+        until (entry is null) {
             if (entry.hash() == hash and equalityFunction(entry.key(), key)) return entry;
             entry = entry.next();
         }
@@ -134,12 +136,12 @@ public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<
         let equalityFunction = this.equalityFunction;
         let mut prefix: MapEntry<K, V>? = null;
         let mut entry = this.buckets[index];
-        until (entry === null) {
+        until (entry is null) {
             if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
                 let previousValue = entry.value();
                 let mut rebuilt =
                     MapEntry<K, V>.of(entry.key(), value, hash, entry.next());
-                until (prefix === null) {
+                until (prefix is null) {
                     let previous = prefix;
                     rebuilt =
                         MapEntry<K, V>.of(
@@ -164,11 +166,11 @@ public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<
         let equalityFunction = this.equalityFunction;
         let mut prefix: MapEntry<K, V>? = null;
         let mut entry = this.buckets[index];
-        until (entry === null) {
+        until (entry is null) {
             if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
                 let removedValue = entry.value();
                 let mut rebuilt = entry.next();
-                until (prefix === null) {
+                until (prefix is null) {
                     let previous = prefix;
                     rebuilt =
                         MapEntry<K, V>.of(
@@ -196,7 +198,7 @@ public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<
         while (bucket < this.buckets.length) {
             let mut entry = this.buckets[bucket];
             while (true) {
-                if (entry === null) break;
+                if (entry is null) break;
                 let next = entry.next();
                 let index = this.bucketIndex(entry.hash(), capacity);
                 expanded[index] =
@@ -216,13 +218,12 @@ public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<
 
     public containsKey(key: K): Boolean {
         let hashFunction = this.hashFunction;
-        return not (this.findEntry(key, hashFunction(key)) === null);
+        return not (this.findEntry(key, hashFunction(key)) is null);
     }
 
-    public lookup(key: K): Option<V> {
-        let hashFunction = this.hashFunction;
+    public get(key: K): Option<V> {
         let entry = this.findEntry(key, hashFunction(key));
-        if (entry === null) return Option<V>.None();
+        if (entry is null) return Option<V>.None();
         return Option.Some(entry.value());
     }
 
@@ -230,7 +231,7 @@ public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<
         let hashFunction = this.hashFunction;
         let hash = hashFunction(key);
         let entry = this.findEntry(key, hash);
-        if (not (entry === null)) {
+        if (entry is not null) {
             let index = this.bucketIndex(hash, this.buckets.length);
             return this.replaceEntry(index, key, value, hash);
         }
@@ -240,6 +241,65 @@ public class Map<K: nullable + Hashable<K>, V: nullable + mut> is Iterable<Pair<
             MapEntry<K, V>.of(key, value, hash, this.buckets[index]);
         this.count = this.count + 1;
         return Option<V>.None();
+    }
+
+    public mut putIfAbsent(key: K, value: V): Option<V> {
+        let mut val = get(key);
+        if (val matches Option.None()) {
+            val = put(key, value);
+        }
+        return val;
+    }
+
+    /*
+    // this method generates faulty bytecode,
+    // the error is related to nested ifs where both branches
+    // return. remaining code may be unreachable, but the classfile
+    // API doesn't seem to detect it
+    public mut compute(key: K, transform: (K, Option<V>) -> Option<V>): Option<V> {
+        let val = get(key);
+        let new = transform(key, val);
+        if (new matches Option.None()) {
+            if (val.isSome() or containsKey(key)) {
+                remove(key);
+                return new;
+            } else {
+                return new;
+            }
+        } else {
+            // TODO: new as Option.Some
+            //           ^ Unknown type 'Option.Some'.
+            // put(key, (new as Option.Some).value);
+            put(key, unwrapSome(new));
+            return new;
+        }
+    }
+    */
+
+    public mut compute(key: K, transform: (K, Option<V>) -> Option<V>): Option<V> {
+        let val = get(key);
+        let new = transform(key, val);
+        if (new matches Option.None()) {
+            if (val.isSome()) {
+                remove(key);
+            }
+            return new;
+        } 
+        // TODO: new as Option.Some
+        //           ^ Unknown type 'Option.Some'.
+        // put(key, (new as Option.Some).value);
+        put(key, unwrapSome(new));
+        return new;
+    }
+
+    public mut computeIfAbsent(key: K, transform: (K) -> V): V {
+        let val = get(key);
+        if (val matches Option.None()) {
+            let res = transform(key);
+            put(key, res);
+            return res;
+        }
+        return unwrapSome(val);
     }
 
     public mut remove(key: K): Option<V> {

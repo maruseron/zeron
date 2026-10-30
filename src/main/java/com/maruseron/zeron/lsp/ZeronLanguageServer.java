@@ -8,6 +8,7 @@ import org.eclipse.lsp4j.PositionEncodingKind;
 import org.eclipse.lsp4j.ServerCapabilities;
 import org.eclipse.lsp4j.TextDocumentSyncKind;
 import org.eclipse.lsp4j.TextDocumentSyncOptions;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
 import org.eclipse.lsp4j.services.LanguageServer;
@@ -44,6 +45,7 @@ final class ZeronLanguageServer implements LanguageServer, LanguageClientAware, 
         capabilities.setCompletionProvider(completion);
         capabilities.setHoverProvider(true);
         capabilities.setDefinitionProvider(true);
+        capabilities.setCodeActionProvider(Either.forLeft(true));
         return CompletableFuture.completedFuture(new InitializeResult(capabilities));
     }
 

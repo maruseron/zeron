@@ -1,10 +1,50 @@
 package zeron.lang;
 
+/// Represents the result of a comparison operation between two values.
+/// 
+/// It contains three standard variants to define an ordering relationship:
+/// - `LT`: Indicates that the current value is less than the reference value.
+/// - `EQ`: Indicates that both values are equivalent or equal.
+/// - `GT`: Indicates that the current value is greater than the reference value.
 public type Ordering =
       LT
     | EQ
     | GT;
 
-public contract Comparable<T> {
+/// Defines the capability to ordinally compare two values of the same type.
+/// `Comparable` implies a total ordering. Implementing this contract for partially ordered
+/// types should be avoided.
+///
+/// Though it is not strictly enforced, any type implementing `Comparable` should adhere to 
+/// the following laws:
+///
+/// **Reflexivity**:
+/// ```zeron
+/// a <= a == true
+/// ```
+/// **Transitivity**:
+/// ```zeron
+/// if (a <= b and b <= c) then a <= c == true
+/// ```
+/// **Antisymmetry**:
+/// ```zeron
+/// if (a <= b and b <= a) then a == b == true
+/// ```
+/// **Totality**:
+/// ```zeron
+/// (a <= b or b <= a) == true
+/// ```
+public contract Comparable<T: mut> {
+    // TODO: bizarre hover:
+    // "extension on zeron.numeric.Integer via zeron.numeric.Integral<zeron.numeric.Integer>
+    // fn compareTo(zeron.numeric.Integer) -> zeron.lang.Ordering". work on this!
+    // NOTE: the issue might be related to delegating witnesses overriding signatures and, 
+    // with them, documentation. the error only seems to be reproducible when the delegating 
+    // witness and the contract exist in different files or packages
+
+    /// Evaluates the current instance against `other` and returns an `Ordering` value 
+    /// specifying whether it is less than, equal to, or greater than the reference.
     compareTo(other: T): Ordering;
 }
+
+// NOTE: investigate letting Comparable require Eq

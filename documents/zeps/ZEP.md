@@ -71,5 +71,21 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0058](./ZEP-0058.md) | Clause-Based For-Expressions and Lazy Yield | Implemented | Shipped | 0.5.0 |
 | [ZEP-0059](./ZEP-0059.md) | Removing Contract Constructor Requirements | Implemented | Shipped | 0.5.0 |
 | [ZEP-0060](./ZEP-0060.md) | Treating Arrays as Iterable Values | Draft | Unscheduled | — |
-| [ZEP-0061](./ZEP-0061.md) | Java and External Interop Language Support | Draft | Unscheduled | — |
+| [ZEP-0061](./ZEP-0061.md) | Java and External Interop Language Support | Accepted | Candidate | 0.6.0 |
 | [ZEP-0062](./ZEP-0062.md) | Mutable-Type Admissibility for Generic Parameters | Implemented | Shipped | 0.5.0 |
+| [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Draft | Unscheduled | — |
+| [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Draft | Unscheduled | — |
+| [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Accepted | Candidate | 0.6.0 |
+| [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Draft | Unscheduled | — |
+| [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Unscheduled | — |
+| [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Accepted | Candidate | 0.6.0 |
+| [ZEP-0069](./ZEP-0069.md) | Transparent Data Classes | Accepted | Candidate | 0.6.0 |
+| [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Draft | Unscheduled | — |
+| [ZEP-0071](./ZEP-0071.md) | Numeric Hierarchy and Context-Directed Literals | Implemented | Candidate | 0.6.0 |
+| [ZEP-0072](./ZEP-0072.md) | Class-Scoped Static Functions as Companion Namespace Members | Draft | Unscheduled | — |
+| [ZEP-0073](./ZEP-0073.md) | Documentation Comments for Declarations | Accepted | Candidate | 0.6.0 |
+| [ZEP-0074](./ZEP-0074.md) | Numeric Literal Suffixes for Newtypes | Draft | Unscheduled | — |
+| [ZEP-0075](./ZEP-0075.md) | General Contextual Numeric Literal Construction | Draft | Unscheduled | — |
+| [ZEP-0076](./ZEP-0076.md) | Delegating Witness Implementations | Implemented | Unscheduled | — |
+| [ZEP-0077](./ZEP-0077.md) | Delegating Higher-Kinded Implementations | Implemented | Unscheduled | — |
+| [ZEP-0078](./ZEP-0078.md) | Default Method Implementations in Higher-Kinded Contracts | Implemented | Unscheduled | — |

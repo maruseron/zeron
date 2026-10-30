@@ -146,8 +146,9 @@ public final class Scanner {
             case '/' -> {
                 // single line comment
                 if (match('/')) {
+                    final var documentation = match('/');
                     while (peek() != '\n' && peek() != '\r' && !isAtEnd()) advance();
-                    addToken(LINE_COMMENT);
+                    addToken(documentation ? DOC_COMMENT : LINE_COMMENT);
                 } else if (match('*')) {
                     while (!isAtEnd() && !(peek() == '*' && peekNext() == '/')) {
                         advance();
@@ -370,11 +371,7 @@ public final class Scanner {
         } else if (isLong) {
             addLongLiteral(value, 10);
         } else {
-            try {
-                addToken(INT, Integer.parseInt(value));
-            } catch (NumberFormatException _) {
-                integerLiteralOutOfRange(INT, "Integer literal is outside the supported Int range.");
-            }
+            addToken(INT, new BigInteger(value, 10));
         }
     }
 
@@ -403,11 +400,7 @@ public final class Scanner {
         if (isLong) {
             addLongLiteral(digits, radix);
         } else {
-            try {
-                addToken(INT, Integer.parseInt(digits, radix));
-            } catch (NumberFormatException _) {
-                integerLiteralOutOfRange(INT, "Integer literal is outside the supported Int range.");
-            }
+            addToken(INT, new BigInteger(digits, radix));
         }
     }
 
@@ -472,7 +465,7 @@ public final class Scanner {
     }
 
     private void integerLiteralOutOfRange(final TokenType tokenType, final String message) {
-        addToken(tokenType, tokenType == LONG ? BigInteger.ZERO : 0);
+        addToken(tokenType, BigInteger.ZERO);
         recordDiagnostic(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
                 span(tokenStart, position()), message);
     }

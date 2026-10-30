@@ -1,0 +1,81 @@
+package zeron.serialization;
+
+import zeron.lang.Option;
+import zeron.lang.Result;
+
+public type ValueKind =
+      NullKind
+    | BooleanKind
+    | StringKind
+    | IntegerKind
+    | DecimalKind
+    | FloatKind
+    | BytesKind
+    | RecordKind
+    | AlternativeKind
+    | SequenceKind
+    | MapKind;
+
+public type CanonicalValue =
+      NullValue
+    | BooleanValue(value: Boolean)
+    | StringValue(value: String)
+    | IntegerValue(decimalText: String)
+    | DecimalValue(decimalText: String)
+    | FloatValue(value: Float)
+    | BytesValue(value: ByteArray)
+    | RecordValue(fields: Array<RecordField>)
+    | AlternativeValue(tag: String, value: CanonicalValue)
+    | SequenceValue(values: Array<CanonicalValue>)
+    | MapValue(entries: Array<MapEntry>);
+
+public type RecordField = (name: String, value: CanonicalValue);
+public type MapEntry = (key: CanonicalValue, value: CanonicalValue);
+
+public type EncodeError = (message: String, path: Array<String>);
+public type DecodeError = (message: String, path: Array<String>, position: Option<Int>);
+
+public contract Encoder {
+    mut writeNull(): Result<Unit, EncodeError>;
+    mut writeBoolean(value: Boolean): Result<Unit, EncodeError>;
+    mut writeString(value: String): Result<Unit, EncodeError>;
+    mut writeInteger(decimalText: String): Result<Unit, EncodeError>;
+    mut writeDecimal(decimalText: String): Result<Unit, EncodeError>;
+    mut writeFloat(value: Float): Result<Unit, EncodeError>;
+    mut writeBytes(value: ByteArray): Result<Unit, EncodeError>;
+    mut beginRecord(): Result<Unit, EncodeError>;
+    mut writeField(name: String): Result<Unit, EncodeError>;
+    mut endRecord(): Result<Unit, EncodeError>;
+    mut beginAlternative(tag: String): Result<Unit, EncodeError>;
+    mut endAlternative(): Result<Unit, EncodeError>;
+    mut beginSequence(): Result<Unit, EncodeError>;
+    mut endSequence(): Result<Unit, EncodeError>;
+    mut beginMap(): Result<Unit, EncodeError>;
+    mut endMap(): Result<Unit, EncodeError>;
+}
+
+public contract Decoder {
+    mut readKind(): Result<ValueKind, DecodeError>;
+    mut readBoolean(): Result<Boolean, DecodeError>;
+    mut readString(): Result<String, DecodeError>;
+    mut readInteger(): Result<String, DecodeError>;
+    mut readDecimal(): Result<String, DecodeError>;
+    mut readFloat(): Result<Float, DecodeError>;
+    mut readBytes(): Result<ByteArray, DecodeError>;
+    mut beginRecord(): Result<Unit, DecodeError>;
+    mut nextField(): Result<Option<String>, DecodeError>;
+    mut endRecord(): Result<Unit, DecodeError>;
+    mut readAlternative(): Result<String, DecodeError>;
+    mut endAlternative(): Result<Unit, DecodeError>;
+    mut beginSequence(): Result<Unit, DecodeError>;
+    mut nextSequenceElement(): Result<Boolean, DecodeError>;
+    mut endSequence(): Result<Unit, DecodeError>;
+    mut beginMap(): Result<Unit, DecodeError>;
+    mut nextMapEntry(): Result<Boolean, DecodeError>;
+    mut endMap(): Result<Unit, DecodeError>;
+    mut skipValue(): Result<Unit, DecodeError>;
+}
+
+public contract Encode<T: nullable + mut> {}
+public contract Decode<T: nullable + mut> {}
+public contract Codec<T: nullable + mut> requires Encode<T> + Decode<T> {}

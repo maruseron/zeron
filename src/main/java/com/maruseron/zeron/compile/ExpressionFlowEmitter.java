@@ -786,7 +786,15 @@ final class ExpressionFlowEmitter {
         final var literal = pattern.literal();
         loadPipelineValue(context, composer, value, value.type());
         switch (literal.getType()) {
-            case IntDescriptor _, CharDescriptor _ -> {
+            case IntDescriptor _ -> {
+                final var intValue = literal.exactInteger() == null
+                        ? literal.value instanceof java.math.BigInteger exact
+                            ? exact.intValueExact() : (Integer) literal.value
+                        : literal.exactInteger().intValueExact();
+                composer.ldc(intValue);
+                composer.if_icmpne(failure);
+            }
+            case CharDescriptor _ -> {
                 composer.ldc((Integer) literal.value);
                 composer.if_icmpne(failure);
             }

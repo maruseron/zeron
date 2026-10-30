@@ -103,6 +103,7 @@ public final class ZeronLibraryIndexDump {
                         .add(namespaced);
                 continue;
             }
+            if (declaration instanceof ZeronLibraryIndex.WitnessExport) continue;
             System.out.println();
             switch (declaration) {
                 case ZeronLibraryIndex.FunctionExport function -> {
@@ -117,6 +118,10 @@ public final class ZeronLibraryIndexDump {
                 }
                 case ZeronLibraryIndex.ExtensionExport _ -> throw new IllegalStateException(
                         "Extension exports must be grouped before declaration printing.");
+                case ZeronLibraryIndex.DocumentationExport documentation -> {
+                    System.out.println("documentation " + documentation.qualifiedName());
+                    System.out.println("  " + documentation.markdown().replace("\n", "\n  "));
+                }
                 case ZeronLibraryIndex.ValueExport value -> {
                     System.out.println("value " + value.qualifiedName() + ": " + formatType(value.type()));
                     // System.out.println("  Namespace: " + namespaceLabel(value.namespaceName()));
@@ -239,17 +244,47 @@ public final class ZeronLibraryIndexDump {
                             + formatType(newtype.underlyingType())
                             + (newtype.validated() ? " where <validated>" : ""));
                 }
-                case ZeronLibraryIndex.WitnessExport witness -> {
-                    System.out.println("witness " + witness.qualifiedName()
-                            + formatTypeParameters(witness.typeParameters()) + " "
-                            + formatType(witness.contractType()) + " for "
-                            + formatType(witness.targetType()) + " {");
-                    System.out.println("}");
-                }
+                case ZeronLibraryIndex.WitnessExport _ -> { }
             }
         }
+        printWitnesses(declarations);
         printNamespacedItems(namespacedItems);
         return true;
+    }
+
+    private static void printWitnesses(final List<ZeronLibraryIndex.ExportedDeclaration> declarations) {
+        final var witnesses = declarations.stream()
+                .filter(ZeronLibraryIndex.WitnessExport.class::isInstance)
+                .map(ZeronLibraryIndex.WitnessExport.class::cast)
+                .sorted(Comparator.comparing((ZeronLibraryIndex.WitnessExport witness) ->
+                                formatType(witness.targetType()))
+                        .thenComparing(witness -> formatType(witness.contractType())))
+                .toList();
+        final var grouped = new LinkedHashMap<String, List<ZeronLibraryIndex.WitnessExport>>();
+        for (final var witness : witnesses) {
+            grouped.computeIfAbsent(formatType(witness.targetType()), _ -> new ArrayList<>()).add(witness);
+        }
+        for (final var entry : grouped.entrySet()) {
+            System.out.println();
+            System.out.println("witnesses for " + entry.getKey() + ":");
+            for (final var witness : entry.getValue()) {
+                final var contract = formatType(witness.contractType());
+                if (witness.methods().isEmpty()) {
+                    System.out.println("  " + contract);
+                    continue;
+                }
+                System.out.println("  " + contract + " {");
+                for (final var method : witness.methods()) {
+                    final var signature = method.methodSignature();
+                    System.out.println("    " + (method.isStatic() ? "static " : "")
+                            + method.requirementName()
+                            + formatTypeParameters(signature.typeParameters())
+                            + formatParameters(signature, method.variadic()) + ": "
+                            + formatType(signature.returnType()));
+                }
+                System.out.println("  }");
+            }
+        }
     }
 
     private static boolean isInPackage(final String qualifiedName, final String packageName) {

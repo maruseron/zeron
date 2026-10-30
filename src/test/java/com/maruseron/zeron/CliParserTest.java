@@ -14,6 +14,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
+import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.StandardLibrary;
 
 import static org.junit.Assert.assertEquals;
@@ -305,6 +306,37 @@ public final class CliParserTest {
         assertTrue(dump, dump.contains("Format version: " + ZeronVersions.API_INDEX_SCHEMA_VERSION));
         assertTrue(dump, dump.contains("Standard-library API version: "
                 + ZeronVersions.STANDARD_LIBRARY_API_VERSION));
+    }
+
+    @Test
+    public void groupsWitnessEvidenceByTargetWithoutGeneratedNames() throws Exception {
+        final var indexPath = Files.createTempFile(temporaryFolder.getRoot().toPath(), "zeron-witness-dump-", ".bin");
+        final var output = new ByteArrayOutputStream();
+        final var originalOut = System.out;
+        final var target = TypeDescriptor.ofName("zeron.numeric.Integer");
+        final var declarations = List.<ZeronLibraryIndex.ExportedDeclaration>of(
+                new ZeronLibraryIndex.WitnessExport("zeron.numeric.$zeron$witness$12", List.of(),
+                        TypeDescriptor.ofName("zeron.lang.Display"),
+                        target, List.of()),
+                new ZeronLibraryIndex.WitnessExport("zeron.numeric.$zeron$witness$13", List.of(),
+                        TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.numeric.Integral"), target),
+                        target, List.of()));
+        try {
+            new ZeronLibraryIndex(StandardLibrary.API_VERSION, declarations).writeTo(indexPath);
+            System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+            assertEquals(0, Zeron.runCli("dump", indexPath.toString()));
+        } finally {
+            System.setOut(originalOut);
+            Files.deleteIfExists(indexPath);
+        }
+        final var dump = output.toString(StandardCharsets.UTF_8);
+        assertTrue(dump, dump.contains("witnesses for zeron.numeric.Integer:"));
+        final var display = "  zeron.lang.Display";
+        final var integral = "  zeron.numeric.Integral<zeron.numeric.Integer>";
+        assertTrue(dump, dump.contains(display));
+        assertTrue(dump, dump.contains(integral));
+        assertTrue(dump, dump.indexOf(display) < dump.indexOf(integral));
+        assertFalse(dump, dump.contains("$zeron$witness"));
     }
 
     @Test

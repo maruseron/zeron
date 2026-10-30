@@ -9,7 +9,7 @@ import zeron.lang.Display;
 import zeron.lang.Eq;
 import zeron.lang.Option;
 
-public class Path is Eq<Path>, Display<Path> {
+public class Path is Eq<Path>, Display {
     value: String;
 
     private constructor new;

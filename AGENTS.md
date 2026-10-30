@@ -20,6 +20,11 @@
 See [NAVIGATION.md](./NAVIGATION.md) for the compiler pipeline and resolver/compiler module
 responsibilities.
 
+For common implementation workflows, see
+[`documents/developer_guides/compiler-changes.md`](./documents/developer_guides/compiler-changes.md)
+and
+[`documents/developer_guides/registries-and-modules.md`](./documents/developer_guides/registries-and-modules.md).
+
 ## Feature Roadmap and Shipping
 
 - For feature work requiring a proposal, draft and resolve a ZEP before implementation. Follow
@@ -58,24 +63,24 @@ responsibilities.
 - `documents/zeps/ZEP-0000.md`: ZEP scope, numbering, lifecycle, and decision process.
 - `documents/zeps/ZEP-0001.md`: ZEP authoring template.
 - `documents/zeps/ZEP-0012.md`: canonical artifact and public release-series versioning policy.
-- `documents/design-document-01_grammar.cfgr`: implemented source grammar.
-- Retired, archive only: `documents/design-document-02_type-grammar.cfgr`. Its encoded descriptor grammar is not authoritative for current source syntax or type representation.
-- `documents/design-document-00.md`: language overview and intended features.
-- `documents/design-document-03_lambda-lowering.md`: current lambda lowering, known gaps, and roadmap.
-- `documents/design-document-04_mutability.md`: mutability semantics and implementation.
-- `documents/design-document-05_classes-and-contracts.md`: classes and contracts.
-- `documents/design-document-06_intrinsic-arrays.md`: intrinsic array types and operations.
-- `documents/design-document-19_generic-type-system.md`: current generic type system status,
+- `documents/design_documents/design-document-01_grammar.cfgr`: implemented source grammar.
+- Retired, archive only: `documents/design_documents/design-document-02_type-grammar.cfgr`. Its encoded descriptor grammar is not authoritative for current source syntax or type representation.
+- `documents/design_documents/design-document-00.md`: language overview and intended features.
+- `documents/design_documents/design-document-03_lambda-lowering.md`: current lambda lowering, known gaps, and roadmap.
+- `documents/design_documents/design-document-04_mutability.md`: mutability semantics and implementation.
+- `documents/design_documents/design-document-05_classes-and-contracts.md`: classes and contracts.
+- `documents/design_documents/design-document-06_intrinsic-arrays.md`: intrinsic array types and operations.
+- `documents/design_documents/design-document-19_generic-type-system.md`: current generic type system status,
   limitations, acceptance criteria, and roadmap.
-- Superseded, historical note: `documents/design-document-07_generic-functions.md`.
-- `documents/design-document-08_flow-typing-type-tests-and-casts.md`: flow typing, type tests, and casts.
-- `documents/design-document-09_namespaces-packages-and-imports.md`: source-level names, packages, imports, and visibility.
-- `documents/design-document-10_small-miscelaneous.md`: low-priority null and equality feature discussion.
-- `documents/design-document-11_compilation-libraries-and-host-integration.md`: project compilation, libraries, and Java interop.
-- `documents/design-document-12_intrinsics-and-external-bindings.md`: compiler intrinsic registry and external declaration design.
-- `documents/design-document-13_typed-raised-effects.md`: typed raised effects, runtime behavior, and open design questions.
-- `documents/design-document-14_sum-product-types-and-newtypes.md`: exploratory design for algebraic sums, products, and value-class-like newtypes.
-- `documents/design-document-15_type-class-witnesses-and-generic-bounds.md`: type-class witnesses, applied contract bounds, and generic bounds.
-- `documents/design-document-16_patterns-and-pattern-matching.md`: pattern syntax, resolution, exhaustiveness, and compilation.
-- `documents/design-document-17_structural-equality-and-hashing.md`: structural equality, hashing, `Eq<T>`, and contract composition.
-- `documents/design-document-18_member-discovery-and-stabilization.md`: proposed public member-discovery API and bounded stabilization milestone.
+- Superseded, historical note: `documents/design_documents/design-document-07_generic-functions.md`.
+- `documents/design_documents/design-document-08_flow-typing-type-tests-and-casts.md`: flow typing, type tests, and casts.
+- `documents/design_documents/design-document-09_namespaces-packages-and-imports.md`: source-level names, packages, imports, and visibility.
+- `documents/design_documents/design-document-10_small-miscelaneous.md`: low-priority null and equality feature discussion.
+- `documents/design_documents/design-document-11_compilation-libraries-and-host-integration.md`: project compilation, libraries, and Java interop.
+- `documents/design_documents/design-document-12_intrinsics-and-external-bindings.md`: compiler intrinsic registry and external declaration design.
+- `documents/design_documents/design-document-13_typed-raised-effects.md`: typed raised effects, runtime behavior, and open design questions.
+- `documents/design_documents/design-document-14_sum-product-types-and-newtypes.md`: exploratory design for algebraic sums, products, and value-class-like newtypes.
+- `documents/design_documents/design-document-15_type-class-witnesses-and-generic-bounds.md`: type-class witnesses, applied contract bounds, and generic bounds.
+- `documents/design_documents/design-document-16_patterns-and-pattern-matching.md`: pattern syntax, resolution, exhaustiveness, and compilation.
+- `documents/design_documents/design-document-17_structural-equality-and-hashing.md`: structural equality, hashing, `Eq<T>`, and contract composition.
+- `documents/design_documents/design-document-18_member-discovery-and-stabilization.md`: proposed public member-discovery API and bounded stabilization milestone.

@@ -1,0 +1,47 @@
+package zeron.collections;
+
+// o(1) guarantee for indexed access
+public contract RandomAccess<T: mut> {
+    at(index: Int): Option<T>;
+}
+
+public contract Sequenced<T: mut> {
+    first(): Option<T>;
+    // not constant
+    last(): Option<T>;
+}
+
+// should NOT mutate members
+public contract Reversible<C<_>> {
+    mut reverse<T>(this: C<T>): C<T>;
+
+    reversed<T>(this: C<T>): C<T>;
+}
+
+/*
+// TODO: this declaration causes an IllegalStateException:
+//   java.lang.IllegalStateException: Unknown symbol: $zeron$evidence$16$T$0$method$0
+//   this seems to be a synthetic adapter for a generic lambda that invokes compareTo
+public contract Sortable<C<_>> {
+    mut sortBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): Unit;
+
+    default mut sort<T: nullable + mut + Comparable<T>>(this: &C<T>): Unit =
+        this.sortBy((a, b) -> a.compareTo(b));
+
+    sortedBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): C<T>;
+
+    default sorted<T: nullable + mut + Comparable<T>>(this: C<T>): C<T> = 
+        this.sortedBy((a, b) -> a.compareTo(b));
+}
+*/
+
+public contract Sink<T: mut> {
+    // boolean indicates success
+    mut add(value: T): Boolean;
+}
+
+public contract Collector<C<_>> {
+    empty<A: mut>(): &C<A>;
+
+    mut add<A: mut>(this: C<A>, value: A): Boolean;
+}

@@ -20,7 +20,7 @@ The underscore marks the slot that will vary. An implementation declares the app
 and supplies the required operation:
 
 ```zeron
-class Box<T> is Mapper<Box<_>> {
+class Box<T: mut> is Mapper<Box<_>> {
     value: T;
 
     public constructor new;
@@ -35,7 +35,26 @@ class Box<T> is Mapper<Box<_>> {
 ```
 
 The implementation block belongs to the class. Its method is statically dispatched through
-higher-kinded evidence; it does not add an ordinary virtual method to `Box`.
+higher-kinded evidence; it does not add an ordinary virtual method to `Box`. If the class already
+provides a compatible public method for a receiver-based operation, the block can opt into
+forwarding it:
+
+```zeron
+class Box<T> is Mapper<Box<_>> {
+    public map<R: mut>(transform: (T) -> R): Box<R> =
+        Box<R>.new(transform(this.value));
+
+    delegating implementation Mapper<Box<_>> {}
+}
+```
+
+Explicit methods in the block take precedence. Contract defaults and receiverless operations keep
+their existing behavior; static and unmatched operations are not delegated. Mutating operations
+can delegate when the receiver and target method both allow mutation.
+
+The target method does not need to repeat the contract signature exactly. Its parameters may accept
+broader types and its return type may be narrower, provided the method remains assignable to the
+required operation and does not raise effects outside those allowed by the contract.
 
 ## Abstract over a type family
 

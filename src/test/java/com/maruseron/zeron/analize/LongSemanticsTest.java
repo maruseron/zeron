@@ -49,7 +49,7 @@ public final class LongSemanticsTest {
                 fn boxed(value: Long): Any = value;
                 fn isLong(value: Any): Boolean = value is Long;
                 fn unbox(value: Any): Long = value as Long;
-                fn display<T: Display<T>>(value: T): String = value.toString();
+                fn display<T: Display>(value: T): String = value.toString();
                 fn equalEvidence<T: Eq<T>>(left: T, right: T): Boolean = left.eq(right);
                 fn hashEvidence<T: Hashable<T>>(value: T): Int = value.hash();
                 fn displayLong(value: Long): String = display(value);

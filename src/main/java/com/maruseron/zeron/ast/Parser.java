@@ -44,23 +44,19 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.maruseron.zeron.scan.TokenType.*;
 
 public final class Parser {
-    private static final Set<String> DEFAULT_ZERON_LANG_TYPES =
-            Set.of("Option", "Result", "Ok", "Err");
-
     private static class ParseError extends RuntimeException {}
 
     private final List<Token> tokens;
     private final List<Token> comments;
     private final List<Diagnostic> diagnostics = new ArrayList<>();
+    private final Map<Token, String> documentation = new LinkedHashMap<>();
     private final String anonymousClassSourceId;
     private final List<Token> forExpressionResultKeywords = new ArrayList<>();
+    private final List<Token> dataClassInitializerNames = new ArrayList<>();
     private int current = 0;
     private String packageName = "";
     private String sourcePath;
     private final List<ImportDeclaration> imports = new ArrayList<>();
-    private final Map<String, String> importedTypes = new LinkedHashMap<>();
-    private final List<String> onDemandImports = new ArrayList<>();
-    private final Set<String> localTypeNames = new java.util.HashSet<>();
     private static final AtomicInteger TYPE_PARAMETER_SCOPES = new AtomicInteger();
     private Map<String, TypeParameterDescriptor> activeTypeParameters = Map.of();
     private boolean stopQualifiedTypeAtNamedPattern;
@@ -70,6 +66,7 @@ public final class Parser {
 
     private LoopMarker loopMarker   = null;
     private LevelMarker levelMarker = null;
+    private boolean parsingDataClassInitializer;
 
     private Parser(List<Token> tokens) {
         comments = tokens.stream().filter(token -> token.type().isComment()).toList();
@@ -156,6 +153,10 @@ public final class Parser {
         return List.copyOf(forExpressionResultKeywords);
     }
 
+    public List<Token> dataClassInitializerNames() {
+        return List.copyOf(dataClassInitializerNames);
+    }
+
     public List<Stmt> parse() {
         return parseCompilationUnit(null).declarations();
     }
@@ -218,13 +219,10 @@ public final class Parser {
                 final var imported = new ImportDeclaration(
                         qualifiedName.toString(), localName, target, onDemand, suffixImport);
                 imports.add(imported);
-                if (onDemand) onDemandImports.add(qualifiedName.toString());
-                else if (!suffixImport) importedTypes.putIfAbsent(localName, qualifiedName.toString());
             } catch (ParseError _) {
                 synchronizeHeader();
             }
         }
-        collectLocalTypeNames();
         final var statements = new ArrayList<Stmt>();
         while (!isAtEnd()) {
             final var parsed = declaration();
@@ -237,29 +235,30 @@ public final class Parser {
         }
         statements.removeIf(statement -> statement == null);
 
-        return new ParseResult(new CompilationUnit(sourcePath, packageName, imports, statements),
+        return new ParseResult(new CompilationUnit(sourcePath, packageName, imports, statements, false, documentation),
                 diagnostics, comments);
     }
 
-    private void collectLocalTypeNames() {
-        var braceDepth = 0;
-        for (var index = current; index + 1 < tokens.size(); index++) {
-            final var token = tokens.get(index);
-            if (braceDepth == 0 && (token.type() == CLASS || token.type() == EFFECT || token.type() == CONTRACT
-                    || token.type() == TYPE
-                    || token.type() == IDENTIFIER && token.lexeme().equals("newtype"))
-                    && tokens.get(index + 1).type() == IDENTIFIER) {
-                localTypeNames.add(tokens.get(index + 1).lexeme());
-            }
-            if (token.type() == LEFT_BRACE) braceDepth++;
-            else if (token.type() == RIGHT_BRACE) braceDepth--;
+    private Stmt declaration() {
+        final var declarationStart = peek();
+        final var doc = levelMarker == null ? documentationBefore(declarationStart) : null;
+        final var declaration = parseDeclaration();
+        final var name = declarationName(declaration);
+        if (doc != null && name != null
+                && (!(declaration instanceof Stmt.Namespace) || declarationStart.type() == NAMESPACE)) {
+            documentation.put(name, doc);
         }
+        return declaration;
     }
 
-    private Stmt declaration() {
+    private Stmt parseDeclaration() {
         try {
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
+            if (levelMarker == null && matchSoftKeyword("delegating")) {
+                consume(WITNESS, "Expect 'witness' after 'delegating'.");
+                return witnessDeclaration(true);
+            }
             if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
             if (levelMarker == null && matchSoftKeyword("handler")) return namedHandlerDeclaration(false);
             if (match(NAMESPACE)) return namespaceDeclaration();
@@ -273,6 +272,10 @@ public final class Parser {
             if (levelMarker == null && match(PUBLIC)) {
                 if (match(LET)) return letDeclaration(true);
                 if (matchSoftKeyword("handler")) return namedHandlerDeclaration(true);
+                if (matchSoftKeyword("data")) {
+                    consume(CLASS, "Expect 'class' after 'data'.");
+                    return classDeclaration(true, false, true);
+                }
                 if (match(CLASS)) return classDeclaration(true);
                 if (match(EFFECT)) return effectDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
@@ -291,6 +294,10 @@ public final class Parser {
                 if (match(EXTENSION)) return extensionDeclaration(true);
                 throw error(previous(), DiagnosticCatalog.INVALID_VISIBILITY,
                         "Only values, functions, classes, contracts, types, and extensions may be public.");
+            }
+            if (levelMarker == null && matchSoftKeyword("data")) {
+                consume(CLASS, "Expect 'class' after 'data'.");
+                return classDeclaration(false, false, true);
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
             if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
@@ -313,6 +320,45 @@ public final class Parser {
         }
     }
 
+    private String documentationBefore(final Token declarationStart) {
+        final var preceding = comments.stream()
+                .filter(comment -> comment.span().end().offset() != null
+                        && declarationStart.span().start().offset() != null
+                        && comment.span().end().offset() < declarationStart.span().start().offset())
+                .toList();
+        if (preceding.isEmpty()) return null;
+        final var last = preceding.getLast();
+        if (last.type() != DOC_COMMENT
+                || last.span().end().line() + 1 != declarationStart.line()) return null;
+        final var lines = new ArrayList<String>();
+        var expectedLine = last.span().end().line();
+        for (var index = preceding.size() - 1; index >= 0; index--) {
+            final var comment = preceding.get(index);
+            if (comment.type() != DOC_COMMENT || comment.span().end().line() != expectedLine) break;
+            var content = comment.lexeme().substring(3);
+            if (content.startsWith(" ")) content = content.substring(1);
+            lines.addFirst(content);
+            expectedLine = comment.span().start().line() - 1;
+        }
+        return String.join("\n", lines);
+    }
+
+    private static Token declarationName(final Stmt declaration) {
+        if (declaration == null) return null;
+        return switch (declaration) {
+            case Stmt.FunctionDeclaration function -> function.name();
+            case Stmt.Var variable -> variable.name();
+            case Stmt.Namespace namespace -> namespace.name();
+            case Stmt.ExternalClass externalClass -> externalClass.name();
+            case Stmt.ClassDecl classDeclaration -> classDeclaration.name();
+            case Stmt.ContractDecl contract -> contract.name();
+            case Stmt.SumDecl sum -> sum.name();
+            case Stmt.ProductDecl product -> product.name();
+            case Stmt.NewtypeDecl newtype -> newtype.name();
+            default -> null;
+        };
+    }
+
     private Stmt typeDeclaration(final boolean isPublic) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect type name."));
         final var typeParameters = typeParameterDeclaration(name, false);
@@ -325,9 +371,13 @@ public final class Parser {
                 final var components = new ArrayList<Stmt.ProductComponent>();
                 if (!check(RIGHT_PAREN)) {
                     do {
+                        final var componentDocumentation = documentationBefore(peek());
                         final var componentName = consume(IDENTIFIER, "Expect product component name.");
                         consume(COLON, "Expect ':' after product component name.");
                         components.add(new Stmt.ProductComponent(componentName, collectType()));
+                        if (componentDocumentation != null) {
+                            documentation.put(componentName, componentDocumentation);
+                        }
                     } while (match(COMMA));
                 }
                 consume(RIGHT_PAREN, "Expect ')' after product components.");
@@ -337,6 +387,7 @@ public final class Parser {
             }
             final var cases = new ArrayList<Stmt.SumCase>();
             do {
+                final var caseDocumentation = documentationBefore(peek());
                 final var caseName = consume(IDENTIFIER, "Expect sum case name.");
                 final var payloads = new ArrayList<Stmt.SumPayload>();
                 if (match(LEFT_PAREN)) {
@@ -350,6 +401,7 @@ public final class Parser {
                     consume(RIGHT_PAREN, "Expect ')' after sum payloads.");
                 }
                 cases.add(new Stmt.SumCase(caseName, payloads));
+                if (caseDocumentation != null) documentation.put(caseName, caseDocumentation);
             } while (match(PIPE));
             consume(SEMICOLON, "Expect ';' after sum declaration.");
             return new Stmt.SumDecl(name, List.copyOf(typeParameters.values()), cases,
@@ -417,6 +469,10 @@ public final class Parser {
     }
 
     private Stmt.Witness witnessDeclaration() {
+        return witnessDeclaration(false);
+    }
+
+    private Stmt.Witness witnessDeclaration(final boolean delegating) {
         final var name = previous();
         final var typeParameters = typeParameterDeclaration(name, true);
         final var enclosingTypeParameters = activeTypeParameters;
@@ -436,6 +492,7 @@ public final class Parser {
         consume(LEFT_BRACE, "Expect '{' before witness members.");
             final var methods = new ArrayList<Stmt.WitnessMethod>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                final var isStatic = match(STATIC);
                 if (match(FN) || match(MUT)) {
                     final var declarationToken = previous();
                     if (declarationToken.type() == MUT) {
@@ -465,12 +522,12 @@ public final class Parser {
                     final var helperName = new Token(IDENTIFIER,
                             SyntheticNames.witnessMethod(name, methodName.lexeme()), null, methodName.span());
                     final var helperParameters = new ArrayList<Token>();
-                    if (!higherKinded) {
+                    if (!higherKinded && !isStatic) {
                         helperParameters.add(new Token(THIS, "this", null, methodName.span()));
                     }
                     helperParameters.addAll(parsed.parameters());
                     final var helperTypes = new ArrayList<TypeDescriptor>();
-                    if (!higherKinded) helperTypes.add(targetType);
+                    if (!higherKinded && !isStatic) helperTypes.add(targetType);
                     helperTypes.addAll(parsed.typeDescriptor().parameters());
                     final var helperTypeParameters = new ArrayList<TypeParameterDescriptor>(typeParameters.values());
                     helperTypeParameters.addAll(methodTypeParameters.values());
@@ -479,11 +536,15 @@ public final class Parser {
                             parsed.typeDescriptor().raisedEffects());
                     final var implementation = new Stmt.Function(helperName, helperParameters, helperType,
                             parsed.body(), false, parsed.defaultValues(),
-                            (higherKinded ? 0 : 1) + parsed.parameters().size()
+                            (higherKinded || isStatic ? 0 : 1) + parsed.parameters().size()
                                     - (parsed.variadic() ? 1 : 0)
                                     - parsed.defaultValues().size(), parsed.variadic());
-                    methods.add(new Stmt.WitnessMethod(methodName, sourceMethod, implementation));
+                    methods.add(new Stmt.WitnessMethod(methodName, sourceMethod, implementation, isStatic));
                     continue;
+                }
+                if (isStatic) {
+                    error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "The 'static' modifier is only valid on witness methods.");
                 }
                 final var member = consume(IDENTIFIER, "Expect witness method declaration.");
                 if (match(EQUAL)) {
@@ -493,9 +554,9 @@ public final class Parser {
                 throw error(member, DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
                         "Witness members must be declared with 'fn'.");
             }
-            consume(RIGHT_BRACE, "Expect '}' after witness members.");
+            final var closingBrace = consume(RIGHT_BRACE, "Expect '}' after witness members.");
             return new Stmt.Witness(name, List.copyOf(typeParameters.values()), contractType,
-                    targetType, methods, false, List.of(), higherKinded);
+                    targetType, methods, false, List.of(), higherKinded, closingBrace, delegating);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -540,6 +601,7 @@ public final class Parser {
             consume(LEFT_BRACE, "Expect '{' before extension methods.");
             final var methods = new ArrayList<Stmt>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                final var memberDocumentation = documentationBefore(peek());
                 final var methodPublic = match(PUBLIC);
                 final var isMutating = match(MUT);
                 if (match(PROPERTY)) {
@@ -562,6 +624,9 @@ public final class Parser {
                     methods.add(new Stmt.ExtensionMethod(propertyName, List.of(receiverParameter), functionType,
                             isPublic && property.isPublic(), false, property.getterBody(), List.of(), 1, false,
                             receiverType, List.copyOf(extensionTypeParameters.values()), List.of(), true));
+                    if (memberDocumentation != null) {
+                        documentation.put(propertyName, memberDocumentation);
+                    }
                     continue;
                 }
                 consume(FN, "Extension methods must be declared with 'fn'.");
@@ -597,6 +662,9 @@ public final class Parser {
                             parsed.variadic(), receiverType,
                             List.copyOf(extensionTypeParameters.values()),
                             List.copyOf(methodTypeParameters.values())));
+                    if (memberDocumentation != null) {
+                        documentation.put(methodName, memberDocumentation);
+                    }
                 } finally {
                     activeTypeParameters = enclosingMethodParameters;
                 }
@@ -741,6 +809,7 @@ public final class Parser {
         final var methods = new ArrayList<Stmt.ExternalMethod>();
         final var properties = new ArrayList<Stmt.ExternalStaticProperty>();
         while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            final var memberDocumentation = documentationBefore(peek());
             final var isMemberPublic = match(PUBLIC);
             final var isMutating = match(MUT);
             final var isStatic = match(STATIC);
@@ -769,6 +838,9 @@ public final class Parser {
                 consume(SEMICOLON, "Expect ';' after external constructor.");
                 constructors.add(new Stmt.ExternalConstructor(constructorName, parameters,
                         parameterTypes, isMemberPublic, exceptionMappings));
+                if (memberDocumentation != null) {
+                    documentation.put(constructorName, memberDocumentation);
+                }
                 continue;
             }
             if (isStatic && check(PROPERTY)) {
@@ -780,6 +852,9 @@ public final class Parser {
                 final var type = collectType();
                 consume(SEMICOLON, "Expect ';' after external property.");
                 properties.add(new Stmt.ExternalStaticProperty(propertyName, type, isMemberPublic));
+                if (memberDocumentation != null) {
+                    documentation.put(propertyName, memberDocumentation);
+                }
                 continue;
             }
             if (isStatic && isMutating) {
@@ -810,6 +885,9 @@ public final class Parser {
                     TypeDescriptor.functionWithEffectsOf(methodName.lexeme(), returnType,
                             parameterTypes, List.of(), raisedEffects),
                     isMemberPublic, isStatic, isMutating, List.of(), exceptionMappings));
+            if (memberDocumentation != null) {
+                documentation.put(methodName, memberDocumentation);
+            }
         }
         consume(RIGHT_BRACE, "Expect '}' after external class members.");
         return new Stmt.ExternalClass(name, binaryName, isPublic, constructors, methods, properties);
@@ -821,7 +899,9 @@ public final class Parser {
             final boolean isPublic) {
         consume(LEFT_PAREN, "Expect '(' after function name.");
         final var enclosingLevelMarker = levelMarker;
+        final var wasParsingInitializer = parsingDataClassInitializer;
         levelMarker = new LevelMarker(levelMarker);
+        parsingDataClassInitializer = false;
 
         try {
             final var parameterNames = new ArrayList<Token>();
@@ -886,6 +966,7 @@ public final class Parser {
                     parameterNames.size() - (variadic ? 1 : 0) - defaultValues.size(), variadic);
         } finally {
             levelMarker = enclosingLevelMarker;
+            parsingDataClassInitializer = wasParsingInitializer;
         }
     }
 
@@ -1006,14 +1087,16 @@ public final class Parser {
     }
 
     private Stmt.ClassDecl classDeclaration(final boolean isTopLevelPublic) {
-        return classDeclaration(isTopLevelPublic, false);
+        return classDeclaration(isTopLevelPublic, false, false);
     }
 
     private Stmt.ClassDecl effectDeclaration(final boolean isPublic) {
-        return classDeclaration(isPublic, true);
+        return classDeclaration(isPublic, true, false);
     }
 
-    private Stmt.ClassDecl classDeclaration(final boolean isTopLevelPublic, final boolean isEffect) {
+    private Stmt.ClassDecl classDeclaration(final boolean isTopLevelPublic,
+                                            final boolean isEffect,
+                                            final boolean isDataClass) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect class name."));
         final var typeParameters = typeParameterDeclaration(name, true, false, true);
         if (isEffect && !typeParameters.isEmpty()) {
@@ -1023,11 +1106,33 @@ public final class Parser {
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
+            final var dataComponents = new ArrayList<Stmt.ProductComponent>();
+            if (isDataClass) {
+                consume(LEFT_PAREN, "Expect '(' before data-class components.");
+                if (!check(RIGHT_PAREN)) {
+                    do {
+                        final var componentDocumentation = documentationBefore(peek());
+                        final var componentName = consume(IDENTIFIER, "Expect data-class component name.");
+                        consume(COLON, "Expect ':' after data-class component name.");
+                        final var componentType = collectType();
+                        if (match(EQUAL)) {
+                            error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                    "Data-class components cannot have default values.");
+                            expression();
+                        }
+                        dataComponents.add(new Stmt.ProductComponent(componentName, componentType));
+                        if (componentDocumentation != null) {
+                            documentation.put(componentName, componentDocumentation);
+                        }
+                    } while (match(COMMA));
+                }
+                consume(RIGHT_PAREN, "Expect ')' after data-class components.");
+            }
             final var contractUses = new ArrayList<Stmt.ContractUse>();
             final var higherKindedContractUses = new ArrayList<Stmt.ContractUse>();
             if (match(IS)) {
                 do {
-                        final var contractName = qualifyTypeToken(
+                        final var contractName = unresolvedTypeToken(
                             consume(IDENTIFIER, "Expect contract name after 'is'."));
                     final var hasTypeArguments = match(LESS);
                     final var typeArguments = hasTypeArguments
@@ -1053,40 +1158,79 @@ public final class Parser {
             final var higherKindedImplementations = new ArrayList<Stmt.Witness>();
             final var literalSuffixes = new ArrayList<Stmt.LiteralSuffix>();
             final var storedStateOrder = new ArrayList<Token>();
+            final var initializerBlocks = new ArrayList<Stmt.InitializerBlock>();
+            for (final var component : dataComponents) {
+                properties.add(new Stmt.Property(component.name(), component.type(), null,
+                        isTopLevelPublic, false, null, null, null, true));
+                storedStateOrder.add(component.name());
+            }
             Stmt.Constructor constructor = null;
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
-                if (matchSoftKeyword("implementation")) {
-                    higherKindedImplementations.add(higherKindedImplementation());
+                final var memberDocumentation = documentationBefore(peek());
+                Token documentedMemberName = null;
+                if (isDataClass && isDataClassInitializerStart(name)) {
+                    dataClassInitializerNames.add(advance());
+                    final var raisedEffects = parseRaisedEffects();
+                    consume(LEFT_BRACE, "Expect '{' before data-class initializer block.");
+                    final var enclosingLevelMarker = levelMarker;
+                    final var wasParsingInitializer = parsingDataClassInitializer;
+                    levelMarker = new LevelMarker(levelMarker);
+                    parsingDataClassInitializer = true;
+                    try {
+                        initializerBlocks.add(new Stmt.InitializerBlock(raisedEffects, block()));
+                    } finally {
+                        levelMarker = enclosingLevelMarker;
+                        parsingDataClassInitializer = wasParsingInitializer;
+                    }
+                } else if (isSoftKeyword("delegating")
+                        && current + 1 < tokens.size()
+                        && tokens.get(current + 1).lexeme().equals("implementation")) {
+                    advance();
+                    consumeSoftKeyword("implementation");
+                    higherKindedImplementations.add(higherKindedImplementation(true));
+                } else if (matchSoftKeyword("implementation")) {
+                    higherKindedImplementations.add(higherKindedImplementation(false));
                 } else if (isLiteralSuffixDeclaration()) {
                     literalSuffixes.add(literalSuffix(advance()));
                 } else if (match(PUBLIC, PRIVATE)) {
                     final var isPublic = previous().type() == PUBLIC;
                     if (match(CONSTRUCTOR)) {
                         final var constructorName = consume(IDENTIFIER, "Expect constructor name after 'constructor'.");
+                        if (isDataClass) {
+                            error(constructorName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                    "Data classes have only their canonical component constructor.");
+                        }
                         if (constructorName.lexeme().equals("new")) {
                             if (constructor != null) error(constructorName,
                                     DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
                                     "A class can declare only one canonical constructor.");
                             consume(SEMICOLON, "Expect ';' after canonical constructor declaration.");
                             constructor = new Stmt.Constructor(constructorName, isPublic);
+                            documentedMemberName = constructorName;
                         } else {
-                            namedConstructors.add(namedConstructor(constructorName, isPublic, name,
-                                    List.copyOf(typeParameters.values())));
+                            final var named = namedConstructor(constructorName, isPublic, name,
+                                    List.copyOf(typeParameters.values()));
+                            namedConstructors.add(named);
+                            documentedMemberName = named.name();
                         }
                     } else {
                         final var isMutating = match(MUT);
                         if (match(PATTERN)) {
                             if (isMutating) error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                                     "Patterns cannot be marked mut.");
-                            patterns.add(classPattern(isPublic));
+                            final var pattern = classPattern(isPublic);
+                            patterns.add(pattern);
+                            documentedMemberName = pattern.name();
                         } else if (match(PROPERTY)) {
                             final var propertyName = consume(IDENTIFIER, "Expect property name.");
                             consume(COLON, "Expect ':' after property name.");
                             properties.add(classProperty(propertyName, isPublic, isMutating));
                             storedStateOrder.add(propertyName);
+                            documentedMemberName = propertyName;
                         } else {
                             final var memberName = consumeMemberName("Expect method name or 'property'.");
                             methods.add(classMethod(isPublic, isMutating, memberName));
+                            documentedMemberName = memberName;
                         }
                     }
                 } else if (match(CONSTRUCTOR)) {
@@ -1099,9 +1243,11 @@ public final class Parser {
                         consume(COLON, "Expect ':' after property name.");
                         properties.add(classProperty(propertyName, false, isMutating));
                         storedStateOrder.add(propertyName);
+                        documentedMemberName = propertyName;
                     } else if (isClassMethodStart()) {
-                        methods.add(classMethod(false, isMutating,
-                                consumeMemberName("Expect method name.")));
+                        final var memberName = consumeMemberName("Expect method name.");
+                        methods.add(classMethod(false, isMutating, memberName));
+                        documentedMemberName = memberName;
                     } else if (isMutating) {
                         throw error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                                 "'mut' must precede a method or property.");
@@ -1114,10 +1260,18 @@ public final class Parser {
                         consume(SEMICOLON, "Expect ';' after field declaration.");
                         fields.add(new Stmt.Field(fieldName, fieldType, initializer));
                         storedStateOrder.add(fieldName);
+                        documentedMemberName = fieldName;
                     }
                 }
+                if (memberDocumentation != null && documentedMemberName != null) {
+                    documentation.put(documentedMemberName, memberDocumentation);
+                }
             }
-            consume(RIGHT_BRACE, "Expect '}' after class members.");
+            final var closingBrace = consume(RIGHT_BRACE, "Expect '}' after class members.");
+                if (isDataClass && !namedConstructors.isEmpty()) {
+                    error(namedConstructors.getFirst().name(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "Data classes cannot declare alternate named constructors.");
+                }
                 if (constructor == null) {
                 final var canonicalName = new Token(IDENTIFIER, "new", null, name.span());
                 constructor = new Stmt.Constructor(canonicalName, true);
@@ -1126,13 +1280,22 @@ public final class Parser {
                     List.copyOf(fields), List.copyOf(properties), constructor,
                     List.copyOf(namedConstructors), List.copyOf(methods), List.copyOf(patterns),
                     isTopLevelPublic, isEffect, derivedContracts, storedStateOrder,
-                    higherKindedContractUses, higherKindedImplementations, literalSuffixes);
+                    higherKindedContractUses, higherKindedImplementations, literalSuffixes,
+                    isDataClass, dataComponents, initializerBlocks, List.of(), closingBrace);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
     }
 
-    private Stmt.Witness higherKindedImplementation() {
+    private boolean isDataClassInitializerStart(final Token className) {
+        if (!check(IDENTIFIER)) return false;
+        final var simpleName = className.lexeme().substring(className.lexeme().lastIndexOf('.') + 1);
+        if (!peek().lexeme().equals(simpleName) || current + 1 >= tokens.size()) return false;
+        final var next = tokens.get(current + 1).type();
+        return next == RAISES || next == LEFT_BRACE;
+    }
+
+    private Stmt.Witness higherKindedImplementation(final boolean delegating) {
         final var keyword = previous();
         final var contractType = collectType();
         if (!(contractType instanceof GenericDescriptor generic)
@@ -1181,9 +1344,9 @@ public final class Parser {
                     parsed.variadic());
             methods.add(new Stmt.WitnessMethod(methodName, sourceMethod, implementation));
         }
-        consume(RIGHT_BRACE, "Expect '}' after HKT implementation methods.");
+        final var closingBrace = consume(RIGHT_BRACE, "Expect '}' after HKT implementation methods.");
         return new Stmt.Witness(implementationName, witnessTypeParameters, contractType, targetType,
-                methods, false, List.of(), true);
+                methods, false, List.of(), true, closingBrace, delegating);
     }
 
     private Stmt.Pattern classPattern(final boolean isPublic) {
@@ -1383,7 +1546,7 @@ public final class Parser {
             final var requiredContracts = new ArrayList<Stmt.ContractUse>();
             if (matchSoftKeyword("requires")) {
                 do {
-                    final var requiredName = qualifyTypeToken(
+                    final var requiredName = unresolvedTypeToken(
                             consume(IDENTIFIER, "Expect required contract name."));
                     final var hasTypeArguments = match(LESS);
                     final var typeArguments = hasTypeArguments
@@ -1396,7 +1559,7 @@ public final class Parser {
             final var permittedClasses = new ArrayList<Stmt.ContractUse>();
             if (matchSoftKeyword("permits")) {
                 do {
-                    final var className = qualifyTypeToken(
+                    final var className = unresolvedTypeToken(
                             consume(IDENTIFIER, "Expect permitted class name."));
                     final var hasTypeArguments = match(LESS);
                     final var typeArguments = hasTypeArguments
@@ -1415,14 +1578,18 @@ public final class Parser {
             final var methods = new ArrayList<Stmt.ContractMethod>();
             final var properties = new ArrayList<Stmt.ContractProperty>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                final var memberDocumentation = documentationBefore(peek());
                 final var isDefault = match(DEFAULT);
                 final var isMutating = match(MUT);
+                final var isStatic = match(STATIC);
                 if (match(CONSTRUCTOR)) {
                     throw error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
                             "Contract constructor requirements were removed; pass a factory explicitly "
                                     + "or use an HKT capability.");
                 }
                 if (match(PROPERTY)) {
+                    if (isStatic) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                            "Contract properties are instance requirements and cannot be static.");
                     if (isHigherKinded) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
                             "HKT contracts cannot declare instance properties.");
                     if (isDefault) error(previous(), DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
@@ -1430,13 +1597,14 @@ public final class Parser {
                     final var propertyName = consume(IDENTIFIER, "Expect property name.");
                     consume(COLON, "Expect ':' after property name.");
                     properties.add(new Stmt.ContractProperty(propertyName, collectType(), isMutating));
+                    if (memberDocumentation != null) documentation.put(propertyName, memberDocumentation);
                     consume(SEMICOLON, "Expect ';' after contract property requirement.");
                     continue;
                 }
                 final var methodName = consumeMemberName("Expect contract method name.");
-                if (isHigherKinded && isDefault) {
+                if (isHigherKinded && isDefault && isStatic) {
                     error(methodName, DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
-                            "HKT contract methods cannot have default implementations.");
+                            "HKT contract default methods cannot be static.");
                 }
                 final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
                 final var enclosingMethodTypeParameters = activeTypeParameters;
@@ -1449,11 +1617,20 @@ public final class Parser {
                         error(methodName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                                 "Only HKT contract methods may declare a receiver parameter.");
                     }
+                    if (signature.receiverParameter() && isStatic) {
+                        error(methodName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                                "Static contract methods cannot declare a receiver parameter.");
+                    }
+                    if (isStatic && isMutating) {
+                        error(methodName, DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
+                                "Static contract methods cannot be mutating.");
+                    }
                     methods.add(new Stmt.ContractMethod(methodName, signature.parameters(),
                             signature.typeDescriptor(), isMutating, isDefault,
                             isDefault ? signature.body() : List.of(), signature.defaultValues(),
                             signature.parameters().size() - (signature.variadic() ? 1 : 0)
-                                    - signature.defaultValues().size(), signature.variadic()));
+                                    - signature.defaultValues().size(), signature.variadic(), isStatic));
+                    if (memberDocumentation != null) documentation.put(methodName, memberDocumentation);
                 } finally {
                     activeTypeParameters = enclosingMethodTypeParameters;
                 }
@@ -1582,7 +1759,7 @@ public final class Parser {
             }
         } else {
             final var firstTypeName = consume(IDENTIFIER, "Expect bind name.");
-            final var qualifiedTypeName = qualifyTypeToken(firstTypeName);
+            final var qualifiedTypeName = unresolvedTypeToken(firstTypeName);
 
             var isGeneric = false;
             List<TypeDescriptor> inner = null;
@@ -1711,26 +1888,13 @@ public final class Parser {
                 : packageName + "." + token.lexeme());
     }
 
-    private Token qualifyTypeToken(final Token token) {
+    private Token unresolvedTypeToken(final Token token) {
         final var name = new StringBuilder(token.lexeme());
         while (check(DOT) && !isNamedPatternSuffix()) {
             advance();
             name.append('.').append(consume(IDENTIFIER, "Expect name after '.'.").lexeme());
         }
-        return withLexeme(token, qualifyTypeReference(name.toString()));
-    }
-
-    private String qualifyTypeReference(final String name) {
-        if (name.indexOf('.') >= 0
-                || BuiltinTypes.NAMES.contains(name)
-                || activeTypeParameters.containsKey(name)) return name;
-        if (localTypeNames.contains(name)) {
-            return packageName.isEmpty() ? name : packageName + "." + name;
-        }
-        if (importedTypes.containsKey(name)) return importedTypes.get(name);
-        if (DEFAULT_ZERON_LANG_TYPES.contains(name)) return "zeron.lang." + name;
-        if (onDemandImports.isEmpty() && !packageName.isEmpty()) return packageName + "." + name;
-        return name;
+        return withLexeme(token, name.toString());
     }
 
     private boolean isNamedPatternSuffix() {
@@ -1796,7 +1960,10 @@ public final class Parser {
     }
 
     private Expr return_() {
-        if (levelMarker == null)
+        if (parsingDataClassInitializer)
+            error(previous(), DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT,
+                    "Cannot return from a data-class initializer block.");
+        else if (levelMarker == null)
             error(previous(), DiagnosticCatalog.CONTROL_STATEMENT_OUTSIDE_CONTEXT,
                     "Can only return inside of a function.");
 
@@ -2395,12 +2562,12 @@ public final class Parser {
             final var factoryName = new Token(IDENTIFIER, "closed", null, operator.span());
             final var receiver = new Expr.Variable(className, TypeDescriptor.ofInfer());
             final var arguments = List.<Expr>of(
-                new Expr.Literal(number.literal(), TypeDescriptor.ofInt()),
-                new Expr.Literal(end.literal(), TypeDescriptor.ofInt()));
+                integerLiteral(number),
+                integerLiteral(end));
             return new Expr.MemberCall(receiver, factoryName, end, arguments,
                 List.of(), TypeDescriptor.ofInfer());
             }
-            return new Expr.Literal(number.literal(), TypeDescriptor.ofInt());
+            return integerLiteral(number);
         }
 
         if (match(LONG)) {
@@ -2418,11 +2585,14 @@ public final class Parser {
         }
 
         if (match(DOUBLE, STRING)) {
+            final var token = previous();
+            if (token.type() == DOUBLE) {
+                final var exact = new java.math.BigDecimal(token.lexeme().replace("_", ""));
+                return new Expr.Literal(token.literal(), TypeDescriptor.ofFloat(),
+                        null, exact, token);
+            }
             return new Expr.Literal(
-                    previous().literal(),
-                    previous().type() == DOUBLE
-                            ? TypeDescriptor.ofFloat()
-                            : TypeDescriptor.ofString());
+                    token.literal(), TypeDescriptor.ofString());
         }
 
         if (match(CHAR)) {
@@ -2529,11 +2699,22 @@ public final class Parser {
         throw error(peek(), "Expect expression.");
     }
 
+    private static Expr.Literal integerLiteral(final Token token) {
+        final var exact = (java.math.BigInteger) token.literal();
+        Object defaultValue;
+        try {
+            defaultValue = exact.intValueExact();
+        } catch (final ArithmeticException _) {
+            defaultValue = exact;
+        }
+        return new Expr.Literal(defaultValue, TypeDescriptor.ofInt(), exact, null, token);
+    }
+
     private Expr anonymousObject(final Token keyword) {
         consume(COLON, "Expect ':' after 'object'.");
         final var contracts = new ArrayList<Stmt.ContractUse>();
         do {
-            final var contractName = qualifyTypeToken(
+            final var contractName = unresolvedTypeToken(
                     consume(IDENTIFIER, "Expect contract name after 'object :'."));
             final var hasTypeArguments = match(LESS);
             final var typeArguments = hasTypeArguments
@@ -2925,14 +3106,21 @@ public final class Parser {
 
     private Expr.Lambda finishLambda(final List<Token> params) {
         final var arrow = consume(ARROW, "Expect '->' after parameters.");
+        final var enclosingLevelMarker = levelMarker;
+        final var wasParsingInitializer = parsingDataClassInitializer;
         levelMarker = new LevelMarker(levelMarker);
-        List<Stmt> body;
-        if (match(LEFT_BRACE)) {
-            body = block();
-        } else {
-            body = List.of(expressionReturn());
+        parsingDataClassInitializer = false;
+        final List<Stmt> body;
+        try {
+            if (match(LEFT_BRACE)) {
+                body = block();
+            } else {
+                body = List.of(expressionReturn());
+            }
+        } finally {
+            levelMarker = enclosingLevelMarker;
+            parsingDataClassInitializer = wasParsingInitializer;
         }
-        levelMarker = levelMarker.enclosing();
         final var inferredParameters = params.stream()
                 .map(_ -> TypeDescriptor.ofInfer())
                 .toArray(TypeDescriptor[]::new);

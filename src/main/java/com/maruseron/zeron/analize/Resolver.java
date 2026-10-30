@@ -111,17 +111,11 @@ public final class Resolver {
                 }
             }
         }
-        for (final var classDeclaration : context.classes.values()) {
-            for (final var witness : classDeclaration.higherKindedImplementations()) {
-                for (final var method : witness.methods()) {
-                    context.higherKindedImplementationOwners.put(
-                            method.implementation(), classDeclaration.name().lexeme());
-                }
-            }
-        }
         for (var unitIndex = 0; unitIndex < units.size(); unitIndex++) {
             final var unit = units.get(unitIndex);
+            context.packageName = unit.packageName();
             context.currentSourcePath = unit.sourcePath();
+            context.currentImports = context.importResolver.provisionalTypeEnvironment(unit);
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = entry.declaration();
                 if (declaration instanceof Stmt.Var variable) {
@@ -129,6 +123,10 @@ public final class Resolver {
                             unit, variable, entry.namespaceName()));
                 }
                 if (!(declaration instanceof Stmt.FunctionDeclaration function)) continue;
+                TypeResolver.resolveTypeNames(context, function.typeDescriptor(), function.name());
+                if (function instanceof Stmt.ExtensionMethod extension) {
+                    TypeResolver.resolveTypeNames(context, extension.receiverType(), function.name());
+                }
                 if (unitIndex > 0 && function.typeDescriptor().returnType() instanceof InferDescriptor) {
                     attempt(context, () -> Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, function.name(),
@@ -165,6 +163,36 @@ public final class Resolver {
             context.currentImports = importsByUnit.get(unit);
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                TypeResolver.resolveTypeNames(context, entry.declaration());
+            }
+        }
+        TypeClassEvidence.synthesizeDelegatingClassHktImplementations(context);
+        for (final var classDeclaration : context.classes.values()) {
+            for (final var witness : classDeclaration.higherKindedImplementations()) {
+                for (final var method : witness.methods()) {
+                    context.higherKindedImplementationOwners.put(
+                            method.implementation(), classDeclaration.name().lexeme());
+                }
+            }
+        }
+        for (final var unit : units) {
+            context.packageName = unit.packageName();
+            context.currentSourcePath = unit.sourcePath();
+            context.currentImports = importsByUnit.get(unit);
+            context.invalidImportAliases = invalidAliasesByUnit.get(unit);
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
+                if (entry.declaration() instanceof Stmt.ExternalClass externalClass) {
+                    attempt(context, () -> context.declarationRegistrar.validateExternalClass(
+                            externalClass, qualify(unit.packageName(), externalClass.name().lexeme())));
+                }
+            }
+        }
+        for (final var unit : units) {
+            context.packageName = unit.packageName();
+            context.currentSourcePath = unit.sourcePath();
+            context.currentImports = importsByUnit.get(unit);
+            context.invalidImportAliases = invalidAliasesByUnit.get(unit);
+            for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 if (entry.declaration() instanceof Stmt.ExternalClass externalClass) {
                     final var javaClass = context.javaClassPath.find(externalClass.javaBinaryName());
                     if (javaClass == null) continue;
@@ -178,6 +206,8 @@ public final class Resolver {
                         }
                     }
                     for (final var constructor : externalClass.constructors()) {
+                        constructor.parameterTypes().forEach(parameterType ->
+                                TypeResolver.resolveTypeNames(context, parameterType, constructor.name()));
                         final var javaConstructor = javaClass.methods().stream()
                                 .filter(candidate -> DeclarationRegistry.matchesExternalConstructor(
                                         constructor, candidate))
@@ -357,6 +387,41 @@ public final class Resolver {
             context.recoverAfterDeclarationFailure();
             return false;
         }
+    }
+
+    static boolean attemptMember(final ResolutionContext context, final Runnable operation) {
+        final var scopeDepth = context.symbols.scopeDepth();
+        final var frame = context.frame.checkpoint();
+        try {
+            operation.run();
+            return true;
+        } catch (final SkipResolutionUnit _) {
+            recoverAfterMemberFailure(context, scopeDepth, frame);
+            return false;
+        } catch (final ResolutionError error) {
+            context.diagnostics.record(error, context.currentSourcePath);
+            recoverAfterMemberFailure(context, scopeDepth, frame);
+            return false;
+        } catch (final JavaClassPath.MetadataException error) {
+            final var token = new Token(TokenType.IDENTIFIER, error.binaryName(), null, 1);
+            final var diagnostic = new ResolutionError(
+                    DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
+                    token, error.getMessage(), context.currentSourcePath);
+            context.diagnostics.record(diagnostic, context.currentSourcePath);
+            recoverAfterMemberFailure(context, scopeDepth, frame);
+            return false;
+        }
+    }
+
+    private static void recoverAfterMemberFailure(final ResolutionContext context,
+                                                  final int scopeDepth,
+                                                  final FunctionResolutionFrame.Checkpoint frame) {
+        final var currentDepth = context.symbols.scopeDepth();
+        if (currentDepth < scopeDepth) {
+            throw new IllegalStateException("Member resolution unwound a scope owned by its enclosing declaration.");
+        }
+        context.symbols.unwindScopesTo(scopeDepth);
+        context.frame.restore(frame);
     }
 
     private static Token declarationName(final Stmt declaration) {

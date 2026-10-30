@@ -2,6 +2,7 @@ package com.maruseron.zeron.compile;
 
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.analize.ContractComposition;
+import com.maruseron.zeron.analize.HktDefaultSupport;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.domain.BindingMutability;
@@ -20,14 +21,24 @@ import java.util.*;
 import static com.maruseron.zeron.compile.BytecodeEmitter.*;
 
 final class NominalTypeEmitter {
+    private static String propertyBackingFieldName(final Stmt.ClassDecl owner, final String name) {
+        return owner.isDataComponent(name) ? name : Stmt.propertyBackingFieldName(name);
+    }
+
     static void emit(CompilationContext context) throws IOException {
         for (final var contract : context.resolution.contracts().values()) {
-            if (contract.higherKinded()
-                    || context.metadata.metadataTypeNames().contains(contract.name().lexeme())) continue;
+            if (context.metadata.metadataTypeNames().contains(contract.name().lexeme())) continue;
+            if (contract.higherKinded()) {
+                if (contract.methods().stream().anyMatch(Stmt.ContractMethod::isDefault)) {
+                    emitHktDefaultOwner(context, contract);
+                }
+                continue;
+            }
             final var contractName = contract.name().lexeme();
             if (contractName.equals(context.mainClassName)) {
                 throw new IllegalStateException("Contract name conflicts with generated program class: " + contractName);
             }
+
             final var contractPath = outputPath(context, contractName);
             Files.createDirectories(contractPath.getParent());
             final var sumDeclaration = context.compilationUnits.stream()
@@ -68,12 +79,14 @@ final class NominalTypeEmitter {
                             emitSumHashMethod(builder, sumDeclaration);
                         }
                         for (final var method : contract.methods()) {
+                            final var hktDefault = contract.higherKinded() && method.isDefault();
+                            final var jvmDefault = method.isDefault() && !hktDefault;
                             final var flags = ClassFile.ACC_PUBLIC
-                                    | (method.isDefault() ? 0 : ClassFile.ACC_ABSTRACT);
+                                    | (jvmDefault ? 0 : ClassFile.ACC_ABSTRACT);
                             final var witnessSlots = BytecodeEmitter.witnessSlots(context, method.typeDescriptor());
                             final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
                                     toJavaMethodDescriptor(method.typeDescriptor()), witnessSlots.size());
-                            if (method.isDefault()) {
+                            if (jvmDefault) {
                                 builder.withMethod(method.name().lexeme(),
                                         methodDescriptor, flags, methodBuilder -> {
                                             final var methodSignature = ClassSignatureEmitter.methodSignature(method.typeDescriptor());
@@ -98,7 +111,7 @@ final class NominalTypeEmitter {
                                 final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(
                                         method.typeDescriptor());
                                 final var bridgeFlags = ClassFile.ACC_PUBLIC
-                                        | (method.isDefault() ? 0 : ClassFile.ACC_ABSTRACT)
+                                        | (jvmDefault ? 0 : ClassFile.ACC_ABSTRACT)
                                         | ClassFile.ACC_SYNTHETIC;
                                 builder.withMethod(method.name().lexeme(),
                                         toJavaMethodDescriptor(bridgeType), bridgeFlags, methodBuilder -> {
@@ -109,12 +122,17 @@ final class NominalTypeEmitter {
                                                         methodBuilder.constantPool().utf8Entry(methodSignature)));
                                             }
 
-                                            if (method.isDefault()) {
+                                            if (jvmDefault) {
                                                 methodBuilder.withCode(BytecodeEmitter::emitEvidenceUnavailable);
                                             }
                                         });
                             }
-                            emitContractDefaultArgumentWrappers(context, builder, contract, method);
+                            if (!hktDefault) {
+                                emitContractDefaultArgumentWrappers(context, builder, contract, method);
+                            }
+                            if (hktDefault) {
+                                emitHktContractDefaultHelper(context, builder, contract, method);
+                            }
                         }
                         for (final var property : contract.properties()) {
                             final var getterType = TypeDescriptor.functionOf(
@@ -380,6 +398,11 @@ final class NominalTypeEmitter {
                     if (signature != null) {
                         builder.with(SignatureAttribute.of(builder.constantPool().utf8Entry(signature)));
                     }
+                    for (final var component : declaration.dataComponents()) {
+                        builder.withField(component.name().lexeme(),
+                                TypeDescriptor.toJavaClassDesc(component.type()),
+                                ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL);
+                    }
                     for (final var field : declaration.fields()) {
                         builder.withField(field.name().lexeme(), TypeDescriptor.toJavaClassDesc(field.type()),
                                 ClassFile.ACC_PRIVATE);
@@ -395,7 +418,7 @@ final class NominalTypeEmitter {
                                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL);
                     }
                     for (final var property : declaration.properties()) {
-                        if (!property.isCustom()) {
+                        if (!property.isCustom() && !declaration.isDataComponent(property.name().lexeme())) {
                             builder.withField(Stmt.propertyBackingFieldName(property.name().lexeme()),
                                     TypeDescriptor.toJavaClassDesc(property.type()),
                                     ClassFile.ACC_PRIVATE
@@ -494,7 +517,9 @@ final class NominalTypeEmitter {
                     } else {
                         final var sourceDeclaration = sourceTypeDeclaration(context, className);
                         if (sourceDeclaration != null
-                                && derives(derivedContracts(sourceDeclaration), "Eq")) {
+                                && (sourceDeclaration instanceof Stmt.ClassDecl classDeclaration
+                                        && classDeclaration.dataClass()
+                                    || derives(derivedContracts(sourceDeclaration), "Eq"))) {
                             emitClassEqualityMethod(builder, declaration);
                         }
                         if (sourceDeclaration != null
@@ -955,6 +980,12 @@ final class NominalTypeEmitter {
     }
 
     private static List<StoredComponent> storedComponents(final Stmt.ClassDecl declaration) {
+        if (declaration.dataClass()) {
+            return declaration.dataComponents().stream()
+                    .map(component -> new StoredComponent(
+                            component.name().lexeme(), component.type(), false))
+                    .toList();
+        }
         final var components = new LinkedHashMap<String, StoredComponent>();
         declaration.fields().forEach(field -> components.put(field.name().lexeme(),
                 new StoredComponent(field.name().lexeme(), field.type(), false)));
@@ -1132,7 +1163,7 @@ final class NominalTypeEmitter {
             final var fieldType = TypeSubstitution.erase(property.type());
             builder.withMethodBody(getterName, toJavaMethodDescriptor(getterType), flags, code -> {
                 code.aload(0);
-                code.getfield(classDesc, Stmt.propertyBackingFieldName(property.name().lexeme()),
+                code.getfield(classDesc, propertyBackingFieldName(owner, property.name().lexeme()),
                         TypeDescriptor.toJavaClassDesc(fieldType));
                 code.return_(TypeKind.fromDescriptor(
                         TypeDescriptor.toJavaClassDesc(fieldType).descriptorString()));
@@ -1159,7 +1190,7 @@ final class NominalTypeEmitter {
             builder.withMethodBody(setterName, toJavaMethodDescriptor(setterType), flags, code -> {
                 code.aload(0);
                 loadLocal(context, code, 1, fieldType);
-                code.putfield(classDesc, Stmt.propertyBackingFieldName(property.name().lexeme()),
+                code.putfield(classDesc, propertyBackingFieldName(owner, property.name().lexeme()),
                         TypeDescriptor.toJavaClassDesc(fieldType));
                 emitUnitValue(context, code);
                 code.areturn();
@@ -1243,6 +1274,7 @@ final class NominalTypeEmitter {
             context.symbols.define(thisToken);
             for (final var field : declaration.fields()) {
                 if (field.initializer() != null) continue;
+                if (declaration.dataClass()) continue;
                 final var fieldType = TypeSubstitution.erase(field.type());
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, field.name(), fieldType,
                         BindingMutability.IMMUTABLE);
@@ -1250,6 +1282,7 @@ final class NominalTypeEmitter {
             }
             for (final var property : declaration.properties()) {
                 if (property.initializer() != null || property.isCustom()) continue;
+                if (declaration.dataClass() && !declaration.isDataComponent(property.name().lexeme())) continue;
                 final var fieldType = TypeSubstitution.erase(property.type());
                 final var parameter = new Token(TokenType.IDENTIFIER,
                         "$propertyArg$" + property.name().lexeme(), null, property.name().span());
@@ -1269,62 +1302,135 @@ final class NominalTypeEmitter {
                         ClassDesc.of("java.lang.invoke.MethodHandle"));
             }
             var slot = 1;
-            var fieldIndex = 0;
-            for (final var field : declaration.fields()) {
-                final var fieldType = TypeSubstitution.erase(field.type());
-                if (field.initializer() != null) {
-                    emitExpr(context, code, field.initializer());
-                    emitConversion(context, code, context.lastEmittedType, fieldType);
-                    final var temporary = new Token(TokenType.IDENTIFIER,
-                            "$fieldInit$" + fieldIndex, null, field.name().span());
-                    final var temporarySlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, temporary,
-                            fieldType, BindingMutability.IMMUTABLE);
-                    context.symbols.define(temporary);
-                    code.storeLocal(TypeKind.fromDescriptor(
-                            TypeDescriptor.toJavaClassDesc(fieldType).descriptorString()),
-                            temporarySlot + context.localSlotOffset);
-                    code.aload(0);
-                    loadLocal(context, code, temporarySlot + context.localSlotOffset, fieldType);
-                } else {
-                    code.aload(0);
-                    loadLocal(context, code, slot, fieldType);
-                    slot += fieldType.isDoubleWidth() ? 2 : 1;
-                }
-                code.putfield(classDesc, field.name().lexeme(), TypeDescriptor.toJavaClassDesc(fieldType));
-                fieldIndex++;
+            for (final var component : declaration.dataComponents()) {
+                final var componentType = TypeSubstitution.erase(component.type());
+                code.aload(0);
+                loadLocal(context, code, slot, componentType);
+                code.putfield(classDesc, component.name().lexeme(),
+                        TypeDescriptor.toJavaClassDesc(componentType));
+                slot += componentType.isDoubleWidth() ? 2 : 1;
             }
-            for (final var property : declaration.properties()) {
-                if (property.isCustom()) continue;
-                final var fieldType = TypeSubstitution.erase(property.type());
-                if (property.initializer() != null) {
-                    emitExpr(context, code, property.initializer());
-                    emitConversion(context, code, context.lastEmittedType, fieldType);
-                    final var temporary = new Token(TokenType.IDENTIFIER,
-                            "$propertyInit$" + fieldIndex, null, property.name().span());
-                    final var temporarySlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, temporary,
-                            fieldType, BindingMutability.IMMUTABLE);
-                    context.symbols.define(temporary);
-                    code.storeLocal(TypeKind.fromDescriptor(
-                            TypeDescriptor.toJavaClassDesc(fieldType).descriptorString()),
-                            temporarySlot + context.localSlotOffset);
-                    code.aload(0);
-                    loadLocal(context, code, temporarySlot + context.localSlotOffset, fieldType);
-                } else {
-                    code.aload(0);
-                    final var parameter = new Token(TokenType.IDENTIFIER,
-                            "$propertyArg$" + property.name().lexeme(), null, property.name().span());
-                    loadLocal(context, code, context.symbols.getSymbol(parameter).lvt() + context.localSlotOffset, fieldType);
-                    slot += fieldType.isDoubleWidth() ? 2 : 1;
+            if (declaration.dataClass()) {
+                emitDataClassDirectInitializers(context, code, declaration, classDesc);
+            } else {
+                var fieldIndex = 0;
+                for (final var field : declaration.fields()) {
+                    final var fieldType = TypeSubstitution.erase(field.type());
+                    if (field.initializer() != null) {
+                        emitExpr(context, code, field.initializer());
+                        emitConversion(context, code, context.lastEmittedType, fieldType);
+                        final var temporary = new Token(TokenType.IDENTIFIER,
+                                "$fieldInit$" + fieldIndex, null, field.name().span());
+                        final var temporarySlot = context.symbols.declareSymbol(
+                                Resolver.SYNTHETIC_VAR, temporary, fieldType, BindingMutability.IMMUTABLE);
+                        context.symbols.define(temporary);
+                        code.storeLocal(TypeKind.fromDescriptor(
+                                TypeDescriptor.toJavaClassDesc(fieldType).descriptorString()),
+                                temporarySlot + context.localSlotOffset);
+                        code.aload(0);
+                        loadLocal(context, code, temporarySlot + context.localSlotOffset, fieldType);
+                    } else {
+                        code.aload(0);
+                        loadLocal(context, code, slot, fieldType);
+                        slot += fieldType.isDoubleWidth() ? 2 : 1;
+                    }
+                    code.putfield(classDesc, field.name().lexeme(), TypeDescriptor.toJavaClassDesc(fieldType));
+                    fieldIndex++;
                 }
-                code.putfield(classDesc, Stmt.propertyBackingFieldName(property.name().lexeme()),
-                        TypeDescriptor.toJavaClassDesc(fieldType));
-                fieldIndex++;
+                for (final var property : declaration.properties()) {
+                    if (property.isCustom()) continue;
+                    final var fieldType = TypeSubstitution.erase(property.type());
+                    if (property.initializer() != null) {
+                        emitExpr(context, code, property.initializer());
+                        emitConversion(context, code, context.lastEmittedType, fieldType);
+                        final var temporary = new Token(TokenType.IDENTIFIER,
+                                "$propertyInit$" + fieldIndex, null, property.name().span());
+                        final var temporarySlot = context.symbols.declareSymbol(
+                                Resolver.SYNTHETIC_VAR, temporary, fieldType, BindingMutability.IMMUTABLE);
+                        context.symbols.define(temporary);
+                        code.storeLocal(TypeKind.fromDescriptor(
+                                TypeDescriptor.toJavaClassDesc(fieldType).descriptorString()),
+                                temporarySlot + context.localSlotOffset);
+                        code.aload(0);
+                        loadLocal(context, code, temporarySlot + context.localSlotOffset, fieldType);
+                    } else {
+                        code.aload(0);
+                        final var parameter = new Token(TokenType.IDENTIFIER,
+                                "$propertyArg$" + property.name().lexeme(), null, property.name().span());
+                        loadLocal(context, code,
+                                context.symbols.getSymbol(parameter).lvt() + context.localSlotOffset, fieldType);
+                        slot += fieldType.isDoubleWidth() ? 2 : 1;
+                    }
+                    code.putfield(classDesc, propertyBackingFieldName(declaration, property.name().lexeme()),
+                            TypeDescriptor.toJavaClassDesc(fieldType));
+                    fieldIndex++;
+                }
+            }
+            for (final var initializerBlock : declaration.initializerBlocks()) {
+                beginScope(context);
+                try {
+                    StatementEmitter.emitStmts(context, code, initializerBlock.body());
+                } finally {
+                    endScope(context);
+                }
             }
             code.return_();
         } finally {
             endScope(context);
             context.localSlotOffset = previousOffset;
         }
+    }
+
+    private static void emitDataClassDirectInitializers(final CompilationContext context,
+                                                        final CodeBuilder code,
+                                                        final Stmt.ClassDecl declaration,
+                                                        final ClassDesc classDesc) {
+        final var fields = declaration.fields().stream()
+                .collect(java.util.stream.Collectors.toMap(field -> field.name().lexeme(), field -> field));
+        final var properties = declaration.properties().stream()
+                .filter(property -> !property.isCustom())
+                .collect(java.util.stream.Collectors.toMap(
+                        property -> property.name().lexeme(), property -> property));
+        var initializerIndex = 0;
+        for (final var member : declaration.storedStateOrder()) {
+            final var name = member.lexeme();
+            if (declaration.isDataComponent(name)) continue;
+            final var field = fields.get(name);
+            if (field != null && field.initializer() != null) {
+                emitDataClassDirectInitializer(context, code, classDesc, field.name(), field.type(),
+                        field.initializer(), field.name().lexeme(), initializerIndex++);
+                continue;
+            }
+            final var property = properties.get(name);
+            if (property != null && property.initializer() != null) {
+                emitDataClassDirectInitializer(context, code, classDesc, property.name(), property.type(),
+                        property.initializer(), propertyBackingFieldName(declaration, name), initializerIndex++);
+            }
+        }
+    }
+
+    private static void emitDataClassDirectInitializer(final CompilationContext context,
+                                                       final CodeBuilder code,
+                                                       final ClassDesc classDesc,
+                                                       final Token name,
+                                                       final TypeDescriptor declaredType,
+                                                       final Expr initializer,
+                                                       final String fieldName,
+                                                       final int initializerIndex) {
+        final var fieldType = TypeSubstitution.erase(declaredType);
+        emitExpr(context, code, initializer);
+        emitConversion(context, code, context.lastEmittedType, fieldType);
+        final var temporary = new Token(TokenType.IDENTIFIER,
+                "$dataInitializer$" + initializerIndex, null, name.span());
+        final var temporarySlot = context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, temporary,
+                fieldType, BindingMutability.IMMUTABLE);
+        context.symbols.define(temporary);
+        code.storeLocal(TypeKind.fromDescriptor(
+                TypeDescriptor.toJavaClassDesc(fieldType).descriptorString()),
+                temporarySlot + context.localSlotOffset);
+        code.aload(0);
+        loadLocal(context, code, temporarySlot + context.localSlotOffset, fieldType);
+        code.putfield(classDesc, fieldName, TypeDescriptor.toJavaClassDesc(fieldType));
     }
 
     private static void emitCrossPackageLambdaAccessBridges(CompilationContext context, final ClassBuilder builder,
@@ -1617,6 +1723,57 @@ final class NominalTypeEmitter {
             context.localSlotOffset = previousOffset;
             context.currentReturnType = previousReturnType;
         }
+    }
+
+    private static void emitHktDefaultOwner(
+            final CompilationContext context, final Stmt.ContractDecl owner) throws IOException {
+        final var helperOwner = SyntheticNames.hktDefaultOwner(owner.name().lexeme());
+        final var helperPath = outputPath(context, helperOwner);
+        Files.createDirectories(helperPath.getParent());
+        context.classFile.buildTo(helperPath.toAbsolutePath(), ClassDesc.of(helperOwner), builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
+            builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL | ClassFile.ACC_SUPER);
+            owner.methods().stream().filter(Stmt.ContractMethod::isDefault)
+                    .forEach(method -> emitHktContractDefaultHelper(context, builder, owner, method));
+        });
+    }
+
+    private static void emitHktContractDefaultHelper(
+            final CompilationContext context, final ClassBuilder builder,
+            final Stmt.ContractDecl owner, final Stmt.ContractMethod method) {
+        final var helperType = HktDefaultSupport.helperType(
+                context.resolution.contracts(), owner, method);
+        final var witnessSlots = BytecodeEmitter.witnessSlots(context, helperType);
+        final var descriptor = BytecodeEmitter.withEvidenceParameters(
+                toJavaMethodDescriptor(helperType), witnessSlots.size());
+        builder.withMethod(SyntheticNames.hktDefaultMethod(
+                        owner.name().lexeme(), method.name().lexeme()),
+                descriptor, ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                methodBuilder -> methodBuilder.withCode(code -> {
+                    final var previousReturnType = context.currentReturnType;
+                    final var previousOffset = context.localSlotOffset;
+                    context.currentReturnType = helperType.returnType();
+                    context.localSlotOffset = 0;
+                    beginScope(context);
+                    try {
+                        for (int index = 0; index < method.parameters().size(); index++) {
+                            final var parameter = method.parameters().get(index);
+                            context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, parameter,
+                                    helperType.parameters().get(index), BindingMutability.IMMUTABLE);
+                            context.symbols.define(parameter);
+                        }
+                        declareEvidenceSlots(context, helperType);
+                        StatementEmitter.emitStmts(context, code, method.body());
+                        if (helperType.returnType() instanceof UnitDescriptor) {
+                            emitUnitValue(context, code);
+                            code.areturn();
+                        }
+                    } finally {
+                        endScope(context);
+                        context.localSlotOffset = previousOffset;
+                        context.currentReturnType = previousReturnType;
+                    }
+                }));
     }
 
     private static void declareEvidenceSlots(final CompilationContext context,

@@ -1,11 +1,10 @@
 package zeron.lang;
 
-/**
- * Provides a user-facing textual representation of a value.
- *
- * Display output is intended for presentation, not debugging or serialization.
- * Implementations should avoid exposing runtime representation details.
- */
-public contract Display<T: mut> {
+/// Provides a user-facing textual representation of a value.
+/// Display output is intended for presentation, not debugging or serialization.
+/// Implementations should avoid exposing runtime representation details.
+public contract Display {
+
+    /// Returns a `String` representation of this object. 
     toString(): String;
 }

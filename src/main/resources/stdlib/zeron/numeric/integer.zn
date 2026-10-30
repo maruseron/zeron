@@ -1,0 +1,109 @@
+package zeron.numeric;
+
+import java.math.BigInteger as JavaBigInteger;
+
+import zeron.lang.Comparable;
+import zeron.lang.Display;
+import zeron.lang.Eq;
+import zeron.lang.Hashable;
+import zeron.lang.Ordering;
+
+external fn bigIntegerFromLiteralText(value: String): &JavaBigInteger;
+external fn bigIntegerFromInt(value: Int): &JavaBigInteger;
+external fn bigIntegerFromLong(value: Long): &JavaBigInteger;
+external fn bigIntegerAdd(left: &JavaBigInteger, right: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerMultiply(left: &JavaBigInteger, right: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerSubtract(left: &JavaBigInteger, right: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerDivide(left: &JavaBigInteger, right: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerRemainder(left: &JavaBigInteger, right: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerFloorDivide(left: &JavaBigInteger, right: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerFloorRemainder(left: &JavaBigInteger, right: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerNegate(value: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerAbs(value: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerSignum(value: &JavaBigInteger): &JavaBigInteger;
+external fn bigIntegerToIntExact(value: &JavaBigInteger): Int;
+external fn bigIntegerToLongExact(value: &JavaBigInteger): Long;
+external fn bigIntegerToFloat(value: &JavaBigInteger): Float;
+external fn bigIntegerToString(value: &JavaBigInteger): String;
+external fn bigIntegerEquals(left: &JavaBigInteger, right: &JavaBigInteger): Boolean;
+external fn bigIntegerCompare(left: &JavaBigInteger, right: &JavaBigInteger): Int;
+external fn bigIntegerHash(value: &JavaBigInteger): Int;
+
+/// Immutable arbitrary-precision integer type.
+///
+/// Internally backed by a `java.math.BigInteger`.
+public class Integer {
+    value: &JavaBigInteger;
+
+    private constructor new;
+
+    public constructor fromLiteralText(value: String) =
+        Integer.new(bigIntegerFromLiteralText(value));
+
+    public constructor fromInt(value: Int) = Integer.new(bigIntegerFromInt(value));
+
+    public constructor fromLong(value: Long) = Integer.new(bigIntegerFromLong(value));
+
+    suffix n {
+        integer: string fromLiteralText;
+    }
+
+    public add(other: Integer): Integer =
+        Integer.new(bigIntegerAdd(this.value, other.value));
+
+    public subtract(other: Integer): Integer =
+        Integer.new(bigIntegerSubtract(this.value, other.value));
+
+    public multiply(other: Integer): Integer =
+        Integer.new(bigIntegerMultiply(this.value, other.value));
+
+    public negate(): Integer = 
+        Integer.new(bigIntegerNegate(this.value));
+
+    public abs(): Integer = 
+        Integer.new(bigIntegerAbs(this.value));
+
+    public signum(): Integer = 
+        Integer.new(bigIntegerSignum(this.value));
+
+    public quot(other: Integer): Integer =
+        Integer.new(bigIntegerDivide(this.value, other.value));
+
+    public rem(other: Integer): Integer =
+        Integer.new(bigIntegerRemainder(this.value, other.value));
+
+    public div(other: Integer): Integer =
+        Integer.new(bigIntegerFloorDivide(this.value, other.value));
+
+    public mod(other: Integer): Integer =
+        Integer.new(bigIntegerFloorRemainder(this.value, other.value));
+
+    public toInteger(): Integer = this;
+
+    public toRational(): Rational = Rational.fromInteger(this);
+
+    public toIntExact(): Int = bigIntegerToIntExact(this.value);
+
+    public toLongExact(): Long = bigIntegerToLongExact(this.value);
+
+    public toFloat(): Float = bigIntegerToFloat(this.value);
+
+    public hash(): Int = bigIntegerHash(this.value);
+
+    public eq(other: Integer): Boolean = bigIntegerEquals(this.value, other.value);
+
+    public compareTo(other: Integer): Ordering {
+        let res = bigIntegerCompare(this.value, other.value);
+        if (res < 0) return Ordering.LT();
+        if (res > 0) return Ordering.GT();
+        return Ordering.EQ();
+    }
+
+    public toString(): String = bigIntegerToString(this.value);
+}
+
+delegating witness Integral<Integer> for Integer {
+    static fn fromInteger(value: Integer): Integer = value;
+}
+
+delegating witness Display for Integer {}

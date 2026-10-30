@@ -2,6 +2,7 @@ package com.maruseron.zeron;
 
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import org.junit.Test;
@@ -18,6 +19,129 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public final class MathApiTest {
+    @Test
+    public void resolvesExactIntegerAndRationalLiteralsContextually() throws Exception {
+        final var className = "NumericHierarchy" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-numeric-");
+        final var unit = parse("NumericHierarchy.zn", """
+                import zeron.numeric.Integer;
+                import zeron.numeric.Rational;
+                import zeron.numeric.Numeric;
+                import zeron.lang.Comparable;
+                import zeron.lang.Display;
+                import zeron.lang.Eq;
+                import zeron.lang.Hashable;
+                import zeron.lang.Ordering;
+                import suffix zeron.numeric.Integer.n;
+
+                fn display<T: mut + Display>(value: T): String = value.toString();
+                fn equal<T: mut + Eq<T>>(left: T, right: T): Boolean = left.eq(right);
+                fn hash<T: mut + Hashable<T>>(value: T): Int = value.hash();
+                fn compare<T: mut + Comparable<T>>(left: T, right: T): Ordering =
+                    left.compareTo(right);
+                fn rationalThird(): Rational = 1 / 3;
+                fn rationalHalf(): Rational = 0.5;
+                fn rationalTwoFourths(): Rational = 2 / 4;
+                fn rationalThreeTenths(): Rational = 3 / 10;
+                fn integerComparison(): Int {
+                    let ordering = compare<Integer>(5n, 2n);
+                    if (ordering matches Ordering.GT()) return 1;
+                    if (ordering matches Ordering.LT()) return -1;
+                    return 0;
+                }
+                fn rationalComparison(): Int {
+                    let ordering = compare<Rational>(rationalThird(), rationalHalf());
+                    if (ordering matches Ordering.LT()) return -1;
+                    if (ordering matches Ordering.GT()) return 1;
+                    return 0;
+                }
+                fn equalRationals(): Boolean =
+                    equal<Rational>(rationalHalf(), rationalTwoFourths());
+                fn equalIntegers(): Boolean = equal<Integer>(12n, 12n);
+                fn rationalHashesMatch(): Boolean =
+                    hash<Rational>(rationalHalf()) == hash<Rational>(rationalTwoFourths());
+                fn integerDisplay(): String = display<Integer>(12345678901234567890n);
+                fn rationalDisplay(): String = display<Rational>(rationalThreeTenths());
+                fn integerHash(): Int = hash<Integer>(12345678901234567890n);
+                fn rationalHash(): Int = hash<Rational>(rationalThreeTenths());
+                fn largeInteger(): Integer = 123456789012345678901234567890;
+                fn integerAdd(): Integer = 5n + 2n;
+                fn rationalLiteral(): Rational = 0.125;
+                fn rationalAdd(): Rational = 0.1 + 0.2;
+                fn rationalDivide(): Rational = 1 / 3;
+                fn negatedRational(): Rational = -0.5;
+                fn genericOne<T: Numeric<T>>(): T = 1;
+                fn genericRational(): Rational = genericOne<Rational>();
+                fn floatFromInteger(): Float = 2;
+                fn floatFromRational(): Float = 0.1;
+                fn intFromLiteral(): Int = 42;
+                fn rationalNumerator(): String = rationalAdd().numerator().toString();
+                fn rationalDenominator(): String = rationalAdd().denominator().toString();
+                fn rationalLiteralNumerator(): String = rationalLiteral().numerator().toString();
+                fn rationalLiteralDenominator(): String = rationalLiteral().denominator().toString();
+                fn rationalDivideNumerator(): String = rationalDivide().numerator().toString();
+                fn rationalDivideDenominator(): String = rationalDivide().denominator().toString();
+                fn genericRationalNumerator(): String = genericRational().numerator().toString();
+                fn genericRationalDenominator(): String = genericRational().denominator().toString();
+                fn divisionByZero(): Rational = 1 / 0;
+                """);
+
+        try {
+            deleteTree(Path.of("dist"));
+            final var compiler = CompilationService.forCompilationUnits(
+                    StandardLibrary.withBundledUnits(List.of(unit)), className, "",
+                    List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals("123456789012345678901234567890",
+                        generated.getMethod("largeInteger").invoke(null).toString());
+                assertEquals("12345678901234567890", generated.getMethod("integerDisplay").invoke(null));
+                assertEquals("3/10", generated.getMethod("rationalDisplay").invoke(null));
+                assertEquals(1, generated.getMethod("integerComparison").invoke(null));
+                assertEquals(-1, generated.getMethod("rationalComparison").invoke(null));
+                assertEquals(true, generated.getMethod("equalIntegers").invoke(null));
+                assertEquals(true, generated.getMethod("equalRationals").invoke(null));
+                assertEquals(true, generated.getMethod("rationalHashesMatch").invoke(null));
+                generated.getMethod("integerHash").invoke(null);
+                generated.getMethod("rationalHash").invoke(null);
+                assertEquals("7", generated.getMethod("integerAdd").invoke(null).toString());
+                assertEquals("1", generated.getMethod("rationalLiteralNumerator").invoke(null));
+                assertEquals("8", generated.getMethod("rationalLiteralDenominator").invoke(null));
+                assertEquals("3", generated.getMethod("rationalNumerator").invoke(null));
+                assertEquals("10", generated.getMethod("rationalDenominator").invoke(null));
+                assertEquals("1", generated.getMethod("rationalDivideNumerator").invoke(null));
+                assertEquals("3", generated.getMethod("rationalDivideDenominator").invoke(null));
+                assertEquals("1", generated.getMethod("genericRationalNumerator").invoke(null));
+                assertEquals("1", generated.getMethod("genericRationalDenominator").invoke(null));
+                assertEquals(1.0d / 10.0d, (double) generated.getMethod("floatFromRational").invoke(null), 0.0d);
+                assertEquals(2.0d, (double) generated.getMethod("floatFromInteger").invoke(null), 0.0d);
+                assertEquals(42, generated.getMethod("intFromLiteral").invoke(null));
+                final var divisionByZero = assertThrows(InvocationTargetException.class,
+                        () -> generated.getMethod("divisionByZero").invoke(null));
+                assertTrue(divisionByZero.getCause() instanceof ArithmeticException);
+            }
+        } finally {
+            deleteTree(output);
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void rejectsIntegerLiteralsOutsideTheExpectedPrimitiveRange() {
+        final var unit = parse("OutOfRange.zn", """
+                fn outOfRange(): Int = 2147483648;
+                """);
+        final var compiler = CompilationService.forCompilationUnits(
+                StandardLibrary.withBundledUnits(List.of(unit)), "OutOfRange", "",
+                List.of(), true, List.of(), Path.of("target", "zeron-out-of-range"));
+
+        assertThrows(ResolutionError.class, compiler::resolve);
+    }
+
     @Test
     public void exposesMathExtensionsConstantsAndJvmEdgeSemantics() throws Exception {
         final var className = "MathApi" + UUID.randomUUID().toString().replace("-", "");

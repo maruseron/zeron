@@ -16,6 +16,7 @@ public final class AnsiSyntaxHighlighter {
         parser.parseCompilationUnitWithDiagnostics(null);
         final var forExpressionResultKeywords = java.util.Set.copyOf(
                 parser.forExpressionResultKeywords());
+        final var dataClassInitializerNames = java.util.Set.copyOf(parser.dataClassInitializerNames());
         final var tokens = scanResult.tokens();
         final var output = new StringBuilder();
         var copiedThrough = 0;
@@ -33,6 +34,7 @@ public final class AnsiSyntaxHighlighter {
                     && tokens.get(previousSignificantIndex(tokens, index)).type() == TokenType.SUFFIXABLE_NUMBER) {
                 color = "36";
             }
+            if (color == null && dataClassInitializerNames.contains(token)) color = "36";
             if (color == null && (forExpressionResultKeywords.contains(token)
                     || isContextualKeyword(tokens, index))) color = "35";
             final var text = source.substring(start, end);
@@ -47,6 +49,7 @@ public final class AnsiSyntaxHighlighter {
         final var token = tokens.get(index);
         if (token.type() != TokenType.IDENTIFIER) return false;
         return switch (token.lexeme()) {
+            case "data" -> followsDataClassDeclaration(tokens, index);
             case "deriving" -> followsDerivingClause(tokens, index);
             case "with" -> followsHandleExpression(tokens, index) || followsSuppressedArm(tokens, index);
             case "handler" -> followsHandlerSyntax(tokens, index);
@@ -57,8 +60,23 @@ public final class AnsiSyntaxHighlighter {
             case "out" -> isTypeProjection(tokens, index);
             case "nullable" -> isGenericAdmissibilityMarker(tokens, index);
             case "implementation" -> followsHigherKindedImplementation(tokens, index);
+            case "delegating" -> followsDelegatingDeclaration(tokens, index);
             default -> false;
         };
+    }
+
+    private static boolean followsDelegatingDeclaration(final List<Token> tokens, final int index) {
+        final var next = nextSignificantIndex(tokens, index);
+        if (next < 0) return false;
+        if (tokens.get(next).type() == TokenType.WITNESS) return true;
+        return tokens.get(next).type() == TokenType.IDENTIFIER
+                && tokens.get(next).lexeme().equals("implementation")
+                && followsHigherKindedImplementation(tokens, next);
+    }
+
+    private static boolean followsDataClassDeclaration(final List<Token> tokens, final int index) {
+        final var next = nextSignificantIndex(tokens, index);
+        return next >= 0 && tokens.get(next).type() == TokenType.CLASS;
     }
 
     private static boolean followsHigherKindedImplementation(final List<Token> tokens, final int index) {

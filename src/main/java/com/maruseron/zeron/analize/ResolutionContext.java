@@ -35,6 +35,7 @@ final class ResolutionContext {
     final Map<Token, Token> referenceTargets = new IdentityHashMap<>();
     final Map<Token, TypeDescriptor> referenceTypes = new IdentityHashMap<>();
     final Map<Token, FunctionDescriptor> callSiteFunctionTypes = new IdentityHashMap<>();
+    Map<TypeParameterDescriptor, TypeDescriptor> activeTypeSubstitutions = Map.of();
     final List<Expr.Lambda> resolvedLambdas = new ArrayList<>();
     private final Set<Expr.Lambda> trackedLambdas = Collections.newSetFromMap(new IdentityHashMap<>());
     final IdentityHashMap<Stmt, String> sourcePathsByDeclaration = new IdentityHashMap<>();
@@ -56,7 +57,7 @@ final class ResolutionContext {
     String entrySourcePath;
     ImportResolver.ImportEnvironment currentImports =
             new ImportResolver.ImportEnvironment(
-                    Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), List.of(), List.of());
+                    Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), List.of(), List.of(), List.of());
     Set<String> invalidImportAliases = Set.of();
     String currentSourcePath;
     String currentNamespaceName;
@@ -88,6 +89,8 @@ final class ResolutionContext {
         frame.currentClassName = null;
         frame.currentMethodOwner = null;
         frame.initializerVisibleFields = null;
+        frame.dataInitializerOwner = null;
+        frame.dataInitializerWritableFields = java.util.Map.of();
     }
 
     void skipInvalidImportAlias(final String name) {

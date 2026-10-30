@@ -87,7 +87,6 @@ final class DeclarationRegistry {
                             declaration.name(),
                             "An external class must use its Java binary name as its qualified source name."));
                 }
-                validateExternalClass(declaration, qualifiedName);
                 if (externalClasses.putIfAbsent(qualifiedName, declaration) != null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                             declaration.name(), "External class '" + qualifiedName + "' is already declared."));
@@ -189,7 +188,7 @@ final class DeclarationRegistry {
         contracts.put(sum.name().lexeme(), sumContract);
     }
 
-    private void validateExternalClass(final Stmt.ExternalClass declaration, final String qualifiedName) {
+    void validateExternalClass(final Stmt.ExternalClass declaration, final String qualifiedName) {
         if (!declaration.isPublic()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
                     declaration.name(), "External classes must be public."));

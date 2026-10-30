@@ -8,18 +8,18 @@ for a type parameter and states which contract those types must provide.
 ## Bounds: require the operations a function needs
 
 Suppose a function wants to display any value. It needs more than an arbitrary `T`: it needs a
-type that provides `Display<T>`:
+type that provides `Display`:
 
 ```zeron
 import zeron.lang.Display;
 
-fn show<T: Display<T>>(value: T): String = value.toString();
+fn show<T: Display>(value: T): String = value.toString();
 ```
 
-The bound `T: Display<T>` means that `T` must have evidence for the fully applied contract
-`Display<T>`. Within `show`, the bound makes the contract's non-mutating methods available. A call
+The bound `T: Display` means that `T` must have evidence for the `Display` contract. Within `show`,
+the bound makes the contract's non-mutating methods available. A call
 is valid only when Zeron can establish that the chosen type meets the bound. For example,
-`show(42)` uses the compiler-provided `Display<Int>` implementation.
+`show(42)` uses the compiler-provided `Display` implementation for `Int`.
 
 Bounds can include generic contract arguments, not just a contract name. For example,
 `Sink<Int>` and `Sink<String>` are different requirements. This lets a function say exactly which
@@ -89,8 +89,25 @@ defaults. Its methods are read-only in the current model: `mut` requirements are
 `this` is immutable, and implementations may access only public members of the target. This does
 not guarantee that a witness method is free of other effects.
 
-If a class already declares nominal conformance, that conformance remains authoritative for its
-instance methods; a witness cannot replace them. Factories are expressed separately: use a class's
+When a target class already has compatible public instance methods, a declaration can opt into
+forwarding those methods instead of repeating trivial witness bodies:
+
+```zeron
+delegating witness Addable<Vector> for Vector {}
+```
+
+For a delegating witness, explicit witness methods take precedence, defaults remain defaults, and
+other abstract, non-mutating instance requirements are forwarded only when a compatible public
+method is declared directly on the target class. Unmatched requirements still need
+implementations. Static requirements are never delegated and must be implemented explicitly.
+Delegation does not infer a witness: the witness declaration remains explicit.
+
+Contracts with static method requirements, including requirements inherited from another
+contract, must be implemented through a witness rather than a class's `is` clause. A witness for
+such a contract implements all of its abstract requirements: declare static implementations with
+`static fn` and instance implementations with `fn`. Contracts without static requirements may
+still use nominal class conformance; that conformance remains authoritative for its instance
+methods, and a witness cannot replace them. Factories are expressed separately: use a class's
 named constructor directly, pass a factory value for one concrete type, or use an HKT contract for
 a generic type family.
 
@@ -139,4 +156,4 @@ The current implementation has several boundaries:
   theorem prover for every complex generic pattern.
 
 For the full rules and implementation details, see the
-[type-class witnesses and generic bounds design document](../documents/design-document-15_type-class-witnesses-and-generic-bounds.md).
+[type-class witnesses and generic bounds design document](../documents/design_documents/design-document-15_type-class-witnesses-and-generic-bounds.md).

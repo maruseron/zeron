@@ -82,13 +82,18 @@ public final class ScannerLocationTest {
 
     @Test
     public void retainsCommentTokensWithTheirSourceRanges() {
-        final var source = "// first\r\nlet value /* *x / still a comment */ = 1;";
+        final var source = "// first\r\n/// API docs\r\nlet value /* *x / still a comment */ = 1;";
         final var result = Scanner.from(source, "src/comments.zn").scanWithDiagnostics();
 
         assertEquals(TokenType.LINE_COMMENT, result.tokens().getFirst().type());
         assertEquals("// first", result.tokens().getFirst().lexeme());
         assertPosition(result.tokens().getFirst().span().start(), 1, 1, 0);
         assertPosition(result.tokens().getFirst().span().end(), 1, 9, 8);
+        final var documentation = result.tokens().stream()
+                .filter(token -> token.type() == TokenType.DOC_COMMENT)
+                .findFirst().orElseThrow();
+        assertEquals("/// API docs", documentation.lexeme());
+        assertPosition(documentation.span().start(), 2, 1, 10);
         final var blockComment = result.tokens().stream()
                 .filter(token -> token.type() == TokenType.BLOCK_COMMENT)
                 .findFirst().orElseThrow();
@@ -113,13 +118,15 @@ public final class ScannerLocationTest {
     }
 
     @Test
-    public void reportsIntegerOverflowInsteadOfThrowing() {
-        final var result = Scanner.from("2147483648", "src/integer.zn").scanWithDiagnostics();
+    public void preservesIntegerLiteralsBeyondThePrimitiveRange() {
+        final var result = Scanner.from("2147483648 123456789012345678901234567890",
+                "src/integer.zn").scanWithDiagnostics();
 
         assertEquals(TokenType.INT, result.tokens().getFirst().type());
-        assertEquals(0, result.tokens().getFirst().literal());
-        assertEquals("ZR1004", result.diagnostics().getFirst().code().toString());
-        assertEquals(1, result.diagnostics().size());
+        assertEquals(BigInteger.valueOf(2_147_483_648L), result.tokens().getFirst().literal());
+        assertEquals(new BigInteger("123456789012345678901234567890"),
+                result.tokens().get(1).literal());
+        assertTrue(result.diagnostics().isEmpty());
     }
 
     @Test
@@ -133,8 +140,9 @@ public final class ScannerLocationTest {
         assertEquals(List.of(TokenType.INT, TokenType.LONG, TokenType.DOUBLE, TokenType.INT, TokenType.INT,
                         TokenType.INT, TokenType.INT, TokenType.LONG, TokenType.INT),
                 numericTokens.stream().map(Token::type).toList());
-        assertEquals(List.of(1_000, BigInteger.valueOf(12_345), 3.141_592, 10, 493, 255, 65_535,
-                        BigInteger.valueOf(2), 12),
+        assertEquals(List.of(BigInteger.valueOf(1_000), BigInteger.valueOf(12_345), 3.141_592,
+                        BigInteger.valueOf(10), BigInteger.valueOf(493), BigInteger.valueOf(255),
+                        BigInteger.valueOf(65_535), BigInteger.valueOf(2), BigInteger.valueOf(12)),
                 numericTokens.stream().map(Token::literal).toList());
         assertEquals("0xFF_FF", numericTokens.get(6).lexeme());
     }
@@ -157,7 +165,7 @@ public final class ScannerLocationTest {
     public void keepsRadixIntegerRangeErrorsDistinctFromMalformedLiterals() {
         final var result = Scanner.from("0x80000000 0x8000000000000001L").scanWithDiagnostics();
 
-        assertEquals(2, result.diagnostics().size());
+        assertEquals(1, result.diagnostics().size());
         assertTrue(result.diagnostics().stream()
                 .allMatch(diagnostic -> diagnostic.code().toString().equals("ZR1004")));
     }

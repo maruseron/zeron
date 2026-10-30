@@ -2,10 +2,15 @@ package com.maruseron.zeron.lsp;
 
 import com.maruseron.zeron.ProjectAnalysisWorkspace;
 import com.maruseron.zeron.diagnostic.Diagnostic;
+import com.maruseron.zeron.diagnostic.DiagnosticHelp;
 import com.maruseron.zeron.diagnostic.Severity;
+import org.eclipse.lsp4j.CodeAction;
+import org.eclipse.lsp4j.CodeActionParams;
+import org.eclipse.lsp4j.CodeActionKind;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionParams;
+import org.eclipse.lsp4j.Command;
 import org.eclipse.lsp4j.DefinitionParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.DidCloseTextDocumentParams;
@@ -19,7 +24,11 @@ import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.TextDocumentEdit;
+import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
+import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
+import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.LanguageClient;
@@ -169,6 +178,95 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
             final var path = documentPath(params.getTextDocument().getUri());
             return LspFeatures.definition(snapshot, path, params);
         }, Either.forLeft(List.of()));
+    }
+
+    @Override
+    public CompletableFuture<List<Either<Command, CodeAction>>> codeAction(final CodeActionParams params) {
+        if (params.getContext() == null) return CompletableFuture.completedFuture(List.of());
+        final var uri = params.getTextDocument().getUri();
+        return withSnapshot(uri, snapshot -> {
+            final var path = documentPath(uri);
+            synchronized (lock) {
+                final var document = openDocuments.get(path);
+                final var text = snapshot.sourceText().get(path);
+                if (document == null || text == null || !text.equals(document.text())) return List.of();
+                return codeActions(snapshot, path, document, params.getContext().getDiagnostics());
+            }
+        }, List.of());
+    }
+
+    private List<Either<Command, CodeAction>> codeActions(
+            final ProjectAnalysisWorkspace.Snapshot snapshot,
+            final Path path,
+            final OpenDocument document,
+            final List<org.eclipse.lsp4j.Diagnostic> requestedDiagnostics) {
+        if (requestedDiagnostics == null || requestedDiagnostics.isEmpty()) return List.of();
+        final var text = snapshot.sourceText().get(path);
+        final var actions = new java.util.ArrayList<Either<Command, CodeAction>>();
+        for (final var diagnostic : snapshot.diagnostics().getOrDefault(path, List.of())) {
+            final var lspDiagnostic = toLspDiagnostic(diagnostic, text);
+            if (!requestedDiagnostics.stream().anyMatch(requested -> sameDiagnostic(requested, lspDiagnostic))) {
+                continue;
+            }
+            for (final DiagnosticHelp help : diagnostic.helps()) {
+                if (help.replacement() == null || help.span() == null) continue;
+                final var span = help.span();
+                final var startOffset = span.start().offset();
+                final var endOffset = span.end().offset();
+                if (startOffset == null || endOffset == null
+                        || startOffset < 0 || endOffset < startOffset || endOffset > text.length()) {
+                    throw new IllegalStateException("Quick-fix replacement has an invalid source span.");
+                }
+                final var edit = insertionEdit(text, startOffset, endOffset, help.replacement());
+                final var workspaceEdit = new WorkspaceEdit();
+                workspaceEdit.setDocumentChanges(List.of(Either.forLeft(new TextDocumentEdit(
+                        new VersionedTextDocumentIdentifier(document.uri(), document.version()),
+                        List.of(Either.forLeft(edit))))));
+                final var action = new CodeAction(help.message());
+                action.setKind(CodeActionKind.QuickFix);
+                action.setDiagnostics(List.of(lspDiagnostic));
+                action.setIsPreferred(true);
+                action.setEdit(workspaceEdit);
+                actions.add(Either.forRight(action));
+            }
+        }
+        return List.copyOf(actions);
+    }
+
+    private static boolean sameDiagnostic(final org.eclipse.lsp4j.Diagnostic requested,
+                                          final org.eclipse.lsp4j.Diagnostic available) {
+        return requested.getCode() != null
+                && requested.getCode().isLeft()
+                && available.getCode() != null
+                && available.getCode().isLeft()
+                && requested.getCode().getLeft().equals(available.getCode().getLeft())
+                && Objects.equals(requested.getRange(), available.getRange());
+    }
+
+    private static TextEdit insertionEdit(final String source,
+                                          final int startOffset,
+                                          final int endOffset,
+                                          final String replacement) {
+        if (startOffset != endOffset) {
+            return new TextEdit(DocumentCoordinates.rangeAt(source, startOffset, endOffset), replacement);
+        }
+        final var lineStart = source.lastIndexOf('\n', Math.max(-1, startOffset - 1)) + 1;
+        final var closingIndent = source.substring(lineStart, startOffset);
+        final var newline = source.contains("\r\n") ? "\r\n" : "\n";
+        if (closingIndent.chars().allMatch(Character::isWhitespace)) {
+            final var memberIndent = closingIndent + "    ";
+            final var inserted = indentLines(replacement, memberIndent, newline)
+                    + newline + closingIndent;
+            return new TextEdit(DocumentCoordinates.rangeAt(source, lineStart, startOffset), inserted);
+        }
+        final var inserted = newline + indentLines(replacement, "    ", newline) + newline;
+        return new TextEdit(DocumentCoordinates.rangeAt(source, startOffset, endOffset), inserted);
+    }
+
+    private static String indentLines(final String text, final String indent, final String newline) {
+        return java.util.Arrays.stream(text.split("\\n", -1))
+                .map(line -> indent + line)
+                .collect(java.util.stream.Collectors.joining(newline));
     }
 
     private <T> CompletableFuture<T> withSnapshot(final String uri,

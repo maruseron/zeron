@@ -8,10 +8,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 import zeron.fs.Path;
+import zeron.internal.allocateByteArray;
 import zeron.io.IoFailure;
 import zeron.io.Reader;
 import zeron.io.Writer;
-import zeron.io.allocateByteArray;
 import zeron.io.openReader;
 import zeron.io.openWriter;
 import zeron.resource.Disposable;

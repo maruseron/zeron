@@ -35,10 +35,21 @@ final class MemberInteropResolver {
         final var availableFields = context.frame.initializerVisibleFields == null
                 ? context.frame.currentMethodOwner.fields()
                 : context.frame.initializerVisibleFields;
-        final var field = availableFields.stream()
+        var field = availableFields.stream()
                 .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
                 .findFirst()
                 .orElse(null);
+        if (field == null && context.frame.currentMethodOwner.dataClass()) {
+            field = context.frame.currentMethodOwner.dataComponentFields().stream()
+                    .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
+                    .findFirst()
+                    .orElse(null);
+            if (field != null && context.frame.initializerVisibleFields != null
+                    && context.frame.initializerVisibleFields.stream()
+                    .noneMatch(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))) {
+                field = null;
+            }
+        }
         if (field == null) return null;
 
         final var receiver = new Expr.Variable(
@@ -53,6 +64,7 @@ final class MemberInteropResolver {
                 TypeResolver.substitutionsFor(context, context.frame.currentMethodOwner.typeParameters(), receiverBaseType));
         variable.setImplicitFieldRead(receiver, context.frame.currentMethodOwner.name().lexeme(), field.type());
         variable.setType(resolvedType);
+        context.recordReference(variable.name, field.name(), resolvedType);
         return resolvedType;
     }
 
@@ -518,11 +530,14 @@ final class MemberInteropResolver {
                                              final TypeDescriptor alreadyResolvedReceiverType,
                                              final TypeDescriptor expectedType) {
         Zeron.debug("resolving member call       " + call.name.lexeme() + " for " + call.receiver);
-        if (call.receiver.getType() instanceof TypeParameterDescriptor parameter
+        final var receiverDescriptor = call.receiver.getType() instanceof TypeParameterDescriptor parameter
+                ? context.activeTypeSubstitutions.getOrDefault(parameter, parameter)
+                : call.receiver.getType();
+        if (receiverDescriptor instanceof TypeParameterDescriptor parameter
                 && parameter.isHigherKinded()) {
             return resolveHigherKindedCall(context, call, parameter);
         }
-        if (call.receiver.getType() instanceof AppliedConstructorDescriptor applied
+        if (receiverDescriptor instanceof AppliedConstructorDescriptor applied
                 && applied.constructor().isHigherKinded()) {
             return resolveHigherKindedReceiverCall(context, call, applied, false);
         }
@@ -900,7 +915,7 @@ final class MemberInteropResolver {
         context.recordReference(call.name, method.implementation().name(), descriptor);
         call.setWitnessMethod(selection.helperQualifiedName(),
                 method.implementation().name().lexeme(),
-                selection.helperType());
+                selection.helperType(), !method.isStatic());
         final var witnessEvidence = TypeClassEvidence.selectArguments(
                 context, method.implementation().typeDescriptor().typeParameters(),
                 selection.substitutions(), call.name);
@@ -1397,18 +1412,22 @@ final class MemberInteropResolver {
         final var instantiatedFactoryParameters = signature.parameters().stream()
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
                 .toList();
-        final var callSiteFactory = TypeDescriptor.functionOf(
+        final var callSiteFactory = TypeDescriptor.functionWithEffectsOf(
                 constructorToken.lexeme(), new ReferenceDescriptor(constructedType),
-                instantiatedFactoryParameters.toArray(TypeDescriptor[]::new));
+                instantiatedFactoryParameters, List.of(),
+                signature.raisedEffects().stream()
+                        .map(effect -> TypeSubstitution.substitute(effect, substitutions))
+                        .toList());
         context.recordReference(call.name, constructorToken, signature);
         context.recordCallSiteFunctionType(call.name, callSiteFactory);
+        call.setResolvedDescriptor(callSiteFactory);
+        RaisedEffectFlow.add(context, new LinkedHashSet<>(callSiteFactory.raisedEffects()), call.name);
         call.setEvidenceArguments(TypeClassEvidence.selectClassArguments(
                 context, declaration, substitutions, call.name));
         final TypeDescriptor result;
         if (factory.canonical()) {
             result = new ReferenceDescriptor(constructedType);
         } else {
-            call.setResolvedDescriptor(callSiteFactory);
             result = callSiteFactory.returnType();
         }
         call.setType(result);
@@ -1417,8 +1436,8 @@ final class MemberInteropResolver {
 
     private static FunctionDescriptor canonicalFactoryDescriptor(final Stmt.ClassDecl declaration) {
         final var constructorTypes = declaration.canonicalConstructorTypes();
-        return TypeDescriptor.functionOf("new", new ReferenceDescriptor(classType(declaration)),
-                constructorTypes.toArray(TypeDescriptor[]::new));
+        return TypeDescriptor.functionWithEffectsOf("new", new ReferenceDescriptor(classType(declaration)),
+                constructorTypes, List.of(), declaration.constructorEffects());
     }
 
     private static TypeDescriptor expectedCaseType(final Stmt.SumDecl sum,
@@ -2380,13 +2399,13 @@ final class MemberInteropResolver {
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
                 method.typeDescriptor(), selectedContractSubstitutions);
         final var evidenceMethodParameters = new ArrayList<TypeDescriptor>();
-        evidenceMethodParameters.add(call.receiver.getType());
+        if (!method.isStatic()) evidenceMethodParameters.add(call.receiver.getType());
         evidenceMethodParameters.addAll(descriptor.parameters());
         final var evidenceMethodType = TypeDescriptor.functionWithEffectsOf(
                 method.name().lexeme(), descriptor.returnType(), evidenceMethodParameters,
                 descriptor.typeParameters(), descriptor.raisedEffects());
         call.setWitnessMethodEvidence(Expr.methodEvidenceToken(parameter, selectedBoundIndex, selectedMethodIndex),
-                evidenceMethodType);
+                evidenceMethodType, !method.isStatic());
         final var variadic = method.variadic();
         final var fixedArity = Stmt.fixedArity(method.parameters(), variadic);
         if (descriptor.isGeneric()) {
@@ -2609,6 +2628,14 @@ final class MemberInteropResolver {
 
     static TypeDescriptor resolveArgument(final ResolutionContext context, final Expr argument,
                                            final TypeDescriptor expectedType) {
+        if (argument instanceof Expr.Literal literal
+                || argument instanceof Expr.Grouping
+                || argument instanceof Expr.Unary
+                || argument instanceof Expr.Binary) {
+            final var contextual = ExpressionFlowResolver.resolveExpectedExpression(
+                    context, argument, expectedType);
+            if (contextual != null) return contextual;
+        }
         if (argument instanceof Expr.MemberCall call) {
             return resolveMemberCall(context, call, expectedType);
         }

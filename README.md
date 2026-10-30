@@ -37,8 +37,9 @@ The implemented language includes:
   lists, and lazy streams.
 - Clause-based for-expressions with ordered generators, local bindings, guards, and lazy `yield` or
   eager `collect` results.
-- Algebraic operator overloading through explicit contracts, plus class-defined numeric literal
-  suffixes.
+- Numeric operator overloading through explicit `Numeric`, `Integral`, `Fractional`, and `Floating`
+  contracts, exact context-directed numeric literals, arbitrary-precision `Integer` and `Rational`
+  types, and class-defined literal suffixes.
 - Sum and product types, guarded newtypes, flow-sensitive type tests and casts, and pattern matching
   with public-property and class-defined patterns.
 - `Option<T>`, `Result<T, E>`, evidence-driven equality and ordering, and typed synchronous raised
@@ -79,9 +80,12 @@ definition navigation, a project-aware `zeron fmt` formatter with `--check` mode
 launcher distribution workflow. The language server currently supports single-project workspaces;
 see the [VS Code extension](editors/vscode/README.md) for setup and its current limitations.
 
-The [language overview](documents/design-document-00.md) summarizes implemented features and
-remaining work. The [design documents](documents/) contain deeper specifications and implementation
-notes.
+The [language overview](documents/design_documents/design-document-00.md) summarizes implemented
+features and remaining work. The [design documents](documents/design_documents/) contain deeper
+specifications and implementation notes.
+
+Contributor guidance for compiler changes, registries, intrinsics, and module conventions is in
+[`documents/developer_guides/`](documents/developer_guides/).
 
 ## License
 

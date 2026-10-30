@@ -4,6 +4,8 @@ import zeron.lang.Option;
 
 fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
 
+public fn allocateByteArray(size: Int): &ByteArray = allocateByteArray(size);
+
 public fn unwrapSome<T: nullable + mut>(option: Option<T>): T = unwrapSome<T>(option);
 
 public fn generateArray<T: nullable + mut>(length: Int, initialize: (Int) -> T): &Array<T> {
@@ -15,3 +17,16 @@ public fn generateArray<T: nullable + mut>(length: Int, initialize: (Int) -> T):
     }
     return values;
 }
+
+public fn arrayToByteArray(values: Array<Byte>): ByteArray {
+    let mut bytes = allocateByteArray(values.length);
+    let mut index = 0;
+    while (index < values.length) {
+        bytes[index] = values[index];
+        index += 1;
+    }
+    return bytes;
+}
+
+public fn byteArrayToArray(bytes: ByteArray): &Array<Byte> =
+    generateArray<Byte>(bytes.length, (index) -> bytes[index]);

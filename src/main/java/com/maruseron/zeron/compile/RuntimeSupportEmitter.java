@@ -92,6 +92,11 @@ final class RuntimeSupportEmitter {
         }
     }
 
+    static void emitNumericSupportClasses(final Path outputDirectory) throws IOException {
+        emitJavaRuntimeClass(outputDirectory, "NumericSupport");
+        emitJavaRuntimeClass(outputDirectory, "RationalValue");
+    }
+
     static void emitJavaArraySupportClass(final Path outputDirectory) throws IOException {
         final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "JavaArraySupport.class"));
         Files.createDirectories(output.getParent());
@@ -201,6 +206,19 @@ final class RuntimeSupportEmitter {
                 "/zeron/runtime/" + className + ".class")) {
             if (classBytes == null) {
                 throw new IOException("Missing compiled " + className + " runtime class.");
+            }
+            Files.copy(classBytes, output, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static void emitJavaRuntimeClass(final Path outputDirectory, final String className) throws IOException {
+        final var output = outputDirectory.resolve(
+                Path.of("com", "maruseron", "zeron", "runtime", className + ".class"));
+        Files.createDirectories(output.getParent());
+        try (final var classBytes = RuntimeSupportEmitter.class.getResourceAsStream(
+                "/com/maruseron/zeron/runtime/" + className + ".class")) {
+            if (classBytes == null) {
+                throw new IOException("Missing compiled " + className + " Java runtime class.");
             }
             Files.copy(classBytes, output, StandardCopyOption.REPLACE_EXISTING);
         }

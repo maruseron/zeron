@@ -1,42 +1,56 @@
-type List<T> = Nil | Cons(head: T, tail: List<T>);
+import zeron.control.Foldable;
+import zeron.control.Monad;
+import zeron.control.Monoid;
+
+type List<T: mut> = Nil | Cons(head: T, tail: List<T>);
 
 namespace List {
-    fn from<T>(elements: T...): List<T> {
+    fn from<T: mut>(elements: T...): List<T> {
         let mut result: List<T> = List<T>.Nil();
         for (let element in elements) {
             let p = pure(element);
-            result = result.append(p);
+            result = result.combine(p);
         }
         return result;
     }
 
-    fn pure<T>(head: T): List<T> = List.Cons(head, List.Nil());
+    fn pure<A: mut>(head: A): List<A> = List.Cons(head, List.Nil());
 }
 
-public extension<T> List<T> {
-    fn append(second: List<T>): List<T> = match (this) {
-        case Cons(head, tail) -> List.Cons(head, tail.append(second));
-        case Nil() -> second;
-    };
-
-    fn fmap<U>(map: (T) -> U): List<U> = match (this) {
-        case Cons(head, tail) -> List.Cons(map(head), tail.fmap<U>(map));
-        case Nil() -> List<U>.Nil();
-    };
-
-    fn bind<U>(map: (T) -> List<U>): List<U> = this.fmap(map).join();
-}
-
-public extension<T> List<List<T>> {
+public extension<T: mut> List<List<T>> {
     fn join(): List<T> = match (this) {
-        case Cons(head, tail) -> head.append(tail.join());
+        case Cons(head, tail) -> head.combine(tail.join());
         case Nil() -> List<T>.Nil();
     };
 }
 
-witness<T: Display<T>> Display<T> for List<T> {
-    fn toString(): String = match (this) {
-        case List.Cons(head, tail) -> head.toString() + tail.toString();
-        case List.Nil() -> "";
+witness<T: mut + Display> Display for List<T> {
+    fn toString(): String = "[" + match (this) {
+        case Cons(head, tail) -> head.toString() + ", " + tail.toString();
+        case Nil() -> "";
+    } + "]";
+}
+
+witness Monad<List<_>> for List<_> {
+    fn map<A: mut, B: mut>(this: List<A>, transform: (A) -> B): List<B> = match (this) {
+        case Cons(head, tail) -> List.Cons(transform(head), tail.map<A, B>(transform));
+        case Nil() -> List<B>.Nil();
+    };
+
+    fn flatMap<A: mut, B: mut>(this: List<A>, transform: (A) -> List<B>): List<B> = 
+        this.map(transform).join();
+
+    fn pure<A: mut>(head: A): List<A> = List.Cons(head, List.Nil());
+
+    fn ap<A: mut, B: mut>(this: List<A>, transform: List<(A) -> B>): List<B> =
+        transform.flatMap(f -> this.map(x -> f(x)));
+}
+
+witness<T> Monoid<List<T>> for List<T> {
+    static fn empty(): List<T> = List.Nil();
+
+    fn combine(other: List<T>): List<T> = match (this) {
+        case Cons(head, tail) -> List.Cons(head, tail.combine(other));
+        case Nil() -> other;
     };
 }

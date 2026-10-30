@@ -1,17 +1,46 @@
 package zeron.lang;
 
-import zeron.algebra.Addition;
-import zeron.algebra.Mult;
+import zeron.numeric.Integral;
+import zeron.numeric.Integer;
+import zeron.numeric.Rational;
 
-witness Addition<Int> for Int {
+witness Integral<Int> for Int {
     fn add(other: Int): Int = this + other;
-    fn zero(): Int = 0;
-    fn negate(): Int = -this;
-}
-
-witness Mult<Int> for Int {
+    fn subtract(other: Int): Int = this - other;
     fn multiply(other: Int): Int = this * other;
-    fn one(): Int = 1;
+    fn negate(): Int = -this;
+    fn abs(): Int = if (this < 0) then -this else this;
+    fn signum(): Int = if (this < 0) then -1 else if (this > 0) then 1 else 0;
+    static fn fromInteger(value: Integer): Int = value.toIntExact();
+
+    fn quot(other: Int): Int = this / other;
+    fn rem(other: Int): Int = this % other;
+    fn div(other: Int): Int {
+        let quotient = this / other;
+        let remainder = this % other;
+        if (remainder != 0 and ((this < 0 and other > 0) or (this > 0 and other < 0))) {
+            return quotient - 1;
+        }
+        return quotient;
+    }
+    fn mod(other: Int): Int {
+        let remainder = this % other;
+        if (remainder != 0 and ((this < 0 and other > 0) or (this > 0 and other < 0))) {
+            return remainder + other;
+        }
+        return remainder;
+    }
+    fn toInteger(): Integer = Integer.fromInt(this);
+    fn toRational(): Rational = Rational.fromInteger(this.toInteger());
+
+    fn hash(): Int = this;
+    fn eq(other: Int): Boolean = this == other;
+
+    fn compareTo(other: Int): Ordering {
+             if (this == other) return Ordering.EQ();
+        else if (this  < other) return Ordering.LT();
+        else                    return Ordering.GT();
+    }
 }
 
 public extension Int {

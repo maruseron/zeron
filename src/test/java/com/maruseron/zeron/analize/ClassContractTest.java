@@ -26,6 +26,33 @@ import static org.junit.Assert.assertThrows;
 
 public final class ClassContractTest {
     @Test
+    public void resolvesImplicitStandardPackageContractRequirements() {
+        final var hashable = Parser.of(Scanner.from("""
+                package zeron.lang;
+                public contract Hashable<T: mut> {}
+                """).scanTokens()).parseCompilationUnit("zeron/lang/hashable.zn");
+        final var numeric = Parser.of(Scanner.from("""
+                package zeron.numeric;
+                public contract Integral<T: mut> requires Hashable<T> {}
+                """).scanTokens()).parseCompilationUnit("zeron/numeric/numeric.zn");
+        final var localContract = Parser.of(Scanner.from("""
+                package zeron.numeric;
+                public contract LocalContract {}
+                """).scanTokens()).parseCompilationUnit("zeron/numeric/local_contract.zn");
+        final var anonymousObject = Parser.of(Scanner.from("""
+                package zeron.numeric;
+                public fn make(): &LocalContract = object: LocalContract {};
+                """).scanTokens()).parseCompilationUnit("zeron/numeric/anonymous_object.zn");
+
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(hashable, numeric, localContract, anonymousObject),
+                "zeron.numeric.Test", "zeron.numeric", List.of(), false, List.of());
+        final var resolution = compiler.resolveWithDiagnostics();
+
+        assertTrue(resolution.errors().toString(), resolution.errors().isEmpty());
+    }
+
+    @Test
     public void getAndSetAreIdentifiersExceptInPropertyAccessorBlocks() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var programName = "SoftAccessorProgram" + suffix;
@@ -125,6 +152,42 @@ public final class ClassContractTest {
     }
 
     @Test
+    public void contractsWithStaticRequirementsRequireWitnesses() {
+        final var result = new ResolutionService().resolveWithDiagnostics(parse("""
+                contract StaticFactory {
+                    static create(): Int;
+                }
+                contract DerivedFactory requires StaticFactory {}
+                class Direct is StaticFactory {
+                    public constructor new;
+                    public create(): Int = 1;
+                }
+                class Inherited is DerivedFactory {
+                    public constructor new;
+                    public create(): Int = 1;
+                }
+                """));
+
+        final var witnessOnlyErrors = result.errors().stream()
+                .filter(diagnostic -> diagnostic.message().contains(
+                        "must be implemented through a witness"))
+                .count();
+        assertEquals(result.errors().toString(), 2, witnessOnlyErrors);
+
+        new ResolutionService().resolve(parse("""
+                contract StaticFactory {
+                    static create(): Int;
+                }
+                class Product {
+                    public constructor new;
+                }
+                witness StaticFactory for Product {
+                    static fn create(): Int = 1;
+                }
+                """));
+    }
+
+    @Test
     public void requiredContractsComposeMembersBoundsAndJvmInterfaces() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var programName = "ContractComposition" + suffix;
@@ -152,7 +215,9 @@ public final class ClassContractTest {
                 }
                 """.formatted(suffix, suffix, suffix, suffix, suffix, suffix, suffix, suffix, suffix,
                 suffix, suffix);
-        final var compiler = new CompilationService(parse(source), programName);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit(null)),
+                programName, "", List.of(), false);
         final var names = List.of("Base" + suffix, "Derived" + suffix, "Implementation" + suffix);
         try {
             compiler.resolve();
@@ -253,13 +318,13 @@ public final class ClassContractTest {
     public void nonNominalWitnessMethodIsDispatchedThroughItsStaticHelper() throws Exception {
         final var programName = "MethodWitness" + UUID.randomUUID().toString().replace("-", "");
         final var source = """
-                contract Display<T> {
+                contract Display {
                     toString(): String;
                 }
                 class Box {
                     public constructor new;
                 }
-                witness Display<Box> for Box {
+                witness Display for Box {
                     fn toString(): String = "box";
                 }
                 fn run(): String = Box.new().toString();
@@ -276,6 +341,219 @@ public final class ClassContractTest {
             Files.deleteIfExists(Path.of("dist", programName + ".class"));
             Files.deleteIfExists(Path.of("dist", "Box.class"));
             Files.deleteIfExists(Path.of("dist", "Display.class"));
+        }
+    }
+
+    @Test
+    public void delegatingWitnessForwardsCompatibleMethodsAndAllowsExplicitOverrides() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "DelegatingWitness" + suffix;
+        final var source = """
+                contract Addable<T> {
+                    add(other: T): T;
+                }
+                class Box%s {
+                    public property value: Int;
+                    public constructor new;
+                    public add(other: Box%s): Box%s =
+                        Box%s.new(this.value + other.value);
+                }
+                class OverrideBox%s {
+                    public property value: Int;
+                    public constructor new;
+                    public add(other: OverrideBox%s): OverrideBox%s =
+                        OverrideBox%s.new(this.value + other.value);
+                }
+                delegating witness Addable<Box%s> for Box%s {}
+                delegating witness Addable<OverrideBox%s> for OverrideBox%s {
+                    fn add(other: OverrideBox%s): OverrideBox%s = OverrideBox%s.new(42);
+                }
+                fn add<T: mut + Addable<T>>(left: T, right: T): T = left.add(right);
+                fn run(): Int =
+                    add(Box%s.new(2), Box%s.new(3)).value
+                    + add(OverrideBox%s.new(2), OverrideBox%s.new(3)).value;
+                """.formatted(suffix, suffix, suffix, suffix,
+                        suffix, suffix, suffix, suffix,
+                        suffix, suffix, suffix,
+                        suffix, suffix, suffix, suffix,
+                        suffix, suffix, suffix, suffix);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit(null)),
+                programName, "", List.of(), false);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(47, loader.loadClass(programName).getMethod("run").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Box" + suffix + ".class"));
+            Files.deleteIfExists(Path.of("dist", "OverrideBox" + suffix + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Addable.class"));
+        }
+    }
+
+    @Test
+    public void delegatingWitnessReportsOverridesWithScalarSignaturesForVectorContract() {
+        final var result = new ResolutionService().resolveWithDiagnostics(parse("""
+                contract Numeric<T: mut> {
+                    add(other: T): T;
+                    negate(): T;
+                }
+                class Vector2<T: mut> {
+                    public add(other: Vector2<T>): Vector2<T> = other;
+                    public negate(): Vector2<T> = this;
+                }
+                delegating witness<T: mut> Numeric<Vector2<T>> for Vector2<T> {
+                    fn add(other: T): T = other;
+                    fn negate(): T {}
+                }
+                """));
+
+        final var invalidOverrides = result.errors().stream()
+                .filter(diagnostic -> diagnostic.message().equals(
+                        "Witness method does not satisfy the contract requirement."))
+                .count();
+        assertEquals(result.errors().toString(), 2, invalidOverrides);
+    }
+
+    @Test
+    public void delegatingWitnessSubstitutesGenericTargetTypeParameters() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "GenericDelegatingWitness" + suffix;
+        final var className = "Box" + suffix;
+        final var explicitClassName = "ExplicitBox" + suffix;
+        final var contractName = "Selectable" + suffix;
+        final var source = """
+                contract %s<T> {
+                    select(other: T): T;
+                }
+                class %s<T> {
+                    public property value: T;
+                    public constructor new;
+                    public select(other: %s<T>): %s<T> = other;
+                }
+                class %s<T> {
+                    public property value: T;
+                    public constructor new;
+                    public select(other: %s<T>): %s<T> = other;
+                }
+                delegating witness<T> %s<%s<T>> for %s<T> {}
+                witness<T> %s<%s<T>> for %s<T> {
+                    fn select(other: %s<T>): %s<T> = other;
+                }
+                fn run(): Int =
+                    %s<Int>.new(1).select(%s<Int>.new(2)).value
+                    + %s<Int>.new(3).select(%s<Int>.new(4)).value;
+                """.formatted(contractName, className, className, className,
+                        explicitClassName, explicitClassName, explicitClassName,
+                        contractName, className, className,
+                        contractName, explicitClassName, explicitClassName,
+                        explicitClassName, explicitClassName, explicitClassName, explicitClassName,
+                        className, className, explicitClassName, explicitClassName);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit(null)),
+                programName, "", List.of(), false);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(6, loader.loadClass(programName).getMethod("run").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", className + ".class"));
+            Files.deleteIfExists(Path.of("dist", explicitClassName + ".class"));
+            Files.deleteIfExists(Path.of("dist", contractName + ".class"));
+        }
+    }
+
+    @Test
+    public void reportsEveryInvalidMethodInAWitness() {
+        final var result = new ResolutionService().resolveWithDiagnostics(parse("""
+                contract Operations {
+                    first(value: Int): Int;
+                    second(value: Int): Int;
+                }
+                class Target {
+                    public constructor new;
+                }
+                witness Operations for Target {
+                    fn first(value: String): String = value;
+                    fn second(value: String): String = value;
+                }
+                """));
+
+        final var invalidMethodCount = result.errors().stream()
+                .filter(diagnostic -> diagnostic.message()
+                        .equals("Witness method does not satisfy the contract requirement."))
+                .count();
+        assertEquals(result.errors().toString(), 2, invalidMethodCount);
+    }
+
+    @Test
+    public void delegatingWitnessLeavesStaticAndUnmatchedRequirementsExplicit() {
+        final var result = new ResolutionService().resolveWithDiagnostics(parse("""
+                contract StaticRequirement {
+                    static create(): Int;
+                }
+                class StaticTarget {
+                    public constructor new;
+                    public create(): Int = 1;
+                }
+                delegating witness StaticRequirement for StaticTarget {}
+                contract InstanceRequirement {
+                    missing(): Int;
+                }
+                class InstanceTarget {
+                    public constructor new;
+                    public unrelated(): Int = 1;
+                }
+                delegating witness InstanceRequirement for InstanceTarget {}
+                """));
+
+        final var missingRequirements = result.errors().stream()
+                .filter(diagnostic -> diagnostic.message().contains(
+                        "Missing witness implementation for contract method"))
+                .count();
+        assertEquals(result.errors().toString(), 2, missingRequirements);
+    }
+
+    @Test
+    public void delegatingWitnessUsesDefaultContractMethods() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "DelegatingDefaultWitness" + suffix;
+        final var className = "Box" + suffix;
+        final var contractName = "Render" + suffix;
+        final var source = """
+                contract %s<T> {
+                    toString(): String;
+                    default label(): String = this.toString();
+                }
+                class %s {
+                    public constructor new;
+                    public toString(): String = "box";
+                }
+                delegating witness %s<%s> for %s {}
+                fn run(): String = %s.new().label();
+                """.formatted(contractName, className, contractName, className, className, className);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(Parser.of(Scanner.from(source).scanTokens()).parseCompilationUnit(null)),
+                programName, "", List.of(), false);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals("box", loader.loadClass(programName).getMethod("run").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", className + ".class"));
+            Files.deleteIfExists(Path.of("dist", contractName + ".class"));
         }
     }
 
@@ -302,13 +580,13 @@ public final class ClassContractTest {
                     public property value: T;
                     public constructor new;
                 }
-                witness zeron.lang.Display<Box> for Box {
+                witness zeron.lang.Display for Box {
                     fn toString(): String = "box";
                 }
-                witness<T> zeron.lang.Display<GenericBox<T>> for GenericBox<T> {
+                witness<T> zeron.lang.Display for GenericBox<T> {
                     fn toString(): String = "generic";
                 }
-                witness<T: Named> zeron.lang.Display<BoundedBox<T>> for BoundedBox<T> {
+                witness<T: Named> zeron.lang.Display for BoundedBox<T> {
                     fn toString(): String = this.value.name();
                 }
                 fn run(): String = "value=" + Box.new();
@@ -317,9 +595,9 @@ public final class ClassContractTest {
                     "value=" + BoundedBox<Label>.new(Label.new("label"));
                 fn builtin(): String = "value=" + 42;
                 fn nullable(value: Int?): String = "value=" + value;
-                fn generic<T: mut + zeron.lang.Display<T>>(value: T): String = "value=" + value;
+                fn generic<T: mut + zeron.lang.Display>(value: T): String = "value=" + value;
                 fn genericRun(): String = generic(42);
-                fn genericBounded<T: mut + zeron.lang.Display<T>>(value: T): String = "value=" + value;
+                fn genericBounded<T: mut + zeron.lang.Display>(value: T): String = "value=" + value;
                 fn genericBoundedRun(): String =
                     genericBounded(BoundedBox<Label>.new(Label.new("generic label")));
                 """;
@@ -931,6 +1209,52 @@ public final class ClassContractTest {
                 """;
 
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+    }
+
+    @Test
+    public void explainsContractMethodSignatureMismatch() {
+        final var source = """
+                contract Numeric<T> {
+                    add(other: T): T;
+                }
+                class Vector2<T> is Numeric<T> {
+                    public constructor new;
+                    public add(other: Vector2<T>): Vector2<T> = other;
+                }
+                """;
+
+        final var result = new ResolutionService().resolveWithDiagnostics(parse(source));
+
+        assertTrue(result.errors().toString(), result.errors().stream().anyMatch(diagnostic ->
+                diagnostic.message().contains("Contract 'Numeric<T>' requires 'add(T) -> T'")
+                        && diagnostic.message().contains(
+                                "public 'add(Vector2<T>) -> Vector2<T>'")));
+    }
+
+    @Test
+    public void reportsConformanceErrorsAfterFaultyMethodBodies() {
+        final var source = """
+                contract NeedsValue {
+                    value(): Int;
+                    label(): String;
+                }
+                class Broken is NeedsValue {
+                    public unrelated(): Unit {
+                        let answer: Int = "wrong";
+                    }
+                    public anotherUnrelated(): Unit {
+                        let message: String = 1;
+                    }
+                }
+                """;
+
+        final var result = new ResolutionService().resolveWithDiagnostics(parse(source));
+
+        final var conformanceErrors = result.errors().stream()
+                .filter(diagnostic -> diagnostic.message().contains("Contract 'NeedsValue' requires"))
+                .count();
+        assertEquals(result.errors().toString(), 2, conformanceErrors);
+        assertTrue(result.errors().toString(), result.errors().size() >= 4);
     }
 
     @Test

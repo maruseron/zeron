@@ -1,9 +1,15 @@
 package com.maruseron.zeron.lsp;
 
 import com.maruseron.zeron.ProjectAnalysisWorkspace;
+import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.compile.CompilationService;
+import com.maruseron.zeron.scan.Scanner;
+import org.eclipse.lsp4j.CodeActionContext;
+import org.eclipse.lsp4j.CodeActionParams;
 import org.eclipse.lsp4j.DefinitionParams;
 import org.eclipse.lsp4j.HoverParams;
 import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.junit.Rule;
 import org.junit.Test;
@@ -35,6 +41,65 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void includesDeclarationDocumentationInHover() throws Exception {
+        final var source = """
+                /// Adds two values using the documented API.
+                /// The comment is rendered as Markdown.
+                public fn documented(left: Int, right: Int): Int = left + right;
+                fn use(): Int = documented(1, 2);
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var position = DocumentCoordinates.positionAt(source,
+                source.indexOf("public fn documented") + "public fn ".length());
+        final var hover = LspFeatures.hover(snapshot, project.entry(),
+                new HoverParams(new TextDocumentIdentifier(project.entry().toUri().toString()), position));
+
+        assertNotNull(hover);
+        final var contents = hover.getContents().getRight().getValue();
+        assertTrue(contents.contains("fn documented"));
+        assertTrue(contents.contains("Adds two values using the documented API."));
+        assertTrue(contents.contains("The comment is rendered as Markdown."));
+    }
+
+    @Test
+    public void includesCompiledLibraryDocumentationInHover() throws Exception {
+        final var packageName = "hoverdocs" + java.util.UUID.randomUUID().toString().replace("-", "");
+        final var project = project("""
+                import %s.documented;
+                fn main(): Int = documented();
+                """.formatted(packageName));
+        final var libraryRoot = Files.createDirectories(project.root().resolve("lib"));
+        final var libraryUnit = Parser.of(Scanner.from("""
+                package %s;
+                /// Documentation loaded from the compiled library.
+                public fn documented(): Int = 42;
+                """.formatted(packageName)).scanTokens()).parseCompilationUnit("Library.zn");
+        final var compiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
+                packageName + ".Library", packageName, List.of(), true, List.of(), libraryRoot);
+        compiler.resolve();
+        compiler.compile();
+        Files.writeString(project.manifest(), Files.readString(project.manifest()) + """
+
+                [dependencies]
+                zeron-libraries = ["lib"]
+                """);
+
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        assertTrue(snapshot.libraryDocumentation().toString(),
+                snapshot.libraryDocumentation().containsKey(packageName + ".documented"));
+        final var source = Files.readString(project.entry());
+        final var hover = LspFeatures.hover(snapshot, project.entry(),
+                new HoverParams(new TextDocumentIdentifier(project.entry().toUri().toString()),
+                        DocumentCoordinates.positionAt(source, source.lastIndexOf("documented"))));
+
+        assertNotNull("diagnostics=" + snapshot.diagnostics() + ", resolution="
+                + snapshot.resolution().map(result -> result.errors().toString()).orElse("none"), hover);
+        assertTrue(hover.getContents().getRight().getValue()
+                .contains("Documentation loaded from the compiled library."));
+    }
+
+    @Test
     public void overlaysProduceDiagnosticsWithoutWritingBuildOutput() throws Exception {
         final var project = project("""
                 fn main() {
@@ -59,6 +124,121 @@ public class LspWorkspaceTest {
                         == com.maruseron.zeron.diagnostic.Severity.ERROR));
         assertFalse(Files.exists(project.root().resolve("dist")));
         assertTrue(Files.readString(project.entry()).contains("answer: Int"));
+    }
+
+    @Test
+    public void codeActionAddsAllMissingContractMethodStubs() throws Exception {
+        final var source = """
+                contract BaseOperation {
+                    inherited(): Unit;
+                }
+                contract RequiredOperations requires BaseOperation {
+                    first(): Unit;
+                    second(value: Int): Unit;
+                }
+                class Implementer is RequiredOperations {
+                }
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var workspace = ProjectAnalysisWorkspace.open(project.manifest());
+        final var initial = workspace.analyze(Map.of(
+                project.entry(), new ProjectAnalysisWorkspace.Overlay(1, source)));
+        final var conformance = initial.diagnostics().get(project.entry()).stream()
+                .filter(diagnostic -> diagnostic.message().contains("Contract 'RequiredOperations'"))
+                .findFirst().orElseThrow(() -> new AssertionError(initial.diagnostics().toString()));
+        final var diagnosticSpan = conformance.primarySpan();
+        final var diagnostic = new org.eclipse.lsp4j.Diagnostic(
+                DocumentCoordinates.rangeAt(source, diagnosticSpan.start().offset(), diagnosticSpan.end().offset()),
+                conformance.message());
+        diagnostic.setCode(conformance.code().value());
+
+        try (final var service = new ZeronTextDocumentService(workspace)) {
+            final var uri = project.entry().toUri().toString();
+            service.didOpen(new org.eclipse.lsp4j.DidOpenTextDocumentParams(
+                    new org.eclipse.lsp4j.TextDocumentItem(uri, "zeron", 1, source)));
+            final var params = new CodeActionParams();
+            params.setTextDocument(new TextDocumentIdentifier(uri));
+            params.setRange(new Range());
+            params.setContext(new CodeActionContext(List.of(diagnostic), List.of()));
+
+            final var actions = service.codeAction(params).get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(1, actions.size());
+            assertTrue(actions.getFirst().isRight());
+            final var action = actions.getFirst().getRight();
+            assertEquals("Add missing contract method stubs", action.getTitle());
+            assertEquals(org.eclipse.lsp4j.CodeActionKind.QuickFix, action.getKind());
+
+            final var documentEdit = action.getEdit().getDocumentChanges().getFirst().getLeft();
+            assertEquals(Integer.valueOf(1), documentEdit.getTextDocument().getVersion());
+            final var edit = documentEdit.getEdits().getFirst().getLeft();
+            final var start = DocumentCoordinates.offsetAt(source, edit.getRange().getStart());
+            final var end = DocumentCoordinates.offsetAt(source, edit.getRange().getEnd());
+            final var updated = source.substring(0, start) + edit.getNewText() + source.substring(end);
+            assertTrue(updated, updated.contains("public first(): Unit"));
+            assertTrue(updated, updated.contains("public second(value: Int): Unit"));
+            assertTrue(updated, updated.contains("public inherited(): Unit"));
+
+            final var afterEdit = workspace.analyze(Map.of(
+                    project.entry(), new ProjectAnalysisWorkspace.Overlay(2, updated)));
+            assertTrue(afterEdit.diagnostics().toString(), afterEdit.diagnostics()
+                    .getOrDefault(project.entry(), List.of()).isEmpty());
+        }
+    }
+
+    @Test
+    public void codeActionAddsMissingWitnessMethodStubsIncludingStaticMethods() throws Exception {
+        final var source = """
+                contract Operations {
+                    accept(value: Int): Unit;
+                    static reset(value: Int): Unit;
+                }
+                class Target {
+                    public constructor new;
+                }
+                witness Operations for Target {
+                }
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var workspace = ProjectAnalysisWorkspace.open(project.manifest());
+        final var initial = workspace.analyze(Map.of(
+                project.entry(), new ProjectAnalysisWorkspace.Overlay(1, source)));
+        final var missingMethod = initial.diagnostics().get(project.entry()).stream()
+                .filter(diagnostic -> diagnostic.message().contains("Missing witness implementation"))
+                .findFirst().orElseThrow(() -> new AssertionError(initial.diagnostics().toString()));
+        final var diagnosticSpan = missingMethod.primarySpan();
+        final var diagnostic = new org.eclipse.lsp4j.Diagnostic(
+                DocumentCoordinates.rangeAt(source, diagnosticSpan.start().offset(), diagnosticSpan.end().offset()),
+                missingMethod.message());
+        diagnostic.setCode(missingMethod.code().value());
+
+        try (final var service = new ZeronTextDocumentService(workspace)) {
+            final var uri = project.entry().toUri().toString();
+            service.didOpen(new org.eclipse.lsp4j.DidOpenTextDocumentParams(
+                    new org.eclipse.lsp4j.TextDocumentItem(uri, "zeron", 1, source)));
+            final var params = new CodeActionParams();
+            params.setTextDocument(new TextDocumentIdentifier(uri));
+            params.setRange(new Range());
+            params.setContext(new CodeActionContext(List.of(diagnostic), List.of()));
+
+            final var actions = service.codeAction(params).get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(1, actions.size());
+            final var action = actions.getFirst().getRight();
+            assertEquals("Add missing witness method stubs", action.getTitle());
+            final var documentEdit = action.getEdit().getDocumentChanges().getFirst().getLeft();
+            final var edit = documentEdit.getEdits().getFirst().getLeft();
+            final var start = DocumentCoordinates.offsetAt(source, edit.getRange().getStart());
+            final var end = DocumentCoordinates.offsetAt(source, edit.getRange().getEnd());
+            final var updated = source.substring(0, start) + edit.getNewText() + source.substring(end);
+            assertTrue(updated, updated.contains("fn accept(value: Int): Unit"));
+            assertTrue(updated, updated.contains("static fn reset(value: Int): Unit"));
+
+            final var afterEdit = workspace.analyze(Map.of(
+                    project.entry(), new ProjectAnalysisWorkspace.Overlay(2, updated)));
+            assertTrue(afterEdit.diagnostics().toString(), afterEdit.diagnostics()
+                    .getOrDefault(project.entry(), List.of()).isEmpty());
+        }
     }
 
     @Test
@@ -253,7 +433,7 @@ public class LspWorkspaceTest {
                 DocumentCoordinates.positionAt(source, source.indexOf("List"))));
 
         assertNotNull(hover);
-        assertTrue(hover.getContents().getRight().getValue().contains("sum List<T>"));
+        assertTrue(hover.getContents().getRight().getValue().contains("type List<T>"));
     }
 
     @Test
@@ -276,9 +456,85 @@ public class LspWorkspaceTest {
         final var handlerHover = hoverAt(snapshot, project.entry(), source, "Recover");
 
         assertTrue(contractHover, contractHover.contains("contract Named<T> : Marker<T>"));
-        assertTrue(classHover, classHover.contains("class Widget<T> : {Marker<T>}"));
+        assertTrue(classHover, classHover.contains("class Widget<T> is Marker<T>"));
         assertTrue(effectHover, effectHover.contains("effect Failure"));
         assertTrue(handlerHover, handlerHover.contains("handler Recover"));
+    }
+
+    @Test
+    public void dataClassHoverShowsComponentsAndContracts() throws Exception {
+        final var source = """
+                contract PairLike<T> {}
+                public data class PairBox<T>(left: T, right: Int) is PairLike<T> {}
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "PairBox<T>");
+
+        assertTrue(hover, hover.contains("data class PairBox<T>(left: T, right: Int) is PairLike<T>"));
+    }
+
+    @Test
+    public void classHoverSeparatesDeclaredConformanceFromInScopeWitnesses() throws Exception {
+        final var root = temporaryFolder.newFolder().toPath();
+        final var sourceRoot = Files.createDirectories(root.resolve("src"));
+        final var entry = sourceRoot.resolve(Path.of("app", "Main.zn"));
+        Files.createDirectories(entry.getParent());
+        Files.writeString(entry, """
+                package app;
+                import model.Widget;
+                import instances.*;
+                fn inspect(value: Widget): Unit {}
+                """);
+        final var outOfScope = sourceRoot.resolve(Path.of("client", "Main.zn"));
+        Files.createDirectories(outOfScope.getParent());
+        Files.writeString(outOfScope, """
+                package client;
+                import model.Widget;
+                fn inspect(value: Widget): Unit {}
+                """);
+        final var model = sourceRoot.resolve(Path.of("model", "Widget.zn"));
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, """
+                package model;
+                public contract Display {}
+                public class Widget is Display deriving Eq {}
+                """);
+        final var instance = sourceRoot.resolve(Path.of("instances", "WidgetTag.zn"));
+        Files.createDirectories(instance.getParent());
+        Files.writeString(instance, """
+                package instances;
+                import model.Widget;
+                public contract Tag<T> {
+                    label(): String;
+                }
+                witness Tag<Widget> for Widget {
+                    fn label(): String = "widget";
+                }
+                """);
+        final var manifest = root.resolve("zeron.toml");
+        Files.writeString(manifest, """
+                [project]
+                entry = "src/app/Main.zn"
+                source-roots = ["src"]
+                output = "dist"
+
+                [platform]
+                stdlib = "source"
+                """);
+
+        final var snapshot = ProjectAnalysisWorkspace.open(manifest).analyze(Map.of());
+        final var appSource = Files.readString(entry);
+        final var appHover = hoverAt(snapshot, entry, appSource, "Widget):");
+        final var clientSource = Files.readString(outOfScope);
+        final var clientHover = hoverAt(snapshot, outOfScope, clientSource, "Widget):");
+
+        assertTrue(appHover, appHover.contains("class Widget is Display"));
+        assertTrue(appHover, appHover.contains("zeron.lang.Eq<Widget>"));
+        assertTrue(appHover, appHover.contains("Tag<Widget>"));
+        assertTrue(clientHover, clientHover.contains("zeron.lang.Eq<Widget>"));
+        assertFalse(clientHover, clientHover.contains("Tag<Widget>"));
     }
 
     @Test
@@ -329,9 +585,33 @@ public class LspWorkspaceTest {
 
         assertNotNull(hover);
         final var line = hover.getContents().getRight().getValue().lines()
-                .filter(value -> value.startsWith("sum Huge")).findFirst().orElseThrow();
+                .filter(value -> value.startsWith("type Huge = ")).findFirst().orElseThrow();
         assertEquals(180, line.length());
         assertTrue(line.endsWith("..."));
+    }
+
+    @Test
+    public void typeHoversShowSumCasesAndProductMembers() throws Exception {
+        final var source = """
+                type Outcome<T> = Success(value: T) | Failure(message: String);
+                type Position = (x: Int, y: Int);
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+
+        final var sumHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("Outcome"))));
+        final var productHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("Position"))));
+
+        assertNotNull(sumHover);
+        assertTrue(sumHover.getContents().getRight().getValue()
+                .contains("type Outcome<T> = Success(T) | Failure(String)"));
+        assertNotNull(productHover);
+        assertTrue(productHover.getContents().getRight().getValue()
+                .contains("type Position = (x: Int, y: Int)"));
     }
 
     @Test
@@ -491,6 +771,7 @@ public class LspWorkspaceTest {
                     value: T;
                     public constructor new;
                     public readValue(): T = this.value;
+                    public readImplicitValue(): T = value;
                 }
                 fn main() {
                     Box<Int>.new(42);
@@ -503,6 +784,8 @@ public class LspWorkspaceTest {
                 DocumentCoordinates.positionAt(source, source.indexOf("this"))));
         final var valueHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
                 DocumentCoordinates.positionAt(source, source.indexOf("this.value") + "this.".length())));
+        final var implicitValueHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("= value;") + "= ".length())));
         final var constructorHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
                 DocumentCoordinates.positionAt(source, source.lastIndexOf("new"))));
 
@@ -510,6 +793,8 @@ public class LspWorkspaceTest {
         assertTrue(thisHover.getContents().getRight().getValue().contains("Box<T>"));
         assertNotNull(valueHover);
         assertTrue(valueHover.getContents().getRight().getValue().contains("T"));
+        assertNotNull(implicitValueHover);
+        assertTrue(implicitValueHover.getContents().getRight().getValue().contains("T"));
         assertNotNull(constructorHover);
         assertTrue(constructorHover.getContents().getRight().getValue(),
                 constructorHover.getContents().getRight().getValue()
@@ -565,7 +850,7 @@ public class LspWorkspaceTest {
 
         assertNotNull(sumHover);
         assertTrue(sumHover.getContents().getRight().getValue()
-                .contains("sum Outcome<T, E> = Good(T) | Bad(E)"));
+                .contains("type Outcome<T, E> = Good(T) | Bad(E)"));
         assertNotNull(sumCaseHover);
         assertTrue(sumCaseHover.getContents().getRight().getValue()
                 .contains("constructor Good<T, E>(T) -> Outcome<T, E>"));
@@ -639,6 +924,23 @@ public class LspWorkspaceTest {
         assertEquals(DocumentCoordinates.positionAt(source, methodOffset).getLine(),
                 definition.getLeft().getFirst().getRange().getStart().getLine());
     }
+
+    /*@Test
+    public void hoverPrefersAbstractContractMethodOverDelegatingWitnessSignature() throws Exception {
+        final var source = """
+                public contract Contract1<T: nullable + mut> {
+                    eq(other: T): Boolean;
+                }
+
+                public contract Contract2<T: mut> requires Eq<T> {}
+
+                public class Implementer {
+                    public eq(other: Implementer): Boolean = true;
+                }
+
+                delegating witness Contract2<Implementer> for Implementer {}
+                """;
+    }*/
 
     @Test
     public void hoverPrefersLocalBindingOverSameNamedTopLevelFunction() throws Exception {
@@ -924,6 +1226,9 @@ public class LspWorkspaceTest {
                 .anyMatch(item -> item.getLabel().startsWith("imported(")));
     }
 
+    /*
+    // TODO: decide whether this test should stay. i lean no, since it's incredibly coupled
+    // and the sample program is subject to change
     @Test
     public void listMonadSampleOffersImportedExtensionCompletion() throws Exception {
         final var manifest = Path.of("sample_programs", "list_monad", "zeron.toml")
@@ -940,6 +1245,7 @@ public class LspWorkspaceTest {
         assertTrue(completion.getItems().toString(), completion.getItems().stream()
                 .anyMatch(item -> item.getLabel().startsWith("fmap(")));
     }
+        */
 
     private ProjectFiles project(final String source) throws Exception {
         final var root = temporaryFolder.newFolder().toPath();

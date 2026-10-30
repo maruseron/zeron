@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+### Compiler and language work
+
+- Added receiver-based and receiverless default operations to higher-kinded contracts, including
+  compiled-library support and derived `Applicative.map2`, `Foldable.count`, `Foldable.isEmpty`,
+  and `Traversable.sequence`.
+- Required witness implementations for contracts with static method requirements, including
+  inherited requirements; nominal class conformance now reports an error for these contracts.
+- Added `delegating witness` declarations to forward compatible non-mutating instance requirements
+  to public methods on the target class while keeping static and unmatched requirements explicit.
+- Added `delegating implementation` blocks to forward compatible HKT receiver operations to
+  public methods declared on the containing class, including methods with broader accepted
+  parameter types and compatible return types.
+- Replaced algebraic operator evidence with the `Numeric`, `Integral`, `Fractional`, and `Floating`
+  hierarchy. Unsuffixed literals now retain exact values for expected-type conversion; the
+  standard library provides arbitrary-precision `Integer` and exact `Rational` types.
+- Added `///` declaration documentation comments, Markdown hover for source and compiled-library
+  symbols, and public documentation records in API-index schema 7.
+- Added transparent data classes with immutable canonical components, component-based structural
+  equality, opt-in hashing, auxiliary-field initialization, and effect-aware construction.
+  Compiled-library metadata preserves data-class shape and constructor effects. Added the
+  serialization streaming protocol and aggregate `Encode`/`Decode`/`Codec` capability evidence;
+  generated codec operations and typed format adapters remain pending. Bumped the API-index schema
+  to 7 for data-class metadata.
+
+### Standard Library
+
+- Made `zeron.lang.Display` non-generic; witness targets identify displayed types. Bumped the
+  standard-library API version to 8.
+- Broadened `zeron.collections.Stream.flatMap` to accept any `Iterable` result, allowing nested
+  `for` generators over lists and other iterables to flatten lazily.
+- Added `zeron.serialization.json` parsing, an ordered mutable JSON value model, exact number-lexeme
+  preservation, checked integer conversion, and compact stringification with bounded parsing,
+  Unicode validation, and source-positioned errors. Typed JSON codec integration remains pending
+  type-directed serialization operations.
+
 ## [0.5.0] - 2026, 21 OCT
 
 ### Compiler and language work

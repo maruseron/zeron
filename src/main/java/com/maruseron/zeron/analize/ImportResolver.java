@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.ImportDeclaration;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.JavaClassPath;
@@ -21,7 +22,8 @@ final class ImportResolver {
                              Map<String, String> extensions,
                              Map<String, LiteralSuffixImport> literalSuffixes,
                              List<String> onDemandPackages,
-                             List<String> onDemandNamespaces) {}
+                             List<String> onDemandNamespaces,
+                             List<String> explicitOnDemandPackages) {}
 
     private final Set<String> types;
     private final Map<String, Stmt.ClassDecl> classes;
@@ -67,6 +69,10 @@ final class ImportResolver {
         final var importedLiteralSuffixes = new LinkedHashMap<String, LiteralSuffixImport>();
         final var onDemandPackages = new ArrayList<String>();
         final var onDemandNamespaces = new ArrayList<String>();
+        final var explicitOnDemandPackages = unit.imports().stream()
+                .filter(ImportDeclaration::onDemand)
+                .map(ImportDeclaration::qualifiedName)
+                .toList();
         final var localTypeNames = new HashSet<String>();
         final var localValueNames = new HashSet<String>();
         final var errors = new ArrayList<ResolutionError>();
@@ -272,9 +278,42 @@ final class ImportResolver {
         return new Validation(new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions),
                 Map.copyOf(importedValues), Map.copyOf(importedExtensions),
                 Map.copyOf(importedLiteralSuffixes), List.copyOf(onDemandPackages),
-                List.copyOf(onDemandNamespaces)),
+                List.copyOf(onDemandNamespaces), explicitOnDemandPackages),
                 List.copyOf(errors),
                 Set.copyOf(invalidAliases));
+    }
+
+    ImportEnvironment provisionalTypeEnvironment(final CompilationUnit unit) {
+        final var importedTypes = new LinkedHashMap<String, String>();
+        final var onDemandPackages = new ArrayList<String>();
+        final var explicitOnDemandPackages = new ArrayList<String>();
+        for (final var importDeclaration : unit.imports()) {
+            if (importDeclaration.suffixImport()) continue;
+            if (importDeclaration.onDemand()) {
+                onDemandPackages.add(importDeclaration.qualifiedName());
+                explicitOnDemandPackages.add(importDeclaration.qualifiedName());
+            } else {
+                var knownType = classes.containsKey(importDeclaration.qualifiedName())
+                        || contracts.containsKey(importDeclaration.qualifiedName());
+                if (!knownType) {
+                    try {
+                        knownType = javaClassPath.find(importDeclaration.qualifiedName()) != null;
+                    } catch (final JavaClassPath.MetadataException _) {
+                        continue;
+                    }
+                }
+                if (knownType) {
+                    importedTypes.putIfAbsent(importDeclaration.localName(), importDeclaration.qualifiedName());
+                }
+            }
+        }
+        for (final var packageName : List.of("zeron.io", "zeron.lang")) {
+            if (packageExists(packageName) && !onDemandPackages.contains(packageName)) {
+                onDemandPackages.add(packageName);
+            }
+        }
+        return new ImportEnvironment(Map.copyOf(importedTypes), Map.of(), Map.of(), Map.of(), Map.of(),
+                List.copyOf(onDemandPackages), List.of(), List.copyOf(explicitOnDemandPackages));
     }
 
     private String resolveNamespaceTarget(final String target, final String packageName) {

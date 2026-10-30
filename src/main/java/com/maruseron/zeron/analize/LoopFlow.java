@@ -7,4 +7,3 @@ final class LoopFlow {
     final List<FlowState> breakStates = new ArrayList<>();
     final List<FlowState> continueStates = new ArrayList<>();
 }
-

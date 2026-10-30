@@ -243,5 +243,5 @@ Nullable scrutinees are not currently supported.
 
 Use `is` for a single type check, `matches` for a simple sum-case test with payloads in an `if` or
 `while` condition, and `match` when several alternatives need clear, ordered handling. See the
-[pattern-matching design document](../documents/design-document-16_patterns-and-pattern-matching.md)
+[pattern-matching design document](../documents/design_documents/design-document-16_patterns-and-pattern-matching.md)
 for the current rules and limitations.

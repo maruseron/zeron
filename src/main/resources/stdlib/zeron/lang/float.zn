@@ -1,20 +1,38 @@
 package zeron.lang;
 
 import java.lang.Double;
+import java.lang.Math;
 
-import zeron.algebra.Addition;
-import zeron.algebra.Multiplication;
+import zeron.numeric.Integer;
+import zeron.numeric.Rational;
+import zeron.numeric.Floating;
 
-witness Addition<Float> for Float {
+witness Floating<Float> for Float {
     fn add(other: Float): Float = this + other;
-    fn zero(): Float = 0.0;
-    fn negate(): Float = -this;
-}
-
-witness Multiplication<Float> for Float {
+    fn subtract(other: Float): Float = this - other;
     fn multiply(other: Float): Float = this * other;
-    fn one(): Float = 1.0;
+    fn negate(): Float = -this;
+    fn abs(): Float = Math.abs(this);
+    fn signum(): Float =
+        if (this < 0.0) then -1.0 else if (this > 0.0) then 1.0 else if (this == 0.0) then 0.0 else this;
+    static fn fromInteger(value: Integer): Float = value.toFloat();
+
+    fn divide(other: Float): Float = this / other;
     fn reciprocal(): Float = 1.0 / this;
+    static fn fromRational(value: Rational): Float = value.toFloat();
+
+    fn sqrt(): Float = Math.sqrt(this);
+    fn pow(exponent: Float): Float = Math.pow(this, exponent);
+    fn exp(): Float = Math.exp(this);
+    fn ln(): Float = Math.log(this);
+    fn log10(): Float = Math.log10(this);
+    fn sin(): Float = Math.sin(this);
+    fn cos(): Float = Math.cos(this);
+    fn tan(): Float = Math.tan(this);
+    fn asin(): Float = Math.asin(this);
+    fn acos(): Float = Math.acos(this);
+    fn atan(): Float = Math.atan(this);
+    fn atan2(x: Float): Float = Math.atan2(this, x);
 }
 
 public extension Float {

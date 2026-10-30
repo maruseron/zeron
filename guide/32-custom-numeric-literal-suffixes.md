@@ -2,16 +2,16 @@
 
 Libraries can define suffixes that construct typed values directly from numeric literals. A suffix
 is statically resolved from an explicit import; it is not a macro or a global compiler registry.
-The standard library's arbitrary-precision `BigInteger` uses the `n` suffix:
+The standard library's arbitrary-precision `Integer` uses the `n` suffix:
 
 ```zeron
-import zeron.math.BigInteger;
-import suffix zeron.math.BigInteger.n;
+import zeron.numeric.Integer;
+import suffix zeron.numeric.Integer.n;
 
-let amount: BigInteger = 123456789012345678901234567890n;
-let total: BigInteger = amount + 5n;
-let hexadecimal: BigInteger = 0xFF_FFn;
-let negative: BigInteger = -42n;
+let amount: Integer = 123456789012345678901234567890n;
+let total: Integer = amount + 5n;
+let hexadecimal: Integer = 0xFF_FFn;
+let negative: Integer = -42n;
 ```
 
 The suffix must be adjacent to the literal: `20n` is a suffixed integer, while `20 n` is not.
@@ -22,7 +22,7 @@ cannot be replaced or combined with a custom suffix.
 ## Declaring a suffix
 
 A class associates a suffix with named public constructor factories and the literal categories they
-accept. The `BigInteger` implementation receives the exact integer token spelling as a string:
+accept. The `Integer` implementation receives the exact integer token spelling as a string:
 
 ```zeron
 suffix n {

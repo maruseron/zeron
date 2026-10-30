@@ -4,8 +4,6 @@ import zeron.control.Foldable;
 import zeron.control.Functor;
 import zeron.control.Monad;
 
-fn applyOptionFunction<A: mut, B: mut>(transform: (A) -> B, value: A): B = transform(value);
-
 public type Option<T: nullable + mut> =
       Some(value: T)
     | None;
@@ -20,6 +18,7 @@ public extension<T: nullable + mut> Option<T> {
     public fn getOrElse(other: T): T =
         if (this matches Option.Some(value)) then value else other;
 
+    // TODO: migrate this method towards a more standard signature
     public fn fold<R: mut>(ifSome: (T) -> R, ifNone: () -> R): R =
         match (this) {
             case Option.Some(value) -> ifSome(value);
@@ -41,17 +40,14 @@ public extension<T: nullable + mut> Option<T> {
 
 witness Monad<Option<_>> for Option<_> {
     fn map<A: mut, B: mut>(this: Option<A>, transform: (A) -> B): Option<B> =
-        match (this) {
-            case Option.Some(value) -> Option.Some(transform(value));
-            case Option.None() -> Option<B>.None();
-        };
+        this.map(transform);
 
     fn pure<A: mut>(value: A): Option<A> = Option.Some(value);
 
-    fn ap<A: mut, B: mut>(this: Option<(A) -> B>, values: Option<A>): Option<B> =
+    fn ap<A: mut, B: mut>(this: Option<A>, function: Option<(A) -> B>): Option<B> =
         match (this) {
-            case Option.Some(transform) -> match (values) {
-                case Option.Some(value) -> Option.Some(applyOptionFunction(transform, value));
+            case Option.Some(value) -> match (function) {
+                case Option.Some(f) -> Option.Some(f(value));
                 case Option.None() -> Option<B>.None();
             };
             case Option.None() -> Option<B>.None();

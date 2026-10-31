@@ -23,6 +23,13 @@ final class TypeUnifier {
         }
         if (pattern instanceof TypeParameterDescriptor parameter) {
             if (actual instanceof NullDescriptor) return;
+
+            if (!parameter.isEffectKind()
+                    && !parameter.admitsMutableArguments()
+                    && actual instanceof ReferenceDescriptor reference) {
+                actual = reference.baseType();
+            }
+
             if (parameter.isHigherKinded()
                     && !(actual instanceof TypeConstructorDescriptor)
                     && !(actual instanceof TypeParameterDescriptor actualParameter

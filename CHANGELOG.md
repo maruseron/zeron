@@ -5,8 +5,8 @@
 ### Compiler and language work
 
 - Added receiver-based and receiverless default operations to higher-kinded contracts, including
-  compiled-library support and derived `Applicative.map2`, `Foldable.count`, `Foldable.isEmpty`,
-  and `Traversable.sequence`.
+  compiled-library support and derived `Applicative.map2`, `Monad.flatten`, `Foldable.count`, `Foldable.isEmpty`,
+  `Traversable.sequence`, and `Comonad.duplicate`.
 - Required witness implementations for contracts with static method requirements, including
   inherited requirements; nominal class conformance now reports an error for these contracts.
 - Added `delegating witness` declarations to forward compatible non-mutating instance requirements
@@ -25,6 +25,8 @@
   serialization streaming protocol and aggregate `Encode`/`Decode`/`Codec` capability evidence;
   generated codec operations and typed format adapters remain pending. Bumped the API-index schema
   to 7 for data-class metadata.
+- Loosened type substitution rules for generic calls to match general subtyping rules by allowing
+  implicit narrowing from `&T` to `T` for type parameters not admitting mutable projections.
 
 ### Standard Library
 
@@ -36,6 +38,13 @@
   preservation, checked integer conversion, and compact stringification with bounded parsing,
   Unicode validation, and source-positioned errors. Typed JSON codec integration remains pending
   type-directed serialization operations.
+- Added the `zeron.function` package with general-purpose functional constructs, such as
+  `identity`, `supply`, `constant`, `compose`, `pipe`, `flip`, partial application functions,
+  predicates operators such as `negate`, `both` and `either`, a `memoize` function and a tap-like
+  `Peekable` type class with a `peek` (tap) method.
+- Added the numeric `Vector2` type with arithmetic operator support.
+- Made all collections in `zeron.collections` null-hostile. Null support for `Array` remains.
+- Made all type classes in `zeron.control` null-hostile.
 
 ## [0.5.0] - 2026, 21 OCT
 

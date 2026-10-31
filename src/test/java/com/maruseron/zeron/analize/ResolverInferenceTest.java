@@ -236,6 +236,24 @@ public final class ResolverInferenceTest {
             ((FunctionDescriptor) result.globalSymbolTable().getFunction(function.name()).type()).returnType());
     }
 
+    @Test
+    public void infersReadonlyProjectionWhenTypeParameterDoesNotAdmitMut() {
+        final var statements = parse("""
+                class Person {
+                    public mut property name: String;
+                }
+
+                fn identity<T>(value: T): T = value;
+
+                let p = identity(Person.new("hello"));
+                """);
+        final var resolver = new ResolutionService();
+
+        final var result = resolver.resolve(statements);
+
+        assertEquals(TypeDescriptor.ofName("Person"), bindingType(result, statements, "p"));
+    }
+
     private static List<Stmt> parse(final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
     }

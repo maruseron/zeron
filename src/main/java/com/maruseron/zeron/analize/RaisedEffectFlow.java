@@ -8,6 +8,7 @@ import com.maruseron.zeron.scan.Token;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 final class RaisedEffectFlow {
     private RaisedEffectFlow() {}
@@ -24,7 +25,7 @@ final class RaisedEffectFlow {
         missing.removeAll(declared);
         if (!missing.isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    where, "Undeclared raised effects: " + missing + ". Add them to the raises clause or handle them."));
+                    where, "Undeclared raised effects: " + missing.stream().map(TypeDescriptor::name).collect(Collectors.joining(", ")) + ". Add them to the raises clause or handle them."));
         }
     }
 

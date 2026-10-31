@@ -444,7 +444,8 @@ final class TypeResolver {
                                                final TypeDescriptor argument,
                                                final Token where) {
         if (!parameter.isEffectKind()
-                && mayAdmitMutableReference(argument) && !parameter.admitsMutableArguments()) {
+                && mayAdmitMutableReference(argument) 
+                && !parameter.admitsMutableArguments()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     where, "Type parameter '" + parameter.name()
                             + "' does not admit mutable-reference type argument '"
@@ -452,9 +453,10 @@ final class TypeResolver {
         }
         final var actual = argument instanceof ReferenceDescriptor reference
                 ? reference.baseType() : argument;
-        final var nullable = actual instanceof NullableDescriptor || actual instanceof NullDescriptor
-                || actual instanceof TypeParameterDescriptor typeParameter
-                        && typeParameter.admitsNullableArguments();
+        final var nullable = actual instanceof NullableDescriptor 
+                          || actual instanceof NullDescriptor
+                          || actual instanceof TypeParameterDescriptor typeParameter
+                          && typeParameter.admitsNullableArguments();
         if (nullable && !parameter.admitsNullableArguments()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     where, "Type parameter '" + parameter.name()

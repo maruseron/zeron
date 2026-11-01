@@ -648,12 +648,15 @@ final class LspFeatures {
             final var signature = symbol != null && symbol.kind() == CompletionItemKind.Constructor
                     ? rawSignature.replaceFirst("^fn ", "constructor ") : rawSignature;
             if (witnessMethod) {
-                if (symbol != null && symbol.detail().startsWith("extension on ")) {
+                if (symbol != null && !symbol.qualifiedName().startsWith("witness:")) {
+                    details.add(symbol.detail());
+                } else if (symbol != null && symbol.detail().startsWith("extension on ")) {
                     details.add(symbolHeader(symbol.detail()));
+                    details.add(signature);
                 } else {
                     details.add("witness method " + signature.substring("fn ".length()));
+                    details.add(signature);
                 }
-                details.add(signature);
             } else if (symbol != null && symbol.detail().startsWith("extension on ")) {
                 details.add(symbolHeader(symbol.detail()));
                 details.add(signature);
@@ -663,11 +666,13 @@ final class LspFeatures {
                 details.add(signature);
             }
         } else if (witnessMethod) {
-        if (symbol != null && symbol.detail().startsWith("extension on ")) {
-            details.add(symbolHeader(symbol.detail()));
-        } else {
-            details.add("witness method " + token.lexeme());
-        }
+            if (symbol != null && !symbol.qualifiedName().startsWith("witness:")) {
+                details.add(symbol.detail());
+            } else if (symbol != null && symbol.detail().startsWith("extension on ")) {
+                details.add(symbolHeader(symbol.detail()));
+            } else {
+                details.add("witness method " + token.lexeme());
+            }
         } else if (symbol != null) {
             details.add(symbol.detail());
             details.addAll(typeEvidenceDetails(snapshot, path, symbol));
@@ -1064,6 +1069,7 @@ final class LspFeatures {
         private final Map<String, List<Symbol>> byName = new LinkedHashMap<>();
         private final Map<String, List<Symbol>> byQualifiedName = new LinkedHashMap<>();
         private final Map<Token, Symbol> byToken = new IdentityHashMap<>();
+        private final Map<Token, Token> witnessRequirementTokens = new IdentityHashMap<>();
         private final Map<Path, CompilationUnit> unitsByPath = new LinkedHashMap<>();
         private final Map<Path, String> packagesByPath = new LinkedHashMap<>();
         private final ProjectAnalysisWorkspace.Snapshot snapshot;
@@ -1097,6 +1103,7 @@ final class LspFeatures {
                 packagesByPath.put(path, unit.packageName());
                 indexUnit(unit, path);
             }
+            indexWitnessReferences();
             snapshot.resolution().ifPresent(this::indexResolvedFunctions);
             snapshot.memberCatalog().ifPresent(catalog -> catalog.typeNames().forEach(name -> {
                 final var split = splitQualifiedName(name);
@@ -1334,12 +1341,26 @@ final class LspFeatures {
                 final var symbol = new Symbol(sourceMethod.name().lexeme(),
                         "witness:" + detail + "." + sourceMethod.name().lexeme(),
                         "", null, detail + "\n" + signature(sourceMethod),
-                        CompletionItemKind.Method, sourceMethod.name(), null, false);
+                        CompletionItemKind.Method,
+                        witness.delegating() ? null : sourceMethod.name(), null, false);
                 add(symbol);
                 byToken.put(method.implementation().name(), symbol);
-                byToken.put(sourceMethod.name(), symbol);
+                if (witness.delegating()) {
+                    witnessRequirementTokens.put(method.implementation().name(), method.requirementName());
+                } else {
+                    byToken.put(sourceMethod.name(), symbol);
+                }
                 witnessMethods.put(method.implementation().name(), detail);
             }
+        }
+
+        private void indexWitnessReferences() {
+            witnessRequirementTokens.forEach((implementation, requirement) -> {
+                final var symbol = byToken.get(requirement);
+                if (symbol != null && !symbol.qualifiedName().startsWith("witness:")) {
+                    byToken.put(implementation, symbol);
+                }
+            });
         }
 
         private void addType(final Token token, final String packageName,

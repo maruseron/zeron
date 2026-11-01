@@ -56,6 +56,8 @@
 - Wrapped long declaration-header clauses in the canonical formatter. `is`, `requires`, `permits`,
   and `deriving` clauses now break before the clause keyword when the flattened header exceeds the
   configured line width, with continuation entries aligned under the first entry.
+- Fixed a bug that would override a contract method's signature with that of any available
+  conformance witness for it.
 
 ## [0.5.0] - 2026, 21 OCT
 

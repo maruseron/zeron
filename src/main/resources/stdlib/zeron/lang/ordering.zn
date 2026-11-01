@@ -35,13 +35,6 @@ public type Ordering =
 /// (a <= b or b <= a) == true
 /// ```
 public contract Comparable<T: mut> {
-    // TODO: bizarre hover:
-    // "extension on zeron.numeric.Integer via zeron.numeric.Integral<zeron.numeric.Integer>
-    // fn compareTo(zeron.numeric.Integer) -> zeron.lang.Ordering". work on this!
-    // NOTE: the issue might be related to delegating witnesses overriding signatures and, 
-    // with them, documentation. the error only seems to be reproducible when the delegating 
-    // witness and the contract exist in different files or packages
-
     /// Evaluates the current instance against `other` and returns an `Ordering` value 
     /// specifying whether it is less than, equal to, or greater than the reference.
     compareTo(other: T): Ordering;

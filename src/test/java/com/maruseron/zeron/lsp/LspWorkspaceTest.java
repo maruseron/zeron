@@ -63,6 +63,45 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void delegatedComparableHoverShowsContractSignatureAndDocumentation() throws Exception {
+        final var project = project("app/Main.zn", """
+                package app;
+                import model.Widget;
+                fn compare(left: Widget, right: Widget): String = left.compareTo(right);
+                """);
+        final var contractPath = project.root().resolve(Path.of("src", "contracts", "Comparable.zn"));
+        Files.createDirectories(contractPath.getParent());
+        final var contractSource = """
+                package contracts;
+                public contract Comparable<T: mut> {
+                    /// Evaluates the current instance against `other`.
+                    compareTo(other: T): String;
+                }
+                """;
+        Files.writeString(contractPath, contractSource);
+        final var witnessPath = project.root().resolve(Path.of("src", "model", "Widget.zn"));
+        Files.createDirectories(witnessPath.getParent());
+        Files.writeString(witnessPath, """
+                package model;
+                import contracts.Comparable;
+                public class Widget {
+                    public constructor new;
+                    public compareTo(other: Widget): String = "";
+                }
+                delegating witness Comparable<Widget> for Widget {}
+                """);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, contractPath, contractSource, "compareTo(other:");
+
+        assertTrue(snapshot.diagnostics().toString(),
+                snapshot.diagnostics().values().stream().allMatch(List::isEmpty));
+        assertTrue("Unexpected hover: " + hover,
+                hover.contains("fn compareTo(T) -> String"));
+        assertTrue(hover, hover.contains("Evaluates the current instance against `other`"));
+        assertFalse(hover, hover.contains("extension on zeron.numeric.Integer via"));
+    }
+
+    @Test
     public void includesCompiledLibraryDocumentationInHover() throws Exception {
         final var packageName = "hoverdocs" + java.util.UUID.randomUUID().toString().replace("-", "");
         final var project = project("""

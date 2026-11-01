@@ -89,3 +89,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0076](./ZEP-0076.md) | Delegating Witness Implementations | Implemented | Unscheduled | — |
 | [ZEP-0077](./ZEP-0077.md) | Delegating Higher-Kinded Implementations | Implemented | Unscheduled | — |
 | [ZEP-0078](./ZEP-0078.md) | Default Method Implementations in Higher-Kinded Contracts | Implemented | Unscheduled | — |
+| [ZEP-0079](./ZEP-0079.md) | Schema Declarations | Draft | Unscheduled | — |
+| [ZEP-0080](./ZEP-0080.md) | Typed Code Models for Selected Expressions | Draft | Unscheduled | — |
+| [ZEP-0081](./ZEP-0081.md) | Type-Safe Embedded DSL Support | Draft | Unscheduled | — |
+| [ZEP-0082](./ZEP-0082.md) | Contextual Blocks and Receiver Lambdas | Draft | Unscheduled | — |

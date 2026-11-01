@@ -88,6 +88,9 @@ Class mutation follows these rules:
 - Fields remain private and have no visibility modifier or generated accessor. Field reads
     are available inside the declaring class; field writes are allowed only there and require a
     mutable receiver. Field writes use direct assignment.
+- Calling a `mut` method through a field of `this` requires the enclosing class method to be marked
+    `mut`, even when the field stores a mutable reference. This restriction does not apply to
+    explicit mutable parameters or local references.
 - A property declared `mut` has a setter; assigning through it requires a mutable receiver.
     Compound property assignment evaluates its receiver once, then calls the getter, computes the
     new value, and calls the setter. This read-compute-write sequence is not atomic.

@@ -52,6 +52,7 @@ final class LspFeatures {
         final var tokens = snapshot.tokens().get(path);
         if (text == null || tokens == null) return new CompletionList(false, List.of());
         final var offset = DocumentCoordinates.offsetAt(text, position);
+        if (insideComment(tokens, offset)) return new CompletionList(false, List.of());
         final var prefix = identifierPrefix(text, offset);
         final var prefixStart = offset - prefix.length();
         final var beforeCursor = tokens.stream()
@@ -961,6 +962,19 @@ final class LspFeatures {
         return Either.forLeft(List.of(location));
     }
 
+    private static boolean insideComment(final List<Token> tokens, final int offset) {
+        for (final var token : tokens) {
+            if (!token.type().isComment()) continue;
+            final var start = token.span().start().offset();
+            final var end = token.span().end().offset();
+            if (start == null || end == null || offset < start) continue;
+            if (offset < end) return true;
+            if (offset == end && (token.type() != TokenType.BLOCK_COMMENT
+                    || !token.lexeme().endsWith("*/"))) return true;
+        }
+        return false;
+    }
+
     private static String identifierPrefix(final String text, final int offset) {
         var start = offset;
         while (start > 0 && isIdentifierPart(text.charAt(start - 1))) start--;
@@ -1421,9 +1435,15 @@ final class LspFeatures {
         }
 
         private void add(final Symbol symbol) {
-            byName.computeIfAbsent(symbol.name(), _ -> new ArrayList<>()).add(symbol);
-            byQualifiedName.computeIfAbsent(symbol.qualifiedName(), _ -> new ArrayList<>()).add(symbol);
+            if (!isCompilerGenerated(symbol.name())) {
+                byName.computeIfAbsent(symbol.name(), _ -> new ArrayList<>()).add(symbol);
+                byQualifiedName.computeIfAbsent(symbol.qualifiedName(), _ -> new ArrayList<>()).add(symbol);
+            }
             if (symbol.token() != null) byToken.put(symbol.token(), symbol);
+        }
+
+        private static boolean isCompilerGenerated(final String name) {
+            return name.startsWith("$zeron$");
         }
 
         CompilationUnit unitFor(final Path path) {

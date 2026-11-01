@@ -497,11 +497,7 @@ for member and default-method dispatch; broader inference remains deferred. See 
 A minimal program using the standard output function is:
 
 ```zeron
-import zeron.io.println;
-
-fn main(): Unit {
-    println("Hello world");
-}
+fn main() = println("Hello world");
 ```
 
 ---

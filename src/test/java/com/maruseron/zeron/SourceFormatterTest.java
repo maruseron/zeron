@@ -385,6 +385,48 @@ public final class SourceFormatterTest {
     }
 
     @Test
+    public void wrapsLongDeclarationClausesUnderTheirKeywords() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = """
+                public class LongList<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>, Reversible<LongList<_>>, Foldable<LongList<_>>, Collector<LongList<_>> {
+                }
+                public sealed contract LongContract<T> requires FirstRequirement<T> + SecondRequirement<T> + ThirdRequirement<T> permits FirstPermittedClass, SecondPermittedClass {
+                }
+                public type LongChoice deriving FirstDerivedImplementation, SecondDerivedImplementation, ThirdDerivedImplementation, FourthDerivedImplementation = Value(value: Int) | Empty;
+                """;
+
+        final var result = SourceFormatter.format(source, "LongClauses.zn", style);
+        assertTrue(result.diagnostics().toString(), result.formattedSource().isPresent());
+        final var formatted = result.formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains(
+                "public class LongList<T: mut>\n"
+                        + "    is Iterable<T>,\n"
+                        + "       Sink<T>,\n"
+                        + "       RandomAccess<T>,\n"
+                        + "       Sequenced<T>,\n"
+                        + "       Reversible<LongList<_>>,\n"
+                        + "       Foldable<LongList<_>>,\n"
+                        + "       Collector<LongList<_>> {"));
+        assertTrue(formatted, formatted.contains(
+                "public sealed contract LongContract<T>\n"
+                        + "    requires FirstRequirement<T> +\n"
+                        + "             SecondRequirement<T> +\n"
+                        + "             ThirdRequirement<T>\n"
+                        + "    permits FirstPermittedClass,\n"
+                        + "            SecondPermittedClass {"));
+        assertTrue(formatted, formatted.contains(
+                "public type LongChoice\n"
+                        + "    deriving FirstDerivedImplementation,\n"
+                        + "             SecondDerivedImplementation,\n"
+                        + "             ThirdDerivedImplementation,\n"
+                        + "             FourthDerivedImplementation ="));
+        assertTrue(formatted.lines().allMatch(line -> line.length() <= style.maximumLineLength()));
+        assertEquals(formatted, SourceFormatter.format(formatted, "LongClauses.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
     public void formatsGenericDeclarationBlocksAndSeparatesTheirMembers() throws Exception {
         final var style = CanonicalStyle.load();
         final var source = """

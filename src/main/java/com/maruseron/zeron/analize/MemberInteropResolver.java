@@ -326,6 +326,37 @@ final class MemberInteropResolver {
         throw new IllegalStateException("Unreachable");
     }
 
+    private static void ensureMutatingFieldCallAllowed(final ResolutionContext context,
+                                                       final Expr receiver, final Token name) {
+        if (context.frame.currentMethodOwner == null || !isThisFieldPath(receiver)) return;
+        final var thisName = new Token(TokenType.THIS, "this", null, name.span());
+        if (!context.symbols.containsSymbol(thisName)
+                || context.symbols.getSymbol(thisName).type() instanceof ReferenceDescriptor) {
+            return;
+        }
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, name,
+                "Calling a mutating method through a field of this requires a mutating caller."));
+    }
+
+    private static boolean isThisFieldPath(final Expr expression) {
+        return switch (expression) {
+            case Expr.Variable variable -> variable.implicitFieldReceiver() != null
+                    && rootedAtThis(variable.implicitFieldReceiver());
+            case Expr.Grouping grouping -> isThisFieldPath(grouping.expression);
+            case Expr.Property property -> !property.resolvedAsProperty() && rootedAtThis(property.receiver);
+            default -> false;
+        };
+    }
+
+    private static boolean rootedAtThis(final Expr expression) {
+        return switch (expression) {
+            case Expr.Variable variable -> variable.name.type() == TokenType.THIS;
+            case Expr.Grouping grouping -> rootedAtThis(grouping.expression);
+            case Expr.Property property -> !property.resolvedAsProperty() && rootedAtThis(property.receiver);
+            default -> false;
+        };
+    }
+
     static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call) {
         return resolveMemberCall(context, call, null);
     }
@@ -402,6 +433,7 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "A mutating HKT operation must declare an explicit receiver parameter."));
         }
+        if (method.isMutating()) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
         final var callableSignature = method.isMutating()
                 ? withReferenceReceiver(selectedSignature)
                 : selectedSignature;
@@ -476,6 +508,7 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
                     "Mutating HKT operations require a mutable reference receiver."));
         }
+        if (method.isMutating()) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
         final var receiverParameter = signature.parameters().getFirst();
         final var explicitParameters = signature.parameters().subList(1, signature.arity());
         final var explicitSignature = TypeDescriptor.functionWithEffectsOf(signature.name(), signature.returnType(),
@@ -685,6 +718,9 @@ final class MemberInteropResolver {
             if (!defaults.isEmpty()) {
                 final var defaultMethod = defaults.getFirst();
                 final var descriptor = instantiateDefaultMethodType(context, owner, receiverType, defaultMethod);
+                if (defaultMethod.method().isMutating()) {
+                    ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+                }
                 if (defaultMethod.method().isMutating()
                         && !(receiverType instanceof ReferenceDescriptor)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -735,6 +771,9 @@ final class MemberInteropResolver {
                 if (!defaults.isEmpty()) {
                     final var defaultMethod = defaults.getFirst();
                     final var descriptor = instantiateDefaultMethodType(context, owner, receiverType, defaultMethod);
+                    if (defaultMethod.method().isMutating()) {
+                        ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+                    }
                     if (defaultMethod.method().isMutating()
                             && !(receiverType instanceof ReferenceDescriptor)) {
                         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -837,6 +876,7 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
                     "Mutating method requires a mutable reference."));
         }
+        if (isMutating) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
         if (instantiatedDescriptor.isGeneric()) {
             return resolveGenericMemberCall(
                     context, call, instantiatedDescriptor, minimumArity, variadic, fixedArity);
@@ -1021,6 +1061,7 @@ final class MemberInteropResolver {
         }
         final var selected = receiverMatches.getFirst();
         final var method = selected.method();
+        if (method.isMutating()) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
         final var fixedArity = method.fixedCallArity();
         if ((!call.explicitTypeArguments.isEmpty()
                 && call.explicitTypeArguments.size() != method.methodTypeParameters().size())
@@ -2390,6 +2431,7 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "Method is not provided by any of the type parameter's contract bounds."));
         }
+        if (method.isMutating()) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
         if (method.isMutating() && !(call.receiver.getType() instanceof ReferenceDescriptor)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
                     "Mutating methods require a mutable reference receiver."));

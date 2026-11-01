@@ -150,6 +150,12 @@ final class SourceFormatter {
         private boolean functionEqualsContinuation;
         private boolean sumDeclaration;
         private boolean typeDeclaration;
+        private int declarationHeaderDepth = -1;
+        private boolean declarationHeaderWrapped;
+        private boolean declarationNameSeen;
+        private boolean declarationClauseActive;
+        private String declarationClauseKeyword = "";
+        private int declarationClauseAlignIndent = -1;
         private boolean currentImport;
         private boolean currentPackage;
         private boolean blankLineAfterTrailingComment;
@@ -224,6 +230,29 @@ final class SourceFormatter {
                     && type != TokenType.SEMICOLON) {
                 indent();
             }
+            if (isDeclarationStart(type) && braceDepth == 0) {
+                beginDeclarationHeader(index, type == TokenType.TYPE);
+            }
+            if (isDeclarationClauseKeyword(index)) {
+                if (declarationHeaderWrapped) {
+                    newline();
+                    indentBy(blockIndent + style.indentWidth());
+                    append(token.lexeme());
+                    declarationClauseActive = true;
+                    declarationClauseKeyword = token.lexeme();
+                    declarationClauseAlignIndent = blockIndent + style.indentWidth()
+                            + token.lexeme().length() + 1;
+                    previous = type;
+                    previousIndex = index;
+                    return;
+                }
+                declarationClauseActive = true;
+                declarationClauseKeyword = token.lexeme();
+            }
+            if (declarationHeaderDepth == braceDepth && !declarationNameSeen
+                    && type == TokenType.IDENTIFIER && !isInsideGenericArguments(index)) {
+                declarationNameSeen = true;
+            }
             if (type == TokenType.RIGHT_BRACE) {
                 closeBrace(index, next);
                 previous = type;
@@ -240,6 +269,7 @@ final class SourceFormatter {
             if (type == TokenType.SEMICOLON) {
                 trimSpace();
                 append(token.lexeme());
+                if (declarationHeaderDepth == braceDepth) resetDeclarationHeader();
                 var blankAfter = false;
                 if (braceDepth == 0) {
                     if (currentImport) {
@@ -279,6 +309,7 @@ final class SourceFormatter {
                 return;
             }
             if (type == TokenType.LEFT_BRACE) {
+                if (declarationHeaderDepth == braceDepth) resetDeclarationHeader();
                 final var declarationBody = isDeclarationBodyOpen(index);
                 final var dataClassName = declarationBody ? dataClassNameForBodyOpen(index) : null;
                 final var dataClassInitializer = isDataClassInitializerBodyOpen(index);
@@ -318,12 +349,21 @@ final class SourceFormatter {
             if (type == TokenType.COMMA) {
                 trimSpace();
                 append(token.lexeme());
-                if (!parentheses.isEmpty() && parentheses.peek().wrapped()
+                if (declarationClauseActive && declarationHeaderWrapped
+                        && declarationHeaderDepth == braceDepth
+                        && parentheses.isEmpty() && bracketDepth == 0
+                        && !isInsideGenericArguments(index)) {
+                    newline();
+                    indentBy(declarationClauseAlignIndent);
+                } else if (!parentheses.isEmpty() && parentheses.peek().wrapped()
                         && !isInsideGenericArguments(index)) newline();
                 else space();
                 previous = type;
                 previousIndex = index;
                 return;
+            }
+            if (type == TokenType.EQUAL && declarationHeaderDepth == braceDepth) {
+                resetDeclarationHeader();
             }
             if (type == TokenType.EQUAL && typeDeclaration) {
                 sumDeclaration = nextNonCommentType(index + 1) != TokenType.LEFT_PAREN;
@@ -388,7 +428,21 @@ final class SourceFormatter {
                 previousIndex = index;
                 return;
             }
+            if (type == TokenType.PLUS && declarationClauseActive && declarationHeaderWrapped
+                    && "requires".equals(declarationClauseKeyword)
+                    && declarationHeaderDepth == braceDepth
+                    && parentheses.isEmpty() && bracketDepth == 0
+                    && !isInsideGenericArguments(index)) {
+                if (needsSpace(previous, type, index)) space();
+                append(token.lexeme());
+                newline();
+                indentBy(declarationClauseAlignIndent);
+                previous = type;
+                previousIndex = index;
+                return;
+            }
             if (isExpressionBreakOperator(type) && !genericAngles.contains(index)
+                    && !isInsideGenericArguments(index)
                     && !isHandlerArrowGreater(index)
                     && !(type == TokenType.IS && isDeclarationConformanceClause(index))
                     && !(type == TokenType.MINUS && unaryPosition())
@@ -704,6 +758,83 @@ final class SourceFormatter {
                 if (type == TokenType.EQUAL || type == TokenType.LEFT_BRACE
                         || type == TokenType.SEMICOLON || type == TokenType.EOF) break;
                 if (!type.isComment()) length += tokens.get(index).lexeme().length() + 1;
+            }
+            return length;
+        }
+
+        private static boolean isDeclarationStart(final TokenType type) {
+            return type == TokenType.CLASS || type == TokenType.CONTRACT || type == TokenType.TYPE;
+        }
+
+        private void beginDeclarationHeader(final int index, final boolean stopAtEquals) {
+            declarationHeaderDepth = braceDepth;
+            declarationHeaderWrapped = lineLength + declarationHeaderRemainderLength(index, stopAtEquals)
+                    > style.maximumLineLength();
+            declarationNameSeen = false;
+            declarationClauseActive = false;
+            declarationClauseKeyword = "";
+            declarationClauseAlignIndent = -1;
+        }
+
+        private void resetDeclarationHeader() {
+            declarationHeaderDepth = -1;
+            declarationHeaderWrapped = false;
+            declarationNameSeen = false;
+            declarationClauseActive = false;
+            declarationClauseKeyword = "";
+            declarationClauseAlignIndent = -1;
+        }
+
+        private boolean isDeclarationClauseKeyword(final int index) {
+            if (declarationHeaderDepth != braceDepth || !declarationNameSeen) return false;
+            if (isInsideGenericArguments(index)) return false;
+            final var type = tokens.get(index).type();
+            if (type == TokenType.IS) return true;
+            if (type != TokenType.IDENTIFIER) return false;
+            return switch (tokens.get(index).lexeme()) {
+                case "requires", "permits", "deriving" -> true;
+                default -> false;
+            };
+        }
+
+        private int declarationHeaderRemainderLength(final int start, final boolean stopAtEquals) {
+            final var savedPrevious = previous;
+            final var savedPreviousIndex = previousIndex;
+            var length = 0;
+            var previousType = previous;
+            var previousTokenIndex = previousIndex;
+            var first = true;
+            try {
+                for (var index = start; index < tokens.size(); index++) {
+                    final var token = tokens.get(index);
+                    final var type = token.type();
+                    if (type.isComment()) continue;
+                    previous = previousType;
+                    previousIndex = previousTokenIndex;
+                    if (first) {
+                        if (lineLength > 0 && needsSpace(previousType, type, index)
+                                && output.charAt(output.length() - 1) != ' '
+                                && output.charAt(output.length() - 1) != '\n'
+                                && output.charAt(output.length() - 1) != '\r') {
+                            length++;
+                        }
+                    } else if (needsSpace(previousType, type, index)) {
+                        length++;
+                    }
+                    length += token.lexeme().length();
+                    if (type == TokenType.COLON) length++;
+                    first = false;
+                    previousType = type;
+                    previousTokenIndex = index;
+                    if (type == TokenType.LEFT_BRACE || type == TokenType.SEMICOLON
+                            || type == TokenType.EOF
+                            || stopAtEquals && type == TokenType.EQUAL) {
+                        break;
+                    }
+                }
+            } finally {
+                previous = savedPrevious;
+                previousIndex = savedPreviousIndex;
             }
             return length;
         }
@@ -1056,7 +1187,8 @@ final class SourceFormatter {
             if (next == TokenType.IDENTIFIER) {
                 final var nextIndex = nextNonCommentIndex(tokens, close + 1);
                 final var lexeme = tokens.get(nextIndex).lexeme();
-                if (lexeme.equals("deriving") || lexeme.equals("requires")) return true;
+                if (lexeme.equals("deriving") || lexeme.equals("requires")
+                        || lexeme.equals("permits")) return true;
             }
             final var previous = previousNonComment(tokens, open - 1);
             return next == TokenType.IDENTIFIER
@@ -1076,7 +1208,7 @@ final class SourceFormatter {
                     || type == TokenType.EQUAL || type == TokenType.ARROW || type == TokenType.HUH
                     || type == TokenType.IS || type == TokenType.FOR || type == TokenType.GREATER
                     || type == TokenType.RAISES || type == TokenType.THROWS || type == TokenType.ELLIPSIS
-                    || type == TokenType.EOF;
+                    || type == TokenType.PLUS || type == TokenType.EOF;
         }
 
         private static int nextNonCommentIndex(final List<Token> tokens, final int start) {

@@ -27,19 +27,22 @@ class ListIterator<T: mut> is Iterator<T> {
     }
 }
 
-public class List<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>, 
-                                        Reversible<List<_>>, Foldable<List<_>>, 
-                                        Collector<List<_>> {
+public class List<T: mut>
+    is Iterable<T>,
+       Sink<T>,
+       RandomAccess<T>,
+       Sequenced<T>,
+       Reversible<List<_>>,
+       Foldable<List<_>>,
+       Collector<List<_>> {
     values: &Array<T>;
     count: Int;
 
     private constructor new;
 
-    public constructor of(elements: T...) = 
-        List<T>.fromArray(elements);
+    public constructor of(elements: T...) = List<T>.fromArray(elements);
 
-    public constructor empty() = 
-        List<T>.new(allocateArray<T>(4), 0);
+    public constructor empty() = List<T>.new(allocateArray<T>(4), 0);
 
     public constructor fromArray(source: Array<T>) {
         let result = List<T>.empty();
@@ -65,8 +68,7 @@ public class List<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>
         }
     }
 
-    private checkIndex(index: Int): Boolean = 
-        index >= 0 and index < count;
+    private checkIndex(index: Int): Boolean = index >= 0 and index < count;
 
     public property size: Int {
         get = count;
@@ -75,9 +77,7 @@ public class List<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>
     public isEmpty(): Boolean = count == 0;
 
     public at(index: Int): Option<T> =
-        if (checkIndex(index)) 
-        then Option.Some(values[index]) 
-        else Option.None<T>();
+        if (checkIndex(index)) then Option.Some(values[index]) else Option.None<T>();
 
     public first(): Option<T> = at(0);
 
@@ -101,7 +101,6 @@ public class List<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>
 
     public mut insert(index: Int, value: T): Unit {
         if (index < 0 or index > count) return;
-    
         this.ensureCapacity(count + 1);
         let mut cursor = count;
         while (cursor > index) {
@@ -156,13 +155,11 @@ public class List<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>
         fn reverse<A>(this: &List<A>): &List<A> {
             let mut left = 0;
             let mut right = this.count - 1;
-
             while (left < right) {
                 this.swapAt(left, right);
                 left += 1;
                 right -= 1;
             }
-
             return this;
         }
 
@@ -177,7 +174,8 @@ public class List<T: mut> is Iterable<T>, Sink<T>, RandomAccess<T>, Sequenced<T>
         }
     }
 
-    delegating implementation Foldable<List<_>> {}
+    delegating implementation Foldable<List<_>> {
+    }
 
     delegating implementation Collector<List<_>> {
         fn empty<A: mut>(): &List<A> = List<A>.empty();

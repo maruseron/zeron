@@ -1247,21 +1247,69 @@ public class LspWorkspaceTest {
     }
         */
 
+    @Test
+    public void completionIsSuppressedInsideComments() throws Exception {
+        final var source = """
+                fn main() {
+                    // ad
+                    /// do
+                    /* re */
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var lineComment = source.indexOf("// ad") + "// ad".length();
+        final var docComment = source.indexOf("/// do") + "/// do".length();
+        final var blockComment = source.indexOf("/* re") + "/* re".length();
+
+        assertTrue(LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, lineComment)).getItems().isEmpty());
+        assertTrue(LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, docComment)).getItems().isEmpty());
+        assertTrue(LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, blockComment)).getItems().isEmpty());
+    }
+
+    @Test
+    public void completionExcludesGeneratedWitnessDefinitions() throws Exception {
+        final var source = """
+                package zeron.lang;
+
+                fn local(): Int = 1;
+                fn main() {
+                }
+                """;
+        final var project = project("zeron/lang/profile.zn", source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var completion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, source.lastIndexOf('}')));
+
+        assertTrue(completion.getItems().toString(), completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("local()")));
+        assertFalse(completion.getItems().toString(), completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().startsWith("$zeron$")));
+    }
+
     private ProjectFiles project(final String source) throws Exception {
+        return project("main.zn", source);
+    }
+
+    private ProjectFiles project(final String relativePath, final String source) throws Exception {
         final var root = temporaryFolder.newFolder().toPath();
         final var sourceRoot = Files.createDirectories(root.resolve("src"));
-        final var entry = sourceRoot.resolve("main.zn");
+        final var entry = sourceRoot.resolve(relativePath);
+        Files.createDirectories(entry.getParent());
         Files.writeString(entry, source);
         final var manifest = root.resolve("zeron.toml");
         Files.writeString(manifest, """
                 [project]
-                entry = "src/main.zn"
+                entry = "src/%s"
                 source-roots = ["src"]
                 output = "dist"
 
                 [platform]
                 stdlib = "source"
-                """);
+                """.formatted(relativePath.replace('\\', '/')));
         return new ProjectFiles(root, entry, manifest);
     }
 

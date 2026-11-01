@@ -48,8 +48,12 @@ break_priority = ["after_equals", "parameter_list"]
 parameter_list_break = "only_if_header_exceeds_width"
 continuation_indent = 4
 
-# Prefer the implicit canonical public constructor. A formatter must preserve
-# an explicit constructor unless it can prove omission is semantics-preserving.
+# Declaration-header clauses (`is`, `requires`, `permits`, and `deriving`) wrap only when the
+# flattened header exceeds the maximum line length. Wrapped clauses break before the clause
+# keyword, and subsequent entries align under the first entry.
 [style.classes]
 avoid_public_new = true
 remove_explicit_public_new = false
+clause_list_break = "only_if_header_exceeds_width"
+continuation_indent = 4
+align_continuation = true

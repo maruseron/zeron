@@ -26,8 +26,8 @@ final class TypeUnifier {
 
             if (!parameter.isEffectKind()
                     && !parameter.admitsMutableArguments()
-                    && actual instanceof ReferenceDescriptor reference) {
-                actual = reference.baseType();
+                    && actual instanceof ReferenceDescriptor(var baseType)) {
+                actual = baseType;
             }
 
             if (parameter.isHigherKinded()
@@ -41,8 +41,8 @@ final class TypeUnifier {
             final var previous = substitutions.putIfAbsent(parameter, actual);
             if (previous != null && !previous.equals(actual)
                 && !acceptsAny(previous, actual)
-                && !(actual instanceof ReferenceDescriptor reference
-                    && previous.equals(reference.baseType()))) {
+                && !(actual instanceof ReferenceDescriptor(var baseType)
+                    && previous.equals(baseType))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE, where,
                         "Conflicting type inferences for '" + parameter.name() + "': "
                                 + previous + " and " + actual + "."));
@@ -84,20 +84,20 @@ final class TypeUnifier {
             unify(nullablePattern.baseType(), actualBase, substitutions, where);
             return;
         }
-        if (pattern instanceof ReferenceDescriptor referencePattern) {
-            final var actualBase = actual instanceof ReferenceDescriptor referenceActual
-                    ? referenceActual.baseType()
+        if (pattern instanceof ReferenceDescriptor(var baseType)) {
+            final var actualBase = actual instanceof ReferenceDescriptor(var type)
+                    ? type
                     : actual;
-            unify(referencePattern.baseType(), actualBase, substitutions, where);
+            unify(baseType, actualBase, substitutions, where);
             return;
         }
-        if (pattern instanceof ArrayDescriptor && actual instanceof ReferenceDescriptor reference
-                && reference.baseType() instanceof ArrayDescriptor) {
-            actual = reference.baseType();
+        if (pattern instanceof ArrayDescriptor && actual instanceof ReferenceDescriptor(var baseType)
+                && baseType instanceof ArrayDescriptor) {
+            actual = baseType;
         }
-        if (pattern instanceof ArrayDescriptor arrayPattern
-                && actual instanceof ArrayDescriptor arrayActual) {
-            unify(arrayPattern.elementType(), arrayActual.elementType(), substitutions, where);
+        if (pattern instanceof ArrayDescriptor(var elementType)
+                && actual instanceof ArrayDescriptor(var actualType)) {
+            unify(elementType, actualType, substitutions, where);
             return;
         }
         if (pattern instanceof GenericDescriptor genericPattern
@@ -133,7 +133,7 @@ final class TypeUnifier {
         }
         if (pattern.equals(actual)) return;
         if (!pattern.equals(actual)
-                && !(actual instanceof ReferenceDescriptor reference && pattern.equals(reference.baseType()))) {
+                && !(actual instanceof ReferenceDescriptor(var baseType) && pattern.equals(baseType))) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, where,
                     "Expected " + TypeFormatter.format(pattern) + ", found " + TypeFormatter.format(actual) + "."));
         }
@@ -143,7 +143,7 @@ final class TypeUnifier {
         if (expected instanceof AnyDescriptor) {
             return !(actual instanceof NullableDescriptor || actual instanceof NullDescriptor);
         }
-        return expected instanceof NullableDescriptor nullable
-                && nullable.baseType() instanceof AnyDescriptor;
+        return expected instanceof NullableDescriptor(var baseType)
+                && baseType instanceof AnyDescriptor;
     }
 }

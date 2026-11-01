@@ -27,6 +27,8 @@
   to 7 for data-class metadata.
 - Loosened type substitution rules for generic calls to match general subtyping rules by allowing
   implicit narrowing from `&T` to `T` for type parameters not admitting mutable projections.
+- Fixed a bug that would allow a field's mutating methods to be called from another method not
+  marked as `mut`.
 
 ### Standard Library
 
@@ -45,6 +47,15 @@
 - Added the numeric `Vector2` type with arithmetic operator support.
 - Made all collections in `zeron.collections` null-hostile. Null support for `Array` remains.
 - Made all type classes in `zeron.control` null-hostile.
+
+### CLI and tooling
+
+- Stopped offering compiler-generated witness helper definitions as completion candidates.
+- Stopped offering completion suggestions while the cursor is inside line, documentation, or block
+  comments.
+- Wrapped long declaration-header clauses in the canonical formatter. `is`, `requires`, `permits`,
+  and `deriving` clauses now break before the clause keyword when the flattened header exceeds the
+  configured line width, with continuation entries aligned under the first entry.
 
 ## [0.5.0] - 2026, 21 OCT
 

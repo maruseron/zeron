@@ -1062,6 +1062,68 @@ public final class ClassContractTest {
     }
 
     @Test
+    public void readOnlyMethodsCannotMutateThroughThisFields() {
+        final var readonlyFieldMutation = """
+                class A {
+                    public constructor new;
+                    public mut f(): Unit = ();
+                }
+                class B {
+                    a: &A;
+                    public constructor new;
+                    public modifyA(): Unit {
+                        this.a.f();
+                    }
+                }
+                """;
+        final var mutatingFieldCaller = """
+                class A {
+                    public constructor new;
+                    public mut f(): Unit = ();
+                }
+                class B {
+                    a: &A;
+                    public constructor new;
+                    public mut modifyA(): Unit {
+                        this.a.f();
+                    }
+                    public callMutableArgument(a: &A): Unit {
+                        a.f();
+                    }
+                }
+                """;
+        final var implicitFieldMutation = """
+                class A {
+                    public constructor new;
+                    public mut f(): Unit = ();
+                }
+                class B {
+                    a: &A;
+                    public constructor new;
+                    public modifyA(): Unit {
+                        a.f();
+                    }
+                }
+                """;
+        final var mutableFunctionArgument = """
+                class A {
+                    public constructor new;
+                    public mut f(): Unit = ();
+                }
+                fn modifyA(a: &A): Unit {
+                    a.f();
+                }
+                """;
+
+        assertThrows(ResolutionError.class,
+                () -> new ResolutionService().resolve(parse(readonlyFieldMutation)));
+        assertThrows(ResolutionError.class,
+                () -> new ResolutionService().resolve(parse(implicitFieldMutation)));
+        new ResolutionService().resolve(parse(mutatingFieldCaller));
+        new ResolutionService().resolve(parse(mutableFunctionArgument));
+    }
+
+    @Test
     public void resolvesImplicitThisReadsCallsAndLambdaCaptures() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var className = "ImplicitThis" + suffix;

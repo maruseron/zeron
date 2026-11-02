@@ -11,7 +11,8 @@ import java.util.*;
 import static com.maruseron.zeron.analize.Resolver.*;
 
 final class TypeResolver {
-    private static final Set<String> DEFAULT_ZERON_LANG_TYPES = Set.of("Option", "Result", "Ok", "Err");
+    private static final Set<String> DEFAULT_ZERON_LANG_TYPES =
+            Set.of("Option", "Result", "Ok", "Err", "PropertyRef");
 
     static String resolveTypeName(final ResolutionContext context, final String name, final Token where) {
         return resolveTypeName(context, name, where, true);

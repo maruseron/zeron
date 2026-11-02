@@ -224,7 +224,9 @@ final class CallResolver {
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
-            if (argument instanceof Expr.Lambda || isFunctionReferenceCandidate(argument)) continue;
+            if (argument instanceof Expr.Lambda || isFunctionReferenceCandidate(argument)
+                    || MemberInteropResolver.defersUntilExpectedType(context, argument,
+                            parameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
             if (!hasExplicitTypeArguments) {
                 TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
@@ -237,7 +239,9 @@ final class CallResolver {
 
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
-            if (!(argument instanceof Expr.Lambda) && !isFunctionReferenceCandidate(argument)) continue;
+            if (!(argument instanceof Expr.Lambda) && !isFunctionReferenceCandidate(argument)
+                    && !MemberInteropResolver.defersUntilExpectedType(context, argument,
+                            parameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             final var expected = TypeSubstitution.substitute(
                     parameterType(genericType.parameters(), i, fixedArity, variadic), substitutions);
             if (functionType(expected) == null) {
@@ -247,11 +251,17 @@ final class CallResolver {
             }
             resolvedArguments[i] = MemberInteropResolver.resolveArgument(context, argument, expected);
             if (!hasExplicitTypeArguments) {
-                TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
-                        context.typeCompatibility.inferenceView(
-                                parameterType(genericType.parameters(), i, fixedArity, variadic),
-                                resolvedArguments[i]),
-                        substitutions, call.callee, rowInference);
+                if (argument instanceof Expr.PropertyReference) {
+                    MemberInteropResolver.unifyPropertyReferenceArgument(
+                            parameterType(genericType.parameters(), i, fixedArity, variadic),
+                            resolvedArguments[i], substitutions, call.callee);
+                } else {
+                    TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
+                            context.typeCompatibility.inferenceView(
+                                    parameterType(genericType.parameters(), i, fixedArity, variadic),
+                                    resolvedArguments[i]),
+                            substitutions, call.callee, rowInference);
+                }
             }
         }
 

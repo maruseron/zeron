@@ -33,45 +33,62 @@ public class Rational is Ratio<Integer>, Hashable<Rational>, Comparable<Rational
 
     private constructor new;
 
+    /// Parses a rational literal such as `1/3`, without converting through `Float`.
     public constructor fromLiteralText(value: String) =
         Rational.new(rationalFromLiteralText(value));
 
+    /// Returns `value` as a rational with denominator `1n`.
     public constructor fromInteger(value: Integer) =
         Rational.fromLiteralText(value.toString());
 
+    /// Returns the sum of this rational and `other`, reduced to lowest terms.
     public add(other: Rational): Rational = Rational.new(rationalAdd(this.value, other.value));
 
+    /// Returns the difference of this rational and `other`, reduced to lowest terms.
     public subtract(other: Rational): Rational =
         Rational.new(rationalSubtract(this.value, other.value));
 
+    /// Returns the product of this rational and `other`, reduced to lowest terms.
     public multiply(other: Rational): Rational =
         Rational.new(rationalMultiply(this.value, other.value));
 
+    /// Returns the quotient of this rational and `other`, reduced to lowest terms.
     public divide(other: Rational): Rational =
         Rational.new(rationalDivide(this.value, other.value));
 
+    /// Returns the additive inverse of this rational.
     public negate(): Rational = Rational.new(rationalNegate(this.value));
 
+    /// Returns the magnitude of this rational, never negative.
     public abs(): Rational = Rational.new(rationalAbs(this.value));
 
+    /// Returns `-1`, `0`, or `1` according to this rational's sign.
     public signum(): Rational = Rational.new(rationalSignum(this.value));
 
+    /// Returns the multiplicative inverse of this rational.
     public reciprocal(): Rational = Rational.new(rationalReciprocal(this.value));
 
+    /// Returns the numerator of this rational in reduced form.
     public numerator(): Integer = Integer.fromLiteralText(rationalNumerator(this.value));
 
+    /// Returns the denominator of this rational in reduced form; it is positive.
     public denominator(): Integer =
         Integer.fromLiteralText(rationalDenominator(this.value));
 
+    /// Returns the closest `Float` to this rational, which may be inexact.
     public toFloat(): Float = rationalToFloat(this.value);
 
+    /// Returns the decimal representation of this rational.
     public toString(): String = rationalToString(this.value);
 
+    /// Whether this rational and `other` denote the same number.
     public eq(other: Rational): Boolean =
         rationalEquals(this.value, other.value);
 
+    /// Returns a hash consistent with `eq`.
     public hash(): Int = rationalHash(this.value);
 
+    /// Compares this rational with `other` by value.
     public compareTo(other: Rational): Ordering {
         let comparison = rationalCompare(this.value, other.value);
         if (comparison < 0) return Ordering.LT();

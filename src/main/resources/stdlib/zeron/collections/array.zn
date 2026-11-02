@@ -3,19 +3,27 @@ package zeron.collections;
 import zeron.control.Foldable;
 import zeron.lang.Eq;
 
+/// Folding and streaming over intrinsic arrays.
 public extension<T: nullable + mut> Array<T> {
+    /// Combines the elements from left to right into a single value.
+    ///
+    /// `combine` receives the accumulated value and the next element, starting from `initial`.
+    /// An empty array returns `initial`.
     public fn foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         for (let item in this) result = combine(result, item);
         return result;
     }
 
+    /// Alias of `foldLeft`; arrays combine from the left only.
     public fn fold<R: mut>(initial: R, accumulator: (R, T) -> R): R {
         return this.foldLeft(initial, accumulator);
     }
 }
 
+/// Streaming over arrays.
 public extension<T: mut> Array<T> {
+    /// Returns a stream over this array's elements, in index order.
     public fn stream(): Stream<T> {
         return Stream.fromArray(this);
     }
@@ -26,9 +34,12 @@ witness Foldable<Array<_>> for Array<_> {
         this.foldLeft(initial, combine);
 }
 
+/// Searching arrays of comparable elements.
 public extension<T: nullable + mut + Eq<T>> Array<T> {
+    /// Whether `item` occurs in this array.
     public fn contains(item: T): Boolean = this.indexOf(item) >= 0;
 
+    /// Returns the lowest index holding a value equal to `item`, or `-1` when absent.
     public fn indexOf(item: T): Int {
         let mut index = 0;
         while (index < this.length) {
@@ -40,6 +51,7 @@ public extension<T: nullable + mut + Eq<T>> Array<T> {
         return -1;
     }
 
+    /// Returns the highest index holding a value equal to `item`, or `-1` when absent.
     public fn lastIndexOf(item: T): Int {
         let mut index = this.length - 1;
         while (index >= 0) {

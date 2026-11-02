@@ -1,3 +1,7 @@
 package zeron.lang;
 
+/// A product value carrying two values, `fst` and `snd`, of possibly different types.
+///
+/// `Pair` is an ordinary product type: its components are named, compared structurally, and
+/// available through those names.
 public type Pair<A: nullable + mut, B: nullable + mut> = (fst: A, snd: B);

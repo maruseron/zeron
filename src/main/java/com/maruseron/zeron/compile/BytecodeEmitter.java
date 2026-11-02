@@ -753,6 +753,23 @@ final class BytecodeEmitter {
                 emitMemberCall(context, composer, literal.factoryCall());
                 context.lastEmittedType = literal.getType();
             }
+            case Expr.PropertyReference reference -> {
+                if (reference.converted()) {
+                    emitExpr(context, composer, reference.reader());
+                    break;
+                }
+                final var propertyRefClass = ClassDesc.of(SyntheticNames.PROPERTY_REF_TYPE);
+                final var readerType = propertyReferenceReaderType();
+                emitExpr(context, composer, reference.reader());
+                emitConversion(context, composer, reference.reader().getType(), readerType);
+                composer.ldc(reference.propertyName.lexeme());
+                composer.ldc(reference.identity());
+                composer.invokestatic(propertyRefClass, SyntheticNames.PROPERTY_REF_FACTORY,
+                        MethodTypeDesc.of(propertyRefClass,
+                                TypeDescriptor.toJavaClassDesc(readerType),
+                                ConstantDescs.CD_String, ConstantDescs.CD_String));
+                context.lastEmittedType = reference.getType();
+            }
             case Expr.Literal literal -> {
                 if (literal.numericConversionCall() != null) {
                     emitMemberCall(context, composer, literal.numericConversionCall());
@@ -2835,6 +2852,12 @@ final class BytecodeEmitter {
             return;
         }
         throw new IllegalStateException("Unsupported conversion from " + sourceType + " to " + targetType);
+    }
+
+    /// The erased shape of `PropertyRef.reader`, which stores the reference's reader closure.
+    static TypeDescriptor propertyReferenceReaderType() {
+        return TypeDescriptor.functionOf("", TypeDescriptor.ofName("java.lang.Object"),
+                TypeDescriptor.ofName("java.lang.Object"));
     }
 
     private static boolean isErasedContractProjection(CompilationContext context, final TypeDescriptor targetType,

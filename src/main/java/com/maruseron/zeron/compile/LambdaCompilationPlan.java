@@ -445,6 +445,13 @@ final class LambdaCompilationPlan {
                 collectLambdaShapes(variable.implicitFieldReceiver());
             }
             case Expr.SuffixedLiteral literal -> collectLambdaShapes(literal.factoryCall());
+            case Expr.PropertyReference reference -> {
+                collectLambdaShapes(reference.reader());
+                if (reference.reader() != null) {
+                    collectFunctionAdapters(reference.reader().getType(),
+                            BytecodeEmitter.propertyReferenceReaderType());
+                }
+            }
             case Expr.Literal _ -> {}
             case null -> {}
             default -> {}

@@ -98,6 +98,62 @@ The expected function type determines whether an arrowless trailing block has on
 zero. Zero-parameter callbacks keep their existing block form; callbacks with multiple parameters
 must name them explicitly.
 
+## Property references
+
+A lambda such as `user -> user.name` reads a property, but the value itself carries no
+information about *which* property was read. When that matters — sorting, mapping, observing
+changes, or describing a field to an API — write a **property reference** instead:
+
+```zeron
+class User {
+    public property name: String;
+    public property age: Int;
+    public constructor new;
+}
+
+let byName: PropertyRef<User, String> = User::name;
+let read: User -> String = User::name;      // implicit conversion
+let name = read(User.new("Ada", 36));       // "Ada"
+```
+
+`User::name` names a property of a type; the left side of `::` is always a type, so qualified
+names and applied generic owners such as `Box<Int>::value` also work. The reference has type
+`PropertyRef<T, V>`, where `T` is the property's owner and `V` the property's type. Because it
+is also callable as a reader, it converts implicitly to `T -> V` and can be used wherever a
+function of that shape is expected:
+
+```zeron
+let maybeUser: Option<User> = Option.Some(User.new("Ada", 36));
+let maybeName: Option<String> = maybeUser.map(User::name);
+```
+
+This works for any parameter typed `(T) -> V`, including generic selector parameters such as
+`map`'s `(T) -> R`, so property references are ordinary function values wherever a reader is
+expected. APIs whose parameter is not a reader — a comparator like `sortBy(compare: (T, T) -> Ordering)`,
+for instance — still need a lambda.
+
+The reference exposes three things:
+
+| Member | Meaning |
+| ------ | ------- |
+| `get(owner: T): V` | Reads the property from a value of the owner type |
+| `name: String` | The property's source name, such as `"name"` |
+| `identity: String` | The declaring type's qualified name and the property's name, for example `"example.User#name"` |
+
+Two references are equal when they denote the same declaration, so `User::name == User::name` is
+true even when the two are written in different functions or different compiled libraries.
+References to a class property and to a contract property with the same name are different
+declarations: `User::name` and `Named::name` have different identities, and reading through
+`Named::name` calls the getter virtually.
+
+Property references are not constructed by hand: there is no public constructor, and only the
+syntax `T::p` creates one. There is no `set` counterpart either; write an ordinary lambda over the
+generated property writer when you need to assign. Referring to a property is allowed only where
+the property itself is accessible.
+
+Note that `::` keeps its existing meaning after a function name: `parse::<Int>` specializes a
+generic function, while `User::name` denotes a property.
+
 ## Receiver functions
 
 A receiver function adds a typed receiver context to a function value. Write the receiver type

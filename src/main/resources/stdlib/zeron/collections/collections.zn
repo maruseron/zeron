@@ -1,42 +1,66 @@
 package zeron.collections;
 
-// o(1) guarantee for indexed access
+/// A collection whose elements are addressed by position in constant time.
+///
+/// Implementations must guarantee `O(1)` access for `at`.
 public contract RandomAccess<T: mut> {
+    /// Returns the element at `index`, or `None` when the index is out of range.
     at(index: Int): Option<T>;
 }
 
+/// A collection with a defined first and last element.
 public contract Sequenced<T: mut> {
+    /// Returns the first element, or `None` when the collection is empty.
     first(): Option<T>;
-    // not constant
+    /// Returns the last element, or `None` when the collection is empty.
+    ///
+    /// Implementations are not required to find the last element in constant time.
     last(): Option<T>;
 }
 
-// should NOT mutate members
+/// A collection that can be traversed backwards.
+///
+/// Reversing changes the order of the elements only; element values themselves are not modified.
 public contract Reversible<C<_>> {
+    /// Reverses the collection in place and returns it.
     mut reverse<T>(this: C<T>): C<T>;
 
+    /// Returns a reversed copy, leaving the receiver unchanged.
     reversed<T>(this: C<T>): C<T>;
 }
 
+/// A collection whose elements can be reordered by a comparison.
 public contract Sortable<C<_>> {
+    /// Sorts the collection in place, using `compare` to order pairs of elements.
+    ///
+    /// The sort is stable only if an implementation documents it as such.
     mut sortBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): Unit;
 
+    /// Sorts the collection in place using the natural order of its elements.
     default mut sort<T: nullable + mut + Comparable<T>>(this: &C<T>): Unit =
         this.sortBy((a, b) -> a.compareTo(b));
 
+    /// Returns a sorted copy, leaving the receiver unchanged.
     sortedBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): C<T>;
 
+    /// Returns a copy sorted by the natural order of its elements.
     default sorted<T: nullable + mut + Comparable<T>>(this: C<T>): C<T> = 
         this.sortedBy((a, b) -> a.compareTo(b));
 }
 
+/// A collection that accepts added values.
 public contract Sink<T: mut> {
-    // boolean indicates success
+    /// Adds `value` to the collection, returning `true` when it was accepted.
+    ///
+    /// Collections that reject duplicates report `false` for an element they already hold.
     mut add(value: T): Boolean;
 }
 
+/// A collection that can be built incrementally from its elements.
 public contract Collector<C<_>> {
+    /// Creates a new empty, mutable collection.
     empty<A: mut>(): &C<A>;
 
+    /// Adds `value` to `this`, returning `true` when it was accepted.
     mut add<A: mut>(this: C<A>, value: A): Boolean;
 }

@@ -27,6 +27,11 @@ class ListIterator<T: mut> is Iterator<T> {
     }
 }
 
+/// A growable, index-addressable sequence of values.
+///
+/// A `List` keeps its elements in a contiguous backing array that grows as needed, so reads by
+/// index are constant time and adding at the end is amortized constant time. Removing or inserting
+/// in the middle shifts the following elements.
 public class List<T: mut>
     is Iterable<T>,
        Sink<T>,
@@ -40,10 +45,13 @@ public class List<T: mut>
 
     private constructor new;
 
+    /// Creates a list holding each argument, in order.
     public constructor of(elements: T...) = List<T>.fromArray(elements);
 
+    /// Creates an empty list.
     public constructor empty() = List<T>.new(allocateArray<T>(4), 0);
 
+    /// Creates a list holding a copy of every element of `source`.
     public constructor fromArray(source: Array<T>) {
         let result = List<T>.empty();
         let mut index = 0;
@@ -70,19 +78,26 @@ public class List<T: mut>
 
     private checkIndex(index: Int): Boolean = index >= 0 and index < count;
 
+    /// The number of elements in the list.
     public property size: Int {
         get = count;
     }
 
+    /// Whether the list has no elements.
     public isEmpty(): Boolean = count == 0;
 
+    /// Returns the element at `index`, or `None` when the index is out of range.
     public at(index: Int): Option<T> =
         if (checkIndex(index)) then Option.Some(values[index]) else Option.None<T>();
 
+    /// Returns the first element, or `None` when the list is empty.
     public first(): Option<T> = at(0);
 
+    /// Returns the last element, or `None` when the list is empty.
     public last(): Option<T> = at(count - 1);
 
+    /// Replaces the element at `index`, returning the previous element or `None` when the index
+    /// is out of range.
     public mut replaceAt(index: Int, value: T): Option<T> {
         if (checkIndex(index)) {
             let previous = at(index);
@@ -92,6 +107,7 @@ public class List<T: mut>
         return Option.None<T>();
     }
 
+    /// Appends `value` and returns `true`; a list always accepts another element.
     public mut add(value: T): Boolean {
         this.ensureCapacity(count + 1);
         this.values[count] = value;
@@ -99,6 +115,9 @@ public class List<T: mut>
         return true;
     }
 
+    /// Inserts `value` before the element currently at `index`, shifting later elements right.
+    ///
+    /// Ignored when `index` is negative or greater than `size`.
     public mut insert(index: Int, value: T): Unit {
         if (index < 0 or index > count) return;
         this.ensureCapacity(count + 1);
@@ -111,6 +130,9 @@ public class List<T: mut>
         this.count = count + 1;
     }
 
+    /// Removes the element at `index`, shifting later elements left, and returns it.
+    ///
+    /// Returns `None` when the index is out of range.
     public mut removeAt(index: Int): Option<T> {
         if (checkIndex(index)) {
             let removed = at(index);
@@ -126,6 +148,7 @@ public class List<T: mut>
         return Option.None();
     }
 
+    /// Removes every element.
     public mut clear(): Unit {
         let mut index = 0;
         while (index < count) {
@@ -135,6 +158,7 @@ public class List<T: mut>
         this.count = 0;
     }
 
+    /// Combines the elements from left to right into a single value.
     public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
         let mut result = initial;
         let mut index = 0;
@@ -181,5 +205,6 @@ public class List<T: mut>
         fn empty<A: mut>(): &List<A> = List<A>.empty();
     }
 
+    /// Returns an iterator over the elements, in index order.
     public iterator(): &Iterator<T> = ListIterator<T>.from(this);
 }

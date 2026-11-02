@@ -35,7 +35,11 @@ witness Floating<Float> for Float {
     fn atan2(x: Float): Float = Math.atan2(this, x);
 }
 
+/// Derived properties and conversions of `Float`.
 public extension Float {
+    /// The sign of this float: `-1`, `0`, or `1`, or `None` when the value is `NaN`.
+    ///
+    /// Both `0.0` and `-0.0` report `0`.
     public property sign: Option<Int> {
         get {
             if (this.isNaN()) return Option<Int>.None();
@@ -45,10 +49,14 @@ public extension Float {
         }
     }
 
+    /// Whether this value is `NaN`.
     public fn isNaN(): Boolean = Double.isNaN(this);
 
+    /// Whether this value is neither `NaN` nor infinite.
     public fn isFinite(): Boolean = Double.isFinite(this);
 
+    /// Returns this value truncated towards zero as an `Int`, or `None` when it is `NaN` or
+    /// outside the range of `Int`.
     public fn toInt(): Option<Int> = floatToInt(this);
 }
 

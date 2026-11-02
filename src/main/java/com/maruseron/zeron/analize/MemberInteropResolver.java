@@ -1174,9 +1174,14 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                     call.name, "Pattern bodies cannot call mutating extension methods."));
         }
-        final var actualArguments = call.arguments.stream().map(argument ->
-                argument instanceof Expr.Lambda || LambdaResolver.isFunctionReferenceCandidate(context, argument)
-                        ? null : ExpressionFlowResolver.resolveExpression(context, argument)).toList();
+        final var signature = method.typeDescriptor();
+        final var actualArguments = new ArrayList<TypeDescriptor>(call.arguments.size());
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var argument = call.arguments.get(i);
+            actualArguments.add(defersUntilExpectedType(context, argument,
+                    extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic()))
+                    ? null : ExpressionFlowResolver.resolveExpression(context, argument));
+        }
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         TypeUnifier.unify(method.receiverType(), selected.projection(), substitutions, call.name);
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
@@ -1185,7 +1190,6 @@ final class MemberInteropResolver {
             substitutions.put(method.methodTypeParameters().get(i), explicitType);
         }
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
-        final var signature = method.typeDescriptor();
         for (int i = 0; i < call.arguments.size(); i++) {
             if (actualArguments.get(i) == null) continue;
             resolvedArguments[i] = actualArguments.get(i);
@@ -1204,7 +1208,11 @@ final class MemberInteropResolver {
             }
             resolvedArguments[i] = resolveArgument(context, call.arguments.get(i), expected);
             if (TypeSubstitution.containsTypeParameter(formal)) {
-                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+                if (call.arguments.get(i) instanceof Expr.PropertyReference) {
+                    unifyPropertyReferenceArgument(formal, resolvedArguments[i], substitutions, call.name);
+                } else {
+                    TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+                }
             }
         }
         for (final var parameter : signature.typeParameters()) {
@@ -1700,6 +1708,38 @@ final class MemberInteropResolver {
         if (pattern instanceof GenericDescriptor) TypeUnifier.unify(pattern, expectedType, substitutions, where);
     }
 
+    /// Whether an argument must wait for the call's type parameters before it is resolved, because
+    /// its own type depends on the expected function parameter type.
+    static boolean defersUntilExpectedType(final ResolutionContext context, final Expr argument,
+                                           final TypeDescriptor parameterType) {
+        return argument instanceof Expr.Lambda
+                || LambdaResolver.isFunctionReferenceCandidate(context, argument)
+                || argument instanceof Expr.PropertyReference
+                && LambdaResolver.functionType(context, parameterType) != null;
+    }
+
+    /// Infers a call's type parameters from a property reference used as a function argument. The
+    /// reader's parameter type is fixed by the owner type, so it only supplies parameters that are
+    /// still unknown; comparing it against an already inferred type would reject the bare owner
+    /// type when another argument inferred a reference to it.
+    static void unifyPropertyReferenceArgument(final TypeDescriptor formal,
+                                               final TypeDescriptor actual,
+                                               final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                                               final Token where) {
+        if (!(formal instanceof FunctionDescriptor formalFunction)
+                || !(actual instanceof FunctionDescriptor actualFunction)) return;
+        for (int index = 0; index < formalFunction.arity() && index < actualFunction.arity(); index++) {
+            final var parameter = formalFunction.parameters().get(index);
+            if (parameter instanceof TypeParameterDescriptor typeParameter
+                    && !substitutions.containsKey(typeParameter)) {
+                TypeUnifier.unify(typeParameter, actualFunction.parameters().get(index),
+                        substitutions, where);
+            }
+        }
+        TypeUnifier.unify(formalFunction.returnType(), actualFunction.returnType(),
+                substitutions, where);
+    }
+
     private static TypeDescriptor resolveGenericMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                                     final FunctionDescriptor genericType, final int minimumArity,
                                                     final boolean variadic, final int fixedArity) {
@@ -1744,7 +1784,8 @@ final class MemberInteropResolver {
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
-            if (argument instanceof Expr.Lambda || LambdaResolver.isFunctionReferenceCandidate(context, argument)) continue;
+            if (defersUntilExpectedType(context, argument,
+                    memberParameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
             TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
                     resolvedArguments[i], substitutions, call.name, rowInference);
@@ -1752,7 +1793,8 @@ final class MemberInteropResolver {
 
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
-            if (!(argument instanceof Expr.Lambda) && !LambdaResolver.isFunctionReferenceCandidate(context, argument)) continue;
+            if (!defersUntilExpectedType(context, argument,
+                    memberParameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             final var expected = TypeSubstitution.substitute(
                     memberParameterType(genericType.parameters(), i, fixedArity, variadic), substitutions);
             if (LambdaResolver.functionType(context, expected) == null) {
@@ -1761,8 +1803,14 @@ final class MemberInteropResolver {
                         "A function value argument requires a function parameter type."));
             }
             resolvedArguments[i] = resolveArgument(context, argument, expected);
-            TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
-                    resolvedArguments[i], substitutions, call.name, rowInference);
+            if (argument instanceof Expr.PropertyReference) {
+                unifyPropertyReferenceArgument(
+                        memberParameterType(genericType.parameters(), i, fixedArity, variadic),
+                        resolvedArguments[i], substitutions, call.name);
+            } else {
+                TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
+                        resolvedArguments[i], substitutions, call.name, rowInference);
+            }
         }
 
         rowInference.solve(substitutions, call.name);
@@ -2792,6 +2840,9 @@ final class MemberInteropResolver {
 
     static TypeDescriptor resolveArgument(final ResolutionContext context, final Expr argument,
                                            final TypeDescriptor expectedType) {
+        if (argument instanceof Expr.PropertyReference reference) {
+            return PropertyReferenceResolver.resolve(context, reference, expectedType);
+        }
         final var wrappedCodeModel = codeModelFunctionType(expectedType);
         if (wrappedCodeModel != null) {
             final var lambda = inlineLambda(argument);

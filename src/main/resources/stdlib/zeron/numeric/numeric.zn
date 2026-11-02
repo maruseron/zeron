@@ -1,46 +1,101 @@
 package zeron.numeric;
 
+/// A value expressible as a quotient of two `T` values.
+///
+/// Implementations decide their own normalization rules, such as reducing the fraction or keeping
+/// the denominator positive.
 public contract Ratio<T: mut> {
+    /// Returns the numerator of this ratio.
     numerator(): T;
+    /// Returns the denominator of this ratio.
     denominator(): T;
 }
 
+/// Addition, subtraction, multiplication, negation, absolute value, and sign.
+///
+/// This is the base of the numeric hierarchy: `Integral` and `Fractional` require it, and
+/// `Fractional` is in turn required by `Floating`. Instances are expected to agree with `Integer`
+/// arithmetic wherever their representation allows it, so `add` and `multiply` are associative
+/// and commutative, `subtract(a, b)` equals `add(a, negate(b))`, and `multiply` distributes over
+/// `add`. Floating-point instances approximate these laws by necessity.
 public contract Numeric<T: mut> {
+    /// Returns the sum of this value and `other`.
     add(other: T): T;
+    /// Returns the difference of this value and `other`.
     subtract(other: T): T;
+    /// Returns the product of this value and `other`.
     multiply(other: T): T;
+    /// Returns the additive inverse of this value.
     negate(): T;
+    /// Returns the magnitude of this value, never negative for the ordered instances.
     abs(): T;
+    /// Returns `-1`, `0`, or `1` in this type's representation, according to the value's sign.
     signum(): T;
+    /// Returns the numeric value of `value` in this type.
+    ///
+    /// The result is exact only when the type can represent the integer.
     static fromInteger(value: Integer): T;
 }
 
+/// Integer division and exact conversion to the exact numeric types.
+///
+/// Two division pairs are provided: `quot`/`rem` truncate towards zero, matching `/` and `%`, and
+/// `rem` takes the sign of the dividend, while `div`/`mod` round towards negative infinity and
+/// `mod` takes the sign of the divisor. Both pairs satisfy `quot * b + rem == this` and
+/// `div * b + mod == this`, so `mod` lies in `0 .. abs(b) - 1` when `b` is positive.
 public contract Integral<T: mut> requires Numeric<T> + Hashable<T> + Comparable<T> {
+    /// Returns the quotient of this value and `other`, truncated towards zero.
     quot(other: T): T;
+    /// Returns the remainder of `quot`, with the sign of this value.
     rem(other: T): T;
+    /// Returns the quotient of this value and `other`, rounded towards negative infinity.
     div(other: T): T;
+    /// Returns the remainder of `div`, with the sign of `other`.
     mod(other: T): T;
+    /// Returns this value as an arbitrary-precision `Integer`.
     toInteger(): Integer;
+    /// Returns this value as an exact `Rational`.
     toRational(): Rational;
 }
 
+/// Division and reciprocal on top of `Numeric`.
 public contract Fractional<T: mut> requires Numeric<T> {
+    /// Returns the quotient of this value and `other`.
     divide(other: T): T;
+    /// Returns the multiplicative inverse of this value, equal to `divide(1)`.
     reciprocal(): T;
+    /// Returns the numeric value of `value` in this type, rounded as the type requires.
     static fromRational(value: Rational): T;
 }
 
+/// Real-valued transcendental functions on top of `Fractional`.
+///
+/// Angles are measured in radians. Functions outside their domain follow the underlying
+/// implementation: for `Float` they produce `NaN` or an infinity rather than an error.
 public contract Floating<T: mut> requires Fractional<T> {
+    /// Returns the square root of this value.
     sqrt(): T;
+    /// Returns this value raised to `exponent`.
     pow(exponent: T): T;
+    /// Returns `e` raised to this value.
     exp(): T;
+    /// Returns the natural logarithm of this value.
     ln(): T;
+    /// Returns the base-10 logarithm of this value.
     log10(): T;
+    /// Returns the sine of this value in radians.
     sin(): T;
+    /// Returns the cosine of this value in radians.
     cos(): T;
+    /// Returns the tangent of this value in radians.
     tan(): T;
+    /// Returns the arc sine of this value in radians.
     asin(): T;
+    /// Returns the arc cosine of this value in radians.
     acos(): T;
+    /// Returns the arc tangent of this value in radians.
     atan(): T;
+    /// Returns the arc tangent of this value divided by `x`, using both signs to select the
+    /// quadrant.
     atan2(x: T): T;
 }

@@ -280,54 +280,86 @@ class TakenWhileStream<T: mut> is Iterable<T> {
 fn streamMonadAp<A: mut, B: mut>(values: Stream<A>, functions: Stream<(A) -> B>): Stream<B> =
     Stream<B>.from(AppliedStream<A, B>.new(values, functions));
 
+/// A lazily evaluated sequence of values.
+///
+/// A stream is a view over an `Iterable`: transformations such as `map` and `filter` build a new
+/// view and do no work until an iterator is pulled. Each traversal starts a fresh iterator from the
+/// underlying source, so a stream can be traversed again whenever its source can; results are not
+/// cached, and a transformation's function may run once per traversal.
+///
+/// The terminal operations `fold`, `count`, `any`, `all`, and `toList` consume the traversal they
+/// start, and `any`/`all` stop at the first decisive element.
 public class Stream<T: mut> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>> {
     source: Iterable<T>;
 
     private constructor new;
 
+    /// Returns a stream over the given elements.
     public constructor of(elements: T...) = Stream<T>.fromArray(elements);
 
+    /// Returns a stream over the elements of `source`.
     public constructor from(source: Iterable<T>) = Stream<T>.new(source);
 
+    /// Returns a stream over the elements of `source`, in index order.
     public constructor fromArray(source: Array<T>) =
         Stream<T>.from(ArrayStream<T>.new(source));
 
+    /// Returns a new iterator over this stream's elements.
     public iterator(): &Iterator<T> = source.iterator();
 
+    /// Returns a stream of the results of `transform` applied to each element.
     public map<R: mut>(transform: (T) -> R): Stream<R> =
         Stream<R>.new(MappedStream<T, R>.new(source, transform));
 
+    /// Returns a stream of the elements of every sequence produced by `transform`.
     public flatMap<R: mut>(transform: (T) -> Iterable<R>): Stream<R> =
         Stream<R>.new(FlatMappedStream<T, R>.new(source, transform));
 
+    /// Returns a stream of the elements accepted by `predicate`.
     public filter(predicate: (T) -> Boolean): Stream<T> =
         Stream<T>.new(FilteredStream<T>.new(source, predicate));
 
+    /// Combines the elements from left to right into a single value.
     public fold<R: mut>(initial: R, accumulator: (R, T) -> R): R {
         let mut result = initial;
         for (let item in this) result = accumulator(result, item);
         return result;
     }
 
+    /// Returns a stream that skips the first `count` elements.
+    ///
+    /// The elements are skipped when the first element of the result is requested, not when this
+    /// method is called. Counts below `0` are treated as `0`.
     public drop(count: Int): Stream<T> =
         Stream<T>.new(DroppedStream<T>.new(source, count));
 
+    /// Returns a stream of at most the first `count` elements.
+    ///
+    /// Counts below `0` produce an empty stream.
     public take(count: Int): Stream<T> =
         Stream<T>.new(TakenStream<T>.new(source, count));
 
+    /// Returns a stream that skips leading elements accepted by `predicate`.
     public dropWhile(predicate: (T) -> Boolean): Stream<T> =
         Stream<T>.new(DroppedWhileStream<T>.new(source, predicate));
 
+    /// Returns a stream of the leading elements accepted by `predicate`, stopping at the first
+    /// rejected element.
     public takeWhile(predicate: (T) -> Boolean): Stream<T> =
         Stream<T>.new(TakenWhileStream<T>.new(source, predicate));
 
+    /// Counts the elements by traversing the stream.
     public count(): Int = fold(0, (a, _) -> a + 1);
 
+    /// Whether any element is accepted by `predicate`, stopping at the first acceptance.
     public any(predicate: (T) -> Boolean): Boolean {
         for (let item in this) if (predicate(item)) return true;
         return false;
     }
 
+    /// Whether every element is accepted by `predicate`, stopping at the first rejection.
+    ///
+    /// An empty stream satisfies `all` for any predicate.
     public all(predicate: (T) -> Boolean): Boolean {
         for (let item in this) if (not predicate(item)) return false;
         return true;
@@ -348,6 +380,7 @@ public class Stream<T: mut> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>
             this.fold(initial, combine);
     }
 
+    /// Collects every element into a new list, in traversal order.
     public toList(): List<T> {
         let mut result = List<T>.empty();
         for (let item in this) result.add(item);

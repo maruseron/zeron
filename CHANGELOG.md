@@ -4,6 +4,9 @@
 
 ### Compiler and language work
 
+- Added property references (`T::p`, such as `User::name`) with a new standard-library
+  `PropertyRef<T, V>` value that exposes `get`, `name`, and a stable `identity`, converts
+  implicitly to `T -> V`, and compares by declaration across separate compilations.
 - Added typed declarative annotations with target and constant-argument validation, and preserved
   public annotation definitions and applications in API-index schema 9. Added runtime
   `CodeModel<F>` values for inspecting selected inline predicate lambdas.
@@ -56,6 +59,8 @@
 
 ### Standard Library
 
+- Documented the foundational APIs of `zeron.lang`, `zeron.numeric`, `zeron.collections`, and
+  `zeron.control` with hover-visible `///` comments covering contracts, types, and public members.
 - Added the `zeron.compiler.CodeModel<F>` API for typed predicate nodes, source types, and eager
   immutable capture values. Bumped the standard-library API version to 9.
 - Enabled the `Sortable` higher-kinded contract with `sort`, `sorted`, and comparator-based operations.

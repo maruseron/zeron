@@ -25,21 +25,41 @@ class StringCodePoints is Iterable<Char> {
     }
 }
 
+/// Inspection and slicing of `String` values.
+///
+/// Bracketed operations come in two families. The plain operations index by UTF-16 code unit,
+/// matching `length()`, and tolerate malformed text. The `*ByCodePoints` operations index by
+/// Unicode code point, and the `*Strict` operations additionally report malformed text through
+/// `UnicodeError` instead of quietly treating unpaired surrogates as single units.
 public extension String {
+    /// Returns the number of UTF-16 code units in this string.
+    ///
+    /// This is the count used by `substring` and `indexOf`, not the number of characters.
     public fn length(): Int = stringLength(this);
 
+    /// Whether this string has no code units.
     public fn isEmpty(): Boolean = stringIsEmpty(this);
 
+    /// Returns the code-unit index of the first occurrence of `value`, or `-1` when absent.
     public fn indexOf(value: String): Int = stringIndexOf(this, value);
 
+    /// Returns the code-unit index of the last occurrence of `value`, or `-1` when absent.
     public fn lastIndexOf(value: String): Int = stringLastIndexOf(this, value);
 
+    /// Whether `value` occurs anywhere in this string.
     public fn contains(value: String): Boolean = this.indexOf(value) >= 0;
 
+    /// Whether this string starts with `prefix`.
     public fn startsWith(prefix: String): Boolean = stringStartsWith(this, prefix);
 
+    /// Whether this string ends with `suffix`.
     public fn endsWith(suffix: String): Boolean = stringEndsWith(this, suffix);
 
+    /// Returns the code units between `start` (inclusive) and `end` (exclusive).
+    ///
+    /// Returns `None` when the range is negative, out of order, or beyond `length()`. The range is
+    /// measured in code units, so it may cut a surrogate pair in half; use
+    /// `substringByCodePoints` to split on character boundaries.
     public fn substring(start: Int, end: Int): Option<String> {
         if (start < 0 or end < start or end > this.length()) return Option<String>.None();
         let result = stringSubstring(this, start, end);
@@ -47,29 +67,40 @@ public extension String {
         return Option.Some(result);
     }
 
+    /// Returns the number of Unicode code points, treating unpaired surrogates as single units.
+    ///
+    /// Use `codePointLengthStrict` when malformed text must be reported instead.
     public fn codePointLength(): Int = stringCodePointLength(this);
 
+    /// Returns the code point at code-point index `index`, or `None` when the index is out of
+    /// range.
     public fn codePointAt(index: Int): Option<Char> {
         let value = stringCodePointAt(this, index);
         if (value < 0) return Option<Char>.None();
         return Option.Some(intToChar(value));
     }
 
+    /// Returns the substring between code-point indices `start` (inclusive) and `end`
+    /// (exclusive), or `None` when the range is invalid.
     public fn substringByCodePoints(start: Int, end: Int): Option<String> {
         let result = stringSubstringByCodePoints(this, start, end);
         if (result == null) return Option<String>.None();
         return Option.Some(result);
     }
 
+    /// Returns the code-point index of the first occurrence of `value`, or `-1` when absent.
     public fn indexOfCodePoint(value: Char): Int = stringIndexOfCodePoint(this, value);
 
+    /// Returns this string's code points as a stream.
     public fn codePoints(): Stream<Char> = Stream<Char>.from(StringCodePoints.new(this));
 
+    /// Returns this string's only code point, or `None` when it has none or more than one.
     public fn singleChar(): Option<Char> {
         if (this.codePointLength() != 1) return Option<Char>.None();
         return this.codePointAt(0);
     }
 
+    /// Like `codePointLength`, but returns `Err` when the text contains an unpaired surrogate.
     public fn codePointLengthStrict(): Result<Int, UnicodeError> {
         let malformedOffset = stringFirstMalformedOffset(this);
         if (malformedOffset >= 0) {
@@ -78,6 +109,7 @@ public extension String {
         return Result<Int, UnicodeError>.Ok(this.codePointLength());
     }
 
+    /// Like `codePointAt`, but returns `Err` when the text contains an unpaired surrogate.
     public fn codePointAtStrict(index: Int): Result<Option<Char>, UnicodeError> {
         let malformedOffset = stringFirstMalformedOffset(this);
         if (malformedOffset >= 0) {
@@ -88,6 +120,8 @@ public extension String {
         return Result<Option<Char>, UnicodeError>.Ok(this.codePointAt(index));
     }
 
+    /// Like `substringByCodePoints`, but returns `Err` when the text contains an unpaired
+    /// surrogate.
     public fn substringByCodePointsStrict(
         start: Int,
         end: Int
@@ -101,6 +135,7 @@ public extension String {
         return Result<Option<String>, UnicodeError>.Ok(this.substringByCodePoints(start, end));
     }
 
+    /// Like `indexOfCodePoint`, but returns `Err` when the text contains an unpaired surrogate.
     public fn indexOfCodePointStrict(value: Char): Result<Int, UnicodeError> {
         let malformedOffset = stringFirstMalformedOffset(this);
         if (malformedOffset >= 0) {
@@ -109,6 +144,7 @@ public extension String {
         return Result<Int, UnicodeError>.Ok(this.indexOfCodePoint(value));
     }
 
+    /// Like `codePoints`, but returns `Err` when the text contains an unpaired surrogate.
     public fn codePointsStrict(): Result<Stream<Char>, UnicodeError> {
         let malformedOffset = stringFirstMalformedOffset(this);
         if (malformedOffset >= 0) {
@@ -119,6 +155,7 @@ public extension String {
         return Result<Stream<Char>, UnicodeError>.Ok(this.codePoints());
     }
 
+    /// Like `singleChar`, but returns `Err` when the text contains an unpaired surrogate.
     public fn singleCharStrict(): Result<Option<Char>, UnicodeError> {
         let malformedOffset = stringFirstMalformedOffset(this);
         if (malformedOffset >= 0) {

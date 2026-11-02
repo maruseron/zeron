@@ -2718,10 +2718,25 @@ public final class Parser {
 
         while (true) {
             if (expr instanceof Expr.Variable variable && match(COLON_COLON)) {
-                consume(LESS, "Expect '<' after '::' in a function specialization.");
+                if (check(LESS)) {
+                    advance();
+                    final var typeArguments = collectTypeArguments();
+                    consume(GREATER, "Expect '>' after function type arguments.");
+                    expr = new Expr.Variable(variable.name, TypeDescriptor.ofInfer(), typeArguments);
+                } else {
+                    expr = propertyReference(previous(), variable.name.lexeme(), List.of());
+                }
+            } else if ((expr instanceof Expr.Variable || expr instanceof Expr.Property)
+                    && check(LESS) && looksLikeGenericPropertyReference()
+                    && staticExpressionPath(expr) != null) {
+                final var ownerName = staticExpressionPath(expr);
+                advance();
                 final var typeArguments = collectTypeArguments();
-                consume(GREATER, "Expect '>' after function type arguments.");
-                expr = new Expr.Variable(variable.name, TypeDescriptor.ofInfer(), typeArguments);
+                consume(GREATER, "Expect '>' after owner type arguments.");
+                final var operator = consume(COLON_COLON, "Expect '::' after owner type.");
+                expr = propertyReference(operator, ownerName, typeArguments);
+            } else if (expr instanceof Expr.Property && match(COLON_COLON)) {
+                expr = propertyReference(previous(), staticExpressionPath(expr), List.of());
             } else if (expr instanceof Expr.Variable variable && check(LESS)
                     && looksLikeGenericFactoryCall()) {
                 advance();
@@ -2814,6 +2829,15 @@ public final class Parser {
         };
     }
 
+    private Expr propertyReference(final Token operator, final String ownerName,
+                                   final List<TypeDescriptor> typeArguments) {
+        final var propertyName = consume(IDENTIFIER, "Expect property name after '::'.");
+        final var type = typeArguments.isEmpty()
+                ? TypeDescriptor.of(ownerName)
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(ownerName), typeArguments);
+        return new Expr.PropertyReference(operator, type, propertyName);
+    }
+
     private Expr finishCall(final Token callee, final List<TypeDescriptor> typeArguments) {
         final var arguments = new ArrayList<Expr>();
         if (!check(RIGHT_PAREN)) {
@@ -2839,6 +2863,20 @@ public final class Parser {
             if (type == LESS) depth++;
             else if (type == GREATER && --depth == 0) {
                 return index + 1 < tokens.size() && tokens.get(index + 1).type() == LEFT_PAREN;
+            }
+        }
+        return false;
+    }
+
+    private boolean looksLikeGenericPropertyReference() {
+        var depth = 0;
+        for (var index = current; index < tokens.size(); index++) {
+            final var type = tokens.get(index).type();
+            if (type == LESS) depth++;
+            else if (type == GREATER && --depth == 0) {
+                return index + 2 < tokens.size()
+                        && tokens.get(index + 1).type() == COLON_COLON
+                        && tokens.get(index + 2).type() == IDENTIFIER;
             }
         }
         return false;

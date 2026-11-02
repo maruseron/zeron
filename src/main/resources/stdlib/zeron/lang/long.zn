@@ -43,7 +43,9 @@ witness Integral<Long> for Long {
     }
 }
 
+/// Conversions of `Long`.
 public extension Long {
+    /// Returns this value narrowed to an `Int`, or `None` when it does not fit.
     public fn toInt(): Option<Int> = longToInt(this);
 }
 

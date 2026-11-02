@@ -512,6 +512,7 @@ final class LambdaResolver {
                     .anyMatch(initializer -> referencesAnyVariable(context, initializer, names));
             case Expr.SuffixedLiteral literal -> literal.factoryCall() != null
                     && referencesAnyVariable(context, literal.factoryCall(), names);
+            case Expr.PropertyReference _ -> false;
             case Expr.Literal _ -> false;
         };
         }

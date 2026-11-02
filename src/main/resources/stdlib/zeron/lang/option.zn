@@ -4,33 +4,52 @@ import zeron.control.Foldable;
 import zeron.control.Functor;
 import zeron.control.Monad;
 
+/// A value that may be absent.
+///
+/// - `Some` holds a value of type `T`.
+/// - `None` represents the absent case and carries no payload.
+///
+/// `Option` implements the `Monad` and `Foldable` operations through its witnesses, so the
+/// generic control operations work on it as well as the members below.
 public type Option<T: nullable + mut> =
       Some(value: T)
     | None;
 
+/// Operations of `Option`.
 public extension<T: nullable + mut> Option<T> {
+    /// Whether this option holds a value.
     public fn isSome(): Boolean =
         match (this) {
             case Option.Some(_) -> true;
             case Option.None() -> false;
         };
 
+    /// Returns the contained value, or `other` when this option is `None`.
+    ///
+    /// `other` is evaluated eagerly regardless of the case.
     public fn getOrElse(other: T): T =
         if (this matches Option.Some(value)) then value else other;
 
     // TODO: migrate this method towards a more standard signature
+    /// Reduces this option to a single value by choosing the matching branch.
+    ///
+    /// `ifSome` receives the contained value; `ifNone` receives no arguments.
     public fn fold<R: mut>(ifSome: (T) -> R, ifNone: () -> R): R =
         match (this) {
             case Option.Some(value) -> ifSome(value);
             case Option.None() -> ifNone();
         };
 
+    /// Transforms the contained value, if any, leaving `None` unchanged.
     public fn map<B: mut>(f: (T) -> B): Option<B> =
         match (this) {
             case Option.Some(value) -> Option.Some(f(value));
             case Option.None() -> Option<B>.None();
         };
 
+    /// Keeps this option only when it holds a value that satisfies `p`; otherwise returns `None`.
+    ///
+    /// `p` is not called when this option is already `None`.
     public fn filter(p: (T) -> Boolean): Option<T> =
         match (this) {
             case Option.Some(value) -> if (p(value)) then this else Option<T>.None();

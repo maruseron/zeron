@@ -3,6 +3,8 @@ package zeron.lang;
 import zeron.collections.ArrayIterator;
 import zeron.collections.Iterator;
 
+/// Operations on intrinsic arrays.
 public extension<T: nullable + mut> Array<T> {
+    /// Returns a new iterator positioned before the first element.
     public fn iterator(): &Iterator<T> = ArrayIterator.from(this);
 }

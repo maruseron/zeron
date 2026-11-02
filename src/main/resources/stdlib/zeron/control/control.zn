@@ -2,9 +2,8 @@ package zeron.control;
 
 import zeron.function.identity;
 
-/// A functor is a type that, given a any types `A` and `B`, lets you
-/// apply a function `(A) -> B` to turn an `F<A>` into an `F<B>`.\
-/// This is a structure-preserving transformation.
+/// A type that lets you apply a function `(A) -> B` to an `F<A>` and obtain an `F<B>`.
+/// This is a structure-preserving transformation: only the values change, never the shape.
 ///
 /// Functors must adhere to the following laws:
 ///
@@ -13,6 +12,7 @@ import zeron.function.identity;
 /// f.map(a -> g(h(a))) == f.map(h).map(g)
 /// ```
 public contract Functor<F<_>> {
+    /// Applies `transform` to the value inside this structure.
     map<A: mut, B: mut>(this: F<A>, transform: A -> B): F<B>;
 }
 
@@ -21,10 +21,17 @@ fn applySecond<A: mut, B: mut, C: mut>(
     second: B
 ): (A) -> C = first -> combine(first, second);
 
+/// A functor that can wrap values and apply wrapped functions.
+///
+/// `pure` lifts a plain value into the structure, and `ap` applies a wrapped function to a wrapped
+/// value. Together they let `map2` combine two independent wrapped values.
 public contract Applicative<F<_>> requires Functor<F> {
+    /// Lifts `value` into this applicative structure.
     pure<A: mut>(value: A): F<A>;
+    /// Applies each wrapped function to the wrapped value.
     ap<A: mut, B: mut>(this: F<A>, transform: F<A -> B>): F<B>;
 
+    /// Combines two wrapped values with `combine`.
     default map2<A: mut, B: mut, C: mut>(
         first: F<A>,
         second: F<B>,
@@ -32,54 +39,104 @@ public contract Applicative<F<_>> requires Functor<F> {
     ): F<C> = first.ap(second.map((b) -> applySecond(combine, b)));
 }
 
+/// An applicative that can sequence a value through a function that itself produces a wrapped
+/// result.
+///
+/// `flatMap` is the primitive; `flatten` removes one layer of nesting. Instances are expected to
+/// satisfy the monad laws: left identity (`pure(a).flatMap(f) == f(a)`), right identity
+/// (`m.flatMap(pure) == m`), and associativity of successive `flatMap` calls.
 public contract Monad<M<_>> requires Applicative<M> {
+    /// Applies `transform` to the wrapped value and keeps the resulting structure as it is.
     flatMap<A: mut, B: mut>(this: M<A>, transform: A -> M<B>): M<B>;
 
+    /// Collapses one level of nesting.
     default flatten<A: mut>(this: M<M<A>>): M<A> =
         this.flatMap(identity);
 }
 
+/// A type whose values can be combined associatively.
 public contract Semigroup<A: mut> {
+    /// Combines this value with `other`.
+    ///
+    /// Implementations must be associative: `a.combine(b).combine(c)` equals
+    /// `a.combine(b.combine(c))`.
     combine(other: A): A;
 }
 
+/// A semigroup with an identity value.
+///
+/// `empty()` must leave values unchanged: `a.combine(empty())` and `empty().combine(a)` both equal
+/// `a`.
 public contract Monoid<A: mut> requires Semigroup<A> {
+    /// Returns the identity value of this monoid.
     static empty(): A;
 }
 
+/// An applicative with an empty structure and a choice operation.
 public contract Alternative<F<_>> requires Applicative<F> {
+    /// Returns the empty structure.
     empty<A: mut>(): F<A>;
+    /// Returns this structure when it is non-empty, and `other` otherwise.
     orElse<A: mut>(this: F<A>, other: F<A>): F<A>;
 }
 
+/// An `Alternative` that is also a `Monad`.
+///
+/// The contract adds no requirements of its own; it names the combination so generic code can
+/// require both capabilities at once.
 public contract MonadPlus<M<_>> requires Alternative<M> + Monad<M> {}
 
+/// A structure whose elements can be folded into a single value.
+///
+/// `foldLeft` visits elements from left to right; the default members are derived from it, so an
+/// instance only implements `foldLeft`.
 public contract Foldable<F<_>> {
+    /// Combines the elements from left to right into a single value.
     foldLeft<A: mut, B: mut>(this: F<A>, initial: B, combine: (B, A) -> B): B;
 
+    /// Returns the number of elements.
     default count<A: mut>(this: F<A>): Int = 
         this.foldLeft(0) { c, _ -> c + 1 };
 
+    /// Whether the structure has no elements.
     default isEmpty<A: mut>(this: F<A>): Boolean = 
         this.foldLeft(true) { accumulator, item -> false };
 }
 
+/// A structure whose elements can be visited with an effectful, structure-producing function.
+///
+/// `traverse` turns a structure of `A` into a structure of `T<B>` inside the applicative `G`;
+/// `sequence` is the special case where the elements already carry their own effects.
 public contract Traversable<T<_>> requires Functor<T> + Foldable<T> {
+    /// Applies `transform` to each element and collects the results, preserving the element order
+    /// and the outer structure.
     traverse<G<_>: Applicative<G>, A: mut, B: mut>(this: T<A>, transform: A -> G<B>): G<T<B>>;
 
+    /// Exchanges the nesting order of this traversable and the applicative.
     default sequence<G<_>: Applicative<G>, A: mut>(this: T<G<A>>): G<T<A>> =
         this.traverse(identity);
 }
 
+/// The dual of `Monad`: a structure that can be observed and re-wrapped with context.
 public contract Comonad<W<_>> requires Functor<W> {
+    /// Returns the value at the current position.
     extract<A: mut>(this: W<A>): A;
+    /// Applies `transform` to every contextual view of this value, producing a new structure.
     extend<A: mut, B: mut>(this: W<A>, transform: W<A> -> B): W<B>;
 
+    /// Wraps each contextual view of this value, duplicating the context.
     default duplicate<A: mut>(this: W<A>): W<W<A>> = 
         this.extend(identity);
 }
 
+/// A category of composable arrows.
+///
+/// `compose` chains the receiver with `other`, so the receiver is applied first, and the result is
+/// the combined arrow. `id` supplies the identity arrow for a category application. The standard
+/// library declares the contract without shipping an implementation.
 public contract Category<Cat<_>> {
+    /// Returns the identity arrow applied to `this`.
     id<A: mut>(this: Cat<A>): A;
+    /// Composes this arrow with `other` so the receiver runs first.
     compose<A: mut, B: mut, C: mut>(this: A -> B, other: B -> C): (A) -> C;
 }

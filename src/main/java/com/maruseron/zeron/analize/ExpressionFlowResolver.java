@@ -894,6 +894,8 @@ final class ExpressionFlowResolver {
                 lambda.setType(resolvedType);
                 yield resolvedType;
             }
+            case Expr.PropertyReference reference ->
+                    PropertyReferenceResolver.resolve(context, reference, null);
             case Expr.AnonymousObject object -> resolveAnonymousObject(context, object);
             case Expr.Literal literal -> resolveLiteral(context, literal);
             case Expr.SuffixedLiteral literal -> resolveSuffixedLiteral(context, literal);

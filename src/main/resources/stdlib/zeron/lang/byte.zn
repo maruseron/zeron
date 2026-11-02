@@ -1,6 +1,8 @@
 package zeron.lang;
 
+/// Operations on `Byte` values.
 public extension Byte {
+    /// Returns this byte widened to an `Int`; the value is unchanged and never negative.
     public fn toInt(): Int = byteToInt(this);
 }
 

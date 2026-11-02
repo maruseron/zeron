@@ -1,0 +1,27 @@
+package zeron.lang;
+
+/// A statically resolved reference to a property of a nominal type.
+///
+/// References are written `Type::property`. The compiler creates every instance, so the value
+/// type of a reference always matches the property's declared type. A reference converts
+/// implicitly to its reader function `T -> V`; that conversion loses the property identity.
+///
+/// Two references are equal (`==`) when they denote the same declaration, which makes a reference
+/// usable as a key. `get` reads the property from an owner value, and `name` and `identity` describe
+/// the declaration.
+public class PropertyRef<T: nullable + mut, V: nullable + mut> is Eq<PropertyRef<T, V>> {
+    private property reader: (T) -> V;
+    /// The property's source name, without its owner type.
+    public property name: String;
+    /// The property's stable identity, formed from the declaring type's qualified name, `#`, and
+    /// the property name; two references are equal when their identities are equal.
+    public property identity: String;
+
+    private constructor new;
+
+    /// Invokes the property's getter on `owner`.
+    public get(owner: T): V = this.reader(owner);
+
+    /// Compares references by declaration identity.
+    public eq(other: PropertyRef<T, V>): Boolean = this.identity == other.identity;
+}

@@ -1,13 +1,19 @@
 package zeron.collections;
 
+/// An iterator over the elements of an array, from index `0` upwards.
+///
+/// The iterator reads the array as it advances rather than copying it, so a later write to an
+/// element is observed when the iterator reaches it.
 public class ArrayIterator<T: nullable + mut> is Iterator<T> {
     arr: Array<T>;
     current: Int;
 
     private constructor new;
 
+    /// Returns a new iterator positioned before `arr`'s first element.
     public constructor from(arr: Array<T>) = ArrayIterator<T>.new(arr, 0);
 
+    /// Returns the element at the current position and advances, or `Done` at the end.
     public mut next(): Step<T> {
         if (this.current >= this.arr.length) return Step<T>.Done();
         let value = this.arr[this.current];

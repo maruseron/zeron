@@ -2,35 +2,51 @@ package zeron.numeric;
 
 import zeron.lang.Display;
 
+/// A two-dimensional vector whose components share a numeric type.
+///
+/// Component-wise operations (`add`, `subtract`, `multiply`, `abs`, `signum`, `negate`) combine
+/// the components independently, and `dot` and `cross` follow the usual plane-vector definitions.
+/// The class implements `Numeric<Vector2<T>>` by delegating to its components.
 public class Vector2<T: Numeric<T>> {
+    /// The first component.
     public property x: T;
+    /// The second component.
     public property y: T;
 
+    /// Returns the component-wise sum of this vector and `other`.
     public add(other: Vector2<T>): Vector2<T> = Vector2.new(
         this.x + other.x,
         this.y + other.y);
 
+    /// Returns the component-wise difference of this vector and `other`.
     public subtract(other: Vector2<T>): Vector2<T> = Vector2.new(
         this.x - other.x,
         this.y - other.y);
 
+    /// Returns the component-wise product of this vector and `other`.
     public multiply(other: Vector2<T>): Vector2<T> = Vector2.new(
         this.x * other.x,
         this.y * other.y);
 
+    /// Returns this vector with both components multiplied by `scale`.
     public scaled(scale: T): Vector2<T> = 
         Vector2.new(this.x * scale, this.y * scale);
 
+    /// Returns the dot product of this vector and `other`.
     public dot(other: Vector2<T>): T =
         this.x * other.x + this.y * other.y;
 
+    /// Returns the two-dimensional cross product of this vector and `other`.
     public cross(other: Vector2<T>): T =
         this.x * other.y - this.y * other.x;
 
+    /// Returns this vector with both components negated.
     public negate(): Vector2<T> = Vector2.new(-this.x, -this.y);
 
+    /// Returns this vector with the magnitude of each component.
     public abs(): Vector2<T> = Vector2.new(this.x.abs(), this.y.abs());
 
+    /// Returns this vector with the sign of each component.
     public signum(): Vector2<T> = Vector2.new(this.x.signum(), this.y.signum());
 }
 

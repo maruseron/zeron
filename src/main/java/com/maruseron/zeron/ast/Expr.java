@@ -328,6 +328,47 @@ public sealed interface Expr {
         public void setType(TypeDescriptor type) { this.type = type; }
     }
 
+    /// A statically resolved property reference written `Type::property`.
+    final class PropertyReference implements Expr {
+        public final Token operator;
+        public final Token propertyName;
+        private TypeDescriptor ownerType;
+        private TypeDescriptor type;
+        private String declaringTypeName;
+        private String identity;
+        private Token propertyToken;
+        private Lambda reader;
+        private boolean resolved;
+        private boolean converted;
+
+        public PropertyReference(final Token operator, final TypeDescriptor ownerType,
+                                 final Token propertyName) {
+            this.operator = operator;
+            this.ownerType = ownerType;
+            this.propertyName = propertyName;
+            this.type = TypeDescriptor.ofInfer();
+        }
+
+        @Override public TypeDescriptor getType() { return type; }
+        @Override public void setType(final TypeDescriptor type) { this.type = type; }
+        public TypeDescriptor ownerType() { return ownerType; }
+        public void setOwnerType(final TypeDescriptor ownerType) { this.ownerType = ownerType; }
+        public String declaringTypeName() { return declaringTypeName; }
+        public void setDeclaringTypeName(final String declaringTypeName) {
+            this.declaringTypeName = declaringTypeName;
+        }
+        public String identity() { return identity; }
+        public void setIdentity(final String identity) { this.identity = identity; }
+        public Token propertyToken() { return propertyToken; }
+        public void setPropertyToken(final Token propertyToken) { this.propertyToken = propertyToken; }
+        public Lambda reader() { return reader; }
+        public void setReader(final Lambda reader) { this.reader = reader; }
+        public boolean resolved() { return resolved; }
+        public void markResolved() { resolved = true; }
+        public boolean converted() { return converted; }
+        public void markConverted() { converted = true; }
+    }
+
     final class PropertyCompoundAssignment implements Expr {
         public final Property property;
         public final Token operator;

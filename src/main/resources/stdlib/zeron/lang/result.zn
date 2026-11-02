@@ -6,46 +6,64 @@ import zeron.control.Monad;
 
 // fn applyResultFunction<A: mut, B: mut>(transform: (A) -> B, value: A): B = transform(value);
 
+/// The outcome of an operation that can fail.
+///
+/// - `Ok` holds a successful value of type `T`.
+/// - `Err` holds a failure of type `E`.
+///
+/// `Result` implements the `Monad` and `Foldable` operations through its witnesses, so the
+/// generic control operations work on it as well as the members below.
 public type Result<T: mut, E: mut> =
       Ok(value: T)
     | Err(error: E);
 
+/// Constructors of `Result` that leave the other type argument to the caller.
 namespace Result {
+    /// Wraps `value` in a successful result.
     public fn ok<T: mut, E: mut>(value: T): Result<T, E> = Result<T, E>.Ok(value);
+
+    /// Wraps `error` in a failed result.
     public fn err<T: mut, E: mut>(error: E): Result<T, E> = Result<T, E>.Err(error);
 }
 
+/// Operations of `Result`.
 public extension<T: mut, E: mut> Result<T, E> {
+    /// Whether this result is successful.
     public fn isOk(): Boolean =
         match (this) {
             case Result.Ok(_) -> true;
             case Result.Err(_) -> false;
         };
 
+    /// Whether this result is a failure.
     public fn isErr(): Boolean =
         match (this) {
             case Result.Ok(_) -> false;
             case Result.Err(_) -> true;
         };
 
+    /// Reduces this result to a single value by choosing the matching branch.
     public fn fold<R: mut>(ifOk: (T) -> R, ifErr: (E) -> R): R =
         match (this) {
             case Result.Ok(value) -> ifOk(value);
             case Result.Err(error) -> ifErr(error);
         };
 
+    /// Transforms the successful value, leaving a failure unchanged.
     public fn map<U: mut>(transform: (T) -> U): Result<U, E> =
         match (this) {
             case Result.Ok(value) -> Result<U, E>.Ok(transform(value));
             case Result.Err(error) -> Result<U, E>.Err(error);
         };
 
+    /// Transforms the failure value, leaving a success unchanged.
     public fn mapError<F: mut>(transform: (E) -> F): Result<T, F> =
         match (this) {
             case Result.Ok(value) -> Result<T, F>.Ok(value);
             case Result.Err(error) -> Result<T, F>.Err(transform(error));
         };
 
+    /// Chains another fallible operation on the successful value, leaving a failure unchanged.
     public fn andThen<U: mut>(transform: (T) -> Result<U, E>): Result<U, E> =
         match (this) {
             case Result.Ok(value) -> transform(value);

@@ -285,6 +285,7 @@ final class LambdaConstraintCollector {
             case Expr.AnonymousObject object -> object.initializers().forEach(this::scan);
             case Expr.SuffixedLiteral literal -> scan(literal.factoryCall());
             case Expr.Lambda _, Expr.Variable _, Expr.Literal _ -> {}
+            case Expr.PropertyReference reference -> scan(reference.reader());
         }
     }
 

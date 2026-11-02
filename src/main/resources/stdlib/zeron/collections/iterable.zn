@@ -1,11 +1,19 @@
 package zeron.collections;
 
+/// A sequence of values that can be traversed forward.
+///
+/// Implementations return a fresh iterator from `iterator()` on each call, so separate traversals
+/// do not interfere. The default members build on that single operation: `forEach` visits every
+/// element in order, and `stream` exposes the same elements as a `Stream`.
 public contract Iterable<T: mut> {
+    /// Returns a new iterator positioned before the first element.
     iterator(): &Iterator<T>;
 
+    /// Applies `consumer` to every element, in order, and discards the results.
     default forEach(consumer: (T) -> Unit): Unit {
         for (let element in this) consumer(element);
     }
 
+    /// Returns a stream over the same elements, in the same order.
     default stream(): Stream<T> = Stream.from(this);
 }

@@ -1,8 +1,11 @@
 package zeron.lang;
 
+/// Operations on `Char` values.
 public extension Char {
+    /// Returns the Unicode code point of this character as an `Int`.
     public fn toInt(): Int = charToInt(this);
 
+    /// Returns a one-character `String` containing this character.
     public fn toString(): String = charToString(this);
 }
 

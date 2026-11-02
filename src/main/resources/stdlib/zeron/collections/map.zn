@@ -88,6 +88,11 @@ class MapKeyIterator<K, V: mut> is Iterator<K> {
     }
 }
 
+/// A hash table mapping distinct keys to values.
+///
+/// Keys are compared with `Eq` and bucketed by `Hashable`, so equal keys must produce equal hashes
+/// and must not change in a way that affects either operation while they are in the map. Iteration
+/// order is not specified.
 public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
     buckets: &Array<MapEntry<K, V>?>;
     count: Int;
@@ -96,6 +101,11 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
 
     private constructor new;
 
+    /// Creates an empty map that buckets keys with `hashFunction` and compares them with
+    /// `equalityFunction`.
+    ///
+    /// The two functions must agree: keys that `equalityFunction` considers equal must produce the
+    /// same hash from `hashFunction`.
     public constructor withOperations(
         hashFunction: (K) -> Int,
         equalityFunction: (K, K) -> Boolean
@@ -107,9 +117,11 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
             equalityFunction
         );
 
+    /// Creates an empty map using the standard hashing and equality of `K`.
     public constructor empty() =
         Map<K, V>.withOperations(hashKey::<K>, equalKeys::<K>);
 
+    /// Creates a map holding each entry; a later duplicate key replaces the earlier value.
     public constructor of(entries: &Pair<K, V>...) {
         let mut result = Map.empty<K, V>();
         for (let entry in entries) result.put(entry.fst, entry.snd);
@@ -210,23 +222,28 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
         this.buckets = expanded;
     }
 
+    /// The number of entries in the map.
     public property size: Int {
         get = this.count;
     }
 
+    /// Whether the map has no entries.
     public isEmpty(): Boolean = this.count == 0;
 
+    /// Whether the map holds an entry for `key`.
     public containsKey(key: K): Boolean {
         let hashFunction = this.hashFunction;
         return not (this.findEntry(key, hashFunction(key)) is null);
     }
 
+    /// Returns the value stored for `key`, or `None` when the key is absent.
     public get(key: K): Option<V> {
         let entry = this.findEntry(key, hashFunction(key));
         if (entry is null) return Option<V>.None();
         return Option.Some(entry.value());
     }
 
+    /// Stores `value` for `key`, returning the value it replaced or `None` for a new key.
     public mut put(key: K, value: V): Option<V> {
         let hashFunction = this.hashFunction;
         let hash = hashFunction(key);
@@ -243,6 +260,7 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
         return Option<V>.None();
     }
 
+    /// Stores `value` only when `key` is absent, returning the previously stored value, if any.
     public mut putIfAbsent(key: K, value: V): Option<V> {
         let mut val = get(key);
         if (val matches Option.None()) {
@@ -251,6 +269,11 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
         return val;
     }
 
+    /// Recomputes the entry for `key` from its current value.
+    ///
+    /// `transform` receives the key and the value currently stored, or `None` when the key is
+    /// absent. Returning `None` removes the entry; returning a value stores it. The result is
+    /// returned.
     public mut compute(key: K, transform: (K, Option<V>) -> Option<V>): Option<V> {
         let val = get(key);
         let new = transform(key, val);
@@ -264,6 +287,7 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
         return new;
     }
 
+    /// Returns the value stored for `key`, computing and storing `transform(key)` when absent.
     public mut computeIfAbsent(key: K, transform: (K) -> V): V {
         let val = get(key);
         if (val matches Option.None()) {
@@ -274,6 +298,7 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
         return unwrapSome(val);
     }
 
+    /// Removes the entry for `key`, returning the value it held or `None` when the key is absent.
     public mut remove(key: K): Option<V> {
         let hashFunction = this.hashFunction;
         let hash = hashFunction(key);
@@ -287,6 +312,7 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
         return removed;
     }
 
+    /// Removes every entry.
     public mut clear(): Unit {
         let mut index = 0;
         while (index < this.buckets.length) {
@@ -296,7 +322,9 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
         this.count = 0;
     }
 
+    /// Returns an iterator over the entries as key-value pairs, in unspecified order.
     public iterator(): &Iterator<Pair<K, V>> = MapIterator<K, V>.from(this.buckets);
 
+    /// Returns an iterator over the keys, in unspecified order.
     public keyIterator(): &Iterator<K> = MapKeyIterator<K, V>.from(this.buckets);
 }

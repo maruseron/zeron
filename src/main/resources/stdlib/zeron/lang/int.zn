@@ -43,7 +43,9 @@ witness Integral<Int> for Int {
     }
 }
 
+/// Derived properties and conversions of `Int`.
 public extension Int {
+    /// The sign of this integer: `-1`, `0`, or `1`.
     public property sign: Int {
         get {
             if (this == 0) return 0;
@@ -52,13 +54,19 @@ public extension Int {
         }
     }
 
+    /// Returns this integer converted to a `Float`.
+    ///
+    /// Values that `Float` cannot represent exactly are rounded.
     public fn toFloat(): Float = intToFloat(this);
 
+    /// Returns this integer as a `Byte`, or `None` when it is outside `0..255`.
     public fn toByte(): Option<Byte> {
         if (this < 0 or this > 255) return Option<Byte>.None();
         return Option.Some(intToByteUnchecked(this));
     }
 
+    /// Returns this integer as a `Char` code point, or `None` when it is not a valid Unicode
+    /// scalar value.
     public fn toChar(): Option<Char> {
         if (this < 0 or this > 1114111 or this >= 55296 and this <= 57343) {
             return Option<Char>.None();
@@ -66,6 +74,7 @@ public extension Int {
         return Option.Some(intToChar(this));
     }
 
+    /// Returns this integer widened to a `Long`; the value is preserved.
     public fn toLong(): Long = intToLong(this);
 }
 

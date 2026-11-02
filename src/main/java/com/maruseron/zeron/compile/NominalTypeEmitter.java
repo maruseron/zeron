@@ -441,6 +441,9 @@ final class NominalTypeEmitter {
                             constructorFlags,
                             code -> emitCanonicalConstructor(context, code, declaration, classDesc,
                                     classEvidenceSlots));
+                    if (className.equals(SyntheticNames.PROPERTY_REF_TYPE)) {
+                        emitPropertyReferenceFactory(builder, declaration, classDesc, constructorType);
+                    }
                     if (!classEvidenceSlots.isEmpty()) {
                         builder.withMethodBody("<init>", constructorType, constructorFlags,
                                 BytecodeEmitter::emitEvidenceUnavailable);
@@ -601,6 +604,31 @@ final class NominalTypeEmitter {
                                     generatedBridges);
                         }
                     }
+                });
+    }
+
+    /// Emits the compiler-only factory that constructs a `PropertyRef`. The member name contains
+    /// `$`, which a Zeron identifier cannot contain, so source programs cannot call it.
+    private static void emitPropertyReferenceFactory(final ClassBuilder builder,
+                                                     final Stmt.ClassDecl declaration,
+                                                     final ClassDesc classDesc,
+                                                     final MethodTypeDesc constructorType) {
+        final var readerType = declaration.properties().stream()
+                .filter(property -> property.name().lexeme().equals("reader"))
+                .findFirst()
+                .map(property -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(property.type())))
+                .orElse(ConstantDescs.CD_Object);
+        builder.withMethodBody(SyntheticNames.PROPERTY_REF_FACTORY,
+                MethodTypeDesc.of(classDesc, readerType, ConstantDescs.CD_String, ConstantDescs.CD_String),
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                code -> {
+                    code.new_(classDesc);
+                    code.dup();
+                    code.aload(0);
+                    code.aload(1);
+                    code.aload(2);
+                    code.invokespecial(classDesc, "<init>", constructorType);
+                    code.areturn();
                 });
     }
 

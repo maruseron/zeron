@@ -8,6 +8,12 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
 public final class SyntheticNames {
+    /// The standard-library property-reference type.
+    public static final String PROPERTY_REF_TYPE = "zeron.lang.PropertyRef";
+    /// The compiler-only factory that constructs property references. `$` is not a legal
+    /// character in a Zeron identifier, so source code cannot call this member.
+    public static final String PROPERTY_REF_FACTORY = "$zeron$propertyRef";
+
     private SyntheticNames() {}
 
     public static String witnessMethod(final Token witnessName, final String methodName) {

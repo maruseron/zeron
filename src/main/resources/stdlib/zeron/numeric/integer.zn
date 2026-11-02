@@ -37,61 +37,83 @@ public class Integer {
 
     private constructor new;
 
+    /// Parses a decimal integer, optionally signed, without converting through `Float`.
     public constructor fromLiteralText(value: String) =
         Integer.new(bigIntegerFromLiteralText(value));
 
+    /// Widens `value` to an arbitrary-precision integer.
     public constructor fromInt(value: Int) = Integer.new(bigIntegerFromInt(value));
 
+    /// Widens `value` to an arbitrary-precision integer.
     public constructor fromLong(value: Long) = Integer.new(bigIntegerFromLong(value));
 
+    /// The `n` suffix, so a decimal literal such as `123n` is an `Integer`.
     suffix n {
         integer: string fromLiteralText;
     }
 
+    /// Returns the sum of this integer and `other`.
     public add(other: Integer): Integer =
         Integer.new(bigIntegerAdd(this.value, other.value));
 
+    /// Returns the difference of this integer and `other`.
     public subtract(other: Integer): Integer =
         Integer.new(bigIntegerSubtract(this.value, other.value));
 
+    /// Returns the product of this integer and `other`.
     public multiply(other: Integer): Integer =
         Integer.new(bigIntegerMultiply(this.value, other.value));
 
+    /// Returns the additive inverse of this integer.
     public negate(): Integer = 
         Integer.new(bigIntegerNegate(this.value));
 
+    /// Returns the magnitude of this integer, never negative.
     public abs(): Integer = 
         Integer.new(bigIntegerAbs(this.value));
 
+    /// Returns `-1n`, `0n`, or `1n` according to this integer's sign.
     public signum(): Integer = 
         Integer.new(bigIntegerSignum(this.value));
 
+    /// Returns the quotient of this integer and `other`, truncated towards zero.
     public quot(other: Integer): Integer =
         Integer.new(bigIntegerDivide(this.value, other.value));
 
+    /// Returns the remainder of `quot`, with the sign of this integer.
     public rem(other: Integer): Integer =
         Integer.new(bigIntegerRemainder(this.value, other.value));
 
+    /// Returns the quotient of this integer and `other`, rounded towards negative infinity.
     public div(other: Integer): Integer =
         Integer.new(bigIntegerFloorDivide(this.value, other.value));
 
+    /// Returns the remainder of `div`, with the sign of `other`.
     public mod(other: Integer): Integer =
         Integer.new(bigIntegerFloorRemainder(this.value, other.value));
 
+    /// Returns this integer unchanged; `Integer` is already exact.
     public toInteger(): Integer = this;
 
+    /// Returns this integer as an exact `Rational` with denominator `1n`.
     public toRational(): Rational = Rational.fromInteger(this);
 
+    /// Returns this integer as an `Int` when it fits, and fails otherwise.
     public toIntExact(): Int = bigIntegerToIntExact(this.value);
 
+    /// Returns this integer as a `Long` when it fits, and fails otherwise.
     public toLongExact(): Long = bigIntegerToLongExact(this.value);
 
+    /// Returns this integer as a `Float`, rounding when it is too large to represent exactly.
     public toFloat(): Float = bigIntegerToFloat(this.value);
 
+    /// Returns a hash consistent with `eq`.
     public hash(): Int = bigIntegerHash(this.value);
 
+    /// Whether this integer and `other` have the same value.
     public eq(other: Integer): Boolean = bigIntegerEquals(this.value, other.value);
 
+    /// Compares this integer with `other`.
     public compareTo(other: Integer): Ordering {
         let res = bigIntegerCompare(this.value, other.value);
         if (res < 0) return Ordering.LT();
@@ -99,6 +121,7 @@ public class Integer {
         return Ordering.EQ();
     }
 
+    /// Returns the decimal representation of this integer.
     public toString(): String = bigIntegerToString(this.value);
 }
 

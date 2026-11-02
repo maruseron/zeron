@@ -1,9 +1,19 @@
 package zeron.collections;
 
+/// One step of an iterator.
+///
+/// - `Yield` carries the next element.
+/// - `Done` reports that no elements remain; it is returned on every later call as well.
 public type Step<T: nullable + mut> =
       Yield(value: T)
     | Done;
 
+/// A stateful forward cursor over a sequence.
+///
+/// `next` advances the cursor and returns the element it moved to, or `Done` once the sequence is
+/// exhausted. Iterators are single-use: a `for` loop or `Stream` consumes the iterator it was
+/// given, and re-traversal requires a new iterator from the source.
 public contract Iterator<T: nullable + mut> {
+    /// Advances the cursor and returns the next element or `Done`.
     mut next(): Step<T>;
 }

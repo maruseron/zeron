@@ -1,4 +1,4 @@
-Zeron Enhancement Proposals
+# Zeron Enhancement Proposals
 
 This file tracks ZEPs in numerical order, including their proposal status and independent release
 state. Release state is maintained here as the single source of truth. See [ZEP-0000](./ZEP-0000.md)
@@ -100,6 +100,6 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0087](./ZEP-0087.md) | Negative Flow Refinement for Closed Sum Types | Implemented | Unscheduled | — |
 | [ZEP-0088](./ZEP-0088.md) | Non-Null Assertion Operator | Implemented | Unscheduled | — |
 | [ZEP-0089](./ZEP-0089.md) | Explicit Unchecked Casts | Draft | Unscheduled | — |
-| [ZEP-0090](./ZEP-0090.md) | Property References | Draft | Unscheduled | — |
+| [ZEP-0090](./ZEP-0090.md) | Property References | Implemented | Unscheduled | — |
 | [ZEP-0091](./ZEP-0091.md) | Annotation Consumption | Draft | Unscheduled | — |
 | [ZEP-0092](./ZEP-0092.md) | Generated Serialization Operations | Draft | Unscheduled | — |

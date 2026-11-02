@@ -1,4 +1,7 @@
 package zeron.lang;
 
+/// The failure reported when a string operation encounters malformed UTF-16 text.
+///
+/// - `MalformedSurrogate` reports the offset of the first unpaired surrogate code unit.
 public type UnicodeError =
       MalformedSurrogate(utf16Offset: Int);

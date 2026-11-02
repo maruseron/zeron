@@ -1,12 +1,19 @@
 package zeron.lang;
 
+/// A mutable one-slot container.
+///
+/// A `Cell` holds a single value that can be replaced through `set` while the cell itself is
+/// shared. Reads return the current value.
 public class Cell<T: nullable + mut> {
     value: T;
 
+    /// Creates a cell holding `value`.
     public constructor new;
 
+    /// Returns the value currently stored in the cell.
     public get(): T = this.value;
 
+    /// Replaces the stored value with `value`, discarding the previous one.
     public mut set(value: T): Unit {
         this.value = value;
     }

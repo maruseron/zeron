@@ -53,6 +53,36 @@ Raised effects are checked through function types as well. Passing a callback do
 effects it may raise: the expected function type must allow those effects, or the callback must be
 handled before it is passed.
 
+## Polymorphic effect rows
+
+A generic callback can accept a pure function or one that raises effects by quantifying over an
+effect row. Use `effect...` for a row parameter; the existing `effect` bound continues to mean one
+nominal effect type:
+
+```zeron
+public fn map<T, R, E: effect...>(
+    list: List<T>,
+    transform: (T) -> R raises E
+): List<R> raises E = ...
+```
+
+The compiler infers `{}` when `transform` is pure, or the callback's raised effects when it is
+effectful. A row can also be supplied explicitly as a set, such as `{}` or `{MissingUser}`; a
+single effect type is accepted as a singleton row. In a `raises` list, a name with kind `effect...`
+expands to its row, while a name with kind `effect` contributes one effect.
+
+Rows can mix fixed effects with one row parameter, for example `raises MissingUser, E`. Calls
+propagate both parts. Handling a fixed effect removes that label from the known part, but does not
+remove it from the unknown row: a handler cannot assume what an unresolved row contains. Function
+compatibility uses effect-set inclusion, so a pure callback can satisfy an open row requirement and
+an implementation cannot raise effects beyond its declared row.
+
+Row parameters are compile-time only. They are preserved in compiled-library metadata, but add no
+runtime representation; raised values continue to use the existing `RaisedEffect` carrier. Higher-
+rank row-polymorphic function values are not supported: rows are quantified on declarations, not
+inside function types. See [ZEP-0086](../documents/zeps/ZEP-0086.md) for the full design and
+validation coverage.
+
 ## Handling effects
 
 Use `handle` around an expression to catch effects raised while that expression runs:
@@ -163,10 +193,11 @@ Ordinary Java exceptions are not caught by effect handlers and keep their usual 
 when an external-class method explicitly maps a declared checked exception to an effect at its call
 boundary.
 
-Effects are synchronous, nominal, and non-generic in the current implementation. There is no
-effect inheritance, wildcard handler, asynchronous effect propagation, handler composition, or
-automatic Java-exception translation. An unhandled effect escaping generated `main` propagates
-across the host boundary; the compiler does not currently add a launcher that formats it.
+Effect payload declarations remain synchronous, nominal, and non-generic. Generic effect rows are
+supported, but there is no effect inheritance, wildcard handler, asynchronous effect propagation,
+handler composition, or automatic Java-exception translation. An unhandled effect escaping
+generated `main` propagates across the host boundary; the compiler does not currently add a launcher
+that formats it.
 
 For declaration, checking, and runtime details, see the
 [typed raised effects design document](../documents/design_documents/design-document-13_typed-raised-effects.md).

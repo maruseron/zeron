@@ -49,7 +49,7 @@ final class WitnessPatternUnifier {
             result.put(parameter, new TypeParameterDescriptor(nextScope[0], parameter.name(),
                     List.of(), parameter.isHigherKinded(), parameter.variance(),
                     parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                    parameter.admitsMutableArguments()));
+                    parameter.isEffectRowKind(), parameter.admitsMutableArguments()));
             usedScopes.add(nextScope[0]);
             nextScope[0] = Math.incrementExact(nextScope[0]);
         }
@@ -208,6 +208,7 @@ final class WitnessPatternUnifier {
                     || leftParameter.variance() != rightParameter.variance()
                     || leftParameter.admitsNullableArguments() != rightParameter.admitsNullableArguments()
                     || leftParameter.isEffectKind() != rightParameter.isEffectKind()
+                    || leftParameter.isEffectRowKind() != rightParameter.isEffectRowKind()
                     || leftParameter.admitsMutableArguments()
                             != rightParameter.admitsMutableArguments()
                     || leftParameter.bounds().size() != rightParameter.bounds().size()) return List.of();

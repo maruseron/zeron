@@ -70,6 +70,17 @@ another type. A checked `as` cast fails at runtime if the value cannot be conver
 produces a value that may be `null` on failure. These operators have more specific rules that are
 introduced with the relevant features later in the guide.
 
+When a nullable value is expected to be present, postfix `!!` checks it and produces its non-null
+type. It throws `NullPointerException` with the message `Non-null assertion failed.` when the value
+is null. The operand is evaluated once, and the assertion does not change the type of its original
+binding:
+
+```zeron
+let name = findName()!!;
+```
+
+Use this only when failure on null is appropriate; otherwise prefer a null check or fallback.
+
 The `raise` expression is also available for typed raised effects; it transfers control rather
 than calculating an ordinary value. See [raised effects](22-raised-effects.md) for when to use it.
 

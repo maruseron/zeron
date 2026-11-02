@@ -1,0 +1,9 @@
+import zeron.compiler.CodeModel;
+
+fn logModel<T>(@CodeModel predicate: CodeModel<T -> Boolean>): Unit {
+
+}
+
+fn main() {
+    // logModel(i -> i % 2 == 0);
+}

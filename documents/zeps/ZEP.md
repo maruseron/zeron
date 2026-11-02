@@ -1,4 +1,4 @@
-# Zeron Enhancement Proposals
+Zeron Enhancement Proposals
 
 This file tracks ZEPs in numerical order, including their proposal status and independent release
 state. Release state is maintained here as the single source of truth. See [ZEP-0000](./ZEP-0000.md)
@@ -41,7 +41,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0028](./ZEP-0028.md) | Project-Aware Source Formatting | Implemented | Shipped | 0.4.0 |
 | [ZEP-0029](./ZEP-0029.md) | Query Engine Sample Project | Implemented | Shipped | 0.4.0 |
 | [ZEP-0030](./ZEP-0030.md) | Receiver-Scoped Extension Wildcard Imports | Superseded | Unscheduled | — |
-| [ZEP-0031](./ZEP-0031.md) | Exploration: Declaration Decorators | Draft | Unscheduled | — |
+| [ZEP-0031](./ZEP-0031.md) | Declarative Annotations and Declaration Metadata | Implemented | Unscheduled | — |
 | [ZEP-0032](./ZEP-0032.md) | Exploration: Runtime Reflection | Draft | Unscheduled | — |
 | [ZEP-0033](./ZEP-0033.md) | Soft `get` and `set` Accessor Keywords | Implemented | Shipped | 0.4.0 |
 | [ZEP-0034](./ZEP-0034.md) | Namespace-Scoped Wildcard Imports | Implemented | Shipped | 0.4.0 |
@@ -70,7 +70,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0057](./ZEP-0057.md) | First-Class Typed-Effect Handler Types | Implemented | Shipped | 0.5.0 |
 | [ZEP-0058](./ZEP-0058.md) | Clause-Based For-Expressions and Lazy Yield | Implemented | Shipped | 0.5.0 |
 | [ZEP-0059](./ZEP-0059.md) | Removing Contract Constructor Requirements | Implemented | Shipped | 0.5.0 |
-| [ZEP-0060](./ZEP-0060.md) | Treating Arrays as Iterable Values | Draft | Unscheduled | — |
+| [ZEP-0060](./ZEP-0060.md) | Treating Arrays as Iterable Values | Implemented | Unscheduled | — |
 | [ZEP-0061](./ZEP-0061.md) | Java and External Interop Language Support | Accepted | Candidate | 0.6.0 |
 | [ZEP-0062](./ZEP-0062.md) | Mutable-Type Admissibility for Generic Parameters | Implemented | Shipped | 0.5.0 |
 | [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Draft | Unscheduled | — |
@@ -83,13 +83,23 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Draft | Unscheduled | — |
 | [ZEP-0071](./ZEP-0071.md) | Numeric Hierarchy and Context-Directed Literals | Implemented | Candidate | 0.6.0 |
 | [ZEP-0072](./ZEP-0072.md) | Class-Scoped Static Functions as Companion Namespace Members | Draft | Unscheduled | — |
-| [ZEP-0073](./ZEP-0073.md) | Documentation Comments for Declarations | Accepted | Candidate | 0.6.0 |
+| [ZEP-0073](./ZEP-0073.md) | Documentation Comments for Declarations | Implemented | Candidate | 0.6.0 |
 | [ZEP-0074](./ZEP-0074.md) | Numeric Literal Suffixes for Newtypes | Draft | Unscheduled | — |
 | [ZEP-0075](./ZEP-0075.md) | General Contextual Numeric Literal Construction | Draft | Unscheduled | — |
-| [ZEP-0076](./ZEP-0076.md) | Delegating Witness Implementations | Implemented | Unscheduled | — |
-| [ZEP-0077](./ZEP-0077.md) | Delegating Higher-Kinded Implementations | Implemented | Unscheduled | — |
-| [ZEP-0078](./ZEP-0078.md) | Default Method Implementations in Higher-Kinded Contracts | Implemented | Unscheduled | — |
-| [ZEP-0079](./ZEP-0079.md) | Schema Declarations | Draft | Unscheduled | — |
-| [ZEP-0080](./ZEP-0080.md) | Typed Code Models for Selected Expressions | Draft | Unscheduled | — |
+| [ZEP-0076](./ZEP-0076.md) | Delegating Witness Implementations | Implemented | Unscheduled | 0.6.0 |
+| [ZEP-0077](./ZEP-0077.md) | Delegating Higher-Kinded Implementations | Implemented | Unscheduled | 0.6.0 |
+| [ZEP-0078](./ZEP-0078.md) | Default Method Implementations in Higher-Kinded Contracts | Implemented | Unscheduled | 0.6.0 |
+| [ZEP-0079](./ZEP-0079.md) | Model Declarations | Draft | Unscheduled | — |
+| [ZEP-0080](./ZEP-0080.md) | Typed Code Models for Selected Expressions | Implemented | Unscheduled | — |
 | [ZEP-0081](./ZEP-0081.md) | Type-Safe Embedded DSL Support | Draft | Unscheduled | — |
-| [ZEP-0082](./ZEP-0082.md) | Contextual Blocks and Receiver Lambdas | Draft | Unscheduled | — |
+| [ZEP-0082](./ZEP-0082.md) | Receiver Lambdas and Type-Safe Builders | Implemented | Unscheduled | — |
+| [ZEP-0083](./ZEP-0083.md) | Lambda and Function-Type Syntax Ergonomics | Implemented | Unscheduled | — |
+| [ZEP-0084](./ZEP-0084.md) | 64-Bit Hashes for Zeron Values | Draft | Unscheduled | — |
+| [ZEP-0085](./ZEP-0085.md) | Explicit Mutable Projections for Inferred Bindings | Draft | Unscheduled | — |
+| [ZEP-0086](./ZEP-0086.md) | Effect-Row Polymorphism | Implemented | Unscheduled | — |
+| [ZEP-0087](./ZEP-0087.md) | Negative Flow Refinement for Closed Sum Types | Implemented | Unscheduled | — |
+| [ZEP-0088](./ZEP-0088.md) | Non-Null Assertion Operator | Implemented | Unscheduled | — |
+| [ZEP-0089](./ZEP-0089.md) | Explicit Unchecked Casts | Draft | Unscheduled | — |
+| [ZEP-0090](./ZEP-0090.md) | Property References | Draft | Unscheduled | — |
+| [ZEP-0091](./ZEP-0091.md) | Annotation Consumption | Draft | Unscheduled | — |
+| [ZEP-0092](./ZEP-0092.md) | Generated Serialization Operations | Draft | Unscheduled | — |

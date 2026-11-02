@@ -32,6 +32,7 @@ public final class Scanner {
     private static final Map<String, TokenType> keywords = Map.ofEntries(
             entry("as",          AS),
             entry("and",         AND),
+            entry("annotation",  ANNOTATION),
             entry("break",       BREAK),
             entry("case",        CASE),
             entry("class",       CLASS),
@@ -131,6 +132,7 @@ public final class Scanner {
             case '&' -> addToken(match('=') ? AMPERSAND_EQUAL : AMPERSAND);
             case '^' -> addToken(match('=') ? CARET_EQUAL : CARET);
             case '~' -> addToken(TILDE);
+            case '@' -> addToken(AT);
 
             // multiple
             case '.' -> {
@@ -168,7 +170,11 @@ public final class Scanner {
                 }
             }
             case '*' -> addToken(match('=') ? STAR_EQUAL : STAR);
-            case '!' -> addToken(match('=') ? BANG_EQUAL : BANG);
+            case '!' -> {
+                if (match('=')) addToken(BANG_EQUAL);
+                else if (match('!')) addToken(BANG_BANG);
+                else addToken(BANG);
+            }
             case '?' -> {
                 if (match('.')) addToken(HUH_DOT);
                 else if (match('?')) addToken(match('=') ? HUH_HUH_EQUAL : HUH_HUH);

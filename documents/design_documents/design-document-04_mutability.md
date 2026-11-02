@@ -104,7 +104,7 @@ Class mutation follows these rules:
 These rules do not change binding reassignment: rebinding the local name still separately requires
 `let mut`.
 
-For arrays, distinguish changing the array binding from changing its contents. `let mut values: Array<Int>` allows assigning another array to `values`; mutating an element requires `&Array<Int>`. This avoids accidentally making every collection mutable just because its variable is reassignable.
+For arrays, distinguish changing the array binding from changing its contents. `let mut values: Array<Int>` allows assigning another array to `values`; mutating an element requires `&Array<Int>`. Inside a class method, writing through a mutable array or byte-array view reached through a field of `this` requires the method to be marked `mut`. This restriction does not apply to explicit mutable parameters or local references. This avoids accidentally making every collection mutable just because its variable is reassignable.
 
 ### Aliasing and Scope of the Guarantee
 

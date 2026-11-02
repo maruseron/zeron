@@ -66,7 +66,8 @@ final class CallResolver {
             final var functionName = MemberInteropResolver.resolveFunctionName(context, call.callee.lexeme(), call.callee);
             final var functionToken = functionName == null ? null : context.functionSymbolTokens.get(functionName);
             if (functionToken == null) {
-                if (context.frame.currentMethodOwner == null) {
+                if (context.frame.currentMethodOwner == null
+                        && context.frame.receiverScopes.isEmpty()) {
                     Zeron.resolutionError(ResolutionError.withHelp(DiagnosticCatalog.NAME_NOT_FOUND,
                             call.callee,
                             "Unknown function '" + call.callee.lexeme() + "' in the current scope.",
@@ -98,6 +99,10 @@ final class CallResolver {
             final var resultType = resolveGenericCall(call, descriptor);
             attachIntrinsicOperation(call);
             return resultType;
+        }
+        if (descriptor.isReceiverFunction()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.callee, "A receiver function must be invoked with receiver-call syntax."));
         }
 
         if (!call.explicitTypeArguments.isEmpty()) {
@@ -208,6 +213,7 @@ final class CallResolver {
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        final var rowInference = new RowInference();
         final var localLambdaBinding = localLambdaBinding(call);
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
             final var explicitType = call.explicitTypeArguments.get(i);
@@ -222,7 +228,10 @@ final class CallResolver {
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
             if (!hasExplicitTypeArguments) {
                 TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
-                        resolvedArguments[i], substitutions, call.callee);
+                        context.typeCompatibility.inferenceView(
+                                parameterType(genericType.parameters(), i, fixedArity, variadic),
+                                resolvedArguments[i]),
+                        substitutions, call.callee, rowInference);
             }
         }
 
@@ -239,16 +248,24 @@ final class CallResolver {
             resolvedArguments[i] = MemberInteropResolver.resolveArgument(context, argument, expected);
             if (!hasExplicitTypeArguments) {
                 TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
-                        resolvedArguments[i], substitutions, call.callee);
+                        context.typeCompatibility.inferenceView(
+                                parameterType(genericType.parameters(), i, fixedArity, variadic),
+                                resolvedArguments[i]),
+                        substitutions, call.callee, rowInference);
             }
         }
 
+        rowInference.solve(substitutions, call.callee);
         for (final var parameter : typeParameters) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
-                        call.callee,
-                        "Cannot infer type parameter '" + parameter.name()
-                                + "'; provide an explicit type argument."));
+                if (parameter.isEffectRowKind()) {
+                    RowInference.defaultEmpty(parameter, substitutions);
+                } else {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
+                            call.callee,
+                            "Cannot infer type parameter '" + parameter.name()
+                                    + "'; provide an explicit type argument."));
+                }
             }
             substitutions.put(parameter, TypeResolver.validateTypeArgument(
                     context, parameter, substitutions.get(parameter), call.callee));
@@ -335,7 +352,8 @@ final class CallResolver {
                         .toArray(TypeDescriptor[]::new));
         final var declaration = (Stmt.Var) context.symbols.getSymbol(callee).declaration();
         final var lambda = (Expr.Lambda) declaration.initializer();
-        final var candidate = new Expr.Lambda(lambda.arrow, lambda.params, lambda.body, candidateType);
+        final var candidate = new Expr.Lambda(lambda.arrow, lambda.params, lambda.parameterTypes(),
+                lambda.body, candidateType, lambda.implicitParameter());
         final var resolvedType = LambdaResolver.resolveLambda(context, candidate, candidateType);
         lambda.setType(resolvedType);
         context.symbols.setResolvedType(declaration.name(), resolvedType);

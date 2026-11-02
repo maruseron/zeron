@@ -185,12 +185,17 @@ public record ResolutionResult(
         final var requiredReturn = TypeSubstitution.substitute(required.returnType(), methodSubstitutions);
         final var requiredEffects = required.raisedEffects().stream()
                 .map(effect -> TypeSubstitution.substitute(effect, methodSubstitutions)).toList();
-        return requiredEffects.containsAll(implementation.raisedEffects())
+        return EffectRows.includedIn(implementation.raisedEffects(), requiredEffects)
                 && new TypeCompatibility(classes, contracts).canAssign(requiredReturn, implementation.returnType());
     }
 
     public boolean isContractProjection(final TypeDescriptor expectedType,
                                        final TypeDescriptor resolvedType) {
         return new TypeCompatibility(classes, contracts).isContractProjection(expectedType, resolvedType);
+    }
+
+    public boolean isArrayIterableProjection(final TypeDescriptor expectedType,
+                                             final TypeDescriptor resolvedType) {
+        return TypeCompatibility.isArrayIterableProjection(expectedType, resolvedType);
     }
 }

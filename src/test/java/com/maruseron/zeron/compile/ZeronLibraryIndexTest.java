@@ -33,6 +33,78 @@ import static org.junit.Assert.assertTrue;
 
 public final class ZeronLibraryIndexTest {
     @Test
+    public void preservesAnnotationDefinitionsAndApplicationsAcrossLibraryIndexes() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "annotationlibrary" + suffix;
+        final var clientPackage = "annotationclient" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-annotation-library-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-annotation-client-");
+        final var library = parse("Library.zn", """
+                package %s;
+                public annotation Label(value: String, attempts: Int = 2)
+                    on CLASS, FUNCTION, METHOD, PARAMETER;
+                @Label("library", attempts = 3)
+                public fn api(): Unit {}
+                @Label("entity")
+                public class Entity {
+                    @Label("operation")
+                    public run(@Label("input") value: String): Unit {}
+                }
+                """.formatted(libraryPackage));
+        final var client = parse("Main.zn", """
+                package %s;
+                import %s.Label;
+                @Label("client")
+                public fn api(): Unit {}
+                """.formatted(clientPackage, libraryPackage));
+        try {
+            deleteTree(Path.of("dist"));
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage,
+                    List.of(), true, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+            final var annotationDefinition = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.AnnotationDeclarationExport.class::isInstance)
+                    .map(ZeronLibraryIndex.AnnotationDeclarationExport.class::cast)
+                    .findFirst().orElseThrow();
+            assertEquals(libraryPackage + ".Label", annotationDefinition.qualifiedName());
+            assertEquals(2, annotationDefinition.parameters().size());
+            final var libraryApplication = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.AnnotationApplicationExport.class::isInstance)
+                    .map(ZeronLibraryIndex.AnnotationApplicationExport.class::cast)
+                    .filter(application -> application.targetName().endsWith(".api"))
+                    .findFirst().orElseThrow();
+            assertEquals(libraryPackage + ".Label", libraryApplication.annotationQualifiedName());
+            assertEquals("library", ((com.maruseron.zeron.domain.AnnotationConstant.StringValue)
+                    libraryApplication.arguments().getFirst().value()).value());
+
+            final var indexedUnits = index.toCompilationUnits("library");
+            assertTrue(indexedUnits.stream().anyMatch(unit -> unit.declarations().stream()
+                    .anyMatch(Stmt.AnnotationDeclaration.class::isInstance)));
+            assertTrue(indexedUnits.stream().flatMap(unit -> unit.annotationSites().stream())
+                    .anyMatch(site -> site.applications().stream().anyMatch(application ->
+                            libraryPackage.concat(".Label").equals(application.resolvedName()))));
+            assertTrue(indexedUnits.stream().flatMap(unit -> unit.annotationSites().stream())
+                    .anyMatch(site -> site.target() == Stmt.AnnotationTarget.PARAMETER
+                            && site.targetName().endsWith(".Entity.run")));
+
+            deleteTree(Path.of("dist"));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), clientPackage + ".Main", clientPackage,
+                    List.of(index), true, List.of(), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(clientOutput);
+            deleteTree(libraryOutput);
+        }
+    }
+
+    @Test
     public void preservesPublicDocumentationInLibraryIndexAndOmitsPrivateDocumentation() throws Exception {
         final var packageName = "documentation" + UUID.randomUUID().toString().replace("-", "");
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-doc-library-");

@@ -72,7 +72,8 @@ public final class HktDefaultSupport {
             } else {
                 result.put(parameter, new TypeParameterDescriptor(parameter.scopeId(), parameter.name(),
                         bounds, true, parameter.variance(), parameter.admitsNullableArguments(),
-                        parameter.isEffectKind(), parameter.admitsMutableArguments()));
+                        parameter.isEffectKind(), parameter.isEffectRowKind(),
+                        parameter.admitsMutableArguments()));
             }
         }
         return result;

@@ -25,10 +25,10 @@ public extension<T: mut> List<List<T>> {
 }
 
 witness<T: mut + Display> Display for List<T> {
-    fn toString(): String = "[" + match (this) {
-        case Cons(head, tail) -> head.toString() + ", " + tail.toString();
+    fn toString(): String = match (this) {
+        case Cons(head, tail) -> head.toString() + " " + tail.toString();
         case Nil() -> "";
-    } + "]";
+    };
 }
 
 witness Monad<List<_>> for List<_> {

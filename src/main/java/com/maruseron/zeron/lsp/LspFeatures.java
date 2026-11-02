@@ -4,6 +4,7 @@ import com.maruseron.zeron.ProjectAnalysisWorkspace;
 import com.maruseron.zeron.analize.ResolutionResult;
 import com.maruseron.zeron.api.PublicMemberCatalog;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.ImportDeclaration;
 import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
@@ -61,6 +62,13 @@ final class LspFeatures {
                         && token.type() != TokenType.EOF)
                 .toList();
         final var symbols = new SymbolIndex(snapshot);
+        if (!beforeCursor.isEmpty() && beforeCursor.getLast().type() == TokenType.AT) {
+            final var annotations = symbols.visibleAnnotations(path).stream()
+                    .filter(symbol -> symbol.name().startsWith(prefix))
+                    .map(LspFeatures::completionItem)
+                    .toList();
+            return new CompletionList(false, annotations);
+        }
         final var importItems = extensionImportMembers(snapshot, path, beforeCursor, prefix, symbols);
         if (importItems != null) return new CompletionList(false, importItems);
         final var items = receiverMembers(snapshot, path, beforeCursor, prefix, symbols);
@@ -210,10 +218,12 @@ final class LspFeatures {
         final var receiver = beforeCursor.get(beforeCursor.size() - 2);
         final var resolution = snapshot.resolution().orElse(null);
         final var catalog = snapshot.memberCatalog().orElse(null);
-        if (resolution == null || catalog == null) {
-            return List.of();
+        final var type = resolution == null ? null : receiverType(beforeCursor, resolution);
+        if (type == null && receiver.type() == TokenType.IDENTIFIER) {
+            final var sourceType = symbols.sourceTypeOfValue(path, beforeCursor, receiver);
+            if (sourceType != null) return sourceTypeMembers(snapshot, path, sourceType, symbols, prefix);
         }
-        final var type = receiverType(beforeCursor, resolution);
+        if (resolution == null || catalog == null) return List.of();
         if (type == null) {
             final var typeToken = typeReceiverToken(beforeCursor);
             final var sourceType = typeToken == null ? null : symbols.sourceType(path, typeToken.lexeme());
@@ -581,6 +591,10 @@ final class LspFeatures {
             case PublicMemberCatalog.HandlerType handler -> formatType(handler.returnType()) + " ~> "
                     + formatTypeSet(handler.handledEffects()) + " raises "
                     + formatTypeSet(handler.raisedEffects());
+            case PublicMemberCatalog.RowType row -> java.util.stream.Stream.concat(
+                            row.effects().stream(), row.variables().stream())
+                    .map(LspFeatures::formatType).sorted()
+                    .collect(java.util.stream.Collectors.joining(", ", "{", "}"));
         };
     }
 
@@ -633,7 +647,9 @@ final class LspFeatures {
         final var witnessMethod = target != null && target.lexeme().startsWith("$zeron$witness$");
         final var isDeclaration = type != null && resolution.referenceTarget(token) == null;
         final var typeNamePosition = isTypeNamePosition(tokens, token);
-        var symbol = !isDeclaration && typeNamePosition
+        var symbol = isAnnotationName(tokens, token)
+                ? symbols.resolveAnnotation(path, token)
+                : !isDeclaration && typeNamePosition
                 ? symbols.resolveType(path, token)
                 : isDeclaration
                 ? symbols.byToken(token)
@@ -678,19 +694,46 @@ final class LspFeatures {
             details.addAll(typeEvidenceDetails(snapshot, path, symbol));
         }
         if (type != null && callSiteType == null) {
-            final var formatted = TypeFormatter.format(type);
+            final var formatted = formatHoverType(type, resolution);
             if (details.stream().noneMatch(detail -> detail.contains(formatted))) {
                 details.add(isDeclaration
                         ? "value " + token.lexeme() + ": " + formatted
                         : "type: " + formatted);
             }
         }
+        details.replaceAll(detail -> formatHoverText(
+                formatWitnessMethodName(detail, target, token), resolution));
         final var contents = new MarkupContent(MarkupKind.MARKDOWN,
                 "```zeron\n" + String.join("\n", details) + "\n```"
                         + documentation(snapshot, symbol));
         final var hover = new Hover(contents);
         hover.setRange(DocumentCoordinates.rangeOf(text, token));
         return hover;
+    }
+
+    private static String formatHoverType(final TypeDescriptor type,
+                                          final ResolutionResult resolution) {
+        return formatHoverText(TypeFormatter.format(type), resolution);
+    }
+
+    private static String formatWitnessMethodName(final String text,
+                                                 final Token target,
+                                                 final Token reference) {
+        if (target == null || !target.lexeme().startsWith("$zeron$witness$")) return text;
+        return text.replace(target.lexeme(), reference.lexeme());
+    }
+
+    private static String formatHoverText(final String text,
+                                         final ResolutionResult resolution) {
+        if (resolution == null) return text;
+        var formatted = text;
+        for (final var sum : resolution.sums().values()) {
+            for (final var sumCase : sum.cases()) {
+                formatted = formatted.replace(sum.generatedCaseName(sumCase),
+                        sum.name().lexeme() + "." + sumCase.name().lexeme());
+            }
+        }
+        return formatted;
     }
 
     private static String documentation(final ProjectAnalysisWorkspace.Snapshot snapshot,
@@ -1002,6 +1045,41 @@ final class LspFeatures {
                 .orElse(null);
     }
 
+    private static boolean isAnnotationName(final List<Token> tokens, final Token target) {
+        for (var index = 0; index < tokens.size(); index++) {
+            if (tokens.get(index) != target) continue;
+            var cursor = index;
+            while (true) {
+                final var previous = previousSignificantTokenIndex(tokens, cursor);
+                if (previous < 0) return false;
+                final var type = tokens.get(previous).type();
+                if (type == TokenType.AT) return true;
+                if (type != TokenType.DOT) return false;
+                cursor = previous;
+                final var qualifier = previousSignificantTokenIndex(tokens, cursor);
+                if (qualifier < 0 || tokens.get(qualifier).type() != TokenType.IDENTIFIER) return false;
+                cursor = qualifier;
+            }
+        }
+        return false;
+    }
+
+    private static int previousSignificantTokenIndex(final List<Token> tokens, final int index) {
+        for (var previous = index - 1; previous >= 0; previous--) {
+            if (!tokens.get(previous).type().isComment()
+                    && tokens.get(previous).type() != TokenType.NEWLINE) return previous;
+        }
+        return -1;
+    }
+
+    private static int nextSignificantTokenIndex(final List<Token> tokens, final int index) {
+        for (var next = index + 1; next < tokens.size(); next++) {
+            if (!tokens.get(next).type().isComment() && tokens.get(next).type() != TokenType.NEWLINE
+                    && tokens.get(next).type() != TokenType.EOF) return next;
+        }
+        return -1;
+    }
+
     private static TypeDescriptor unwrap(final TypeDescriptor type) {
         return switch (type) {
             case ReferenceDescriptor reference -> unwrap(reference.baseType());
@@ -1068,6 +1146,7 @@ final class LspFeatures {
     private static final class SymbolIndex {
         private final Map<String, List<Symbol>> byName = new LinkedHashMap<>();
         private final Map<String, List<Symbol>> byQualifiedName = new LinkedHashMap<>();
+        private final Map<String, Symbol> annotationsByQualifiedName = new LinkedHashMap<>();
         private final Map<Token, Symbol> byToken = new IdentityHashMap<>();
         private final Map<Token, Token> witnessRequirementTokens = new IdentityHashMap<>();
         private final Map<Path, CompilationUnit> unitsByPath = new LinkedHashMap<>();
@@ -1103,13 +1182,24 @@ final class LspFeatures {
                 packagesByPath.put(path, unit.packageName());
                 indexUnit(unit, path);
             }
+            addCodeModelAnnotation();
+            indexAnnotationReferences();
             indexWitnessReferences();
             snapshot.resolution().ifPresent(this::indexResolvedFunctions);
             snapshot.memberCatalog().ifPresent(catalog -> catalog.typeNames().forEach(name -> {
                 final var split = splitQualifiedName(name);
                 add(new Symbol(split[1], name, split[0], null,
-                        "type " + split[1], CompletionItemKind.Class, null, null, true));
+                        codeModelTypeDetail(split[0], split[1]), CompletionItemKind.Class, null, null, true));
             }));
+            addCodeModelTypes();
+        }
+
+        private void addCodeModelAnnotation() {
+            final var qualifiedName = "zeron.compiler.CodeModel";
+            annotationsByQualifiedName.putIfAbsent(qualifiedName,
+                    new Symbol("CodeModel", qualifiedName, "zeron.compiler", null,
+                            "annotation @CodeModel on PARAMETER",
+                            CompletionItemKind.Interface, null, null, true));
         }
 
         private void indexResolvedFunctions(final ResolutionResult resolution) {
@@ -1167,7 +1257,19 @@ final class LspFeatures {
             for (final var member : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = member.declaration();
                 final var namespace = member.namespaceName();
-                if (declaration instanceof Stmt.ClassDecl value) {
+                if (declaration instanceof Stmt.AnnotationDeclaration value) {
+                    final var qualified = namespace == null
+                            ? qualify(unit.packageName(), value.name().lexeme())
+                            : NamespaceMembers.qualifiedName(unit.packageName(), namespace,
+                                    value.name().lexeme());
+                    final var targets = value.targets().stream().map(Enum::name)
+                            .collect(java.util.stream.Collectors.joining(", "));
+                    final var symbol = new Symbol(value.name().lexeme(), qualified, unit.packageName(),
+                            namespace, "annotation @" + value.name().lexeme() + " on " + targets,
+                            CompletionItemKind.Interface, value.name(), path, value.isPublic());
+                    annotationsByQualifiedName.putIfAbsent(qualified, symbol);
+                    byToken.put(value.name(), symbol);
+                } else if (declaration instanceof Stmt.ClassDecl value) {
                     if (value.isEffect()) {
                         addType(value.name(), unit.packageName(), value.isPublic(), path,
                                 "effect", formatTypeParameters(value.typeParameters()));
@@ -1332,6 +1434,36 @@ final class LspFeatures {
             }
         }
 
+        private void indexAnnotationReferences() {
+            for (final var unit : snapshot.units()) {
+                for (final var site : unit.annotationSites()) {
+                    for (final var application : site.applications()) {
+                        final var symbol = annotationsByQualifiedName.get(application.resolvedName());
+                        if (symbol != null) byToken.put(application.name(), symbol);
+                    }
+                }
+            }
+        }
+
+        private void addCodeModelTypes() {
+            List.of("CodeCapture", "CodeModel", "CodeNode", "CodeType").forEach(name -> {
+                final var qualifiedName = "zeron.compiler." + name;
+                if (byQualifiedName.containsKey(qualifiedName)) return;
+                add(new Symbol(name, qualifiedName, "zeron.compiler", null,
+                        codeModelTypeDetail("zeron.compiler", name),
+                        CompletionItemKind.Class, null, null, true));
+            });
+        }
+
+        private static String codeModelTypeDetail(final String packageName, final String name) {
+            if (!packageName.equals("zeron.compiler")) return "type " + name;
+            return switch (name) {
+                case "CodeCapture", "CodeNode", "CodeType" -> "class " + name;
+                case "CodeModel" -> "class CodeModel<F>";
+                default -> "type " + name;
+            };
+        }
+
         private void indexWitnessMethods(final Stmt.Witness witness, final TypeDescriptor targetType,
                                          final Map<Token, String> witnessMethods) {
             final var detail = "extension on " + TypeFormatter.format(targetType)
@@ -1398,6 +1530,7 @@ final class LspFeatures {
             final var constraints = new ArrayList<String>();
             if (parameter.admitsNullableArguments()) constraints.add("nullable");
             if (parameter.isEffectKind()) constraints.add("effect");
+        if (parameter.isEffectRowKind()) constraints.add("effect...");
             if (parameter.admitsMutableArguments()) constraints.add("mut");
             parameter.bounds().stream().map(TypeFormatter::format)
                     .map(LspFeatures::shortTypeNames).forEach(constraints::add);
@@ -1508,6 +1641,24 @@ final class LspFeatures {
                     .findFirst().orElse(null);
         }
 
+        Stmt sourceTypeOfValue(final Path path, final List<Token> beforeCursor,
+                               final Token valueReference) {
+            final var referenceIndex = beforeCursor.lastIndexOf(valueReference);
+            if (referenceIndex < 0) return null;
+            for (var index = referenceIndex - 1; index >= 0; index--) {
+                final var candidate = beforeCursor.get(index);
+                if (candidate.type() != TokenType.IDENTIFIER
+                        || !candidate.lexeme().equals(valueReference.lexeme())) continue;
+                final var colon = nextSignificantTokenIndex(beforeCursor, index);
+                if (colon < 0 || beforeCursor.get(colon).type() != TokenType.COLON) continue;
+                final var typeIndex = nextSignificantTokenIndex(beforeCursor, colon);
+                if (typeIndex < 0 || beforeCursor.get(typeIndex).type() != TokenType.IDENTIFIER) continue;
+                final var declaration = sourceType(path, beforeCursor.get(typeIndex).lexeme());
+                if (declaration != null) return declaration;
+            }
+            return null;
+        }
+
         private static boolean isTypeDeclaration(final Stmt declaration) {
             return declaration instanceof Stmt.ClassDecl
                     || declaration instanceof Stmt.ExternalClass
@@ -1566,6 +1717,15 @@ final class LspFeatures {
                 }
             }
             final var candidates = visibleSymbols(path).stream()
+                    .filter(symbol -> symbol.name().equals(token.lexeme()))
+                    .toList();
+            return candidates.size() == 1 ? candidates.getFirst() : null;
+        }
+
+        Symbol resolveAnnotation(final Path path, final Token token) {
+            final var direct = byToken(token);
+            if (direct != null && direct.detail().startsWith("annotation @")) return direct;
+            final var candidates = visibleAnnotations(path).stream()
                     .filter(symbol -> symbol.name().equals(token.lexeme()))
                     .toList();
             return candidates.size() == 1 ? candidates.getFirst() : null;
@@ -1691,6 +1851,24 @@ final class LspFeatures {
                                                     snapshot.units(), resolution) == null
                                                     && symbol.packageName().equals(entry.qualifiedName())
                                     : entry.qualifiedName().equals(symbol.qualifiedName())))
+                    .toList();
+        }
+
+        List<Symbol> visibleAnnotations(final Path path) {
+            final var unit = unitsByPath.get(path);
+            if (unit == null) return List.of();
+            final var explicitImports = unit.imports().stream()
+                    .filter(imported -> !imported.onDemand())
+                    .map(imported -> imported.qualifiedName())
+                    .collect(java.util.stream.Collectors.toSet());
+            final var onDemand = unit.imports().stream()
+                    .filter(ImportDeclaration::onDemand)
+                    .map(ImportDeclaration::qualifiedName)
+                    .collect(java.util.stream.Collectors.toSet());
+            return annotationsByQualifiedName.values().stream()
+                    .filter(symbol -> symbol.packageName().equals(unit.packageName())
+                            || symbol.isPublic() && explicitImports.contains(symbol.qualifiedName())
+                            || symbol.isPublic() && onDemand.contains(symbol.packageName()))
                     .toList();
         }
 

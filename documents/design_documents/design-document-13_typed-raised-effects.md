@@ -14,9 +14,12 @@ handler types. Effects and handler shapes are checked by the resolver and repres
 compiled-library API metadata. Handler cases use the existing named-pattern syntax, can bind the
 whole payload with `as`, and can include Boolean guards.
 
-The implementation does not add effect inheritance, effect generics, effect rows, catch-all or
-wildcard cases, or asynchronous effects. Java checked exceptions can be mapped only through explicit
-interop declarations and configured bindings described below; there is no automatic translation.
+The implementation supports effect-row polymorphism through declaration-level `effect...` type
+parameters. Effect payload declarations remain non-generic. It does not add effect inheritance,
+catch-all or wildcard cases, or asynchronous effects. Java checked exceptions can be mapped only
+through explicit interop declarations and configured bindings described below; there is no
+automatic translation.
+
 Declared effects may escape from the entry-point `main`; top-level initializers remain effect-free.
 Handlers remain expression-scoped; no statement-level `try`/`catch` form is introduced.
 
@@ -107,7 +110,7 @@ fn example(): String = applyPolicy(handler {
 
 Named and anonymous handlers with the same result type and effect sets have the same structural
 type. Assignment and parameter compatibility require an exact match of all three components;
-handler composition, effect-row polymorphism, and effect subtyping are not supported.
+handler composition and effect subtyping are not supported.
 
 ## Static semantics
 
@@ -122,6 +125,26 @@ Effect types in `raises` clauses and handler cases must resolve to a declared, n
 Ordinary classes, contracts, generic types, nullable types, and mutable-reference types are not
 effect types. Effect identity is exact nominal identity; there is no subclass matching or
 subtyping.
+
+### Effect-row polymorphism
+
+A generic parameter bounded by `effect...` denotes a finite effect row, which may be empty; the
+existing `effect` bound still denotes exactly one nominal effect. A single `effect` value can be
+used as a singleton row, but a row cannot instantiate an `effect` parameter. Explicit row arguments
+use set syntax such as `{}` or `{MissingUser}`. In `raises` clauses, an `effect...` parameter
+expands to its members, and at most one row variable may occur in a clause.
+
+Row inference collects inclusion constraints and chooses the union of lower bounds as the minimal
+solution. An unconstrained row at a generic call site defaults to `{}`; a row fixed by an enclosing
+signature instead checks every lower bound against that row. Contravariant callback positions
+contribute upper bounds, which are checked against the solution. A same-row recursive call preserves
+the enclosing row rather than replacing it with `{}`. Fixed labels alongside a row variable are
+subtracted before computing its lower bound.
+
+Function compatibility requires the implementation's effects to fit the expected row. An open
+expected row can cover additional fixed labels; row variables must otherwise remain preserved.
+Handling a fixed effect removes only that fixed label from the known part of an escaping row and
+leaves the unknown row unchanged. Row variables cannot be named by handler cases.
 
 ### Effect propagation and callable checking
 
@@ -210,16 +233,18 @@ catch-all case, so it cannot silently erase an unlisted effect.
 
 Raised effect lists are part of `FunctionDescriptor` signatures, including function type annotations
 and exported signatures for functions, methods, extensions, and named constructors. A function type
-accepts a value whose effect set is a subset of the expected effect set. Handler types are structural
-and require exact result, handled-effect, and handler-raised-effect sets. JVM callable interfaces
-encode only the handler result and dispatch argument; effect capabilities remain in source-level
-descriptors and library metadata.
+accepts a value whose effect set is a subset of the expected effect row, including an empty effect
+set where the expected row is open. Handler types are structural and require exact result,
+handled-effect, and handler-raised-effect sets. JVM callable interfaces encode only the handler
+result and dispatch argument; effect capabilities remain in source-level descriptors and library
+metadata.
 
-The compiled-library index serializes effect markers, callable raised sets, handler shapes on
-exported values, and external-facade exception mappings needed for separately compiled clients. The
-standard-library API version remains independent of the binary schema version. Consumers of schemas
-that predate the relevant metadata must rebuild or use a compatible compiler; such an index cannot
-communicate effect markers, raised signatures, handler capabilities, or exception mappings safely.
+The compiled-library index serializes effect and row markers, callable raised sets, handler shapes
+on exported values, and external-facade exception mappings needed for separately compiled clients.
+The standard-library API version remains independent of the binary schema version. Consumers of
+schemas that predate the relevant metadata must rebuild or use a compatible compiler; such an index
+cannot communicate effect markers, row parameters, raised signatures, handler capabilities, or
+exception mappings safely.
 
 ## Runtime model
 
@@ -239,6 +264,10 @@ report an uncaught Zeron effect by catching only `RaisedEffect`, without transla
 or implicitly stringifying the payload. Effect payload classes and carriers are emitted as normal
 class files and public effect metadata is available to imported compiled libraries.
 
+Effect-row parameters are erased at runtime and add no runtime witness; raised values continue to
+use `RaisedEffect`. The API index preserves row-parameter kinds and row expressions for separately
+compiled consumers. Higher-rank row quantification is not supported.
+
 ## Limitations and roadmap
 
 Other follow-up areas:
@@ -254,8 +283,8 @@ Other follow-up areas:
    and depend on a sound runtime identity model.
 5. Extend explicit checked-exception mappings only as concrete interop needs arise; they remain an
    opt-in boundary and do not alter ordinary Java exception propagation.
-6. Explore effect-set polymorphism only after concrete callable and function-type compatibility has
-   stabilized.
+6. [Effect-row polymorphism](../zeps/ZEP-0086.md) is implemented with declaration-level row
+   quantification; higher-rank row-polymorphic function values remain unsupported.
 7. Decide whether observable I/O belongs in the raised-effect system. `raises` currently describes
    typed control-flow effects, not purity or the absence of observable side effects, so `println`
    can have no declared raised effects without being pure. If operations such as `println` were to
@@ -273,6 +302,8 @@ Other follow-up areas:
    investigate a compiler-managed strategy such as CPS transformation, starting with one-shot
    continuations, before committing to this direction.
 
-`Result<T, E>` remains ordinary and is not a migration target for this feature. The compiler does
+Effect-set polymorphism is implemented in [ZEP-0086](../zeps/ZEP-0086.md); its design and
+validation coverage are recorded there. `Result<T, E>` remains ordinary and is not a migration
+target for this feature. The compiler does
 not automatically catch Java exceptions, convert a `Result` into a raised effect, or convert a
 raised effect into a `Result`.

@@ -16,6 +16,7 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
     private final Variance variance;
     private final boolean nullableArguments;
     private final boolean effectKind;
+    private final boolean effectRowKind;
     private final boolean mutableArguments;
 
     public TypeParameterDescriptor(final int scopeId, final String name) {
@@ -67,17 +68,33 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
                                    final boolean nullableArguments,
                                    final boolean effectKind,
                                    final boolean mutableArguments) {
+        this(scopeId, name, bounds, higherKinded, variance, nullableArguments, effectKind, false,
+                mutableArguments);
+    }
+
+    public TypeParameterDescriptor(final int scopeId,
+                                   final String name,
+                                   final List<TypeDescriptor> bounds,
+                                   final boolean higherKinded,
+                                   final Variance variance,
+                                   final boolean nullableArguments,
+                                   final boolean effectKind,
+                                   final boolean effectRowKind,
+                                   final boolean mutableArguments) {
         this.scopeId = scopeId;
         this.name = Objects.requireNonNull(name);
         this.bounds = List.copyOf(bounds);
         this.higherKinded = higherKinded;
         this.variance = Objects.requireNonNull(variance);
         if (nullableArguments && effectKind || effectKind && mutableArguments
-                || higherKinded && (nullableArguments || effectKind || mutableArguments)) {
+                || effectKind && effectRowKind
+                || effectRowKind && (nullableArguments || mutableArguments)
+                || higherKinded && (nullableArguments || effectKind || effectRowKind || mutableArguments)) {
             throw new IllegalArgumentException("Invalid type-parameter admissibility markers.");
         }
         this.nullableArguments = nullableArguments;
         this.effectKind = effectKind;
+        this.effectRowKind = effectRowKind;
         this.mutableArguments = mutableArguments;
     }
 
@@ -109,6 +126,10 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
         return effectKind;
     }
 
+    public boolean isEffectRowKind() {
+        return effectRowKind;
+    }
+
     public boolean admitsMutableArguments() {
         return mutableArguments;
     }
@@ -130,12 +151,13 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
                 && scopeId == that.scopeId
                 && name.equals(that.name)
                 && higherKinded == that.higherKinded
+                && effectRowKind == that.effectRowKind
                 && variance == that.variance;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(scopeId, name, higherKinded, variance);
+        return Objects.hash(scopeId, name, higherKinded, effectRowKind, variance);
     }
 
     @Override

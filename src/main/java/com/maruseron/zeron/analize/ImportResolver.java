@@ -32,6 +32,7 @@ final class ImportResolver {
     private final Map<String, Stmt.FunctionDeclaration> functions;
     private final Map<String, List<Stmt.ExtensionMethod>> extensionMethods;
     private final Map<String, Stmt.Var> topLevelValues;
+    private final Map<String, Stmt.AnnotationDeclaration> annotationDeclarations;
     private final Map<String, String> declarationPackages;
     private final Map<String, String> namespaceMemberPackages;
     private final Set<String> namespaces;
@@ -44,6 +45,7 @@ final class ImportResolver {
     final Map<String, Stmt.FunctionDeclaration> functions,
     final Map<String, List<Stmt.ExtensionMethod>> extensionMethods,
     final Map<String, Stmt.Var> topLevelValues,
+                   final Map<String, Stmt.AnnotationDeclaration> annotationDeclarations,
                    final Map<String, String> declarationPackages,
                    final Map<String, String> namespaceMemberPackages,
                    final Set<String> namespaces,
@@ -55,6 +57,7 @@ final class ImportResolver {
         this.functions = functions;
         this.extensionMethods = extensionMethods;
         this.topLevelValues = topLevelValues;
+        this.annotationDeclarations = annotationDeclarations;
         this.declarationPackages = declarationPackages;
         this.namespaceMemberPackages = namespaceMemberPackages;
         this.namespaces = namespaces;
@@ -181,10 +184,11 @@ final class ImportResolver {
             final var functionDeclaration = functions.get(target);
             final var extensionFamily = extensionMethods.getOrDefault(target, List.of());
             final var valueDeclaration = topLevelValues.get(target);
+            final var annotationDeclaration = annotationDeclarations.get(target);
             final var javaClass = javaClassPath.find(target);
             if (classDeclaration == null && contractDeclaration == null
                     && functionDeclaration == null && extensionFamily.isEmpty()
-                    && valueDeclaration == null && javaClass == null) {
+                    && valueDeclaration == null && annotationDeclaration == null && javaClass == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
                         importDeclaration.location(),
                         "Unknown import target '" + target + "'."));
@@ -199,6 +203,7 @@ final class ImportResolver {
                     : contractDeclaration != null ? contractDeclaration.isPublic()
                     : functionDeclaration != null ? functionDeclaration.isPublic()
                     : !extensionFamily.isEmpty() ? extensionFamily.stream().anyMatch(Stmt.ExtensionMethod::isPublic)
+                    : annotationDeclaration != null ? annotationDeclaration.isPublic()
                     : valueDeclaration != null ? valueDeclaration.isPublic()
                     : true;
             if (!targetPackage.equals(unit.packageName()) && !isPublic) {
@@ -206,6 +211,7 @@ final class ImportResolver {
                         importDeclaration.location(),
                         (valueDeclaration == null ? "Type '" : "Value '") + target + "' is not public."));
             }
+            if (annotationDeclaration != null) continue;
             if (classDeclaration != null || contractDeclaration != null || javaClass != null) {
                 if (BuiltinTypes.NAMES.contains(importDeclaration.localName())) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
@@ -338,7 +344,9 @@ final class ImportResolver {
                     final var extensions = extensionMethods.getOrDefault(memberName, List.of());
                     if (!extensions.isEmpty()) return extensions.stream().anyMatch(Stmt.ExtensionMethod::isPublic);
                     final var value = topLevelValues.get(memberName);
-                    return value != null && value.isPublic();
+                    if (value != null) return value.isPublic();
+                    final var annotation = annotationDeclarations.get(memberName);
+                    return annotation != null && annotation.isPublic();
                 });
     }
 
@@ -354,6 +362,7 @@ final class ImportResolver {
     private boolean packageExists(final String packageName) {
         return classes.keySet().stream().anyMatch(name -> packageOf(name).equals(packageName))
                 || contracts.keySet().stream().anyMatch(name -> packageOf(name).equals(packageName))
+                || annotationDeclarations.keySet().stream().anyMatch(name -> packageOf(name).equals(packageName))
                 || declarationPackages.containsValue(packageName);
     }
 

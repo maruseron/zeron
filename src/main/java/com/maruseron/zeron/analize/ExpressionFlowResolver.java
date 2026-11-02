@@ -88,9 +88,13 @@ final class ExpressionFlowResolver {
             return literal.getType();
         }
         if (expression instanceof Expr.Grouping grouping) {
-            final var type = resolveExpectedExpression(context, grouping.expression, expectedType);
+            final var type = MemberInteropResolver.resolveArgument(
+                    context, grouping.expression, expectedType);
             grouping.setType(type);
             return type;
+        }
+        if (expression instanceof Expr.If iff) {
+            return resolveIfExpression(context, iff, expectedType);
         }
         if (expression instanceof Expr.Unary unary && unary.operator.type() == TokenType.MINUS
                 && isNumericExpression(unary.right)) {
@@ -104,6 +108,40 @@ final class ExpressionFlowResolver {
             return resolve(context, binary);
         }
         return resolve(context, expression);
+    }
+
+    private static TypeDescriptor resolveIfExpression(final ResolutionContext context,
+                                                      final Expr.If iff,
+                                                      final TypeDescriptor expectedType) {
+        final var incoming = context.frame.flowState.copy();
+        final var conditionFlows = resolveCondition(context, iff.condition, incoming, iff.paren);
+        context.frame.flowState = conditionFlows.whenTrue().copy();
+        final var matchBindings = beginSuccessfulSumCaseTestScope(context, iff.condition, true);
+        final TypeDescriptor thenType;
+        final FlowState thenFlow;
+        try {
+            thenType = expectedType == null
+                    ? resolve(context, iff.thenExpr)
+                    : MemberInteropResolver.resolveArgument(context, iff.thenExpr, expectedType);
+        } finally {
+            endSuccessfulSumCaseTestScope(context, matchBindings);
+        }
+        thenFlow = context.frame.flowState.copy();
+        context.frame.flowState = conditionFlows.whenFalse().copy();
+        final var elseBindings = beginSuccessfulSumCaseTestScope(context, iff.condition, false);
+        final TypeDescriptor elseType;
+        try {
+            elseType = expectedType == null
+                    ? resolve(context, iff.elseExpr)
+                    : MemberInteropResolver.resolveArgument(context, iff.elseExpr, expectedType);
+        } finally {
+            endSuccessfulSumCaseTestScope(context, elseBindings);
+        }
+        final var elseFlow = context.frame.flowState.copy();
+        final var commonType = ensureCommonParent(context, iff.paren, thenType, elseType);
+        context.frame.flowState = FlowState.join(thenFlow, elseFlow);
+        iff.setType(commonType);
+        return commonType;
     }
 
     private static boolean isNumericExpression(final Expr expression) {
@@ -139,6 +177,11 @@ final class ExpressionFlowResolver {
                 || literal.exactInteger().compareTo(java.math.BigInteger.valueOf(Long.MAX_VALUE)) > 0)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INTEGER_LITERAL_OUT_OF_RANGE,
                     where, "Integer literal is outside the expected type's range."));
+        }
+
+        if (expectedType instanceof IntDescriptor || expectedType instanceof LongDescriptor) {
+            literal.setType(expectedType);
+            return true;
         }
 
         final var carrierType = TypeDescriptor.ofName(decimal
@@ -265,6 +308,17 @@ final class ExpressionFlowResolver {
         return new java.math.BigInteger(digits, literal.info().radix());
     }
 
+    private static FunctionResolutionFrame.ReceiverScope enclosingReceiverScope(
+            final ResolutionContext context, final Token qualifiedThis) {
+        final var receiverTypeName = qualifiedThis.lexeme().substring(
+                0, qualifiedThis.lexeme().length() - ".this".length());
+        final var requestedName = TypeResolver.resolveTypeName(context, receiverTypeName, qualifiedThis);
+        for (final var scope : context.frame.receiverScopes) {
+            if (Resolver.className(context, scope.type()).equals(requestedName)) return scope;
+        }
+        return null;
+    }
+
     private static TypeDescriptor resolve(final ResolutionContext context, Expr expr) {
         return switch (expr) {
             case Expr.MemberCall call -> {
@@ -278,9 +332,13 @@ final class ExpressionFlowResolver {
                             && !descriptor.parameters().isEmpty()
                             ? descriptor.parameters().subList(1, descriptor.parameters().size())
                             : descriptor.parameters();
-                    context.recordCallSiteFunctionType(call.name, TypeDescriptor.functionWithEffectsOf(
-                            descriptor.name(), descriptor.returnType(), parameters, descriptor.typeParameters(),
-                            descriptor.raisedEffects()));
+                    final var callSiteType = descriptor.receiverType() == null
+                            ? TypeDescriptor.functionWithEffectsOf(descriptor.name(), descriptor.returnType(),
+                                    parameters, descriptor.typeParameters(), descriptor.raisedEffects())
+                            : TypeDescriptor.receiverFunctionOf(descriptor.name(), descriptor.receiverType(),
+                                    descriptor.returnType(), parameters, descriptor.typeParameters(),
+                                    descriptor.raisedEffects());
+                    context.recordCallSiteFunctionType(call.name, callSiteType);
                 }
                 if (call.resolvedDescriptor() != null) {
                     RaisedEffectFlow.add(context, new LinkedHashSet<>(call.resolvedDescriptor().raisedEffects()),
@@ -498,6 +556,8 @@ final class ExpressionFlowResolver {
             }
             case Expr.IndexAssignment assignment -> {
                 final var receiverType = resolve(context, assignment.array);
+                MemberInteropResolver.ensureMutationThroughThisFieldAllowed(
+                        context, assignment.array, SYNTHETIC_IDENTIFIER);
                 if (!(receiverType instanceof ReferenceDescriptor reference)
                         || !(reference.baseType() instanceof ArrayDescriptor
                             || reference.baseType() instanceof ByteArrayDescriptor)) {
@@ -757,25 +817,7 @@ final class ExpressionFlowResolver {
                 yield resolvedType;
             }
             case Expr.If iff -> {
-                final var incoming = context.frame.flowState.copy();
-                final var conditionFlows = resolveCondition(context, iff.condition, incoming, iff.paren);
-                context.frame.flowState = conditionFlows.whenTrue().copy();
-                final var matchBindings = beginSuccessfulSumCaseTestScope(context, iff.condition);
-                final TypeDescriptor thenType;
-                final FlowState thenFlow;
-                try {
-                    thenType = resolve(context, iff.thenExpr);
-                } finally {
-                    endSuccessfulSumCaseTestScope(context, matchBindings);
-                }
-                thenFlow = context.frame.flowState.copy();
-                context.frame.flowState = conditionFlows.whenFalse().copy();
-                final var elseType = resolve(context, iff.elseExpr);
-                final var elseFlow = context.frame.flowState.copy();
-                final var commonType = ensureCommonParent(context, iff.paren, thenType, elseType);
-                context.frame.flowState = FlowState.join(thenFlow, elseFlow);
-                iff.setType(commonType);
-                yield commonType;
+                yield resolveIfExpression(context, iff, null);
             }
             case Expr.Pipeline pipeline -> resolvePipeline(context, pipeline);
             case Expr.Match match -> resolveMatch(context, match);
@@ -891,6 +933,19 @@ final class ExpressionFlowResolver {
             }
             case Expr.Unary unary -> {
                 final var operandType = resolve(context, unary.right);
+                if (unary.operator.type() == TokenType.BANG_BANG) {
+                    if (operandType instanceof NullableDescriptor nullable) {
+                        unary.setType(nullable.baseType());
+                        yield nullable.baseType();
+                    }
+                    if (operandType instanceof NullDescriptor) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
+                                unary.operator, "'!!' requires a nullable value."));
+                    }
+                    unary.setType(operandType);
+                    yield operandType;
+                }
                 if (unary.operator.type() == TokenType.MINUS
                         && !isBuiltInArithmeticType(operandType)) {
                     final var resultType = resolveNumericOperator(context, unary.right, operandType,
@@ -935,6 +990,24 @@ final class ExpressionFlowResolver {
                 yield TypeDescriptor.ofInfer();
             }
             case Expr.Variable variable -> {
+                if (variable.name.type() == TokenType.THIS) {
+                    final var receiverScope = variable.name.lexeme().equals("this")
+                            ? context.frame.receiverScopes.peek()
+                            : enclosingReceiverScope(context, variable.name);
+                    if (receiverScope != null) {
+                        variable.setResolvedSymbolToken(receiverScope.token());
+                        variable.setType(receiverScope.type());
+                        context.recordReference(variable.name, receiverScope.token(), receiverScope.type());
+                        yield receiverScope.type();
+                    }
+                    if (!variable.name.lexeme().equals("this")) {
+                        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND,
+                                variable.name, "No enclosing receiver matches '"
+                                        + variable.name.lexeme().substring(0,
+                                                variable.name.lexeme().length() - ".this".length())
+                                        + "'." ));
+                    }
+                }
                 if (variable.getType() instanceof TypeParameterDescriptor parameter) {
                     yield context.activeTypeSubstitutions.getOrDefault(parameter, parameter);
                 }
@@ -2107,10 +2180,10 @@ final class ExpressionFlowResolver {
     }
 
     static List<Token> beginSuccessfulSumCaseTestScope(final ResolutionContext context,
-                                                       final Expr condition) {
-        final var candidate = condition instanceof Expr.Grouping grouping
-                ? grouping.expression : condition;
-        if (!(candidate instanceof Expr.SumCaseTest test)) return List.of();
+                                                       final Expr condition,
+                                                       final boolean conditionIsTrue) {
+        final var test = successfulSumCaseTest(condition, conditionIsTrue);
+        if (test == null) return List.of();
         final var payloadBindings = test.pattern.arguments().stream()
                 .map(Expr.MatchPattern::binding).filter(Objects::nonNull).toList();
         if (payloadBindings.isEmpty()) return List.of();
@@ -2127,6 +2200,17 @@ final class ExpressionFlowResolver {
             bindings.add(name);
         }
         return bindings;
+    }
+
+    private static Expr.SumCaseTest successfulSumCaseTest(final Expr expression,
+                                                           final boolean conditionIsTrue) {
+        return switch (expression) {
+            case Expr.Grouping grouping -> successfulSumCaseTest(grouping.expression, conditionIsTrue);
+            case Expr.Unary unary when unary.operator.type() == TokenType.NOT ->
+                    successfulSumCaseTest(unary.right, !conditionIsTrue);
+            case Expr.SumCaseTest test -> conditionIsTrue ? test : null;
+            default -> null;
+        };
     }
 
     static void endSuccessfulSumCaseTestScope(final ResolutionContext context,
@@ -2202,9 +2286,7 @@ final class ExpressionFlowResolver {
                     test.operator, "'matches' is currently supported only as a direct if or while condition."));
         }
         final var sourceType = resolve(context, test.value);
-        final var source = sourceType instanceof ReferenceDescriptor reference
-                ? reference.baseType() : sourceType;
-        final var sumType = source instanceof NullableDescriptor nullable ? nullable.baseType() : source;
+        final var sumType = sumTypeForCaseTest(context, test.value, sourceType);
         final var sumDeclaration = context.sums.get(sumType.name());
         if (sumDeclaration == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
@@ -2242,6 +2324,26 @@ final class ExpressionFlowResolver {
         test.setPayloadTypes(payloadTypes);
         test.setType(TypeDescriptor.ofBoolean());
         return TypeDescriptor.ofBoolean();
+    }
+
+    private static TypeDescriptor sumTypeForCaseTest(final ResolutionContext context,
+                                                      final Expr value,
+                                                      final TypeDescriptor sourceType) {
+        final var source = sourceType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : sourceType;
+        final var normalizedSource = source instanceof NullableDescriptor nullable
+                ? nullable.baseType() : source;
+        if (context.sums.containsKey(normalizedSource.name())) return normalizedSource;
+
+        final var variable = directVariable(context, value);
+        if (variable == null || !context.symbols.containsSymbol(variable.name)) return normalizedSource;
+        final var declaredType = context.symbols.getSymbol(variable.name).type();
+        final var declaredBase = declaredType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : declaredType;
+        final var normalizedDeclared = declaredBase instanceof NullableDescriptor nullable
+                ? nullable.baseType() : declaredBase;
+        return context.sums.containsKey(normalizedDeclared.name())
+                ? normalizedDeclared : normalizedSource;
     }
 
     private static TypeDescriptor resolveCoalesceAssignment(final ResolutionContext context, final Expr.CoalesceAssignment assignment) {
@@ -2331,7 +2433,7 @@ final class ExpressionFlowResolver {
         final var enclosingFlow = context.frame.flowState;
         try {
             final var condition = ungroupCondition(expression);
-            if (containsSumCaseTest(expression) && !(condition instanceof Expr.SumCaseTest)) {
+            if (containsSumCaseTest(expression) && directSumCaseTest(expression) == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         where, "'matches' cannot be composed with other condition operators yet."));
             }
@@ -2371,7 +2473,7 @@ final class ExpressionFlowResolver {
 
             context.frame.flowState = incoming.copy();
             final var previousSumCaseCondition = context.frame.resolvingSumCaseCondition;
-            context.frame.resolvingSumCaseCondition = condition instanceof Expr.SumCaseTest;
+            context.frame.resolvingSumCaseCondition = directSumCaseTest(expression) != null;
             try {
                 ensureBoolean(context, resolve(context, expression), where);
             } finally {
@@ -2409,8 +2511,12 @@ final class ExpressionFlowResolver {
                 final var variable = directVariable(context, test.value);
                 if (variable != null && isRefinable(context, variable.name)) {
                     final var binding = context.symbols.getSymbol(variable.name);
-                    whenTrue.put(binding.name(), refineTypeFact(context, binding.type(),
-                            evaluated.get(binding.name()), test.resolvedCaseType()));
+                    final var partition = partitionSumCaseFact(context, binding.type(),
+                            evaluated.get(binding.name()), test.resolvedCaseType());
+                    whenTrue.put(binding.name(), partition.matching());
+                    whenFalse.put(binding.name(), partition.nonMatching());
+                    if (!partition.canMatch()) whenTrue.markUnreachable();
+                    if (!partition.canNotMatch()) whenFalse.markUnreachable();
                 }
             } else if (expression instanceof Expr.Binary binary
                     && isNullComparison(context, binary)) {
@@ -2434,6 +2540,16 @@ final class ExpressionFlowResolver {
     private static Expr ungroupCondition(final Expr expression) {
         return expression instanceof Expr.Grouping grouping
                 ? ungroupCondition(grouping.expression) : expression;
+    }
+
+    private static Expr.SumCaseTest directSumCaseTest(final Expr expression) {
+        return switch (expression) {
+            case Expr.Grouping grouping -> directSumCaseTest(grouping.expression);
+            case Expr.Unary unary when unary.operator.type() == TokenType.NOT ->
+                    directSumCaseTest(unary.right);
+            case Expr.SumCaseTest test -> test;
+            default -> null;
+        };
     }
 
     private static boolean containsSumCaseTest(final Expr expression) {
@@ -2468,6 +2584,61 @@ final class ExpressionFlowResolver {
         }
         if (narrowed.isEmpty()) narrowed.add(targetType);
         return new FlowFact(false, narrowed);
+    }
+
+    private record SumCasePartition(FlowFact matching, FlowFact nonMatching,
+                                    boolean canMatch, boolean canNotMatch) {}
+
+    private static SumCasePartition partitionSumCaseFact(final ResolutionContext context,
+                                                          final TypeDescriptor declaredType,
+                                                          final FlowFact existing,
+                                                          final TypeDescriptor caseType) {
+        final var currentAlternatives = existing == null
+                ? initialNonNullAlternatives(context, declaredType)
+                : existing.nonNullAlternatives();
+        final var mayBeNull = existing == null
+                ? declaredType instanceof NullableDescriptor || declaredType instanceof NullDescriptor
+                : existing.mayBeNull();
+        if (currentAlternatives == null) {
+            return new SumCasePartition(new FlowFact(false, Set.of(caseType)),
+                    new FlowFact(mayBeNull, null), true, true);
+        }
+
+        final var expandedAlternatives = new LinkedHashSet<TypeDescriptor>();
+        for (final var alternative : currentAlternatives) {
+            TypeDescriptor baseType = alternative instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : alternative;
+            if (baseType instanceof NullableDescriptor nullable) baseType = nullable.baseType();
+            final var sum = context.sums.get(baseType.name());
+            if (sum == null) {
+                if (!isGeneratedSumCase(context, baseType.name())) {
+                    return new SumCasePartition(new FlowFact(false, Set.of(caseType)),
+                            new FlowFact(mayBeNull, null), true, true);
+                }
+                expandedAlternatives.add(alternative);
+                continue;
+            }
+            final var arguments = baseType instanceof GenericDescriptor generic
+                    ? generic.typeParameters() : List.<TypeDescriptor>of();
+            for (final var sumCase : sum.cases()) {
+                final var generatedName = TypeDescriptor.ofName(sum.generatedCaseName(sumCase));
+                expandedAlternatives.add(arguments.isEmpty()
+                        ? generatedName : TypeDescriptor.genericOf(generatedName, arguments));
+            }
+        }
+
+        final var matchingAlternatives = new LinkedHashSet<TypeDescriptor>();
+        final var nonMatchingAlternatives = new LinkedHashSet<TypeDescriptor>();
+        for (final var alternative : expandedAlternatives) {
+            if (context.typeCompatibility.canAssign(caseType, alternative)) {
+                matchingAlternatives.add(alternative);
+            } else {
+                nonMatchingAlternatives.add(alternative);
+            }
+        }
+        return new SumCasePartition(new FlowFact(false, matchingAlternatives),
+                new FlowFact(mayBeNull, nonMatchingAlternatives),
+                !matchingAlternatives.isEmpty(), mayBeNull || !nonMatchingAlternatives.isEmpty());
     }
 
     static FlowFact nonNullFact(final ResolutionContext context, final TypeDescriptor declaredType) {

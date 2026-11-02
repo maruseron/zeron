@@ -58,7 +58,7 @@ final class LambdaCaptureValidator {
 
     private void validate(final Expr.Lambda lambda, final Set<String> inheritedNames) {
         final var lambdaLocals = new HashSet<>(inheritedNames);
-        for (final var param : lambda.params) {
+        for (final var param : lambda.parameterTokens()) {
             lambdaLocals.add(param.lexeme());
         }
         walkCaptureUsage(lambda.body, lambdaLocals);

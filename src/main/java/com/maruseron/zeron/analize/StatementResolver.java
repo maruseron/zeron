@@ -28,6 +28,8 @@ final class StatementResolver {
         switch (stmt) {
             case Stmt.Namespace _ ->
                     throw new IllegalStateException("Namespace members must be flattened before resolution.");
+            case Stmt.AnnotationDeclaration _ -> {}
+            case Stmt.AnnotatedDeclaration annotated -> resolve(annotated.declaration());
             case Stmt.ClassDecl declaration -> DeclarationResolver.resolveClass(context, declaration);
             case Stmt.ContractDecl declaration -> DeclarationResolver.resolveContract(context, declaration);
             case Stmt.SumDecl declaration -> DeclarationResolver.resolveSum(context, declaration);
@@ -172,7 +174,8 @@ final class StatementResolver {
                 final var incoming = context.frame.flowState.copy();
                 final var conditionFlows = ExpressionFlowResolver.resolveCondition(context, condition, incoming, keyword);
                 context.frame.flowState = conditionFlows.whenTrue().copy();
-                final var matchBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(context, condition);
+                final var matchBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(
+                        context, condition, true);
                 final FlowState thenFlow;
                 try {
                     resolve(thenBranch);
@@ -186,7 +189,13 @@ final class StatementResolver {
                     elseFlow = conditionFlows.whenFalse();
                 } else {
                     context.frame.flowState = conditionFlows.whenFalse().copy();
-                    resolve(elseBranch);
+                    final var elseBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(
+                            context, condition, false);
+                    try {
+                        resolve(elseBranch);
+                    } finally {
+                        ExpressionFlowResolver.endSuccessfulSumCaseTestScope(context, elseBindings);
+                    }
                     elseFlow = context.frame.flowState.copy();
                 }
                 context.frame.flowState = FlowState.join(thenFlow, elseFlow);
@@ -330,7 +339,8 @@ final class StatementResolver {
             try {
                 conditionFlows = ExpressionFlowResolver.resolveCondition(context, condition, headerState, keyword);
                 context.frame.flowState = conditionFlows.whenTrue().copy();
-                final var matchBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(context, condition);
+                final var matchBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(
+                        context, condition, true);
                 try {
                     resolve(body);
                 } finally {

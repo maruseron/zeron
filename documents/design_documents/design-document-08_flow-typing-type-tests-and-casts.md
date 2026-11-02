@@ -163,6 +163,13 @@ fn incrementIfPresent(value: Int?): Int {
 The continuation has only the non-null path. Track normal completion separately from a type such as
 `Never`; do not overload `Never` to represent resolver reachability.
 
+For a stable binding of a closed sum type, a direct `value matches Sum.Case(...)` test narrows the
+true path to the tested case and removes that case from the false path. If one alternative remains,
+its payload properties are available there. Parenthesized tests behave the same, and unary `not`
+swaps the two outcomes. Payload names are available only on the outcome where the underlying case
+pattern succeeds. This initial complement rule does not apply to `is` tests or `matches` expressions
+composed with `and` or `or`; nullable values retain their null possibility on the false path.
+
 Statement-form `if` branches and value-producing `if` expressions resolve their branches under the
 corresponding true/false facts. An `if` expression joins the facts from both result branches after
 resolving them; facts established in only one branch do not escape the expression.

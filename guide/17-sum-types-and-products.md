@@ -1,4 +1,4 @@
-# Algebraic data types
+# Products, data classes, and sum types
 
 Many values are made by combining simpler pieces of data. An **algebraic data type** (ADT) gives
 those combinations a name and describes which values belong to that type. Zeron's `type` keyword

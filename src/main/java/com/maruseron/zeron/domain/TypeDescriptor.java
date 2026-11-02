@@ -12,7 +12,7 @@ public sealed interface TypeDescriptor
                 ByteArrayDescriptor,
                 NullableDescriptor, NullDescriptor, ReferenceDescriptor,
                 TypeParameterDescriptor, AppliedConstructorDescriptor, TypeConstructorDescriptor,
-                TypeProjectionDescriptor, CapturedTypeDescriptor {
+                TypeProjectionDescriptor, CapturedTypeDescriptor, EffectRowDescriptor {
 
     // Contract
     String name();
@@ -156,6 +156,16 @@ public sealed interface TypeDescriptor
         return new FunctionDescriptor(name, returnType, parameterTypes, typeParameters, raisedEffects);
     }
 
+    static FunctionDescriptor receiverFunctionOf(final String name,
+                                                 final TypeDescriptor receiverType,
+                                                 final TypeDescriptor returnType,
+                                                 final List<TypeDescriptor> parameterTypes,
+                                                 final List<TypeParameterDescriptor> typeParameters,
+                                                 final List<TypeDescriptor> raisedEffects) {
+        return new FunctionDescriptor(name, receiverType, returnType, parameterTypes, typeParameters,
+                raisedEffects, List.of(), false);
+    }
+
     static FunctionDescriptor handlerOf(final TypeDescriptor returnType,
                                         final List<TypeDescriptor> handledEffects,
                                         final List<TypeDescriptor> raisedEffects) {
@@ -210,6 +220,8 @@ public sealed interface TypeDescriptor
             case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
             case TypeProjectionDescriptor projection -> toJavaClassDesc(projection.bound());
             case CapturedTypeDescriptor capture -> toJavaClassDesc(capture.upperBound());
+            case EffectRowDescriptor _ ->
+                    throw new IllegalArgumentException("An effect row is not a runtime value type.");
         };
     }
 
@@ -250,6 +262,8 @@ public sealed interface TypeDescriptor
             case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
             case TypeProjectionDescriptor projection -> toJavaWrapper(projection.bound());
             case CapturedTypeDescriptor capture -> toJavaWrapper(capture.upperBound());
+            case EffectRowDescriptor _ ->
+                    throw new IllegalArgumentException("An effect row is not a runtime value type.");
         };
     }
 }

@@ -285,7 +285,7 @@ final class TypeClassEvidence {
         }
         if (!context.typeCompatibility.canAssign(required.returnType(), candidate.returnType())) return false;
         final var requiredEffects = required.raisedEffects();
-        return requiredEffects.containsAll(candidate.raisedEffects());
+        return EffectRows.includedIn(candidate.raisedEffects(), requiredEffects);
     }
 
     private static boolean compatibleDelegatedTypeParameters(
@@ -297,6 +297,7 @@ final class TypeClassEvidence {
                 && candidate.variance() == required.variance()
                 && (candidate.admitsNullableArguments() || !required.admitsNullableArguments())
                 && candidate.isEffectKind() == required.isEffectKind()
+                && candidate.isEffectRowKind() == required.isEffectRowKind()
                 && (candidate.admitsMutableArguments() || !required.admitsMutableArguments())
                 && candidateBounds.equals(required.bounds());
         return compatible;
@@ -1142,7 +1143,8 @@ final class TypeClassEvidence {
                                        final TypeDescriptor actualType,
                                        final com.maruseron.zeron.scan.Token where,
                                        final Set<String> resolving) {
-        if (context.typeCompatibility.isContractProjection(contractType, actualType)) return true;
+        if (TypeCompatibility.isArrayIterableProjection(contractType, actualType)
+                || context.typeCompatibility.isContractProjection(contractType, actualType)) return true;
         if (actualType instanceof TypeParameterDescriptor parameter
                 && parameter.bounds().stream().anyMatch(bound -> entails(context, bound, contractType))) return true;
         final var evidenceKey = contractType + " for " + actualType;
@@ -1408,6 +1410,11 @@ final class TypeClassEvidence {
                 requiredType.returnType(), methodParameters, requiredType.typeParameters(),
                 requiredType.raisedEffects());
 
+        if (TypeCompatibility.isArrayIterableProjection(requiredBound, concrete)) {
+            return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
+                    "zeron.runtime.ArrayIterable", "$bound$" + requirement.name().lexeme(),
+                    methodType, null, true, Expr.EvidenceHandleKind.STATIC);
+        }
         if (context.typeCompatibility.isContractProjection(requiredBound, concrete)) {
             return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
                     nominalName(requiredBound), requirement.name().lexeme(), methodType, null, true,

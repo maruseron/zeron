@@ -31,20 +31,27 @@ final class MemberInteropResolver {
     }
 
     static TypeDescriptor resolveImplicitFieldRead(final ResolutionContext context, final Expr.Variable variable) {
-        if (context.frame.currentMethodOwner == null) return null;
-        final var availableFields = context.frame.initializerVisibleFields == null
-                ? context.frame.currentMethodOwner.fields()
-                : context.frame.initializerVisibleFields;
+        final var receiverScope = context.frame.receiverScopes.peek();
+        final var receiverLambdaType = receiverScope == null
+                || receiverScope.token().type() == TokenType.THIS
+                ? null : receiverScope.type();
+        final var owner = receiverLambdaType == null
+                ? context.frame.currentMethodOwner
+                : context.classes.get(Resolver.className(context, receiverLambdaType));
+        if (owner == null) return null;
+        final var availableFields = receiverLambdaType != null || context.frame.initializerVisibleFields == null
+                ? owner.fields() : context.frame.initializerVisibleFields;
         var field = availableFields.stream()
                 .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
                 .findFirst()
                 .orElse(null);
-        if (field == null && context.frame.currentMethodOwner.dataClass()) {
-            field = context.frame.currentMethodOwner.dataComponentFields().stream()
+        if (field == null && owner.dataClass()) {
+            field = owner.dataComponentFields().stream()
                     .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
                     .findFirst()
                     .orElse(null);
-            if (field != null && context.frame.initializerVisibleFields != null
+            if (field != null && receiverLambdaType == null
+                    && context.frame.initializerVisibleFields != null
                     && context.frame.initializerVisibleFields.stream()
                     .noneMatch(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))) {
                 field = null;
@@ -56,13 +63,17 @@ final class MemberInteropResolver {
                 new Token(TokenType.THIS, "this", null, variable.name.span()),
                 TypeDescriptor.ofInfer());
         final var receiverType = ExpressionFlowResolver.resolveExpression(context, receiver);
-        ensureFieldAccessible(context, variable.name, context.frame.currentMethodOwner.name().lexeme());
-        final var receiverBaseType = receiverType instanceof ReferenceDescriptor reference
-                ? reference.baseType()
-                : receiverType;
+        ensureFieldAccessible(context, variable.name, owner.name().lexeme());
+        final var thisToken = new Token(TokenType.THIS, "this", null, variable.name.span());
+        final var implicitReceiverType = context.symbols.containsSymbol(thisToken)
+                ? context.symbols.getSymbol(thisToken).type()
+                : TypeDescriptor.of(owner.name().lexeme());
+        final var effectiveReceiverType = receiverType == null ? implicitReceiverType : receiverType;
+        final var receiverBaseType = effectiveReceiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : effectiveReceiverType;
         final var resolvedType = TypeSubstitution.substitute(field.type(),
-                TypeResolver.substitutionsFor(context, context.frame.currentMethodOwner.typeParameters(), receiverBaseType));
-        variable.setImplicitFieldRead(receiver, context.frame.currentMethodOwner.name().lexeme(), field.type());
+                TypeResolver.substitutionsFor(context, owner.typeParameters(), receiverBaseType));
+        variable.setImplicitFieldRead(receiver, owner.name().lexeme(), field.type());
         variable.setType(resolvedType);
         context.recordReference(variable.name, field.name(), resolvedType);
         return resolvedType;
@@ -152,6 +163,17 @@ final class MemberInteropResolver {
         final var receiverType = alreadyResolvedReceiverType == null
                 ? ExpressionFlowResolver.resolveExpression(context, property.receiver)
                 : alreadyResolvedReceiverType;
+        final var unreferencedReceiverType = receiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : receiverType;
+        final var nullableReceiverBase = unreferencedReceiverType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : unreferencedReceiverType;
+        if (!property.safeNavigation() && unreferencedReceiverType instanceof NullableDescriptor
+                && context.sums.values().stream().anyMatch(sum -> sum.cases().stream()
+                        .anyMatch(sumCase -> sum.generatedCaseName(sumCase).equals(nullableReceiverBase.name())))) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
+                    property.name, "Cannot access property '" + property.name.lexeme()
+                    + "' on a nullable receiver. Check it for null or use safe navigation ('?.')."));
+        }
         final var safeFlows = property.safeNavigation()
                 ? beginSafeNavigation(context, property.receiver, property.name, receiverType)
                 : null;
@@ -326,8 +348,8 @@ final class MemberInteropResolver {
         throw new IllegalStateException("Unreachable");
     }
 
-    private static void ensureMutatingFieldCallAllowed(final ResolutionContext context,
-                                                       final Expr receiver, final Token name) {
+    static void ensureMutationThroughThisFieldAllowed(final ResolutionContext context,
+                                                      final Expr receiver, final Token name) {
         if (context.frame.currentMethodOwner == null || !isThisFieldPath(receiver)) return;
         final var thisName = new Token(TokenType.THIS, "this", null, name.span());
         if (!context.symbols.containsSymbol(thisName)
@@ -344,6 +366,7 @@ final class MemberInteropResolver {
                     && rootedAtThis(variable.implicitFieldReceiver());
             case Expr.Grouping grouping -> isThisFieldPath(grouping.expression);
             case Expr.Property property -> !property.resolvedAsProperty() && rootedAtThis(property.receiver);
+            case Expr.Index index -> rootedAtThis(index.array);
             default -> false;
         };
     }
@@ -353,6 +376,7 @@ final class MemberInteropResolver {
             case Expr.Variable variable -> variable.name.type() == TokenType.THIS;
             case Expr.Grouping grouping -> rootedAtThis(grouping.expression);
             case Expr.Property property -> !property.resolvedAsProperty() && rootedAtThis(property.receiver);
+            case Expr.Index index -> rootedAtThis(index.array);
             default -> false;
         };
     }
@@ -433,7 +457,7 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "A mutating HKT operation must declare an explicit receiver parameter."));
         }
-        if (method.isMutating()) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+        if (method.isMutating()) ensureMutationThroughThisFieldAllowed(context, call.receiver, call.name);
         final var callableSignature = method.isMutating()
                 ? withReferenceReceiver(selectedSignature)
                 : selectedSignature;
@@ -508,7 +532,7 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
                     "Mutating HKT operations require a mutable reference receiver."));
         }
-        if (method.isMutating()) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+        if (method.isMutating()) ensureMutationThroughThisFieldAllowed(context, call.receiver, call.name);
         final var receiverParameter = signature.parameters().getFirst();
         final var explicitParameters = signature.parameters().subList(1, signature.arity());
         final var explicitSignature = TypeDescriptor.functionWithEffectsOf(signature.name(), signature.returnType(),
@@ -523,6 +547,9 @@ final class MemberInteropResolver {
                     minimumArity, method.variadic(), fixedArity,
                     receiverParameter, receiverType);
             call.setWitnessMethodEvidence(evidenceToken, signature);
+            final var resolvedDescriptor = (FunctionDescriptor) call.resolvedDescriptor();
+            context.recordReference(call.name, method.name(), resolvedDescriptor);
+            context.recordCallSiteFunctionType(call.name, resolvedDescriptor);
             return result;
         }
         if (!call.explicitTypeArguments.isEmpty()) {
@@ -544,6 +571,8 @@ final class MemberInteropResolver {
         call.setWitnessMethodEvidence(evidenceToken, signature);
         call.setResolvedDescriptor(explicitSignature);
         call.setType(signature.returnType());
+        context.recordReference(call.name, method.name(), explicitSignature);
+        context.recordCallSiteFunctionType(call.name, explicitSignature);
         return signature.returnType();
     }
 
@@ -670,6 +699,13 @@ final class MemberInteropResolver {
                 : alreadyResolvedReceiverType;
         final var receiverBaseType = receiverType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : receiverType;
+        final var receiverFunctionResult = resolveReceiverFunctionPropertyCall(context, call, receiverType);
+        if (receiverFunctionResult != null) return receiverFunctionResult;
+        if (receiverBaseType.isNullable() || receiverBaseType instanceof NullDescriptor) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
+                    call.name, "Cannot call method '" + call.name.lexeme()
+                    + "' on a nullable receiver. Check it for null or use safe navigation ('?.')."));
+        }
         if (receiverBaseType instanceof AppliedConstructorDescriptor applied
                 && applied.constructor().isHigherKinded()) {
             return resolveHigherKindedReceiverCall(
@@ -719,7 +755,7 @@ final class MemberInteropResolver {
                 final var defaultMethod = defaults.getFirst();
                 final var descriptor = instantiateDefaultMethodType(context, owner, receiverType, defaultMethod);
                 if (defaultMethod.method().isMutating()) {
-                    ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+                    ensureMutationThroughThisFieldAllowed(context, call.receiver, call.name);
                 }
                 if (defaultMethod.method().isMutating()
                         && !(receiverType instanceof ReferenceDescriptor)) {
@@ -772,7 +808,7 @@ final class MemberInteropResolver {
                     final var defaultMethod = defaults.getFirst();
                     final var descriptor = instantiateDefaultMethodType(context, owner, receiverType, defaultMethod);
                     if (defaultMethod.method().isMutating()) {
-                        ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+                        ensureMutationThroughThisFieldAllowed(context, call.receiver, call.name);
                     }
                     if (defaultMethod.method().isMutating()
                             && !(receiverType instanceof ReferenceDescriptor)) {
@@ -876,7 +912,7 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
                     "Mutating method requires a mutable reference."));
         }
-        if (isMutating) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+        if (isMutating) ensureMutationThroughThisFieldAllowed(context, call.receiver, call.name);
         if (instantiatedDescriptor.isGeneric()) {
             return resolveGenericMemberCall(
                     context, call, instantiatedDescriptor, minimumArity, variadic, fixedArity);
@@ -913,6 +949,7 @@ final class MemberInteropResolver {
                 ? reference.baseType()
                 : propertyType;
         if (!(callableType instanceof FunctionDescriptor functionType)) return null;
+        if (functionType.isReceiverFunction()) return null;
         if (!call.explicitTypeArguments.isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     call.name, "A function-valued property does not declare type parameters."));
@@ -931,6 +968,69 @@ final class MemberInteropResolver {
         call.setResolvedDescriptor(functionType);
         call.setType(functionType.returnType());
         return functionType.returnType();
+    }
+
+    private static TypeDescriptor resolveReceiverFunctionPropertyCall(
+            final ResolutionContext context, final Expr.MemberCall call,
+            final TypeDescriptor receiverType) {
+        if (context.symbols.containsSymbol(call.name)) {
+            final var binding = context.symbols.getSymbol(call.name);
+            final var bindingType = binding.type() instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : binding.type();
+            if (bindingType instanceof FunctionDescriptor functionType
+                    && functionType.isReceiverFunction()
+                    && context.typeCompatibility.canAssign(functionType.receiverType(), receiverType)) {
+                if (!binding.isInit() && binding.lvt() != SymbolTable.GLOBAL) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_INITIALIZER,
+                            call.name, "Can't read local variable in its own initializer."));
+                }
+                if (!call.explicitTypeArguments.isEmpty()) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            call.name, "A function-valued property does not declare type parameters."));
+                }
+                ensureReceiverFunctionArguments(context, call, functionType);
+                call.setReceiverFunctionSymbol(binding.name());
+                call.setResolvedDescriptor(functionType);
+                call.setType(functionType.returnType());
+                context.recordReference(call.name, binding.name(), functionType);
+                return functionType.returnType();
+            }
+        }
+
+        final var property = new Expr.Property(call.receiver, call.name, TypeDescriptor.ofInfer());
+        final var propertyType = resolveProperty(context, property, receiverType, true);
+        if (propertyType == null) return null;
+        final var callableType = propertyType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : propertyType;
+        if (!(callableType instanceof FunctionDescriptor functionType)
+                || !functionType.isReceiverFunction()
+                || !context.typeCompatibility.canAssign(functionType.receiverType(), receiverType)) {
+            return null;
+        }
+        ensureReceiverFunctionArguments(context, call, functionType);
+        call.setFunctionProperty(property);
+        call.setResolvedDescriptor(functionType);
+        call.setType(functionType.returnType());
+        return functionType.returnType();
+    }
+
+    private static void ensureReceiverFunctionArguments(final ResolutionContext context,
+                                                        final Expr.MemberCall call,
+                                                        final FunctionDescriptor functionType) {
+        if (!call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    call.name, "A function-valued property does not declare type parameters."));
+        }
+        if (call.arguments.size() != functionType.arity()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    call.name, "Expected " + functionType.arity() + " arguments, found "
+                            + call.arguments.size() + "."));
+        }
+        for (int index = 0; index < call.arguments.size(); index++) {
+            final var expected = functionType.parameters().get(index);
+            ensureAssignable(context, expected,
+                    resolveArgument(context, call.arguments.get(index), expected), call.name);
+        }
     }
 
     private static TypeDescriptor resolveWitnessMethodCall(final ResolutionContext context,
@@ -1061,7 +1161,7 @@ final class MemberInteropResolver {
         }
         final var selected = receiverMatches.getFirst();
         final var method = selected.method();
-        if (method.isMutating()) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+        if (method.isMutating()) ensureMutationThroughThisFieldAllowed(context, call.receiver, call.name);
         final var fixedArity = method.fixedCallArity();
         if ((!call.explicitTypeArguments.isEmpty()
                 && call.explicitTypeArguments.size() != method.methodTypeParameters().size())
@@ -1385,6 +1485,7 @@ final class MemberInteropResolver {
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        final var rowInference = new RowInference();
         for (int i = 0; i < explicitClassTypeArguments.size(); i++) {
             substitutions.put(typeParameters.get(i), explicitClassTypeArguments.get(i));
         }
@@ -1397,7 +1498,7 @@ final class MemberInteropResolver {
                     ? ExpressionFlowResolver.resolveExpression(context, argument) : priorType;
             final var formal = classFactoryParameterType(signature, i, fixedArity, variadic);
             if (containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
-                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name, rowInference);
             }
         }
 
@@ -1418,15 +1519,21 @@ final class MemberInteropResolver {
             }
             resolvedArguments[i] = resolveArgument(context, argument, expected);
             if (containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
-                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name, rowInference);
             }
         }
 
+        rowInference.solve(substitutions, call.name);
+
         for (final var parameter : typeParameters) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
-                        call.name, "Cannot infer class type parameter '" + parameter.name()
-                                + "'; provide an explicit type argument or an expected type."));
+                if (parameter.isEffectRowKind()) {
+                    RowInference.defaultEmpty(parameter, substitutions);
+                } else {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
+                            call.name, "Cannot infer class type parameter '" + parameter.name()
+                                    + "'; provide an explicit type argument or an expected type."));
+                }
             }
             substitutions.put(parameter, TypeResolver.validateTypeArgument(
                     context, parameter, substitutions.get(parameter), call.name));
@@ -1574,6 +1681,9 @@ final class MemberInteropResolver {
                     .anyMatch(parameter -> containsAnyTypeParameter(parameter, parameters))
                     || function.raisedEffects().stream()
                     .anyMatch(effect -> containsAnyTypeParameter(effect, parameters));
+            case EffectRowDescriptor row -> row.effects().stream()
+                    .anyMatch(effect -> containsAnyTypeParameter(effect, parameters))
+                    || !row.variables().isEmpty();
             default -> false;
         };
     }
@@ -1621,13 +1731,14 @@ final class MemberInteropResolver {
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        final var rowInference = new RowInference();
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
             final var explicitType = call.explicitTypeArguments.get(i);
             TypeResolver.validateType(context, explicitType, call.name);
             substitutions.put(typeParameters.get(i), explicitType);
         }
         if (receiverParameter != null) {
-            TypeUnifier.unify(receiverParameter, receiverType, substitutions, call.name);
+            TypeUnifier.unify(receiverParameter, receiverType, substitutions, call.name, rowInference);
         }
 
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
@@ -1636,7 +1747,7 @@ final class MemberInteropResolver {
             if (argument instanceof Expr.Lambda || LambdaResolver.isFunctionReferenceCandidate(context, argument)) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
             TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
-                    resolvedArguments[i], substitutions, call.name);
+                    resolvedArguments[i], substitutions, call.name, rowInference);
         }
 
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -1651,15 +1762,21 @@ final class MemberInteropResolver {
             }
             resolvedArguments[i] = resolveArgument(context, argument, expected);
             TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
-                    resolvedArguments[i], substitutions, call.name);
+                    resolvedArguments[i], substitutions, call.name, rowInference);
         }
+
+        rowInference.solve(substitutions, call.name);
 
         for (final var parameter : typeParameters) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
-                        call.name,
-                        "Cannot infer type parameter '" + parameter.name()
-                                + "'; provide an explicit type argument."));
+                if (parameter.isEffectRowKind()) {
+                    RowInference.defaultEmpty(parameter, substitutions);
+                } else {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
+                            call.name,
+                            "Cannot infer type parameter '" + parameter.name()
+                                    + "'; provide an explicit type argument."));
+                }
             }
             substitutions.put(parameter, TypeResolver.validateTypeArgument(
                     context, parameter, substitutions.get(parameter), call.name));
@@ -2431,7 +2548,7 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, call.name,
                     "Method is not provided by any of the type parameter's contract bounds."));
         }
-        if (method.isMutating()) ensureMutatingFieldCallAllowed(context, call.receiver, call.name);
+        if (method.isMutating()) ensureMutationThroughThisFieldAllowed(context, call.receiver, call.name);
         if (method.isMutating() && !(call.receiver.getType() instanceof ReferenceDescriptor)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED, call.name,
                     "Mutating methods require a mutable reference receiver."));
@@ -2455,6 +2572,9 @@ final class MemberInteropResolver {
                     method.minimumArity(), variadic, fixedArity);
             call.setResolvedOwnerName(ownerName);
             call.setReceiverRequiresCast(true);
+            final var resolvedDescriptor = (FunctionDescriptor) call.resolvedDescriptor();
+            context.recordReference(call.name, method.name(), resolvedDescriptor);
+            context.recordCallSiteFunctionType(call.name, resolvedDescriptor);
             return result;
         }
         ensureMemberCallArity(call, descriptor, method.minimumArity(), variadic);
@@ -2469,6 +2589,8 @@ final class MemberInteropResolver {
         call.setReceiverRequiresCast(true);
         call.setResolvedDescriptor(descriptor);
         call.setType(descriptor.returnType());
+        context.recordReference(call.name, method.name(), descriptor);
+        context.recordCallSiteFunctionType(call.name, descriptor);
         return descriptor.returnType();
     }
 
@@ -2670,10 +2792,20 @@ final class MemberInteropResolver {
 
     static TypeDescriptor resolveArgument(final ResolutionContext context, final Expr argument,
                                            final TypeDescriptor expectedType) {
+        final var wrappedCodeModel = codeModelFunctionType(expectedType);
+        if (wrappedCodeModel != null) {
+            final var lambda = inlineLambda(argument);
+            if (lambda != null) {
+                lambda.setCodeModelType(expectedType);
+                resolveLambda(context, lambda, wrappedCodeModel);
+                return expectedType;
+            }
+        }
         if (argument instanceof Expr.Literal literal
                 || argument instanceof Expr.Grouping
                 || argument instanceof Expr.Unary
-                || argument instanceof Expr.Binary) {
+                || argument instanceof Expr.Binary
+                || argument instanceof Expr.If) {
             final var contextual = ExpressionFlowResolver.resolveExpectedExpression(
                     context, argument, expectedType);
             if (contextual != null) return contextual;
@@ -2713,6 +2845,23 @@ final class MemberInteropResolver {
             if (functionType != null) return resolveLambda(context, lambda, functionType);
         }
         return ExpressionFlowResolver.resolveExpression(context, argument);
+    }
+
+    private static Expr.Lambda inlineLambda(final Expr expression) {
+        var unwrapped = expression;
+        while (unwrapped instanceof Expr.Grouping grouping) {
+            unwrapped = grouping.expression;
+        }
+        return unwrapped instanceof Expr.Lambda lambda ? lambda : null;
+    }
+
+    private static FunctionDescriptor codeModelFunctionType(final TypeDescriptor type) {
+        final var unwrapped = type instanceof ReferenceDescriptor reference ? reference.baseType() : type;
+        if (!(unwrapped instanceof GenericDescriptor generic)
+                || !generic.baseType().name().equals("zeron.compiler.CodeModel")) return null;
+        return generic.typeParameters().size() == 1
+                && generic.typeParameters().getFirst() instanceof FunctionDescriptor function
+                ? function : null;
     }
 
     static Stmt.Field findField(final ResolutionContext context, final String className, final Token name) {

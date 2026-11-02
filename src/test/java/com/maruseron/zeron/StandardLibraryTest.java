@@ -1143,6 +1143,7 @@ public final class StandardLibraryTest {
                 import zeron.control.Foldable;
                 import zeron.control.Functor;
                 import zeron.control.Monad;
+                import zeron.function.identity;
                 import zeron.lang.Option;
                 import zeron.lang.Result;
 
@@ -1151,6 +1152,10 @@ public final class StandardLibraryTest {
                 fn flatMapAll<F<_>: Monad<F>, A, B>(
                     source: F<A>, transform: (A) -> F<B>
                 ): F<B> = source.flatMap(transform);
+                fn flattenAll<F<_>: Monad<F>, A>(source: F<F<A>>): F<A> =
+                    source.flatten();
+                fn flatMapIdentity<F<_>: Monad<F>, A>(source: F<F<A>>): F<A> =
+                    source.flatMap(identity);
                 fn applyAll<F<_>: Monad<F>, A, B>(
                     values: F<A>, functions: F<(A) -> B>
                 ): F<B> = values.ap(functions);
@@ -1176,6 +1181,13 @@ public final class StandardLibraryTest {
                 fn optionFlatMap(): Int =
                     foldAll<Option<_>>(flatMapAll<Option<_>, Int, Int>(
                         Option.Some(5), value -> Option.Some(value + 1)));
+                fn optionFlatten(): Int {
+                    let inner: Option<Int> = Option.Some(6);
+                    let outer: Option<Option<Int>> = Option.Some(inner);
+                    let flattened = flattenAll<Option<_>, Int>(outer);
+                    let direct = flatMapIdentity<Option<_>, Int>(outer);
+                    return foldAll<Option<_>>(flattened) + foldAll<Option<_>>(direct);
+                }
                 fn optionApply(): Int {
                     let transform: (Int) -> Int = value -> value * 3;
                     return foldAll<Option<_>>(applyAll<Option<_>, Int, Int>(
@@ -1228,6 +1240,7 @@ public final class StandardLibraryTest {
                 assertEquals(7, test.getMethod("streamPure").invoke(null));
                 assertEquals(5, test.getMethod("optionMap").invoke(null));
                 assertEquals(6, test.getMethod("optionFlatMap").invoke(null));
+                assertEquals(12, test.getMethod("optionFlatten").invoke(null));
                 assertEquals(12, test.getMethod("optionApply").invoke(null));
                 assertEquals(8, test.getMethod("optionPure").invoke(null));
                 assertEquals(7, test.getMethod("resultMap").invoke(null));

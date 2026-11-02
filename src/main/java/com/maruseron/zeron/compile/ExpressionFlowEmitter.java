@@ -97,7 +97,7 @@ final class ExpressionFlowEmitter {
     static List<Token> beginSumCaseTestBindings(final CompilationContext context,
                                                final CodeBuilder composer,
                                                final Expr condition) {
-        final var candidate = condition instanceof Expr.Grouping grouping ? grouping.expression : condition;
+        final var candidate = sumCaseTest(condition);
         if (!(candidate instanceof Expr.SumCaseTest test)) return List.of();
         final var bindings = test.pattern.arguments().stream()
                 .filter(argument -> argument.binding() != null).toList();
@@ -125,6 +125,14 @@ final class ExpressionFlowEmitter {
             names.add(name);
         }
         return names;
+    }
+
+    private static Expr sumCaseTest(final Expr expression) {
+        return switch (expression) {
+            case Expr.Grouping grouping -> sumCaseTest(grouping.expression);
+            case Expr.Unary unary when unary.operator.type() == TokenType.NOT -> sumCaseTest(unary.right);
+            default -> expression;
+        };
     }
 
     static void endSumCaseTestBindings(final CompilationContext context, final List<Token> bindings) {
@@ -531,7 +539,7 @@ final class ExpressionFlowEmitter {
                 storePipelineValue(context, composer, binding, capture.type());
             }
             final var parameter = declareLoopLocal(
-                    context, lambda.params.getFirst(), functionType.parameters().getFirst());
+                    context, lambda.parameterTokens().getFirst(), functionType.parameters().getFirst());
             loadPipelineValue(context, composer, currentValue, currentType);
             emitConversion(context, composer, currentType, functionType.parameters().getFirst());
             storePipelineValue(context, composer, parameter, functionType.parameters().getFirst());

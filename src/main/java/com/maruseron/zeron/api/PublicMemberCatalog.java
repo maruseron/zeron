@@ -19,7 +19,7 @@ public final class PublicMemberCatalog {
     public enum MemberOrigin { DIRECT, CONTRACT_REQUIREMENT, CONTRACT_DEFAULT, EXTENSION }
 
     public sealed interface TypeRef permits NamedType, GenericType, TypeVariable,
-            ArrayType, NullableType, ReferenceType, FunctionType, HandlerType, ProjectedType {
+            ArrayType, NullableType, ReferenceType, FunctionType, HandlerType, ProjectedType, RowType {
         static TypeRef named(final String name) {
             return new NamedType(name);
         }
@@ -29,7 +29,7 @@ public final class PublicMemberCatalog {
                 case TypeParameterDescriptor parameter -> new TypeVariable(parameter.name(),
                         parameter.bounds().stream().map(TypeRef::from).toList(),
                         parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                        parameter.admitsMutableArguments());
+                        parameter.isEffectRowKind(), parameter.admitsMutableArguments());
                 case TypeProjectionDescriptor projection -> new ProjectedType(projection.kind(),
                         TypeRef.from(projection.bound()));
                 case GenericDescriptor generic -> new GenericType(generic.baseType().name(),
@@ -47,6 +47,9 @@ public final class PublicMemberCatalog {
                         from(function.returnType()),
                         function.raisedEffects().stream().map(TypeRef::from).toList());
                 case NominalDescriptor nominal -> new NamedType(nominal.name());
+                case EffectRowDescriptor row -> new RowType(
+                        row.effects().stream().map(TypeRef::from).toList(),
+                        row.variables().stream().map(TypeRef::from).toList());
                 default -> new NamedType(descriptor.name());
             };
         }
@@ -65,19 +68,25 @@ public final class PublicMemberCatalog {
 
     public record TypeVariable(String name, List<TypeRef> bounds,
                                boolean admitsNullableArguments, boolean effectKind,
-                               boolean admitsMutableArguments) implements TypeRef {
+                               boolean effectRowKind, boolean admitsMutableArguments) implements TypeRef {
         public TypeVariable {
             Objects.requireNonNull(name);
             bounds = List.copyOf(bounds);
         }
 
         public TypeVariable(final String name, final List<TypeRef> bounds) {
-            this(name, bounds, false, false, false);
+            this(name, bounds, false, false, false, false);
         }
 
         public TypeVariable(final String name, final List<TypeRef> bounds,
                             final boolean admitsNullableArguments, final boolean effectKind) {
-            this(name, bounds, admitsNullableArguments, effectKind, false);
+            this(name, bounds, admitsNullableArguments, effectKind, false, false);
+        }
+
+        public TypeVariable(final String name, final List<TypeRef> bounds,
+                            final boolean admitsNullableArguments, final boolean effectKind,
+                            final boolean admitsMutableArguments) {
+            this(name, bounds, admitsNullableArguments, effectKind, false, admitsMutableArguments);
         }
     }
 
@@ -85,6 +94,13 @@ public final class PublicMemberCatalog {
         public ProjectedType {
             Objects.requireNonNull(kind);
             Objects.requireNonNull(bound);
+        }
+    }
+
+    public record RowType(List<TypeRef> effects, List<TypeRef> variables) implements TypeRef {
+        public RowType {
+            effects = List.copyOf(effects);
+            variables = List.copyOf(variables);
         }
     }
 
@@ -123,26 +139,32 @@ public final class PublicMemberCatalog {
 
     public record TypeParameter(String name, List<TypeRef> bounds,
                                 boolean admitsNullableArguments, boolean effectKind,
-                                boolean admitsMutableArguments) {
+                                boolean effectRowKind, boolean admitsMutableArguments) {
         public TypeParameter {
             Objects.requireNonNull(name);
             bounds = List.copyOf(bounds);
         }
 
         public TypeParameter(final String name, final List<TypeRef> bounds) {
-            this(name, bounds, false, false, false);
+            this(name, bounds, false, false, false, false);
         }
 
         public TypeParameter(final String name, final List<TypeRef> bounds,
                              final boolean admitsNullableArguments, final boolean effectKind) {
-            this(name, bounds, admitsNullableArguments, effectKind, false);
+            this(name, bounds, admitsNullableArguments, effectKind, false, false);
+        }
+
+        public TypeParameter(final String name, final List<TypeRef> bounds,
+                             final boolean admitsNullableArguments, final boolean effectKind,
+                             final boolean admitsMutableArguments) {
+            this(name, bounds, admitsNullableArguments, effectKind, false, admitsMutableArguments);
         }
 
         private static TypeParameter from(final TypeParameterDescriptor parameter) {
             return new TypeParameter(parameter.name(),
                     parameter.bounds().stream().map(TypeRef::from).toList(),
                     parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                    parameter.admitsMutableArguments());
+                    parameter.isEffectRowKind(), parameter.admitsMutableArguments());
         }
     }
 
@@ -832,7 +854,7 @@ public final class PublicMemberCatalog {
                     variable.bounds().stream().map(PublicMemberCatalog::toDescriptor).toList(), false,
                     TypeParameterDescriptor.Variance.INVARIANT,
                     variable.admitsNullableArguments(), variable.effectKind(),
-                    variable.admitsMutableArguments());
+                    variable.effectRowKind(), variable.admitsMutableArguments());
             case ProjectedType projection -> new TypeProjectionDescriptor(
                     projection.kind(), toDescriptor(projection.bound()));
             case ArrayType array -> TypeDescriptor.arrayOf(toDescriptor(array.elementType()));
@@ -846,11 +868,22 @@ public final class PublicMemberCatalog {
                                     .map(PublicMemberCatalog::toDescriptor).toList(), false,
                             TypeParameterDescriptor.Variance.INVARIANT,
                             parameter.admitsNullableArguments(), parameter.effectKind(),
-                            parameter.admitsMutableArguments())).toList(),
+                            parameter.effectRowKind(), parameter.admitsMutableArguments())).toList(),
                     function.raisedEffects().stream().map(PublicMemberCatalog::toDescriptor).toList());
             case HandlerType handler -> TypeDescriptor.handlerOf(toDescriptor(handler.returnType()),
                     handler.handledEffects().stream().map(PublicMemberCatalog::toDescriptor).toList(),
                     handler.raisedEffects().stream().map(PublicMemberCatalog::toDescriptor).toList());
+            case RowType row -> new EffectRowDescriptor(
+                    row.effects().stream().map(PublicMemberCatalog::toDescriptor).toList(),
+                    row.variables().stream()
+                            .map(PublicMemberCatalog::toDescriptor)
+                            .map(descriptor -> {
+                                if (descriptor instanceof TypeParameterDescriptor parameter
+                                        && parameter.isEffectRowKind()) return parameter;
+                                throw new IllegalArgumentException(
+                                        "An effect-row variable must be a row-kinded type parameter.");
+                            })
+                            .toList());
         };
     }
 
@@ -860,7 +893,7 @@ public final class PublicMemberCatalog {
                     parameter.name(), parameter.bounds().stream().map(PublicMemberCatalog::copyType).toList(),
                     parameter.isHigherKinded(), parameter.variance(),
                     parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                    parameter.admitsMutableArguments());
+                    parameter.isEffectRowKind(), parameter.admitsMutableArguments());
             case AppliedConstructorDescriptor applied -> new AppliedConstructorDescriptor(
                     (TypeParameterDescriptor) copyType(applied.constructor()), copyType(applied.argument()));
             case TypeConstructorDescriptor constructor -> new TypeConstructorDescriptor(
@@ -885,6 +918,11 @@ public final class PublicMemberCatalog {
                     function.typeParameters().stream().map(parameter -> (TypeParameterDescriptor)
                             copyType(parameter)).toList(),
                     function.raisedEffects().stream().map(PublicMemberCatalog::copyType).toList());
+            case EffectRowDescriptor row -> new EffectRowDescriptor(
+                    row.effects().stream().map(PublicMemberCatalog::copyType).toList(),
+                    row.variables().stream()
+                            .map(variable -> (TypeParameterDescriptor) copyType(variable))
+                            .toList());
             default -> type;
         };
     }

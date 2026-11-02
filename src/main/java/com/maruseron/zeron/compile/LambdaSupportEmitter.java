@@ -3,6 +3,7 @@ package com.maruseron.zeron.compile;
 import com.maruseron.zeron.analize.Resolver;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
+import com.maruseron.zeron.scan.Token;
 
 import java.lang.classfile.*;
 import java.lang.constant.*;
@@ -110,7 +111,7 @@ final class LambdaSupportEmitter {
         final var allParameters = new ArrayList<TypeDescriptor>();
         allParameters.addAll(context.lambdaPlan.captureTypes(lambda));
         allParameters.addAll(Collections.nCopies(evidenceFields.size(), methodHandleType));
-        for (final var parameter : functionType.parameters()) {
+        for (final var parameter : functionType.invocationParameters()) {
             allParameters.add(parameter);
         }
         final var previousOffset = context.localSlotOffset;
@@ -132,8 +133,18 @@ final class LambdaSupportEmitter {
                         methodHandleType, BindingMutability.IMMUTABLE);
                 context.symbols.define(evidenceField.token());
             }
-            for (int i = 0; i < lambda.params.size(); i++) {
-                final var param = lambda.params.get(i);
+            if (functionType.receiverType() != null) {
+                final var receiverToken = lambda.receiverSymbolToken();
+                if (receiverToken == null) {
+                    throw new IllegalStateException("Receiver lambda has no receiver symbol.");
+                }
+                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR,
+                        receiverToken, functionType.receiverType(), BindingMutability.IMMUTABLE);
+                context.symbols.define(receiverToken);
+            }
+            final var lambdaParameters = lambda.parameterTokens();
+            for (int i = 0; i < lambdaParameters.size(); i++) {
+                final var param = lambdaParameters.get(i);
                 final var parameterType = functionType.parameters().get(i);
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, param, parameterType, BindingMutability.IMMUTABLE);
                 context.symbols.define(param);
@@ -194,7 +205,7 @@ final class LambdaSupportEmitter {
         }
 
         final var implementationParameters = new ArrayList<TypeDescriptor>(capturedTypes);
-        implementationParameters.addAll(erasedFunctionType.parameters());
+        implementationParameters.addAll(erasedFunctionType.invocationParameters());
         final var implementation = MethodHandleDesc.of(
                 DirectMethodHandleDesc.Kind.STATIC,
                 ClassDesc.of(context.mainClassName),
@@ -254,7 +265,7 @@ final class LambdaSupportEmitter {
         }
         final var implementationParameters = new ArrayList<TypeDescriptor>();
         implementationParameters.add(sourceType);
-        implementationParameters.addAll(targetType.parameters());
+        implementationParameters.addAll(targetType.invocationParameters());
         final var metafactoryType = MethodTypeDesc.of(
                 ClassDesc.of("java.lang.invoke.CallSite"),
                 ClassDesc.of("java.lang.invoke.MethodHandles$Lookup"),
@@ -288,18 +299,30 @@ final class LambdaSupportEmitter {
                                                            final FunctionDescriptor targetType) {
         composer.aload(0);
         var slot = 1;
-        for (int i = 0; i < targetType.arity(); i++) {
-            final var targetParameter = targetType.parameters().get(i);
+        final var targetParameters = targetType.invocationParameters();
+        final var sourceParameters = sourceType.invocationParameters();
+        for (int i = 0; i < targetParameters.size(); i++) {
+            final var targetParameter = targetParameters.get(i);
             NominalTypeEmitter.loadLocal(context, composer, slot, targetParameter);
-            emitConversion(context, composer, targetParameter, sourceType.parameters().get(i));
+            emitConversion(context, composer, targetParameter, sourceParameters.get(i));
             final var descriptor = TypeDescriptor.toJavaClassDesc(targetParameter).descriptorString();
             slot += descriptor.equals("D") || descriptor.equals("J") ? 2 : 1;
         }
         composer.invokeinterface(TypeDescriptor.toJavaClassDesc(sourceType), "invoke",
             toJavaMethodDescriptor(sourceType));
-        emitConversion(context, composer, sourceType.returnType(), targetType.returnType());
+        final var sourceReturn = sourceType.returnType();
+        final var targetReturn = targetType.returnType();
+        if (sourceReturn instanceof NeverDescriptor) {
+            if (!(targetReturn instanceof NeverDescriptor)) {
+                composer.aconst_null();
+            }
+        } else if (targetReturn instanceof NeverDescriptor) {
+            emitPop(context, composer, sourceReturn);
+        } else {
+            emitConversion(context, composer, sourceReturn, targetReturn);
+        }
         composer.return_(TypeKind.fromDescriptor(
-            TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));
+            TypeDescriptor.toJavaClassDesc(targetReturn).descriptorString()));
     }
 
 }

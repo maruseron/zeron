@@ -23,10 +23,30 @@ fn circleRadius(shape: Shape): Float =
     if (shape matches Shape.Circle(radius)) then radius else 0.0;
 ```
 
-`matches` is currently supported only as a direct `if` or `while` condition. It cannot be combined
-with `and`, `or`, or `not`, or used as an ordinary expression, because a payload binding is only
-valid on the path where that case matched. When several alternatives or more involved conditions
-are needed, use a `match` expression instead.
+`matches` is supported as a direct `if` or `while` condition, including in an `if` expression.
+Parentheses may group the test, and `not` reverses which branch represents a successful match.
+Payload bindings are available only on the successful-match branch:
+
+```zeron
+type Option<T> = Some(value: T) | None;
+
+fn valueOrZero(option: Option<Int>): Int =
+    if (not (option matches Option.Some(value))) then 0 else value;
+```
+
+When a branch rules out all but one sum case, the remaining case's payload properties are available
+on that branch:
+
+```zeron
+fn valueOrZero(option: Option<Int>): Int {
+    if (option matches Option.None()) { return 0; }
+    return option.value;
+}
+```
+
+This negative refinement is limited to direct `matches` tests on closed sum types. It does not apply
+to `is` tests or to `matches` combined with `and` or `or`. Use a `match` expression for several
+alternatives or more involved conditions.
 
 ## Choosing a case with `match`
 

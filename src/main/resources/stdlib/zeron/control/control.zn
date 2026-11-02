@@ -13,7 +13,7 @@ import zeron.function.identity;
 /// f.map(a -> g(h(a))) == f.map(h).map(g)
 /// ```
 public contract Functor<F<_>> {
-    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+    map<A: mut, B: mut>(this: F<A>, transform: A -> B): F<B>;
 }
 
 fn applySecond<A: mut, B: mut, C: mut>(
@@ -21,11 +21,9 @@ fn applySecond<A: mut, B: mut, C: mut>(
     second: B
 ): (A) -> C = first -> combine(first, second);
 
-/// An Applicative is a type that, given any types `A` and `B`, lets you
-/// pass expressions to a previously stored computation
 public contract Applicative<F<_>> requires Functor<F> {
     pure<A: mut>(value: A): F<A>;
-    ap<A: mut, B: mut>(this: F<A>, transform: F<(A) -> B>): F<B>;
+    ap<A: mut, B: mut>(this: F<A>, transform: F<A -> B>): F<B>;
 
     default map2<A: mut, B: mut, C: mut>(
         first: F<A>,
@@ -35,19 +33,10 @@ public contract Applicative<F<_>> requires Functor<F> {
 }
 
 public contract Monad<M<_>> requires Applicative<M> {
-    flatMap<A: mut, B: mut>(this: M<A>, transform: (A) -> M<B>): M<B>;
+    flatMap<A: mut, B: mut>(this: M<A>, transform: A -> M<B>): M<B>;
 
     default flatten<A: mut>(this: M<M<A>>): M<A> =
-        // TODO: this.flatMap(identity);
-        //                    ^ Conflicting type inferences for 'A': 
-        //     AppliedConstructorDescriptor[constructor=TypeParameter[M], 
-        //                                  argument=TypeParameter[A]] 
-        // and AppliedConstructorDescriptor[constructor=TypeParameter[M], 
-        //                                  argument=TypeParameter[B]].
-        //
-        // identity::<M<A>> does fix it - why?
-        //this.flatMap(identity::<M<A>>);
-        this.flatMap(ma -> ma);
+        this.flatMap(identity);
 }
 
 public contract Semigroup<A: mut> {
@@ -69,28 +58,28 @@ public contract Foldable<F<_>> {
     foldLeft<A: mut, B: mut>(this: F<A>, initial: B, combine: (B, A) -> B): B;
 
     default count<A: mut>(this: F<A>): Int = 
-        this.foldLeft(0, (c, _) -> c + 1);
+        this.foldLeft(0) { c, _ -> c + 1 };
 
     default isEmpty<A: mut>(this: F<A>): Boolean = 
-        this.foldLeft(true, (accumulator, item) -> false);
+        this.foldLeft(true) { accumulator, item -> false };
 }
 
 public contract Traversable<T<_>> requires Functor<T> + Foldable<T> {
-    traverse<G<_>: Applicative<G>, A: mut, B: mut>(this: T<A>, transform: (A) -> G<B>): G<T<B>>;
+    traverse<G<_>: Applicative<G>, A: mut, B: mut>(this: T<A>, transform: A -> G<B>): G<T<B>>;
 
     default sequence<G<_>: Applicative<G>, A: mut>(this: T<G<A>>): G<T<A>> =
-        this.traverse(ga -> ga);
+        this.traverse(identity);
 }
 
 public contract Comonad<W<_>> requires Functor<W> {
     extract<A: mut>(this: W<A>): A;
-    extend<A: mut, B: mut>(this: W<A>, transform: (W<A>) -> B): W<B>;
+    extend<A: mut, B: mut>(this: W<A>, transform: W<A> -> B): W<B>;
 
     default duplicate<A: mut>(this: W<A>): W<W<A>> = 
-        this.extend(wa -> wa);
+        this.extend(identity);
 }
 
 public contract Category<Cat<_>> {
     id<A: mut>(this: Cat<A>): A;
-    compose<A: mut, B: mut, C: mut>(this: (A) -> B, other: (B) -> C): (A) -> C;
+    compose<A: mut, B: mut, C: mut>(this: A -> B, other: B -> C): (A) -> C;
 }

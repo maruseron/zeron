@@ -1,26 +1,13 @@
-/*effect NotFound {
-    public property path: String;
-}
-
-fn read(path: String): String raises NotFound = raise NotFound.new(path);
-
-fn applyPolicy(policy: String ~> {NotFound}): String =
-    handle (read("input.txt")) with policy;
-
-public fn map<T, R, E: effect>(
-    list: List<T>, 
-    transform: (T) -> R raises E
-): List<R> raises E = 
-    match (list) {
-        case List.Nil() -> List.Nil<R>();
-        case List.Cons(head, tail) -> List.Cons(transform(head), map<T, R, E>(tail, transform));
-    };
-
-fn example(): String = applyPolicy(handler {
-    case NotFound.path(_) -> "";
-});*/
-
 fn main() {
     let list = List.from<Int>(1, 2, 3, 4, 5);
-    println(list.toString());
+    println(list.map(i -> i * 2).toString());
+    println(map(list, i -> i * 2).toString());
 }
+
+public fn map<T, R, E: effect...>(
+    list: List<T>,
+    transform: (T) -> R raises E
+): List<R> raises E = match (list) {
+    case List.Nil() -> List.Nil<R>();
+    case List.Cons(head, tail) -> List.Cons(transform(head), map<T, R, E>(tail, transform));
+};

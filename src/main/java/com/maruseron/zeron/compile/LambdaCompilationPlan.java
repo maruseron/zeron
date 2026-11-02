@@ -232,9 +232,12 @@ final class LambdaCompilationPlan {
                 functionShapes.putIfAbsent(shapeKey, erasedFunction);
                 final List<TypeDescriptor> erasedParameters = Collections.nCopies(
                         erasedFunction.arity(), TypeDescriptor.ofName("java.lang.Object"));
-                final var objectShape = TypeDescriptor.functionWithEffectsOf(
-                        erasedFunction.name(), TypeDescriptor.ofName("java.lang.Object"),
-                        erasedParameters, List.of(), List.of());
+                final var objectShape = erasedFunction.receiverType() == null
+                        ? TypeDescriptor.functionWithEffectsOf(erasedFunction.name(),
+                                TypeDescriptor.ofName("java.lang.Object"), erasedParameters, List.of(), List.of())
+                        : TypeDescriptor.receiverFunctionOf(erasedFunction.name(),
+                                TypeDescriptor.ofName("java.lang.Object"),
+                                TypeDescriptor.ofName("java.lang.Object"), erasedParameters, List.of(), List.of());
                 final var objectShapeKey = FunctionShapeKey.of(objectShape);
                 final var objectInterfaceName = FunctionShapeNames.interfaceName(objectShapeKey);
                 final var previousObjectKey = functionShapeNames.putIfAbsent(
@@ -244,6 +247,7 @@ final class LambdaCompilationPlan {
                             "Function shape digest collision for " + objectInterfaceName);
                 }
                 functionShapes.putIfAbsent(objectShapeKey, objectShape);
+                if (erasedFunction.receiverType() != null) collectFunctionShapes(erasedFunction.receiverType());
                 for (final var parameter : erasedFunction.parameters()) collectFunctionShapes(parameter);
                 collectFunctionShapes(erasedFunction.returnType());
             }
@@ -484,8 +488,22 @@ final class LambdaCompilationPlan {
         final var captured = new ArrayList<Token>();
         final var seen = new HashSet<String>();
         final var locals = new HashSet<String>();
-        for (final var param : lambda.params) {
+        for (final var param : lambda.parameterTokens()) {
             locals.add(param.lexeme());
+        }
+        if (lambda.receiverSymbolToken() != null) {
+            locals.add(lambda.receiverSymbolToken().lexeme());
+        }
+        if (lambda.getType() instanceof FunctionDescriptor functionType) {
+            for (final var parameter : functionType.typeParameters()) {
+                for (int boundIndex = 0; boundIndex < parameter.bounds().size(); boundIndex++) {
+                    final var contractUse = ContractComposition.fromType(parameter.bounds().get(boundIndex));
+                    if (contractUse == null) continue;
+                    for (final var slot : ContractComposition.methods(contracts, contractUse)) {
+                        locals.add(Expr.methodEvidenceToken(parameter, boundIndex, slot.index()).lexeme());
+                    }
+                }
+            }
         }
         final var previousCaptureTypes = activeCaptureTypes;
         final var captureTypes = new LinkedHashMap<String, TypeDescriptor>();
@@ -586,6 +604,8 @@ final class LambdaCompilationPlan {
         if (expr == null) return;
         switch (expr) {
             case Expr.MemberCall call -> {
+                collectEvidenceCapture(call.witnessEvidenceToken(), localNames, captured, seen);
+                collectEvidenceCaptures(call.evidenceArguments(), localNames, captured, seen);
                 lambdaMethodCalls.add(new LambdaMemberKey(
                         call.resolvedOwnerName() == null
                                 ? nominalName(call.receiver.getType())
@@ -626,10 +646,18 @@ final class LambdaCompilationPlan {
             case Expr.CoalesceAssignment assignment ->
                     collectCapturedVariables(assignment.value, localNames, captured, seen);
             case Expr.Binary binary -> {
+                if (binary.synthesizedEqualityEvidence() != null) {
+                    collectEvidenceCapture(binary.synthesizedEqualityEvidence().forwardToken(),
+                            localNames, captured, seen);
+                    collectEvidenceCaptures(
+                            binary.synthesizedEqualityEvidence().prerequisiteEvidence(),
+                            localNames, captured, seen);
+                }
                 collectCapturedVariables(binary.left, localNames, captured, seen);
                 collectCapturedVariables(binary.right, localNames, captured, seen);
             }
             case Expr.Call call -> {
+                collectEvidenceCaptures(call.evidenceArguments(), localNames, captured, seen);
                 final var callee = call.resolvedSymbolToken();
                 final var calleeName = callee.lexeme();
                 if (!localNames.contains(calleeName)
@@ -639,7 +667,10 @@ final class LambdaCompilationPlan {
                             && functionView(binding.type()) != null
                             && seen.add(calleeName)) {
                         captured.add(callee);
-                        activeCaptureTypes.putIfAbsent(calleeName, binding.type());
+                        final var captureType = call.genericFunctionType() == null
+                                ? binding.type()
+                                : call.genericFunctionType();
+                        activeCaptureTypes.putIfAbsent(calleeName, captureType);
                     }
                 }
                 if (call.implicitMemberCall() != null) {
@@ -725,7 +756,10 @@ final class LambdaCompilationPlan {
             }
             case Expr.Lambda lambda -> {
                 final var nestedNames = new HashSet<>(localNames);
-                for (final var param : lambda.params) nestedNames.add(param.lexeme());
+                for (final var param : lambda.parameterTokens()) nestedNames.add(param.lexeme());
+                if (lambda.receiverSymbolToken() != null) {
+                    nestedNames.add(lambda.receiverSymbolToken().lexeme());
+                }
                 collectCapturedVariables(lambda.body, nestedNames, captured, seen);
             }
             case Expr.AnonymousObject object -> object.initializers().forEach(initializer ->
@@ -739,6 +773,7 @@ final class LambdaCompilationPlan {
             }
             case Expr.Unary unary -> collectCapturedVariables(unary.right, localNames, captured, seen);
             case Expr.Variable variable -> {
+                collectEvidenceCaptures(variable.evidenceArguments(), localNames, captured, seen);
                 if (variable.implicitFieldReceiver() != null) {
                     lambdaFieldReads.add(new LambdaMemberKey(
                             variable.implicitFieldOwner(), variable.name.lexeme()));
@@ -748,6 +783,7 @@ final class LambdaCompilationPlan {
                 final var sourceName = variable.name.lexeme();
                 if (localNames.contains(sourceName)) return;
                 final var resolvedName = variable.resolvedSymbolToken();
+                if (localNames.contains(resolvedName.lexeme())) return;
                 if ((symbols.containsSymbol(resolvedName) || symbols.containsAnySymbol(resolvedName))
                         && lookupCapture(resolvedName).lvt() != SymbolTable.GLOBAL
                         && seen.add(resolvedName.lexeme())) {
@@ -757,6 +793,26 @@ final class LambdaCompilationPlan {
             }
             default -> {}
         }
+    }
+
+    private void collectEvidenceCaptures(final List<Expr.EvidenceArgument> arguments,
+                                         final Set<String> localNames,
+                                         final List<Token> captured,
+                                         final Set<String> seen) {
+        for (final var argument : arguments) {
+            collectEvidenceCapture(argument.forwardToken(), localNames, captured, seen);
+            collectEvidenceCaptures(argument.prerequisiteEvidence(), localNames, captured, seen);
+        }
+    }
+
+    private void collectEvidenceCapture(final Token token,
+                                        final Set<String> localNames,
+                                        final List<Token> captured,
+                                        final Set<String> seen) {
+        if (token == null || localNames.contains(token.lexeme()) || !seen.add(token.lexeme())) return;
+        captured.add(token);
+        activeCaptureTypes.putIfAbsent(token.lexeme(),
+                TypeDescriptor.ofName("java.lang.invoke.MethodHandle"));
     }
 
     private void collectCapturedProperty(final Expr.Property property,
@@ -799,6 +855,17 @@ final class LambdaCompilationPlan {
                 collectFunctionAdapters(call.arguments.get(index).getType(),
                         TypeSubstitution.erase(witnessType.parameters().get(index + receiverOffset)));
             }
+            return;
+        }
+
+        if (call.witnessMethodName() != null) {
+            final var helperType = call.witnessMethodType();
+            final var receiverOffset = call.witnessMethodHasReceiver() ? 1 : 0;
+            for (int index = 0; index < call.arguments.size(); index++) {
+                collectFunctionAdapters(call.arguments.get(index).getType(),
+                        TypeSubstitution.erase(helperType.parameters().get(index + receiverOffset)));
+            }
+            collectFunctionAdapters(TypeSubstitution.erase(helperType.returnType()), call.getType());
             return;
         }
 
@@ -1036,6 +1103,9 @@ final class LambdaCompilationPlan {
                     _ -> "$nullableAdapter$" + nullableFunctionAdapterNames.size());
         }
 
+        if (target.receiverType() != null) {
+            collectFunctionAdapters(target.receiverType(), source.receiverType());
+        }
         for (int i = 0; i < target.arity(); i++) {
             collectFunctionAdapters(target.parameters().get(i), source.parameters().get(i));
         }

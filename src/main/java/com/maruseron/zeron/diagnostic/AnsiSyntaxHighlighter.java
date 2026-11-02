@@ -34,6 +34,15 @@ public final class AnsiSyntaxHighlighter {
                     && tokens.get(previousSignificantIndex(tokens, index)).type() == TokenType.SUFFIXABLE_NUMBER) {
                 color = "36";
             }
+            if (color == null && token.type() == TokenType.IDENTIFIER
+                    && previousSignificantIndex(tokens, index) >= 0
+                    && tokens.get(previousSignificantIndex(tokens, index)).type() == TokenType.AT) {
+                color = "35";
+            }
+            if (color == null && token.type() == TokenType.IDENTIFIER
+                    && isCodeModelType(token.lexeme())) {
+                color = "36";
+            }
             if (color == null && dataClassInitializerNames.contains(token)) color = "36";
             if (color == null && (forExpressionResultKeywords.contains(token)
                     || isContextualKeyword(tokens, index))) color = "35";
@@ -297,7 +306,7 @@ public final class AnsiSyntaxHighlighter {
             case STRING, CHAR, TRUE, FALSE, NULL -> "32";
             case INT, LONG, DOUBLE, SUFFIXABLE_NUMBER -> "36";
             case LINE_COMMENT, BLOCK_COMMENT -> "90";
-            case AND, AS, BREAK, CASE, CLASS, CONTRACT, CONSTRUCTOR, CONTINUE, DEFAULT, ELSE,
+            case AND, ANNOTATION, AS, BREAK, CASE, CLASS, CONTRACT, CONSTRUCTOR, CONTINUE, DEFAULT, ELSE,
                     EFFECT, EXTENSION, EXTERNAL, FN, FOR, HANDLE, IF, IMPLEMENT, IMPORT,
                     IN, IS, LET, LOOP, MATCH, MUT, NOT, NAMESPACE, OR, PACKAGE, PATTERN,
                     OBJECT, PRIVATE, PROPERTY, PUBLIC, RAISE, RAISES, RETURN, SEALED, STATIC,
@@ -312,6 +321,13 @@ public final class AnsiSyntaxHighlighter {
                     HUH_HUH_EQUAL, EQUAL, EQUAL_EQUAL, EQUAL_EQUAL_EQUAL, GREATER,
                     GREATER_EQUAL, LESS, LESS_EQUAL -> "33";
             default -> null;
+        };
+    }
+
+    private static boolean isCodeModelType(final String name) {
+        return switch (name) {
+            case "CodeCapture", "CodeModel", "CodeNode", "CodeType" -> true;
+            default -> false;
         };
     }
 }

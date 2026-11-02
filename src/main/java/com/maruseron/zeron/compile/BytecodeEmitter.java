@@ -49,6 +49,7 @@ final class BytecodeEmitter {
             context.registerGeneratedInterface(FunctionShapeNames.interfaceName(shape.getKey()));
             RuntimeSupportEmitter.emitFunctionShape(context.outputDirectory, shape.getKey(), shape.getValue());
         }
+        RuntimeSupportEmitter.emitArrayIterableSupportClass(context);
 
         final var hasNamespaceValues = context.compilationUnits.stream().filter(unit -> !unit.metadataOnly())
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
@@ -699,6 +700,10 @@ final class BytecodeEmitter {
                 context.lastEmittedType = object.getType();
             }
             case Expr.Lambda lambda -> {
+                if (lambda.codeModelType() != null) {
+                    emitCodeModel(context, composer, lambda);
+                    break;
+                }
                 final var functionType = (FunctionDescriptor) lambda.getType();
                 if (context.lambdaPlan.lambdaTemplateFactoryName(lambda) != null) {
                     emitLambdaTemplateValue(context, composer, lambda);
@@ -707,7 +712,7 @@ final class BytecodeEmitter {
                 final var captures = context.lambdaPlan.captures(lambda);
                 final var captureTypes = context.lambdaPlan.captureTypes(lambda);
                 final var implementationParameters = new ArrayList<>(captureTypes);
-                implementationParameters.addAll(functionType.parameters());
+                implementationParameters.addAll(functionType.invocationParameters());
                 for (int i = 0; i < captures.size(); i++) {
                     emitVariable(context, composer, captures.get(i));
                     emitConversion(context, composer, context.lastEmittedType, captureTypes.get(i));
@@ -752,6 +757,12 @@ final class BytecodeEmitter {
                 if (literal.numericConversionCall() != null) {
                     emitMemberCall(context, composer, literal.numericConversionCall());
                     context.lastEmittedType = literal.getType();
+                } else if (literal.exactInteger() != null && literal.getType() instanceof IntDescriptor) {
+                    composer.ldc(literal.exactInteger().intValueExact());
+                    context.lastEmittedType = literal.getType();
+                } else if (literal.exactInteger() != null && literal.getType() instanceof LongDescriptor) {
+                    composer.ldc(literal.exactInteger().longValueExact());
+                    context.lastEmittedType = literal.getType();
                 } else switch (literal.value) {
                     case String s -> {
                         composer.ldc(s);
@@ -788,6 +799,16 @@ final class BytecodeEmitter {
             case Expr.Unary unary -> {
                 if (unary.operatorCall() != null) {
                     emitMemberCall(context, composer, unary.operatorCall());
+                    context.lastEmittedType = unary.getType();
+                } else if (unary.operator.type() == TokenType.BANG_BANG) {
+                    emitExpr(context, composer, unary.right);
+                    if (unary.right.getType() instanceof NullableDescriptor nullable) {
+                        composer.ldc("Non-null assertion failed.");
+                        composer.invokestatic(ClassDesc.of("java.util.Objects"), "requireNonNull",
+                                MethodTypeDesc.of(ClassDesc.of("java.lang.Object"),
+                                        ClassDesc.of("java.lang.Object"), ClassDesc.of("java.lang.String")));
+                        emitConversion(context, composer, TypeDescriptor.ofAny(), nullable.baseType());
+                    }
                     context.lastEmittedType = unary.getType();
                 } else if (unary.operator.type() == TokenType.NOT) {
                     emitExpr(context, composer, unary.right);
@@ -862,6 +883,251 @@ final class BytecodeEmitter {
             }
             default -> throw new UnsupportedOperationException();
         }
+    }
+
+    private static void emitCodeModel(final CompilationContext context,
+                                      final CodeBuilder composer,
+                                      final Expr.Lambda lambda) {
+        final var functionType = (FunctionDescriptor) lambda.getType();
+        final var parameters = lambda.parameterTokens(functionType.arity());
+        final var captures = context.lambdaPlan.captures(lambda);
+        final var captureTypes = context.lambdaPlan.captureTypes(lambda);
+        final var body = ((Stmt.Return) lambda.body.getFirst()).value();
+        final var modelClass = ClassDesc.of("zeron.compiler.CodeModel");
+        final var nodeClass = ClassDesc.of("zeron.compiler.CodeNode");
+        final var captureClass = ClassDesc.of("zeron.compiler.CodeCapture");
+
+        composer.new_(modelClass);
+        composer.dup();
+        composer.new_(nodeClass);
+        composer.dup();
+        composer.ldc("LAMBDA");
+        emitCodeType(context, composer, functionType);
+        composer.aconst_null();
+        composer.aconst_null();
+        composer.loadConstant(-1);
+        composer.loadConstant(parameters.size() + 1);
+        composer.anewarray(nodeClass);
+        for (int index = 0; index < parameters.size(); index++) {
+            composer.dup();
+            composer.loadConstant(index);
+            composer.new_(nodeClass);
+            composer.dup();
+            composer.ldc("PARAMETER");
+            emitCodeType(context, composer, functionType.parameters().get(index));
+            composer.ldc(parameters.get(index).lexeme());
+            composer.aconst_null();
+            composer.loadConstant(index);
+            composer.loadConstant(0);
+            composer.anewarray(nodeClass);
+            composer.invokespecial(nodeClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String,
+                            ClassDesc.of("zeron.compiler.CodeType"), ConstantDescs.CD_String,
+                            ConstantDescs.CD_Object, ConstantDescs.CD_int, ConstantDescs.CD_Object.arrayType()));
+            composer.aastore();
+        }
+        composer.dup();
+        composer.loadConstant(parameters.size());
+        emitCodeNode(context, composer, lambda, body, parameters, captures);
+        composer.aastore();
+        composer.invokespecial(nodeClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String,
+                        ClassDesc.of("zeron.compiler.CodeType"), ConstantDescs.CD_String,
+                        ConstantDescs.CD_Object, ConstantDescs.CD_int, ConstantDescs.CD_Object.arrayType()));
+        composer.loadConstant(captures.size());
+        composer.anewarray(captureClass);
+        for (int index = 0; index < captures.size(); index++) {
+            composer.dup();
+            composer.loadConstant(index);
+            composer.new_(captureClass);
+            composer.dup();
+            composer.loadConstant(index);
+            composer.ldc(captures.get(index).lexeme());
+            emitCodeType(context, composer, captureTypes.get(index));
+            emitVariable(context, composer, captures.get(index));
+            emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
+            composer.invokespecial(captureClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_int,
+                            ConstantDescs.CD_String, ClassDesc.of("zeron.compiler.CodeType"),
+                            ConstantDescs.CD_Object));
+            composer.aastore();
+        }
+        composer.invokespecial(modelClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, nodeClass,
+                        ConstantDescs.CD_Object.arrayType()));
+        context.lastEmittedType = lambda.codeModelType();
+    }
+
+    private static void emitCodeNode(final CompilationContext context,
+                                     final CodeBuilder composer,
+                                     final Expr.Lambda lambda,
+                                     final Expr expression,
+                                     final List<Token> parameters,
+                                     final List<Token> captures) {
+        final var nodeClass = ClassDesc.of("zeron.compiler.CodeNode");
+        String kind;
+        String identity = null;
+        Object literal = null;
+        var slot = -1;
+        final List<Expr> children;
+        switch (expression) {
+            case Expr.Grouping grouping -> {
+                emitCodeNode(context, composer, lambda, grouping.expression, parameters, captures);
+                return;
+            }
+            case Expr.Literal value -> {
+                kind = "LITERAL";
+                literal = value.value;
+                children = List.of();
+            }
+            case Expr.Variable variable -> {
+                final var symbol = variable.resolvedSymbolToken();
+                final var parameterIndex = tokenIndex(parameters, symbol);
+                if (parameterIndex >= 0) {
+                    kind = "PARAMETER";
+                    identity = variable.name.lexeme();
+                    slot = parameterIndex;
+                } else {
+                    kind = "CAPTURE";
+                    identity = variable.name.lexeme();
+                    slot = tokenIndex(captures, symbol);
+                    if (slot < 0) throw new IllegalStateException("Validated CodeModel capture was not planned.");
+                }
+                children = List.of();
+            }
+            case Expr.Property property -> {
+                kind = "PROPERTY";
+                final var owner = property.resolvedOwnerName() == null
+                        ? property.receiver.getType().name() : property.resolvedOwnerName();
+                identity = owner + "." + property.name.lexeme();
+                children = List.of(property.receiver);
+            }
+            case Expr.Binary binary -> {
+                kind = switch (binary.operator.type()) {
+                    case EQUAL_EQUAL -> "EQUAL";
+                    case BANG_EQUAL -> "NOT_EQUAL";
+                    case GREATER -> "GREATER_THAN";
+                    case GREATER_EQUAL -> "GREATER_THAN_OR_EQUAL";
+                    case LESS -> "LESS_THAN";
+                    case LESS_EQUAL -> "LESS_THAN_OR_EQUAL";
+                    default -> throw new IllegalStateException("Unsupported validated CodeModel comparison.");
+                };
+                children = List.of(binary.left, binary.right);
+            }
+            case Expr.Logical logical -> {
+                kind = logical.operator.type() == TokenType.AND ? "AND" : "OR";
+                children = List.of(logical.left, logical.right);
+            }
+            case Expr.Unary unary -> {
+                kind = "NOT";
+                children = List.of(unary.right);
+            }
+            case Expr.TypeTest test -> {
+                kind = "IS_NULL";
+                children = List.of(test.value);
+            }
+            default -> throw new IllegalStateException("Unsupported validated CodeModel expression: "
+                    + expression.getClass().getSimpleName());
+        }
+
+        composer.new_(nodeClass);
+        composer.dup();
+        composer.ldc(kind);
+        emitCodeType(context, composer, expression.getType());
+        if (identity == null) composer.aconst_null();
+        else composer.ldc(identity);
+        if (expression instanceof Expr.Literal literalExpression
+                && literalExpression.getType() instanceof NullDescriptor) {
+            composer.aconst_null();
+        } else if (expression instanceof Expr.Literal) {
+            emitExpr(context, composer, expression);
+            emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
+        } else {
+            composer.aconst_null();
+        }
+        composer.loadConstant(slot);
+        composer.loadConstant(children.size());
+        composer.anewarray(nodeClass);
+        for (int index = 0; index < children.size(); index++) {
+            composer.dup();
+            composer.loadConstant(index);
+            emitCodeNode(context, composer, lambda, children.get(index), parameters, captures);
+            composer.aastore();
+        }
+        composer.invokespecial(nodeClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String,
+                        ClassDesc.of("zeron.compiler.CodeType"), ConstantDescs.CD_String,
+                        ConstantDescs.CD_Object, ConstantDescs.CD_int, ConstantDescs.CD_Object.arrayType()));
+    }
+
+    private static int tokenIndex(final List<Token> tokens, final Token target) {
+        for (int index = 0; index < tokens.size(); index++) {
+            if (tokens.get(index).lexeme().equals(target.lexeme())) return index;
+        }
+        return -1;
+    }
+
+    private static void emitCodeType(final CompilationContext context,
+                                     final CodeBuilder composer,
+                                     final TypeDescriptor type) {
+        final var typeClass = ClassDesc.of("zeron.compiler.CodeType");
+        final var kind = codeTypeKind(type);
+        final var name = codeTypeName(type);
+        final var arguments = codeTypeArguments(type);
+        composer.new_(typeClass);
+        composer.dup();
+        composer.ldc(kind);
+        composer.ldc(name);
+        composer.loadConstant(arguments.size());
+        composer.anewarray(typeClass);
+        for (int index = 0; index < arguments.size(); index++) {
+            composer.dup();
+            composer.loadConstant(index);
+            emitCodeType(context, composer, arguments.get(index));
+            composer.aastore();
+        }
+        composer.invokespecial(typeClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String,
+                        ConstantDescs.CD_String, ConstantDescs.CD_Object.arrayType()));
+    }
+
+    private static String codeTypeKind(final TypeDescriptor type) {
+        if (type instanceof NullableDescriptor) return "nullable";
+        if (type instanceof ArrayDescriptor || type instanceof ByteArrayDescriptor) return "array";
+        if (type instanceof FunctionDescriptor) return "function";
+        if (type instanceof GenericDescriptor || type instanceof NominalDescriptor) return "nominal";
+        if (type instanceof TypeParameterDescriptor) return "type_parameter";
+        if (type instanceof ReferenceDescriptor) return "reference";
+        if (type instanceof TypeProjectionDescriptor projection) {
+            return projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "out" : "in";
+        }
+        if (type instanceof NullDescriptor) return "null";
+        return "primitive";
+    }
+
+    private static String codeTypeName(final TypeDescriptor type) {
+        if (type instanceof FunctionDescriptor function) return "Function/" + function.arity();
+        if (type instanceof NullableDescriptor nullable) return codeTypeName(nullable.baseType());
+        if (type instanceof ArrayDescriptor) return "Array";
+        if (type instanceof ByteArrayDescriptor) return "ByteArray";
+        if (type instanceof GenericDescriptor generic) return generic.baseType().name();
+        if (type instanceof ReferenceDescriptor reference) return codeTypeName(reference.baseType());
+        if (type instanceof TypeProjectionDescriptor projection) return codeTypeName(projection.bound());
+        return type.name();
+    }
+
+    private static List<TypeDescriptor> codeTypeArguments(final TypeDescriptor type) {
+        if (type instanceof NullableDescriptor nullable) return List.of(nullable.baseType());
+        if (type instanceof ArrayDescriptor array) return List.of(array.elementType());
+        if (type instanceof GenericDescriptor generic) return generic.typeParameters();
+        if (type instanceof FunctionDescriptor function) {
+            final var arguments = new ArrayList<TypeDescriptor>(function.parameters());
+            arguments.add(function.returnType());
+            return List.copyOf(arguments);
+        }
+        if (type instanceof ReferenceDescriptor reference) return List.of(reference.baseType());
+        if (type instanceof TypeProjectionDescriptor projection) return List.of(projection.bound());
+        return List.of();
     }
 
     private static void emitCall(CompilationContext context, final CodeBuilder composer, final Expr.Call call ){
@@ -1355,6 +1621,32 @@ final class BytecodeEmitter {
     private static void emitMemberCall(CompilationContext context, final CodeBuilder composer,
                                 final Expr.MemberCall call,
                                 final boolean receiverOnStack ){
+        if (call.receiverFunctionSymbol() != null) {
+            final var functionType = call.resolvedDescriptor();
+            if (functionType == null || !functionType.isReceiverFunction()) {
+                throw new IllegalStateException("Resolved receiver function call has no receiver shape.");
+            }
+            final var runtimeType = (FunctionDescriptor) TypeSubstitution.erase(functionType);
+            if (receiverOnStack) composer.pop();
+            emitVariable(context, composer, call.receiverFunctionSymbol());
+            if (receiverOnStack) {
+                composer.swap();
+            } else {
+                emitExpr(context, composer, call.receiver);
+            }
+            final var receiverType = call.receiver.getType() instanceof NullableDescriptor nullable
+                    ? nullable.baseType() : call.receiver.getType();
+            emitConversion(context, composer, receiverType, runtimeType.receiverType());
+            for (int index = 0; index < call.arguments.size(); index++) {
+                emitExpr(context, composer, call.arguments.get(index));
+                emitConversion(context, composer, context.lastEmittedType, runtimeType.parameters().get(index));
+            }
+            composer.invokeinterface(TypeDescriptor.toJavaClassDesc(runtimeType), "invoke",
+                    toJavaMethodDescriptor(runtimeType));
+            emitConversion(context, composer, runtimeType.returnType(), TypeSubstitution.erase(call.getType()));
+            context.lastEmittedType = call.getType();
+            return;
+        }
         if (call.functionProperty() != null) {
             emitFunctionPropertyCall(context, composer, call, receiverOnStack);
             return;
@@ -1573,18 +1865,28 @@ final class BytecodeEmitter {
                                                  final Expr.MemberCall call,
                                                  final boolean receiverOnStack) {
         final var property = call.functionProperty();
-        if (receiverOnStack) {
-            emitFunctionPropertyValueWithReceiverOnStack(context, composer, property);
-        } else {
-            emitExpr(context, composer, property);
-        }
         final var propertyType = property.getType() instanceof ReferenceDescriptor reference
                 ? reference.baseType()
                 : property.getType();
         if (!(propertyType instanceof FunctionDescriptor functionType)) {
             throw new IllegalStateException("Resolved callable property is not a function.");
         }
+        if (functionType.isReceiverFunction() && !receiverOnStack) {
+            emitExpr(context, composer, call.receiver);
+            composer.dup();
+            emitFunctionPropertyValueWithReceiverOnStack(context, composer, property);
+        } else if (receiverOnStack) {
+            emitFunctionPropertyValueWithReceiverOnStack(context, composer, property);
+        } else {
+            emitExpr(context, composer, property);
+        }
         final var runtimeType = (FunctionDescriptor) TypeSubstitution.erase(functionType);
+        if (runtimeType.isReceiverFunction()) {
+            composer.swap();
+            final var receiverType = call.receiver.getType() instanceof NullableDescriptor nullable
+                    ? nullable.baseType() : call.receiver.getType();
+            emitConversion(context, composer, receiverType, runtimeType.receiverType());
+        }
         for (int index = 0; index < call.arguments.size(); index++) {
             emitExpr(context, composer, call.arguments.get(index));
             emitConversion(context, composer, context.lastEmittedType, runtimeType.parameters().get(index));
@@ -2432,6 +2734,13 @@ final class BytecodeEmitter {
     static void emitConversion(CompilationContext context, final CodeBuilder composer,
                                 final TypeDescriptor sourceType,
                                 final TypeDescriptor targetType ){
+        if (context.resolution.isArrayIterableProjection(targetType, sourceType)) {
+            composer.invokestatic(ClassDesc.of("zeron.runtime.ArrayIterable"), "wrap",
+                    MethodTypeDesc.of(ClassDesc.of("zeron.collections.Iterable"),
+                            TypeDescriptor.toJavaClassDesc(sourceType)));
+            context.lastEmittedType = targetType;
+            return;
+        }
         final var sourceFunction = functionView(context, sourceType);
         final var targetFunction = functionView(context, targetType);
         if (sourceFunction != null && targetFunction != null) {
@@ -2455,6 +2764,19 @@ final class BytecodeEmitter {
             return;
         }
         if (sourceType instanceof NeverDescriptor) {
+            context.lastEmittedType = targetType;
+            return;
+        }
+        if (targetType instanceof NeverDescriptor) {
+            // A value flowing into a Never-typed position means the expression cannot complete normally.
+            emitPop(context, composer, sourceType);
+            final var exception = ClassDesc.of("java.lang.IllegalStateException");
+            composer.new_(exception);
+            composer.dup();
+            composer.ldc("A Never-typed expression produced a value.");
+            composer.invokespecial(exception, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            composer.athrow();
             context.lastEmittedType = targetType;
             return;
         }
@@ -2561,6 +2883,9 @@ final class BytecodeEmitter {
         }
         final var targetDescriptor = TypeDescriptor.toJavaClassDesc(targetType).descriptorString();
         switch (targetDescriptor) {
+            case "V" -> {
+                // No value may be materialized for a Never-typed target.
+            }
             case "I" -> {
                 composer.checkcast(ConstantDescs.CD_Integer);
                 composer.invokevirtual(ClassDesc.of("java.lang.Integer"), "intValue",
@@ -2662,7 +2987,8 @@ final class BytecodeEmitter {
 
     static MethodTypeDesc toJavaMethodDescriptor(FunctionDescriptor type) {
         final var returnType = TypeDescriptor.toJavaClassDesc(type.returnType());
-        final var paramTypes = type.parameters().stream().map(TypeDescriptor::toJavaClassDesc).toList();
+        final var paramTypes = type.invocationParameters().stream()
+                .map(TypeDescriptor::toJavaClassDesc).toList();
         return MethodTypeDesc.of(returnType, paramTypes);
     }
 

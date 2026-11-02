@@ -4,6 +4,9 @@
 
 ### Compiler and language work
 
+- Added typed declarative annotations with target and constant-argument validation, and preserved
+  public annotation definitions and applications in API-index schema 9. Added runtime
+  `CodeModel<F>` values for inspecting selected inline predicate lambdas.
 - Added receiver-based and receiverless default operations to higher-kinded contracts, including
   compiled-library support and derived `Applicative.map2`, `Monad.flatten`, `Foldable.count`, `Foldable.isEmpty`,
   `Traversable.sequence`, and `Comonad.duplicate`.
@@ -29,9 +32,33 @@
   implicit narrowing from `&T` to `T` for type parameters not admitting mutable projections.
 - Fixed a bug that would allow a field's mutating methods to be called from another method not
   marked as `mut`.
+- Fixed a bug that would allow a mutable array field to be mutated from a non-mutating method.
+- Fixed nested statement `if` bytecode generation when branches do not complete normally, avoiding
+  invalid branch targets after returning branches.
+- Fixed expected-type propagation through conditional expressions.
+- Refined stable closed-sum values on the negative path of direct `matches` tests, including
+  grouped and negated conditions.
+- Fixed adapter discovery for witness helper calls.
+- Fixed captured function types in generic lambdas, enabling the `zeron.function` combinators and predicates.
+- Improved inference for generic function references in open expected types, allowing `flatMap(identity)` and
+  `Monad.flatten` without explicit type arguments.
+- Captured ambient type-class evidence in lambdas created inside generic functions.
+- Added the postfix `!!` non-null assertion with a stable `NullPointerException` failure and
+  support for nullable references and boxed primitives.
+- Added explicitly typed lambda parameters, right-associative unary function types, trailing
+  lambdas for final function-valued arguments, and implicit `it` for unary trailing lambdas.
+- Added receiver function types and contextually typed receiver lambdas, including receiver-member
+  lookup, qualified enclosing receivers, receiver-call invocation, and compiled-library metadata.
+- Added effect-row polymorphism with `effect...` parameters, empty-row inference, nested callback
+  bounds, conservative handler residuals, and compiled-library support.
+- Made non-null `Array<T>` intrinsically compatible with `zeron.collections.Iterable<T>` using
+  exact element types and a fresh, non-copying adapter per conversion; array loops stay intrinsic.
 
 ### Standard Library
 
+- Added the `zeron.compiler.CodeModel<F>` API for typed predicate nodes, source types, and eager
+  immutable capture values. Bumped the standard-library API version to 9.
+- Enabled the `Sortable` higher-kinded contract with `sort`, `sorted`, and comparator-based operations.
 - Made `zeron.lang.Display` non-generic; witness targets identify displayed types. Bumped the
   standard-library API version to 8.
 - Broadened `zeron.collections.Stream.flatMap` to accept any `Iterable` result, allowing nested
@@ -58,6 +85,7 @@
   configured line width, with continuation entries aligned under the first entry.
 - Fixed a bug that would override a contract method's signature with that of any available
   conformance witness for it.
+- Expanded hints for LSP hovers.
 
 ## [0.5.0] - 2026, 21 OCT
 

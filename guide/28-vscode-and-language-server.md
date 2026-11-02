@@ -7,12 +7,14 @@ standard-library sources open in read-only virtual documents; project source fil
 
 ## Requirements
 
-- Install a Zeron 0.3.0 or later distribution and make `zeron` available on `PATH`.
-- Install the Java runtime required by that Zeron distribution.
+- For a source checkout, install JDK 25 or later and run `mvn compile`.
+- Otherwise, install a Zeron 0.3.0 or later distribution and make `zeron` available on `PATH`.
 - Open one Zeron project folder containing its `zeron.toml` manifest.
 
-The extension starts `zeron lsp` from the workspace folder. The language server currently supports
-one project per VS Code workspace, not a multi-root workspace.
+The extension prefers compiled classes from a Zeron checkout's `target/classes`, with runtime
+dependencies from `target/dependency`. It searches the workspace folder and its parents. If no local
+build is found, it starts `zeron lsp` from `PATH`. The language server currently supports one
+project per VS Code workspace, not a multi-root workspace.
 
 ## Declaration documentation
 
@@ -41,13 +43,16 @@ code --extensionDevelopmentPath=editors/vscode sample_programs/list_monad
 ```
 
 The sample folder is a project with a manifest, so the language server can load its project
-configuration. To use a different Zeron executable, set the VS Code setting `zeron.server.path` to
-its command or path, then reload the window. The extension appends the `lsp` subcommand itself.
+configuration. From a source checkout, run `mvn compile` after changing compiler sources to refresh
+the local server. To use a different Zeron executable, set the VS Code setting
+`zeron.server.path` to its command or path, then reload the window. The extension appends the `lsp`
+subcommand itself.
 
 ## Troubleshooting
 
 If language features do not start, check that the workspace root contains a valid `zeron.toml`,
-that the configured executable can be launched, and that its Java runtime is available. Open the
+that the local Maven build completed or the configured executable can be launched, and that Java is
+available. Open the
 **Zeron Language Server** output channel for startup errors. Syntax highlighting remains available
 even when the server is missing or cannot start. If you opened a multi-root workspace, open the
 Zeron project as the single workspace folder instead.

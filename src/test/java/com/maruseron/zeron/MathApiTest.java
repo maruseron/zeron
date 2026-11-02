@@ -1,7 +1,9 @@
 package com.maruseron.zeron;
 
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Parser;
+import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.analize.ResolutionError;
 import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
@@ -15,6 +17,8 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -75,6 +79,7 @@ public final class MathApiTest {
                 fn floatFromInteger(): Float = 2;
                 fn floatFromRational(): Float = 0.1;
                 fn intFromLiteral(): Int = 42;
+                fn longFromLiteral(): Long = 2147483648;
                 fn rationalNumerator(): String = rationalAdd().numerator().toString();
                 fn rationalDenominator(): String = rationalAdd().denominator().toString();
                 fn rationalLiteralNumerator(): String = rationalLiteral().numerator().toString();
@@ -92,6 +97,9 @@ public final class MathApiTest {
                     StandardLibrary.withBundledUnits(List.of(unit)), className, "",
                     List.of(), true, List.of(), output);
             compiler.resolve();
+            assertNull(numericLiteralIn(unit, "intFromLiteral").numericConversionCall());
+            assertNull(numericLiteralIn(unit, "longFromLiteral").numericConversionCall());
+            assertNotNull(numericLiteralIn(unit, "genericOne").numericConversionCall());
             compiler.compile();
 
             try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
@@ -120,6 +128,7 @@ public final class MathApiTest {
                 assertEquals(1.0d / 10.0d, (double) generated.getMethod("floatFromRational").invoke(null), 0.0d);
                 assertEquals(2.0d, (double) generated.getMethod("floatFromInteger").invoke(null), 0.0d);
                 assertEquals(42, generated.getMethod("intFromLiteral").invoke(null));
+                assertEquals(2147483648L, generated.getMethod("longFromLiteral").invoke(null));
                 final var divisionByZero = assertThrows(InvocationTargetException.class,
                         () -> generated.getMethod("divisionByZero").invoke(null));
                 assertTrue(divisionByZero.getCause() instanceof ArithmeticException);
@@ -339,6 +348,21 @@ public final class MathApiTest {
     private static CompilationUnit parse(final String sourceName, final String source) {
         return Parser.of(Scanner.from(source, sourceName).scanTokens())
                 .parseCompilationUnit(sourceName);
+    }
+
+    private static Expr.Literal numericLiteralIn(final CompilationUnit unit, final String functionName) {
+        final var function = unit.declarations().stream()
+                .filter(Stmt.Function.class::isInstance)
+                .map(Stmt.Function.class::cast)
+                .filter(candidate -> candidate.name().lexeme().equals(functionName))
+                .findFirst().orElseThrow();
+        return function.body().stream()
+                .filter(Stmt.Return.class::isInstance)
+                .map(Stmt.Return.class::cast)
+                .map(Stmt.Return::value)
+                .filter(Expr.Literal.class::isInstance)
+                .map(Expr.Literal.class::cast)
+                .findFirst().orElseThrow();
     }
 
     private static void deleteTree(final Path path) throws Exception {

@@ -17,7 +17,14 @@ This design has useful properties already:
 - Lambdas with the same signature share one interface while retaining separate implementations.
 - The JVM creates the concrete lambda implementation object at runtime; the compiler emits the interface and the static body helpers.
 
-Capturing lambdas use the same `LambdaMetafactory` path. Their factory descriptor accepts captured values, while the generated SAM interface and its `invoke` descriptor contain only the lambda's declared parameters. The static helper receives captures followed by those parameters. The JVM creates the concrete function object with the captured values bound to it; the compiler does not emit a separate closure class per lambda.
+Capturing lambdas use the same `LambdaMetafactory` path. Their factory descriptor accepts captured values, while the generated SAM interface and its `invoke` descriptor contain the lambda's invocation parameters. The static helper receives captures followed by those parameters. The JVM creates the concrete function object with the captured values bound to it; the compiler does not emit a separate closure class per lambda.
+
+Receiver functions use a distinct `FunctionShapeKey` from ordinary functions, even when their
+erased JVM descriptors match an ordinary function with the receiver as its first explicit
+parameter. Their SAM invocation descriptor places the receiver before explicit parameters. A
+contextually typed receiver lambda binds that first runtime argument as its implicit receiver;
+qualified enclosing-receiver references are captured like other immutable values. The receiver
+type and mutability view are also preserved in compiled-library API metadata.
 
 The current sample in `src/main/resources/test.zn` exercises integer, floating-point, and string lambdas, including two different lambdas with the same integer shape and immutable local captures.
 
@@ -148,6 +155,7 @@ Address the remaining work in this order:
 1. **Canonicalize function-shape identity: implemented baseline.** `FunctionShapeKey` is recursive and versioned; SHA-256 names are separate from semantic equality, and the compiler checks full keys for generated-name collisions. Package-qualified nominal identity is included; add module identity if modules are introduced, and evolve the encoding version if its canonical rules change.
 2. **Make lambda typing first-class: implemented baseline.** Lambda signatures remain on the original
 	expression and binding. Expected types flow through declarations, assignments, calls, and returns.
+	Conditional expressions pass the expected type independently to both result branches.
 	Safe immutable let-bound identity/constant lambdas generalize to rank-1 schemes and instantiate
 	freshly at each use; operator-constrained lambdas retain monomorphic contextual inference.
 3. **Add multi-parameter lambdas: implemented.** The AST, parser, resolver, and lowering logic now support zero-argument, single-argument, and multi-argument lambda forms, and they lower each shape to the appropriate generated functional interface.
@@ -160,7 +168,7 @@ Address the remaining work in this order:
 	polymorphism.
 6. **Specify and implement capture lowering: implemented.** Immutable captured values are passed through the `invokedynamic` factory descriptor and bound to the runtime function object; static helpers receive captures before the lambda's declared parameters. Explicit shared mutable state is available through the ordinary `zeron.lang.Cell<T>` library type; capturing a mutable cell reference preserves the existing by-value reference-capture model.
 7. **Unify artifact output: implemented baseline.** Generated programs are emitted under `dist/`; source classes follow their declared package paths, while generated lambda interfaces remain in the default package. Define stale-artifact handling and configurable output directories if incremental or multi-project compilation requires them.
-8. **Expand behavior tests: broader baseline implemented.** Tests cover same-shape lambdas with different bodies, zero and multiple parameters, the complete `Int`/`Float`/`Boolean`/`String` callback input-output matrix, stored and returned callbacks, nested lambdas, immutable captures across generic boundaries, adapter reuse, and deterministic repeated compilation. Continue with incremental/multi-project compilation, explicit shared mutation, and additional nominal/nested shape combinations; verify both program output and emitted descriptors/call instructions.
+8. **Expand behavior tests: broader baseline implemented.** Tests cover same-shape lambdas with different bodies, zero and multiple parameters, the complete `Int`/`Float`/`Boolean`/`String` callback input-output matrix, stored and returned callbacks, conditional lambdas under expected function types, nested lambdas, immutable captures across generic boundaries, adapter reuse, and deterministic repeated compilation. Continue with incremental/multi-project compilation, explicit shared mutation, and additional nominal/nested shape combinations; verify both program output and emitted descriptors/call instructions.
 
 ## Acceptance Criteria for Broader Lambda Support
 

@@ -63,7 +63,7 @@
           "type": "string",
           "default": "zeron",
           "scope": "machine",
-          "description": "Path or command used to launch Zeron. The extension appends the fixed 'lsp' subcommand."
+          "description": "Explicit Zeron executable override. Otherwise, a local Maven build is preferred before the 'zeron' command on PATH. The extension appends the fixed 'lsp' subcommand."
         }
       }
     }
@@ -74,6 +74,7 @@
   "files": [
     "README.md",
     "extension.js",
+    "server-launch.js",
     "stdlib-documents.js",
     "language-configuration.json",
     "node_modules/**",

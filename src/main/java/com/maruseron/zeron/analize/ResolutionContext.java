@@ -18,6 +18,7 @@ final class ResolutionContext {
     final Map<String, Stmt.SumDecl> sums = new LinkedHashMap<>();
     final Map<String, Stmt.ProductDecl> products = new LinkedHashMap<>();
     final Map<String, Stmt.NewtypeDecl> newtypes = new LinkedHashMap<>();
+    final Map<String, Stmt.AnnotationDeclaration> annotationDeclarations = new LinkedHashMap<>();
     final List<TypeClassEvidence.WitnessEntry> typeClassWitnesses = new ArrayList<>();
     final Map<String, Stmt.FunctionDeclaration> functions = new LinkedHashMap<>();
     final Map<String, List<Stmt.ExtensionMethod>> extensionMethods = new LinkedHashMap<>();
@@ -68,7 +69,8 @@ final class ResolutionContext {
         this.packageName = packageName == null ? "" : packageName;
         this.javaClassPath = Objects.requireNonNull(javaClassPath);
         importResolver = new ImportResolver(types, classes, contracts, sums, functions, extensionMethods,
-                topLevelValues, declarationPackages, namespaceMemberPackages, namespaces, javaClassPath);
+                topLevelValues, annotationDeclarations, declarationPackages, namespaceMemberPackages,
+                namespaces, javaClassPath);
         topLevelValuePlanner = new TopLevelValuePlanner(topLevelValues, namespaces);
         declarationRegistrar = new DeclarationRegistry(
                 types, classes, externalClasses, contracts, sums, products, newtypes, functions, extensionMethods,

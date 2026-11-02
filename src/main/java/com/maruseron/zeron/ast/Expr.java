@@ -13,6 +13,7 @@ import com.maruseron.zeron.scan.TokenType;
 import com.maruseron.zeron.scan.SuffixableNumber;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -116,7 +117,7 @@ public sealed interface Expr {
         public final Expr receiver;
         public final Token name;
         public final Token paren;
-        public final List<Expr> arguments;
+        public List<Expr> arguments;
         public final List<TypeDescriptor> explicitTypeArguments;
         private List<TypeDescriptor> explicitOwnerTypeArguments = List.of();
         private final boolean safeNavigation;
@@ -127,6 +128,7 @@ public sealed interface Expr {
         private Stmt.ExtensionMethod resolvedExtensionMethod;
         private Call namespaceCall;
         private Property functionProperty;
+        private Token receiverFunctionSymbol;
         private String resolvedClassName;
         private boolean sumCaseFactory;
         private boolean internalNewtypeConstructor;
@@ -157,7 +159,7 @@ public sealed interface Expr {
             this.receiver = receiver;
             this.name = name;
             this.paren = paren;
-            this.arguments = List.copyOf(arguments);
+            this.arguments = new ArrayList<>(arguments);
             this.explicitTypeArguments = List.copyOf(explicitTypeArguments);
             this.type = type;
             this.safeNavigation = safeNavigation;
@@ -165,6 +167,9 @@ public sealed interface Expr {
 
         public TypeDescriptor getType() { return type; }
         public void setType(TypeDescriptor type) { this.type = type; }
+        public void appendArgument(final Expr argument) {
+            arguments.add(argument);
+        }
         public boolean safeNavigation() { return safeNavigation; }
         public List<TypeDescriptor> explicitOwnerTypeArguments() { return explicitOwnerTypeArguments; }
         public void setExplicitOwnerTypeArguments(final List<TypeDescriptor> typeArguments) {
@@ -184,6 +189,8 @@ public sealed interface Expr {
         public void setNamespaceCall(final Call call) { namespaceCall = call; }
         public Property functionProperty() { return functionProperty; }
         public void setFunctionProperty(final Property property) { functionProperty = property; }
+        public Token receiverFunctionSymbol() { return receiverFunctionSymbol; }
+        public void setReceiverFunctionSymbol(final Token token) { receiverFunctionSymbol = token; }
         public String resolvedClassName() { return resolvedClassName; }
         public void setResolvedClassName(String className) { resolvedClassName = className; }
         public boolean sumCaseFactory() { return sumCaseFactory; }
@@ -857,7 +864,7 @@ public sealed interface Expr {
     final class Call implements Expr {
         public final Token callee;
         public final Token paren;
-        public final List<Expr> arguments;
+        public List<Expr> arguments;
         public final List<TypeDescriptor> explicitTypeArguments;
         private TypeDescriptor type;
         private FunctionDescriptor genericFunctionType;
@@ -875,7 +882,7 @@ public sealed interface Expr {
                     List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
             this.callee = callee;
             this.paren = paren;
-            this.arguments = arguments;
+            this.arguments = new ArrayList<>(arguments);
             this.explicitTypeArguments = List.copyOf(explicitTypeArguments);
             this.type = type;
         }
@@ -886,6 +893,9 @@ public sealed interface Expr {
 
         public void setType(TypeDescriptor type) {
             this.type = type;
+        }
+        public void appendArgument(final Expr argument) {
+            arguments.add(argument);
         }
 
         public FunctionDescriptor genericFunctionType() {
@@ -1337,16 +1347,50 @@ public sealed interface Expr {
     final class Lambda implements Expr {
         public final Token arrow;
         public final List<Token> params;
+        private final List<TypeDescriptor> parameterTypes;
         public final List<Stmt> body;
+        private final Token implicitParameter;
         private TypeDescriptor type;
+        private TypeDescriptor codeModelType;
+        private Token receiverSymbolToken;
 
         public Lambda(Token arrow, List<Token> params, List<Stmt> body, TypeDescriptor type) {
-            this.arrow = arrow;
-            this.params = params == null ? List.of() : params;
-            this.body = body;
-            this.type = type;
+            this(arrow, params, params == null ? List.of() : params.stream()
+                    .<TypeDescriptor>map(_ -> TypeDescriptor.ofInfer()).toList(), body, type, null);
         }
 
+        public Lambda(Token arrow, List<Token> params, List<TypeDescriptor> parameterTypes,
+                      List<Stmt> body, TypeDescriptor type) {
+            this(arrow, params, parameterTypes, body, type, null);
+        }
+
+        public Lambda(Token arrow, List<Token> params, List<TypeDescriptor> parameterTypes,
+                      List<Stmt> body, TypeDescriptor type, Token implicitParameter) {
+            this.arrow = arrow;
+            this.params = params == null ? List.of() : params;
+            this.parameterTypes = List.copyOf(parameterTypes);
+            this.body = body;
+            this.type = type;
+            this.implicitParameter = implicitParameter;
+        }
+
+        public List<TypeDescriptor> parameterTypes() { return parameterTypes; }
+        public Token implicitParameter() { return implicitParameter; }
+        public Token receiverSymbolToken() { return receiverSymbolToken; }
+        public void setReceiverSymbolToken(final Token token) { receiverSymbolToken = token; }
+        public TypeDescriptor codeModelType() { return codeModelType; }
+        public void setCodeModelType(final TypeDescriptor value) { codeModelType = value; }
+        public List<Token> parameterTokens() {
+            return implicitParameter != null
+                    && type instanceof com.maruseron.zeron.domain.FunctionDescriptor function
+                    && function.arity() == 1
+                    ? List.of(implicitParameter)
+                    : params;
+        }
+        public List<Token> parameterTokens(final int expectedArity) {
+            if (implicitParameter == null) return params;
+            return expectedArity == 1 ? List.of(implicitParameter) : List.of();
+        }
         public TypeDescriptor getType() {
             return type;
         }
@@ -1361,11 +1405,12 @@ public sealed interface Expr {
             return  Objects.equals(this.arrow, that.arrow) &&
                     Objects.equals(this.params, that.params) &&
                     Objects.equals(this.body,  that.body)  &&
+                    Objects.equals(this.implicitParameter, that.implicitParameter) &&
                     Objects.equals(this.type,  that.type)  ;
         }
 
         public int hashCode() {
-            return Objects.hash(arrow, params, body, type);
+            return Objects.hash(arrow, params, body, implicitParameter, type);
         }
 
         public String toString() {
@@ -1606,6 +1651,7 @@ public sealed interface Expr {
         public FunctionDescriptor storedFunctionType() { return storedFunctionType; }
         public void setStoredFunctionType(final FunctionDescriptor type) { storedFunctionType = type; }
         public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? name : resolvedSymbolToken; }
+        public void setResolvedSymbolToken(final Token token) { resolvedSymbolToken = token; }
         public void setResolvedValue(final Token symbolToken, final Stmt.Var declaration) {
             resolvedSymbolToken = symbolToken;
             resolvedValueDeclaration = declaration;

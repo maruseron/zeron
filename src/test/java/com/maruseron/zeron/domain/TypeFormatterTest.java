@@ -25,6 +25,14 @@ public final class TypeFormatterTest {
     }
 
     @Test
+    public void formatsReceiverFunctionTypes() {
+        final var function = TypeDescriptor.receiverFunctionOf("", TypeDescriptor.ofName("Scope"),
+                TypeDescriptor.ofInt(), List.of(TypeDescriptor.ofString()), List.of(), List.of());
+
+        assertEquals("Scope.(String) -> Int", TypeFormatter.format(function));
+    }
+
+    @Test
     public void formatsMutableAdmissibilityMarker() {
         final var parameter = new TypeParameterDescriptor(1, "T", List.of(), false,
                 TypeParameterDescriptor.Variance.INVARIANT, false, false, true);

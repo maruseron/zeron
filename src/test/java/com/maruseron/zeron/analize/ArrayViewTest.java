@@ -135,6 +135,54 @@ public final class ArrayViewTest {
     }
 
     @Test
+    public void arrayWritesThroughThisFieldsRequireMutatingMethod() {
+        final var explicitFieldWrite = """
+                class Buffer {
+                    values: &Array<Int>;
+                    public constructor new;
+                    public overwrite(): Unit {
+                        this.values[0] = 1;
+                    }
+                }
+                """;
+        final var implicitFieldWrite = """
+                class Buffer {
+                    values: &Array<Int>;
+                    public constructor new;
+                    public overwrite(): Unit {
+                        values[0] = 1;
+                    }
+                }
+                """;
+        final var byteArrayFieldWrite = """
+                class Buffer {
+                    values: &ByteArray;
+                    public constructor new;
+                    public overwrite(): Unit {
+                        this.values[0] = 1;
+                    }
+                }
+                """;
+        final var allowedMutations = """
+                class Buffer {
+                    values: &Array<Int>;
+                    public constructor new;
+                    public mut overwrite(): Unit {
+                        this.values[0] = 1;
+                    }
+                    public overwriteArgument(values: &Array<Int>): Unit {
+                        values[0] = 2;
+                    }
+                }
+                """;
+
+        for (final var source : List.of(explicitFieldWrite, implicitFieldWrite, byteArrayFieldWrite)) {
+            assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+        }
+        new ResolutionService().resolve(parse(allowedMutations));
+    }
+
+    @Test
     public void writesThroughMutableViewAndCompilerExecutesArrayOperations() throws Exception {
         final var className = "ArrayViewGenerated" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");

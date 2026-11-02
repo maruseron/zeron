@@ -38,6 +38,7 @@ public final class TypeFormatter {
                     (projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "out " : "in ")
                             + format(projection.bound());
             case CapturedTypeDescriptor capture -> capture.name();
+            case EffectRowDescriptor row -> row.name();
             case NullableDescriptor nullable -> format(nullable.baseType()) + "?";
             case ReferenceDescriptor reference -> "&" + format(reference.baseType());
             case FunctionDescriptor function when function.isHandler() ->
@@ -45,7 +46,9 @@ public final class TypeFormatter {
                             + formatEffectSet(function.handledEffects())
                             + (function.raisedEffects().isEmpty() ? ""
                                     : " raises " + formatEffectSet(function.raisedEffects()));
-            case FunctionDescriptor function -> (function.typeParameters().isEmpty() ? "" :
+            case FunctionDescriptor function -> (function.receiverType() == null ? ""
+                    : format(function.receiverType()) + ".")
+                    + (function.typeParameters().isEmpty() ? "" :
                     function.typeParameters().stream()
                             .map(parameter ->                             parameter.name()
                                             + typeParameterConstraints(parameter))
@@ -66,6 +69,7 @@ public final class TypeFormatter {
         final var constraints = new java.util.ArrayList<String>();
         if (parameter.admitsNullableArguments()) constraints.add("nullable");
         if (parameter.isEffectKind()) constraints.add("effect");
+        if (parameter.isEffectRowKind()) constraints.add("effect...");
         if (parameter.admitsMutableArguments()) constraints.add("mut");
         parameter.bounds().stream().map(TypeFormatter::format).forEach(constraints::add);
         return constraints.isEmpty() ? "" : ": " + String.join(" + ", constraints);

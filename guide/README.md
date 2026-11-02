@@ -26,7 +26,7 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [Lambdas and function values](14-lambdas-and-function-values.md)
 1. [Collections and iteration](15-collections-and-iteration.md)
 1. [For-expressions](16-for-expressions.md)
-1. [Sum types and products](17-sum-types-and-products.md)
+1. [Products, data classes, and sum types](17-sum-types-and-products.md)
 1. [Pattern matching](18-pattern-matching.md)
 1. [Option and Result](19-option-and-result.md)
 

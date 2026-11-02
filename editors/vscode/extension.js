@@ -1,8 +1,10 @@
 "use strict";
 
 const vscode = require("vscode");
+const path = require("node:path");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 const { createContentProvider, createDefinitionMiddleware } = require("./stdlib-documents");
+const { resolveServerLaunch } = require("./server-launch");
 
 let client;
 let outputChannel;
@@ -30,25 +32,38 @@ async function activate(context) {
     context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(
         "zeron-stdlib", createContentProvider(vscode)));
 
-    const configuredExecutable = vscode.workspace.getConfiguration("zeron").get("server.path", "zeron");
-    if (typeof configuredExecutable !== "string" || configuredExecutable.trim().length === 0) {
-        const message = "The Zeron server executable path must not be empty.";
+    const serverConfiguration = vscode.workspace.getConfiguration("zeron");
+    const configuredExecutable = serverConfiguration.get("server.path", "zeron");
+    const serverPathSetting = serverConfiguration.inspect("server.path");
+    const hasExplicitExecutable = serverPathSetting !== undefined
+        && ["globalValue", "workspaceValue", "workspaceFolderValue"]
+            .some(key => typeof serverPathSetting[key] === "string");
+    let launch;
+    try {
+        launch = resolveServerLaunch(
+            workspaceFolder.uri.fsPath,
+            configuredExecutable,
+            hasExplicitExecutable);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         outputChannel.appendLine(message);
         void vscode.window.showErrorMessage(message);
         return;
     }
-    const executable = configuredExecutable.trim();
-    const command = process.platform === "win32" && executable.includes(" ")
-        ? `"${executable}"`
-        : executable;
+
+    if (launch.local) {
+        outputChannel.appendLine(`Using Zeron language server from ${path.join(launch.projectPath, "target")}.`);
+    } else {
+        outputChannel.appendLine(`Using Zeron executable: ${launch.command}`);
+    }
 
     const serverOptions = {
-        command,
-        args: ["lsp"],
+        command: launch.command,
+        args: launch.args,
         transport: TransportKind.stdio,
         options: {
             cwd: workspaceFolder.uri.fsPath,
-            shell: process.platform === "win32"
+            ...(launch.shell ? { shell: true } : {})
         }
     };
     const clientOptions = {
@@ -68,7 +83,7 @@ async function activate(context) {
         const message = `Unable to start the Zeron language server: ${detail}`;
         outputChannel.appendLine(message);
         void vscode.window.showErrorMessage(
-            `${message}. Install Zeron 0.3.0 or later, or configure zeron.server.path.`);
+            `${message}. Build the project with Maven, install Zeron 0.3.0 or later, or configure zeron.server.path.`);
     }
 }
 

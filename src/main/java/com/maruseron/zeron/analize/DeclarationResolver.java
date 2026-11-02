@@ -269,6 +269,8 @@ final class DeclarationResolver {
                     : ownerType;
             declare(context, SYNTHETIC_VAR, thisToken, thisType, BindingMutability.IMMUTABLE);
             define(context, thisToken);
+            context.frame.receiverScopes.push(
+                    new FunctionResolutionFrame.ReceiverScope(thisType, thisToken));
         }
         for (int i = 0; i < method.parameters().size(); i++) {
             final var parameter = method.parameters().get(i);
@@ -290,6 +292,7 @@ final class DeclarationResolver {
                 RaisedEffectFlow.verifyCallable(context, methodType.raisedEffects(), method.name());
             }
         } finally {
+            if (!owner.higherKinded()) context.frame.receiverScopes.pop();
             context.frame.expectedReturnTypes.pop();
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
@@ -672,6 +675,8 @@ final class DeclarationResolver {
         final var thisToken = new Token(TokenType.THIS, "this", null, pattern.name().span());
         declare(context, SYNTHETIC_VAR, thisToken, ownerType, BindingMutability.IMMUTABLE);
         define(context, thisToken);
+        context.frame.receiverScopes.push(
+                new FunctionResolutionFrame.ReceiverScope(ownerType, thisToken));
         try {
             if (pattern.condition() != null) {
                 final var conditionType = ExpressionFlowResolver.resolveExpression(context, pattern.condition());
@@ -695,6 +700,7 @@ final class DeclarationResolver {
             }
             RaisedEffectFlow.verifyCallable(context, List.of(), pattern.name());
         } finally {
+            context.frame.receiverScopes.pop();
             context.frame.resolvingPattern = previousPattern;
             context.frame.patternOutputNames = previousPatternOutputs;
             context.frame.currentMethodOwner = previousOwner;
@@ -721,11 +727,15 @@ final class DeclarationResolver {
         final var thisToken = new Token(TokenType.THIS, "this", null, field.name().span());
         declare(context, SYNTHETIC_VAR, thisToken, TypeResolver.classType(context, owner), BindingMutability.IMMUTABLE);
         define(context, thisToken);
+        context.frame.receiverScopes.push(
+                new FunctionResolutionFrame.ReceiverScope(
+                        TypeResolver.classType(context, owner), thisToken));
         try {
             final var initializerType = ExpressionFlowResolver.resolveExpression(context, field.initializer());
             ensureAssignable(context, field.type(), initializerType, field.name());
             RaisedEffectFlow.verifyCallable(context, List.of(), field.name());
         } finally {
+            context.frame.receiverScopes.pop();
             endScope(context);
             context.frame.currentMethodOwner = previousMethodOwner;
             context.frame.initializerVisibleFields = previousInitializerFields;
@@ -768,6 +778,10 @@ final class DeclarationResolver {
                     new ReferenceDescriptor(TypeResolver.classType(context, declaration)),
                     BindingMutability.IMMUTABLE);
             define(context, thisToken);
+            final var initializerReceiverType =
+                    new ReferenceDescriptor(TypeResolver.classType(context, declaration));
+            context.frame.receiverScopes.push(
+                    new FunctionResolutionFrame.ReceiverScope(initializerReceiverType, thisToken));
             try {
                 context.statementResolver.resolveStatements(block.body());
                 if (context.frame.flowState.isReachable()) {
@@ -785,6 +799,7 @@ final class DeclarationResolver {
                 }
                 RaisedEffectFlow.verifyCallable(context, block.raisedEffects(), declaration.name());
             } finally {
+                context.frame.receiverScopes.pop();
                 endScope(context);
                 context.frame.currentMethodOwner = previousOwner;
                 context.frame.initializerVisibleFields = previousVisibleFields;
@@ -850,6 +865,8 @@ final class DeclarationResolver {
             : ownerType;
         declare(context, SYNTHETIC_VAR, thisToken, thisType, BindingMutability.IMMUTABLE);
         define(context, thisToken);
+        context.frame.receiverScopes.push(
+                new FunctionResolutionFrame.ReceiverScope(thisType, thisToken));
         for (final var field : owner.fields()) {
             if (!Stmt.isAnonymousCaptureField(field)) continue;
             final var captureName = new Token(TokenType.IDENTIFIER,
@@ -874,6 +891,7 @@ final class DeclarationResolver {
             ensureReturns(context, method.name(), method.typeDescriptor().returnType(), method.body());
             RaisedEffectFlow.verifyCallable(context, method.typeDescriptor().raisedEffects(), method.name());
         } finally {
+            context.frame.receiverScopes.pop();
             context.frame.expectedReturnTypes.pop();
             endScope(context);
             context.frame.flowState = enclosingFlow;
@@ -1214,6 +1232,7 @@ final class DeclarationResolver {
             if (requiredParameter.admitsNullableArguments()
                     != implementationParameter.admitsNullableArguments()
                     || requiredParameter.isEffectKind() != implementationParameter.isEffectKind()
+                    || requiredParameter.isEffectRowKind() != implementationParameter.isEffectRowKind()
                     || requiredParameter.admitsMutableArguments()
                             != implementationParameter.admitsMutableArguments()) {
                 return false;
@@ -1230,7 +1249,7 @@ final class DeclarationResolver {
         final var requiredReturn = TypeSubstitution.substitute(required.returnType(), methodSubstitutions);
         final var requiredEffects = required.raisedEffects().stream()
                 .map(effect -> TypeSubstitution.substitute(effect, methodSubstitutions)).toList();
-        return requiredEffects.containsAll(implementation.raisedEffects())
+        return EffectRows.includedIn(implementation.raisedEffects(), requiredEffects)
                 && context.typeCompatibility.canAssign(requiredReturn, implementation.returnType());
     }
 

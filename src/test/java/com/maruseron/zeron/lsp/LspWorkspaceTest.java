@@ -63,6 +63,47 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void completesAndHoversCodeModelAnnotationsAndTypes() throws Exception {
+        final var source = """
+                import zeron.compiler.CodeModel;
+                import zeron.compiler.CodeNode;
+                fn consume(@CodeModel model: CodeModel<(Int) -> Boolean>): Unit {}
+                fn root(value: CodeNode): CodeNode = value;
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var completionOffset = source.indexOf("@CodeModel") + "@CodeM".length();
+        final var completion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, completionOffset));
+        final var annotationHover = hoverAt(snapshot, project.entry(), source, "@CodeModel", 1);
+        final var modelHover = hoverAt(snapshot, project.entry(), source, "CodeModel<");
+        final var nodeHover = hoverAt(snapshot, project.entry(), source, "CodeNode):");
+
+        assertTrue(completion.getItems().toString(), completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("CodeModel")));
+        assertTrue(annotationHover, annotationHover.contains("annotation @CodeModel on PARAMETER"));
+        assertTrue(modelHover, modelHover.contains("CodeModel"));
+        assertTrue(nodeHover, nodeHover.contains("CodeNode"));
+    }
+
+    @Test
+    public void reportsMisTypedCodeModelParametersInDiagnostics() throws Exception {
+        final var source = """
+                import zeron.compiler.CodeModel;
+                fn where<T>(@CodeModel predicate: T? -> Boolean): Unit {
+                    predicate(null);
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        assertTrue(snapshot.diagnostics().toString(), snapshot.diagnostics().values().stream()
+                .flatMap(List::stream)
+                .anyMatch(diagnostic -> diagnostic.message()
+                        .contains("@CodeModel parameters must use CodeModel<F>")));
+    }
+
+    @Test
     public void delegatedComparableHoverShowsContractSignatureAndDocumentation() throws Exception {
         final var project = project("app/Main.zn", """
                 package app;
@@ -403,6 +444,22 @@ public class LspWorkspaceTest {
         assertNotNull(hover);
         assertTrue(hover.getContents().getRight().getValue().contains("(Int) -> Int"));
         assertFalse(hover.getContents().getRight().getValue().contains(">(Int)"));
+    }
+
+    @Test
+    public void hoverFormatsReceiverFunctionTypes() throws Exception {
+        final var source = """
+                contract Scope {}
+                fn invoke(scope: Scope, callback: Scope.() -> Int): Int = scope.callback();
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+        final var hover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document,
+                DocumentCoordinates.positionAt(source, source.indexOf("callback:"))));
+
+        assertNotNull(hover);
+        assertTrue(hover.getContents().getRight().getValue().contains("Scope.() -> Int"));
     }
 
     @Test
@@ -914,6 +971,116 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void hoverShowsSourceNameForRefinedSumCaseTypes() throws Exception {
+        final var source = """
+                public type Option<T: nullable> = Some(value: T) | None;
+                fn inspect<T: nullable>(option: Option<T>): Option<T> {
+                    let new = option;
+                    if (new matches Option.None()) { return new; }
+                    return new;
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "new;\n}");
+
+        assertTrue("Unexpected hover: " + hover, hover.contains("Option.Some<T>"));
+        assertFalse(hover, hover.contains("$$sum$"));
+    }
+
+    @Test
+    public void boundedGenericAndHigherKindedMemberCallsShowHover() throws Exception {
+        final var source = """
+                import zeron.lang.Hashable;
+                public contract Foldable<F<_>> {
+                    foldLeft<A: mut, B: mut>(
+                        this: F<A>, initial: B, combine: (B, A) -> B
+                    ): B;
+                    default count<A: mut>(this: F<A>): Int =
+                        this.foldLeft(0, (count, _) -> count + 1);
+                }
+                fn hashKey<T: Hashable<T>>(key: T): Int = key.hash();
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hashHover = hoverAt(snapshot, project.entry(), source, "key.hash", "key.".length());
+        final var foldableHover = hoverAt(snapshot, project.entry(), source,
+                "this.foldLeft", "this.".length());
+
+        assertTrue("Unexpected hash hover: " + hashHover, hashHover.contains("fn hash() -> Int"));
+        assertTrue("Unexpected foldLeft hover: " + foldableHover, foldableHover.contains("fn foldLeft"));
+    }
+
+    @Test
+    public void witnessMethodHoverUsesSourceNamesInListMonadSample() throws Exception {
+        final var manifest = Path.of("sample_programs", "list_monad", "zeron.toml")
+                .toAbsolutePath().normalize();
+        final var path = manifest.getParent().resolve("src").resolve("main.zn");
+        final var source = Files.readString(path);
+        final var snapshot = ProjectAnalysisWorkspace.open(manifest).analyze(Map.of());
+        final var mapHover = hoverAt(snapshot, path, source, "map(");
+        final var listPath = manifest.getParent().resolve("src").resolve("list.zn");
+        final var listSource = Files.readString(listPath);
+        final var witnessDeclarationHovers = List.of(
+                hoverAt(snapshot, listPath, listSource, "toString():"),
+                hoverAt(snapshot, listPath, listSource, "map<A:"),
+                hoverAt(snapshot, listPath, listSource, "flatMap<A:"),
+                hoverAt(snapshot, listPath, listSource, "pure<A:"),
+                hoverAt(snapshot, listPath, listSource, "ap<A:"));
+        final var witnessCallHovers = List.of(
+                hoverAt(snapshot, listPath, listSource, "tail.map", "tail.".length()),
+                hoverAt(snapshot, listPath, listSource, "head.combine", "head.".length()),
+                hoverAt(snapshot, listPath, listSource, "transform.flatMap", "transform.".length()),
+                hoverAt(snapshot, listPath, listSource, "head.toString", "head.".length()));
+
+        assertTrue("Unexpected map hover: " + mapHover, mapHover.contains("extension on List"));
+        assertFalse("Unexpected map hover: " + mapHover, mapHover.contains("$$sum$"));
+        assertTrue("Unexpected witness declarations: " + witnessDeclarationHovers,
+                witnessDeclarationHovers.stream().allMatch(hover -> hover.contains("fn ")));
+        assertFalse("Unexpected witness declarations: " + witnessDeclarationHovers,
+                witnessDeclarationHovers.stream()
+                        .anyMatch(hover -> hover.contains("$$sum$") || hover.contains("$zeron$witness$")));
+        assertTrue("Missing witness call hovers: " + witnessCallHovers,
+                witnessCallHovers.stream().allMatch(hover -> !hover.isBlank()));
+        assertFalse("Unexpected witness calls: " + witnessCallHovers,
+                witnessCallHovers.stream().anyMatch(hover ->
+                        hover.contains("$$sum$") || hover.contains("$zeron$witness$")));
+        assertTrue("Expected a source-level map signature: " + witnessCallHovers.getFirst(),
+                witnessCallHovers.getFirst().contains("fn map<"));
+    }
+
+    @Test
+    public void receiverFunctionMembersSupportCompletionHoverAndNavigation() throws Exception {
+        final var source = """
+                public class Box {
+                    public constructor new;
+                    public read(): Int = 42;
+                }
+                fn apply(box: Box, body: Box.() -> Int): Int = box.body();
+                fn result(box: Box): Int = apply(box, () -> this.read());
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var document = new TextDocumentIdentifier(project.entry().toUri().toString());
+        final var memberOffset = source.indexOf("this.read") + "this.".length();
+        final var memberPosition = DocumentCoordinates.positionAt(source, memberOffset);
+        final var completion = LspFeatures.completion(snapshot, project.entry(), memberPosition);
+        final var hover = LspFeatures.hover(snapshot, project.entry(),
+                new HoverParams(document, memberPosition));
+        final var definition = LspFeatures.definition(snapshot, project.entry(),
+                new DefinitionParams(document, memberPosition));
+
+        assertTrue(completion.getItems().toString(), completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("read()")));
+        assertNotNull(hover);
+        assertTrue(hover.getContents().getRight().getValue().contains("fn read() -> Int"));
+        assertTrue(definition.isLeft());
+        assertEquals(DocumentCoordinates.positionAt(source, source.indexOf("public read"))
+                        .getLine(),
+                definition.getLeft().getFirst().getRange().getStart().getLine());
+    }
+
+    @Test
     public void qualifiedJavaTypeCompletionDoesNotSuggestSameNamedZeronType() throws Exception {
         final var source = """
                 package zeron.math;
@@ -1329,6 +1496,37 @@ public class LspWorkspaceTest {
                 .anyMatch(item -> item.getLabel().startsWith("$zeron$")));
     }
 
+    @Test
+    public void completionContinuesForIncompleteMemberAccess() throws Exception {
+        final var source = """
+                public class Predicate {
+                    public constructor new;
+                    public test(): Boolean = true;
+                }
+                fn main(predicate: Predicate) {
+                    predicate.
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var receiverOffset = source.indexOf("predicate.");
+        final var completion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, receiverOffset + "predicate.".length()));
+        final var receiver = snapshot.tokens().get(project.entry()).stream()
+                .filter(token -> token.span().start().offset() == receiverOffset)
+                .findFirst().orElseThrow();
+        final var receiverType = snapshot.resolution().map(resolution ->
+                resolution.referenceType(receiver)).orElse(null);
+
+        assertTrue(snapshot.diagnostics().toString(), snapshot.diagnostics().values().stream()
+                .flatMap(List::stream)
+                .anyMatch(diagnostic -> diagnostic.message().contains("Expect member name after '.'")));
+        assertTrue("completion=" + completion.getItems() + ", receiverType=" + receiverType
+                + ", diagnostics=" + snapshot.diagnostics(),
+                completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().startsWith("test(")));
+    }
+
     private ProjectFiles project(final String source) throws Exception {
         return project("main.zn", source);
     }
@@ -1364,10 +1562,16 @@ public class LspWorkspaceTest {
 
     private static String hoverAt(final ProjectAnalysisWorkspace.Snapshot snapshot,
                                   final Path path, final String source, final String searchedText) {
+        return hoverAt(snapshot, path, source, searchedText, 0);
+    }
+
+    private static String hoverAt(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                  final Path path, final String source,
+                                  final String searchedText, final int relativeOffset) {
         final var offset = source.indexOf(searchedText);
         final var hover = LspFeatures.hover(snapshot, path, new HoverParams(
                 new TextDocumentIdentifier(path.toUri().toString()),
-                DocumentCoordinates.positionAt(source, offset)));
+                DocumentCoordinates.positionAt(source, offset + relativeOffset)));
         return hover == null ? "" : hover.getContents().getRight().getValue();
     }
 

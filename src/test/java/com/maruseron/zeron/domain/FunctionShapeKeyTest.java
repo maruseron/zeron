@@ -95,6 +95,21 @@ public final class FunctionShapeKeyTest {
     }
 
     @Test
+    public void distinguishesReceiverShapeFromExplicitReceiverParameterShape() {
+        final var receiver = TypeDescriptor.ofName("example.Scope");
+        final var receiverFunction = TypeDescriptor.receiverFunctionOf("", receiver,
+                TypeDescriptor.ofInt(), java.util.List.of(TypeDescriptor.ofString()),
+                java.util.List.of(), java.util.List.of());
+        final var ordinaryFunction = function("ordinary", TypeDescriptor.ofInt(),
+                receiver, TypeDescriptor.ofString());
+
+        assertNotEquals(FunctionShapeKey.of(receiverFunction), FunctionShapeKey.of(ordinaryFunction));
+        assertNotEquals(FunctionShapeNames.interfaceName(receiverFunction),
+                FunctionShapeNames.interfaceName(ordinaryFunction));
+        assertEquals(methodType(receiverFunction), methodType(ordinaryFunction));
+    }
+
+    @Test
     public void distinguishesAnyFromNominalTypeWithSameName() {
         final var any = function("any", TypeDescriptor.ofAny(), TypeDescriptor.ofAny());
         final var nominal = function("nominal", TypeDescriptor.ofName("Any"), TypeDescriptor.ofName("Any"));
@@ -184,7 +199,7 @@ public final class FunctionShapeKeyTest {
     }
 
     private static MethodTypeDesc methodType(final FunctionDescriptor functionType) {
-        final var parameters = functionType.parameters().stream()
+        final var parameters = functionType.invocationParameters().stream()
                 .map(TypeDescriptor::toJavaClassDesc)
                 .toList();
         return MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(functionType.returnType()), parameters);

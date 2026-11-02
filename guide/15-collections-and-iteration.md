@@ -15,6 +15,26 @@ for (let score in scores) {
 The loop runs once for each array element, with `score` holding the current item. You do not have
 to manage an index or write the stopping condition yourself.
 
+Arrays can also be passed anywhere an `Iterable<T>` is expected:
+
+```zeron
+import zeron.collections.Iterable;
+
+fn sum(values: Iterable<Int>): Int {
+    let mut total = 0;
+    for (let value in values) {
+        total += value;
+    }
+    return total;
+}
+
+let result = sum([8, 10, 9]);
+```
+
+The compiler creates a lightweight adapter for each conversion. It keeps the original array rather
+than copying its elements, so later writes through a mutable alias remain visible. A `for` loop
+directly over an array still uses intrinsic array iteration and does not create an adapter.
+
 ## Letting other types work with `for`
 
 Arrays are not the only values that can be visited one item at a time. A list, a range of numbers,

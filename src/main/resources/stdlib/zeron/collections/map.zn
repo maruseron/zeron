@@ -251,31 +251,6 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
         return val;
     }
 
-    /*
-    // this method generates faulty bytecode,
-    // the error is related to nested ifs where both branches
-    // return. remaining code may be unreachable, but the classfile
-    // API doesn't seem to detect it
-    public mut compute(key: K, transform: (K, Option<V>) -> Option<V>): Option<V> {
-        let val = get(key);
-        let new = transform(key, val);
-        if (new matches Option.None()) {
-            if (val.isSome() or containsKey(key)) {
-                remove(key);
-                return new;
-            } else {
-                return new;
-            }
-        } else {
-            // TODO: new as Option.Some
-            //           ^ Unknown type 'Option.Some'.
-            // put(key, (new as Option.Some).value);
-            put(key, unwrapSome(new));
-            return new;
-        }
-    }
-    */
-
     public mut compute(key: K, transform: (K, Option<V>) -> Option<V>): Option<V> {
         let val = get(key);
         let new = transform(key, val);
@@ -285,10 +260,7 @@ public class Map<K: Hashable<K>, V: mut> is Iterable<Pair<K, V>> {
             }
             return new;
         } 
-        // TODO: new as Option.Some
-        //           ^ Unknown type 'Option.Some'.
-        // put(key, (new as Option.Some).value);
-        put(key, unwrapSome(new));
+        put(key, new.value);
         return new;
     }
 

@@ -20,6 +20,20 @@ public class AnsiSyntaxHighlighterTest {
     }
 
     @Test
+    public void highlightsAnnotationDeclarationsApplicationsAndCodeModelTypes() {
+        final var highlighted = AnsiSyntaxHighlighter.highlight("""
+                annotation Example on PARAMETER;
+                fn consume(@Example model: CodeModel<CodeNode>): CodeType = model.root().sourceType();
+                """);
+
+        assertTrue(highlighted.contains(AnsiColor.apply("annotation", "35")));
+        assertTrue(highlighted.contains(AnsiColor.apply("Example", "35")));
+        assertTrue(highlighted.contains(AnsiColor.apply("CodeModel", "36")));
+        assertTrue(highlighted.contains(AnsiColor.apply("CodeNode", "36")));
+        assertTrue(highlighted.contains(AnsiColor.apply("CodeType", "36")));
+    }
+
+    @Test
     public void highlightsContextualKeywordsInTheirSyntaxPositions() {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 class Record deriving Eq, Hashable {
@@ -54,10 +68,11 @@ public class AnsiSyntaxHighlighterTest {
                 public effect IoFailure {}
                 fn resolveEffects<E: effect, T: nullable + Display>(value: T): String =
                     value.toString();
+                fn resolveRows<E: effect...>(value: Int): Int = value;
                 let nullable = 1;
                 """);
-
-        assertEquals(2, occurrences(highlighted, AnsiColor.apply("effect", "35")));
+        assertEquals(3, occurrences(highlighted, AnsiColor.apply("effect", "35")));
+        assertTrue(highlighted.contains(AnsiColor.apply("...", "33")));
         assertEquals(1, occurrences(highlighted, AnsiColor.apply("nullable", "35")));
     }
 

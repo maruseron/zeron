@@ -9,6 +9,7 @@ import com.maruseron.zeron.domain.ByteArrayDescriptor;
 import com.maruseron.zeron.domain.ByteDescriptor;
 import com.maruseron.zeron.domain.CapturedTypeDescriptor;
 import com.maruseron.zeron.domain.CharDescriptor;
+import com.maruseron.zeron.domain.EffectRowDescriptor;
 import com.maruseron.zeron.domain.FloatDescriptor;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.GenericDescriptor;
@@ -244,6 +245,27 @@ public final class ZeronLibraryIndexDump {
                             + formatType(newtype.underlyingType())
                             + (newtype.validated() ? " where <validated>" : ""));
                 }
+                case ZeronLibraryIndex.AnnotationDeclarationExport annotation -> {
+                    final var targets = annotation.targets().stream()
+                            .map(Enum::name)
+                            .collect(Collectors.joining(", "));
+                    final var parameters = annotation.parameters().stream()
+                            .map(parameter -> parameter.name() + ": " + formatType(parameter.type())
+                                    + (parameter.defaultValue() == null ? ""
+                                            : " = " + formatAnnotationConstant(parameter.defaultValue())))
+                            .collect(Collectors.joining(", "));
+                    System.out.println("annotation " + annotation.qualifiedName()
+                            + "(" + parameters + ") on " + targets);
+                }
+                case ZeronLibraryIndex.AnnotationApplicationExport annotation -> {
+                    final var arguments = annotation.arguments().stream()
+                            .map(argument -> argument.name() + " = "
+                                    + formatAnnotationConstant(argument.value()))
+                            .collect(Collectors.joining(", "));
+                    System.out.println("annotation use @" + annotation.annotationQualifiedName()
+                            + " on " + annotation.target() + " " + annotation.targetName()
+                            + (arguments.isEmpty() ? "" : " (" + arguments + ")"));
+                }
                 case ZeronLibraryIndex.WitnessExport _ -> { }
             }
         }
@@ -364,6 +386,24 @@ public final class ZeronLibraryIndexDump {
         if (variadic) System.out.println("    Variadic: yes");
     }
 
+    private static String formatAnnotationConstant(
+            final com.maruseron.zeron.domain.AnnotationConstant constant) {
+        return switch (constant) {
+            case com.maruseron.zeron.domain.AnnotationConstant.StringValue value ->
+                    "\"" + value.value() + "\"";
+            case com.maruseron.zeron.domain.AnnotationConstant.BooleanValue value ->
+                    Boolean.toString(value.value());
+            case com.maruseron.zeron.domain.AnnotationConstant.IntegerValue value ->
+                    value.value().toString();
+            case com.maruseron.zeron.domain.AnnotationConstant.DecimalValue value ->
+                    value.value().toPlainString();
+            case com.maruseron.zeron.domain.AnnotationConstant.NullValue ignored -> "null";
+            case com.maruseron.zeron.domain.AnnotationConstant.ArrayValue value ->
+                    "[" + value.values().stream().map(ZeronLibraryIndexDump::formatAnnotationConstant)
+                            .collect(Collectors.joining(", ")) + "]";
+        };
+    }
+
     private static String namespaceLabel(final String namespaceName) {
         return namespaceName == null ? "<top-level>" : namespaceName;
     }
@@ -433,6 +473,7 @@ public final class ZeronLibraryIndexDump {
                     (projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "out " : "in ")
                             + formatType(projection.bound());
             case CapturedTypeDescriptor capture -> capture.name();
+            case EffectRowDescriptor row -> row.name();
             case NullableDescriptor nullable -> formatType(nullable.baseType()) + "?";
             case ReferenceDescriptor reference -> "&" + formatType(reference.baseType());
             case FunctionDescriptor function when function.isHandler() ->

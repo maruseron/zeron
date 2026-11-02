@@ -56,6 +56,17 @@ public final class Resolver {
         for (final var unit : units) {
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = entry.declaration();
+                if (declaration instanceof Stmt.AnnotationDeclaration annotation) {
+                    final var simpleName = annotation.name().lexeme()
+                            .substring(annotation.name().lexeme().lastIndexOf('.') + 1);
+                    final var packageAndNamespace = entry.namespaceName() == null
+                            ? unit.packageName()
+                            : unit.packageName().isEmpty() ? entry.namespaceName()
+                                    : unit.packageName() + "." + entry.namespaceName();
+                    final var qualifiedName = packageAndNamespace.isEmpty()
+                            ? simpleName : packageAndNamespace + "." + simpleName;
+                    context.annotationDeclarations.putIfAbsent(qualifiedName, annotation);
+                }
                 if (declaration instanceof Stmt.ClassDecl || declaration instanceof Stmt.ContractDecl
                         || declaration instanceof Stmt.SumDecl || declaration instanceof Stmt.ProductDecl
                         || declaration instanceof Stmt.NewtypeDecl) {
@@ -164,8 +175,18 @@ public final class Resolver {
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 TypeResolver.resolveTypeNames(context, entry.declaration());
+                if (entry.declaration() instanceof Stmt.AnnotationDeclaration annotation) {
+                    for (final var parameter : annotation.parameters()) {
+                        TypeResolver.resolveTypeNames(context, parameter.type(), parameter.name());
+                        if (parameter.defaultValue() != null) {
+                            attempt(context, () -> AnnotationResolver.validateDefault(
+                                    context, unit, parameter));
+                        }
+                    }
+                }
             }
         }
+        AnnotationResolver.validate(context, units);
         TypeClassEvidence.synthesizeDelegatingClassHktImplementations(context);
         for (final var classDeclaration : context.classes.values()) {
             for (final var witness : classDeclaration.higherKindedImplementations()) {

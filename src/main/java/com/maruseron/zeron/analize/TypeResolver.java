@@ -80,6 +80,9 @@ final class TypeResolver {
             case ReferenceDescriptor reference -> resolveTypeNames(context, reference.baseType(), where);
             case AppliedConstructorDescriptor applied -> resolveTypeNames(context, applied.argument(), where);
             case FunctionDescriptor function -> {
+                if (function.receiverType() != null) {
+                    resolveTypeNames(context, function.receiverType(), where);
+                }
                 function.parameters().forEach(parameter -> resolveTypeNames(context, parameter, where));
                 resolveTypeNames(context, function.returnType(), where);
                 function.raisedEffects().forEach(effect -> resolveTypeNames(context, effect, where));
@@ -88,6 +91,10 @@ final class TypeResolver {
             }
             case TypeParameterDescriptor parameter ->
                     parameter.bounds().forEach(bound -> resolveTypeNames(context, bound, where));
+            case EffectRowDescriptor row -> {
+                row.effects().forEach(effect -> resolveTypeNames(context, effect, where));
+                row.variables().forEach(variable -> resolveTypeNames(context, variable, where));
+            }
             case TypeProjectionDescriptor projection -> resolveTypeNames(context, projection.bound(), where);
             default -> { }
         }
@@ -189,14 +196,24 @@ final class TypeResolver {
     }
 
     static void validateFunctionTypes(final ResolutionContext context, final FunctionDescriptor function, final Token where) {
+        if (function.receiverType() != null) validateType(context, function.receiverType(), where);
         for (final var parameter : function.parameters()) validateType(context, parameter, where);
         validateType(context, function.returnType(), where);
         final var seenEffects = new HashSet<TypeDescriptor>();
+        var rowVariableSeen = false;
         for (final var effect : function.raisedEffects()) {
             validateType(context, effect, where);
-            if (!isEffectType(context, effect)) {
+            if (EffectRows.isRowVariable(effect)) {
+                if (rowVariableSeen) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, where,
+                            "A raises clause may contain at most one effect-row variable."));
+                }
+                rowVariableSeen = true;
+            } else if (!isEffectType(context, effect)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        where, "A raises clause must name a declared effect type or an effect-kinded parameter."));
+                        where, "A raises clause must name a declared effect type, an effect-kinded "
+                                + "parameter, or an effect-row parameter."));
             }
             if (!seenEffects.add(effect)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
@@ -335,6 +352,10 @@ final class TypeResolver {
                 }
             }
             case FunctionDescriptor function -> validateFunctionTypes(context, function, where);
+            case EffectRowDescriptor row -> {
+                row.effects().forEach(effect -> validateType(context, effect, where));
+                row.variables().forEach(variable -> validateType(context, variable, where));
+            }
             case TypeProjectionDescriptor projection -> validateType(context, projection.bound(), where);
             case GenericDescriptor generic -> {
                 generic.baseType().resolveName(
@@ -443,6 +464,14 @@ final class TypeResolver {
                                                final TypeParameterDescriptor parameter,
                                                final TypeDescriptor argument,
                                                final Token where) {
+        if (parameter.isEffectRowKind()) {
+            if (!isEffectRowType(context, argument)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        where, "Type parameter '" + parameter.name()
+                                + "' requires an effect-row type argument such as '{}' or '{NotFound}'."));
+            }
+            return EffectRows.asRow(argument);
+        }
         if (!parameter.isEffectKind()
                 && mayAdmitMutableReference(argument) 
                 && !parameter.admitsMutableArguments()) {
@@ -483,6 +512,16 @@ final class TypeResolver {
         if (!(type instanceof NominalDescriptor nominal)) return false;
         final var declaration = context.classes.get(nominal.name());
         return declaration != null && declaration.isEffect();
+    }
+
+    private static boolean isEffectRowType(final ResolutionContext context, final TypeDescriptor type) {
+        return switch (type) {
+            case EffectRowDescriptor row -> row.effects().stream()
+                    .allMatch(effect -> isEffectType(context, effect));
+            case TypeParameterDescriptor parameter -> parameter.isEffectKind()
+                    || parameter.isEffectRowKind();
+            default -> isEffectType(context, type);
+        };
     }
 
     static TypeDescriptor classType(final ResolutionContext context, final Stmt.ClassDecl declaration) {

@@ -56,11 +56,20 @@ final class StatementEmitter {
                     try {
                         emitExpr(context, composer, condition);
                         if (elseBranch != null) {
-                            composer.ifThenElse(
-                                c -> emitStmt(context, c, thenBranch),
-                                c -> emitStmt(context, c, elseBranch));
+                            final var elseLabel = composer.newLabel();
+                            final var thenCompletes = canCompleteNormally(thenBranch);
+                            final var doneLabel = thenCompletes ? composer.newLabel() : null;
+                            composer.ifeq(elseLabel);
+                            emitStmt(context, composer, thenBranch);
+                            if (thenCompletes) composer.goto_(doneLabel);
+                            composer.labelBinding(elseLabel);
+                            emitStmt(context, composer, elseBranch);
+                            if (thenCompletes) composer.labelBinding(doneLabel);
                         } else {
-                            composer.ifThen(c -> emitStmt(context, c, thenBranch));
+                            final var doneLabel = composer.newLabel();
+                            composer.ifeq(doneLabel);
+                            emitStmt(context, composer, thenBranch);
+                            composer.labelBinding(doneLabel);
                         }
                     } finally {
                         ExpressionFlowEmitter.endSumCaseTestBindings(context, bindings);

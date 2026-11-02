@@ -219,4 +219,6 @@ simple stored value, and a computed property when reads or writes need custom be
 Classes give related data and behavior one name and one place to maintain. They are especially
 useful when a program needs multiple objects of the same kind, each with its own state and
 operations. Classes do not inherit from other classes; they can instead conform to contracts,
-introduced in [contracts and conformance](10-contracts-and-conformance.md).
+introduced in [contracts and conformance](10-contracts-and-conformance.md). For classes whose
+canonical components define structural equality, see
+[products, data classes, and sum types](17-sum-types-and-products.md).

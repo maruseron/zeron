@@ -371,6 +371,98 @@ public final class SumTypeTest {
     }
 
     @Test
+    public void refinesNegativeSumCaseTestsThroughGroupingAndNot() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "NegativeSumFlow" + suffix;
+        final var optionType = "OptionFlow" + suffix;
+        final var choiceType = "ChoiceFlow" + suffix;
+        final var source = """
+                public type %s<T> = Some(value: T) | None;
+                public type %s<T> = First | Second | Third(value: T);
+                fn some(): %s<Int> = %s.Some(42);
+                fn third(): %s<Int> = %s.Third(17);
+                fn afterNegative(option: %s<Int>): Int {
+                    if (option matches %s.None()) { return 0; }
+                    return option.value;
+                }
+                fn grouped(option: %s<Int>): Int =
+                    if ((option matches %s.None())) then 0 else option.value;
+                fn negated(option: %s<Int>): Int =
+                    if (not (option matches %s.None())) then option.value else 0;
+                fn negatedPayload(option: %s<Int>): Int =
+                    if (not (option matches %s.Some(value))) then 0 else value;
+                fn multi(choice: %s<Int>): Int {
+                    if (choice matches %s.First()) { return 1; }
+                    if (choice matches %s.Second()) { return 2; }
+                    return choice.value;
+                }
+                """.formatted(optionType, choiceType,
+                optionType, optionType, choiceType, choiceType,
+                optionType, optionType, optionType, optionType,
+                optionType, optionType, optionType, optionType,
+                choiceType, choiceType, choiceType);
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                final var option = program.getMethod("some").invoke(null);
+                final var choice = program.getMethod("third").invoke(null);
+                assertEquals(42, program.getMethod("afterNegative", loader.loadClass(optionType))
+                        .invoke(null, option));
+                assertEquals(42, program.getMethod("grouped", loader.loadClass(optionType))
+                        .invoke(null, option));
+                assertEquals(42, program.getMethod("negated", loader.loadClass(optionType))
+                        .invoke(null, option));
+                assertEquals(42, program.getMethod("negatedPayload", loader.loadClass(optionType))
+                        .invoke(null, option));
+                assertEquals(17, program.getMethod("multi", loader.loadClass(choiceType))
+                        .invoke(null, choice));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            for (final var sumType : List.of(optionType, choiceType)) {
+                Files.deleteIfExists(Path.of("dist", sumType + ".class"));
+                Files.deleteIfExists(Path.of("dist", sumType + "$$sum$Some.class"));
+                Files.deleteIfExists(Path.of("dist", sumType + "$$sum$None.class"));
+                Files.deleteIfExists(Path.of("dist", sumType + "$$sum$First.class"));
+                Files.deleteIfExists(Path.of("dist", sumType + "$$sum$Second.class"));
+                Files.deleteIfExists(Path.of("dist", sumType + "$$sum$Third.class"));
+            }
+        }
+    }
+
+    @Test
+    public void negativeFlowRefinementDoesNotApplyToIsTestsOrNullableSums() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Option = Some(value: Int) | None;
+                fn invalid(option: Option): Int {
+                    if (option is Option.None) { return 0; }
+                    return option.value;
+                }
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Option = Some(value: Int) | None;
+                fn invalid(option: Option?): Int {
+                    if (option matches Option.None()) { return 0; }
+                    return option.value;
+                }
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Option = Some(value: Int) | None;
+                fn invalid(initial: Option): Int {
+                    let mut option = initial;
+                    if (option matches Option.None()) {
+                        option = Option.None();
+                    }
+                    return option.value;
+                }
+                """)));
+    }
+
+    @Test
     public void rejectsSumPayloadReadsWithoutCaseRefinement() {
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 type Choice = Some(value: Int) | Empty;

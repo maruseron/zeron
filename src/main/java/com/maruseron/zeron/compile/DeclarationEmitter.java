@@ -186,7 +186,7 @@ final class DeclarationEmitter {
                             context.lambdaPlan.lambdaMethodName(lambda));
                     implementationParameters.addAll(Collections.nCopies(evidenceFields.size(),
                             TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
-                    implementationParameters.addAll(functionType.parameters());
+                    implementationParameters.addAll(functionType.invocationParameters());
                     classBuilder.withMethodBody(
                         context.lambdaPlan.lambdaMethodName(lambda),
                         toJavaMethodDescriptor(functionType, implementationParameters),
@@ -211,7 +211,7 @@ final class DeclarationEmitter {
                     final var targetType = adapter.target();
                     final var parameters = new ArrayList<TypeDescriptor>();
                     parameters.add(sourceType);
-                    parameters.addAll(targetType.parameters());
+                    parameters.addAll(targetType.invocationParameters());
                     classBuilder.withMethodBody(
                         adapter.name(),
                         toJavaMethodDescriptor(targetType, parameters),

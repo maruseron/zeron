@@ -6,6 +6,7 @@ import java.util.stream.Collectors;
 
 public final class FunctionDescriptor implements TypeDescriptor {
     private final String name;
+    private final TypeDescriptor receiverType;
     private final TypeDescriptor returnType;
     private final List<TypeDescriptor> parameters;
     private final List<TypeParameterDescriptor> typeParameters;
@@ -30,17 +31,20 @@ public final class FunctionDescriptor implements TypeDescriptor {
     FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters,
                        List<TypeParameterDescriptor> typeParameters, List<TypeDescriptor> raisedEffects,
                        List<TypeDescriptor> handledEffects) {
-        this(name, returnType, parameters, typeParameters, raisedEffects, handledEffects, false);
+        this(name, null, returnType, parameters, typeParameters, raisedEffects, handledEffects, false);
     }
 
-    private FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters,
-                               List<TypeParameterDescriptor> typeParameters, List<TypeDescriptor> raisedEffects,
-                               List<TypeDescriptor> handledEffects, boolean handlerShape) {
+    FunctionDescriptor(String name, TypeDescriptor receiverType, TypeDescriptor returnType,
+                       List<TypeDescriptor> parameters,
+                       List<TypeParameterDescriptor> typeParameters, List<TypeDescriptor> raisedEffects,
+                       List<TypeDescriptor> handledEffects, boolean handlerShape) {
         this.name = name;
+        this.receiverType = receiverType;
         this.returnType = returnType;
         this.parameters = List.copyOf(parameters);
         this.typeParameters = List.copyOf(typeParameters);
-        this.raisedEffects = handlerShape ? normalizedEffects(raisedEffects) : List.copyOf(raisedEffects);
+        this.raisedEffects = handlerShape ? normalizedEffects(raisedEffects)
+                : EffectRows.normalize(raisedEffects);
         this.handledEffects = normalizedEffects(handledEffects);
         this.handlerShape = handlerShape;
     }
@@ -54,10 +58,27 @@ public final class FunctionDescriptor implements TypeDescriptor {
         return name;
     }
 
+    public TypeDescriptor receiverType() {
+        return receiverType;
+    }
+
+    public boolean isReceiverFunction() {
+        return receiverType != null;
+    }
+
+    public List<TypeDescriptor> invocationParameters() {
+        if (receiverType == null) return parameters;
+        final var invocationParameters = new java.util.ArrayList<TypeDescriptor>(parameters.size() + 1);
+        invocationParameters.add(receiverType);
+        invocationParameters.addAll(parameters);
+        return List.copyOf(invocationParameters);
+    }
+
     @Override
     public String descriptor() {
         // function annotation + arity
-        return "$ " + parameters.size() + " "
+        return (receiverType == null ? "" : "@" + receiverType.descriptor() + " ")
+                + "$ " + parameters.size() + " "
                 // parameters in order
                 + parameters.stream()
                 .map(TypeDescriptor::descriptor).collect(Collectors.joining(" ")) + " "
@@ -90,7 +111,7 @@ public final class FunctionDescriptor implements TypeDescriptor {
     }
 
     FunctionDescriptor asHandler() {
-        return new FunctionDescriptor(name, returnType, parameters, typeParameters, raisedEffects,
+        return new FunctionDescriptor(name, null, returnType, parameters, typeParameters, raisedEffects,
                 handledEffects, true);
     }
 
@@ -107,7 +128,7 @@ public final class FunctionDescriptor implements TypeDescriptor {
     }
 
     public FunctionDescriptor toReturnType(final TypeDescriptor returnType) {
-        return new FunctionDescriptor(name, returnType, parameters, typeParameters, raisedEffects,
+        return new FunctionDescriptor(name, receiverType, returnType, parameters, typeParameters, raisedEffects,
                 handledEffects, handlerShape);
     }
 
@@ -115,7 +136,8 @@ public final class FunctionDescriptor implements TypeDescriptor {
     public boolean equals(Object obj) {
         if (obj == this) return true;
         if (!(obj instanceof FunctionDescriptor that)) return false;
-         return Objects.equals(this.parameters, that.parameters) &&
+         return Objects.equals(this.receiverType, that.receiverType) &&
+             Objects.equals(this.parameters, that.parameters) &&
              sameTypeParameters(this.typeParameters, that.typeParameters) &&
                Objects.equals(this.returnType, that.returnType) &&
              this.handlerShape == that.handlerShape &&
@@ -133,8 +155,8 @@ public final class FunctionDescriptor implements TypeDescriptor {
         final var handledHash = handlerShape
                 ? new java.util.HashSet<>(handledEffects).hashCode() : handledEffects.hashCode();
         return handlerShape
-                ? Objects.hash(returnType, parameters, typeParameterHash(), raisedHash, handledHash, true)
-                : Objects.hash(returnType, parameters, typeParameterHash(),
+                ? Objects.hash(receiverType, returnType, parameters, typeParameterHash(), raisedHash, handledHash, true)
+                : Objects.hash(receiverType, returnType, parameters, typeParameterHash(),
                         raisedEffects, handledEffects, false);
     }
 
@@ -147,6 +169,7 @@ public final class FunctionDescriptor implements TypeDescriptor {
             if (!first.equals(second)
                     || first.admitsNullableArguments() != second.admitsNullableArguments()
                     || first.isEffectKind() != second.isEffectKind()
+                    || first.isEffectRowKind() != second.isEffectRowKind()
                     || first.admitsMutableArguments() != second.admitsMutableArguments()) return false;
         }
         return true;
@@ -156,14 +179,14 @@ public final class FunctionDescriptor implements TypeDescriptor {
         var hash = 1;
         for (final var parameter : typeParameters) {
             hash = 31 * hash + Objects.hash(parameter, parameter.admitsNullableArguments(),
-                    parameter.isEffectKind(), parameter.admitsMutableArguments());
+                    parameter.isEffectKind(), parameter.isEffectRowKind(), parameter.admitsMutableArguments());
         }
         return hash;
     }
 
     @Override
     public String toString() {
-        return "TypeDescriptor.Function("
+        return "TypeDescriptor.Function(" + (receiverType == null ? "" : TypeFormatter.format(receiverType) + ".")
                 + parameters().stream().map(TypeDescriptor::toString).collect(Collectors.joining(", "))
                 + ") -> "
                 + returnType().toString();

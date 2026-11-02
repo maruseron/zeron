@@ -1,0 +1,60 @@
+package zeron.compiler;
+
+public annotation CodeModel on PARAMETER;
+
+public class CodeNode {
+    kindValue: String;
+    sourceTypeValue: CodeType;
+    identityValue: String?;
+    literalValue: Any?;
+    slotValue: Int;
+    childrenValue: Array<CodeNode>;
+
+    public constructor new;
+
+    public kind(): String = kindValue;
+    public sourceType(): CodeType = sourceTypeValue;
+    public identity(): String? = identityValue;
+    public literal(): Any? = literalValue;
+    public slot(): Int = slotValue;
+    public childCount(): Int = childrenValue.length;
+    public child(index: Int): CodeNode = childrenValue[index];
+}
+
+public class CodeType {
+    kindValue: String;
+    nameValue: String;
+    argumentsValue: Array<CodeType>;
+
+    public constructor new;
+
+    public kind(): String = kindValue;
+    public name(): String = nameValue;
+    public argumentCount(): Int = argumentsValue.length;
+    public argument(index: Int): CodeType = argumentsValue[index];
+}
+
+public class CodeCapture {
+    slotValue: Int;
+    nameValue: String;
+    sourceTypeValue: CodeType;
+    valueValue: Any?;
+
+    public constructor new;
+
+    public slot(): Int = slotValue;
+    public name(): String = nameValue;
+    public sourceType(): CodeType = sourceTypeValue;
+    public value(): Any? = valueValue;
+}
+
+public class CodeModel<F> {
+    rootValue: CodeNode;
+    captureValues: Array<CodeCapture>;
+
+    public constructor new;
+
+    public root(): CodeNode = rootValue;
+    public captureCount(): Int = captureValues.length;
+    public capture(index: Int): CodeCapture = captureValues[index];
+}

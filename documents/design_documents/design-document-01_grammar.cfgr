@@ -168,7 +168,10 @@ functionValueReference     : IDENTIFIER "::" typeArguments ;
 genericClassFactoryCall    : IDENTIFIER [typeArguments] "." IDENTIFIER arguments ;
 arguments                  : "(" [expression {"," expression}] ")" ;
 typeArguments              : "<" type {"," type} ">" ;
-type                       : ["&"] typeAtom ["~>" effectSet ["raises" effectSet]] ["?"] ;
+type                       : ["&"] (receiverFunctionType | typeAtom)
+                             ["~>" effectSet ["raises" effectSet]] ["?"] ;
+receiverFunctionType       : qualifiedName "." "(" [type {"," type}] ")"
+                             "->" type [raisesClause] ;
 effectSet                  : "{" [type {"," type}] "}" ;
 typeAtom                   : qualifiedName ["<" typeArgumentsBody ">"]
                            | "(" ")" "->" type [raisesClause]
@@ -187,6 +190,7 @@ primary                    : INT
                            | handlerLiteral
                            | arrayLiteral
                            | lambda
+                           | qualifiedName "." "this"
                            | "true" | "false" | "null" | "this"
                            | ifExpr
                            | matchExpr

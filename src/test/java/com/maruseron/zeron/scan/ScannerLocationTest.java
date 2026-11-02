@@ -193,7 +193,7 @@ public final class ScannerLocationTest {
 
     @Test
     public void scannerContinuesAfterInvalidCharactersAndPreservesFollowingTokens() {
-        final var result = Scanner.from("let x = 1; @ let y = 2;").scanWithDiagnostics();
+        final var result = Scanner.from("let x = 1; # let y = 2;").scanWithDiagnostics();
 
         assertFalse(result.diagnostics().isEmpty());
         assertTrue(result.tokens().stream().anyMatch(token -> token.type() == TokenType.IDENTIFIER

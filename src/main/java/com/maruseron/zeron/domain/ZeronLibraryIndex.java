@@ -13,6 +13,8 @@ import com.maruseron.zeron.scan.TokenType;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -55,11 +57,25 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 case WitnessExport witness -> packageName(witness.qualifiedName());
                 case DocumentationExport documentation ->
                         documentationPackageName(documentation.qualifiedName(), declarations);
+                case AnnotationDeclarationExport annotation ->
+                        packageName(annotation.qualifiedName());
+                case AnnotationApplicationExport annotation ->
+                        annotation.packageName();
                 default -> packageName(exported.qualifiedName());
             };
             final var statements = declarationsByPackage.computeIfAbsent(packageName, _ -> new ArrayList<>());
             switch (exported) {
                 case DocumentationExport ignored -> { }
+                case AnnotationDeclarationExport annotation -> {
+                    final var parameters = annotation.parameters().stream()
+                            .map(parameter -> new Stmt.AnnotationParameter(token(parameter.name()),
+                                    parameter.type(), parameter.defaultValue() == null ? null
+                                            : annotationExpression(parameter.defaultValue(), parameter.type())))
+                            .toList();
+                    statements.add(new Stmt.AnnotationDeclaration(token(simpleName(annotation.qualifiedName())),
+                            parameters, annotation.targets(), true));
+                }
+                case AnnotationApplicationExport ignored -> { }
                 case FunctionExport function -> {
                     final var functionName = token(simpleName(function.qualifiedName()));
                     final var declaration = new Stmt.Function(functionName,
@@ -280,8 +296,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     final var markdown = documentation.get(qualifiedName);
                     if (markdown != null) docs.put(name, markdown);
                 }
+                final var annotationSites = declarations.stream()
+                        .filter(AnnotationApplicationExport.class::isInstance)
+                        .map(AnnotationApplicationExport.class::cast)
+                        .filter(annotation -> annotation.packageName().equals(packageName))
+                        .map(annotation -> new Stmt.AnnotationSite(annotation.target(), annotation.targetName(),
+                                annotation.signature(), annotation.parameterIndex(), true,
+                                List.of(annotationApplication(annotation))))
+                        .toList();
                 return new CompilationUnit(sourceLabel + "#" + packageName, packageName,
-                        List.<ImportDeclaration>of(), entry.getValue(), true, docs);
+                        List.<ImportDeclaration>of(), entry.getValue(), true, docs, annotationSites);
             })
             .toList();
         }
@@ -295,13 +319,15 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             case Stmt.SumDecl sum -> sum.name();
             case Stmt.ProductDecl product -> product.name();
             case Stmt.NewtypeDecl newtype -> newtype.name();
+            case Stmt.AnnotationDeclaration annotation -> annotation.name();
             case Stmt.ExternalClass externalClass -> externalClass.name();
             default -> null;
         };
     }
 
     public sealed interface ExportedDeclaration permits NamespacedDeclaration, ClassExport, ContractExport,
-            SumExport, ProductExport, NewtypeExport, WitnessExport, ExternalClassExport, DocumentationExport {
+            SumExport, ProductExport, NewtypeExport, WitnessExport, ExternalClassExport, DocumentationExport,
+            AnnotationDeclarationExport, AnnotationApplicationExport {
         String qualifiedName();
     }
 
@@ -311,6 +337,49 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(markdown);
             if (qualifiedName.isBlank()) throw new IllegalArgumentException("Documentation name must not be blank.");
+        }
+    }
+
+    public record AnnotationDeclarationExport(String qualifiedName, boolean isPublic,
+                                              List<Stmt.AnnotationTarget> targets,
+                                              List<AnnotationParameterExport> parameters)
+            implements ExportedDeclaration {
+        public AnnotationDeclarationExport {
+            Objects.requireNonNull(qualifiedName);
+            targets = List.copyOf(targets);
+            parameters = List.copyOf(parameters);
+        }
+    }
+
+    public record AnnotationParameterExport(String name, TypeDescriptor type,
+                                            AnnotationConstant defaultValue) {
+        public AnnotationParameterExport {
+            Objects.requireNonNull(name);
+            Objects.requireNonNull(type);
+        }
+    }
+
+    public record AnnotationApplicationExport(String qualifiedName, String packageName,
+                                              Stmt.AnnotationTarget target,
+                                              String targetName, String signature, int parameterIndex,
+                                              String annotationQualifiedName,
+                                              List<AnnotationArgumentExport> arguments)
+            implements ExportedDeclaration {
+        public AnnotationApplicationExport {
+            Objects.requireNonNull(qualifiedName);
+            Objects.requireNonNull(packageName);
+            Objects.requireNonNull(target);
+            Objects.requireNonNull(targetName);
+            Objects.requireNonNull(annotationQualifiedName);
+            arguments = List.copyOf(arguments);
+            if (parameterIndex < -1) throw new IllegalArgumentException("Invalid parameter index.");
+        }
+    }
+
+    public record AnnotationArgumentExport(String name, AnnotationConstant value) {
+        public AnnotationArgumentExport {
+            Objects.requireNonNull(name);
+            Objects.requireNonNull(value);
         }
     }
 
@@ -1191,6 +1260,41 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 name.lexeme());
                 exports.add(new DocumentationExport(qualifiedName, documented.getValue()));
             }
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (!(member.declaration() instanceof Stmt.AnnotationDeclaration annotation)
+                        || !annotation.isPublic()) continue;
+                final var qualifiedName = member.namespaceName() == null
+                        ? qualify(unit.packageName(), annotation.name().lexeme())
+                        : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
+                                simpleName(annotation.name().lexeme()));
+                exports.add(new AnnotationDeclarationExport(qualifiedName, true,
+                        annotation.targets(), annotation.parameters().stream()
+                                .map(parameter -> {
+                                    if (parameter.defaultValue() != null
+                                            && parameter.resolvedDefault() == null) {
+                                        throw new IllegalStateException("Unresolved annotation default for "
+                                                + qualifiedName + "." + parameter.name().lexeme());
+                                    }
+                                    return new AnnotationParameterExport(parameter.name().lexeme(),
+                                            parameter.type(), parameter.resolvedDefault());
+                                }).toList()));
+            }
+            for (final var site : unit.annotationSites()) {
+                if (!site.isPublic()) continue;
+                final var targetName = qualify(unit.packageName(), site.targetName());
+                for (final var application : site.applications()) {
+                    if (application.resolvedName() == null) {
+                        throw new IllegalStateException("Unresolved annotation application at "
+                                + application.location().span());
+                    }
+                    exports.add(new AnnotationApplicationExport(targetName, unit.packageName(), site.target(),
+                            targetName, site.signature(), site.parameterIndex(), application.resolvedName(),
+                            application.resolvedArguments().stream()
+                                    .map(argument -> new AnnotationArgumentExport(
+                                            argument.name(), argument.value()))
+                                    .toList()));
+                }
+            }
             for (final var declaration : unit.declarations()) {
                 if (declaration instanceof Stmt.Namespace namespace
                         && NamespaceMembers.flatten(List.of(namespace)).stream()
@@ -1519,6 +1623,35 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeUTF(documentation.qualifiedName());
                 output.writeUTF(documentation.markdown());
             }
+            case AnnotationDeclarationExport annotation -> {
+                output.writeByte(16);
+                output.writeUTF(annotation.qualifiedName());
+                output.writeBoolean(annotation.isPublic());
+                output.writeInt(annotation.targets().size());
+                for (final var target : annotation.targets()) output.writeByte(target.ordinal());
+                final var context = new WriteContext();
+                output.writeInt(annotation.parameters().size());
+                for (final var parameter : annotation.parameters()) {
+                    output.writeUTF(parameter.name());
+                    writeType(output, parameter.type(), context);
+                    writeOptionalAnnotationConstant(output, parameter.defaultValue());
+                }
+            }
+            case AnnotationApplicationExport annotation -> {
+                output.writeByte(17);
+                output.writeUTF(annotation.qualifiedName());
+                output.writeUTF(annotation.packageName());
+                output.writeByte(annotation.target().ordinal());
+                output.writeUTF(annotation.targetName());
+                writeOptionalString(output, annotation.signature());
+                output.writeInt(annotation.parameterIndex());
+                output.writeUTF(annotation.annotationQualifiedName());
+                output.writeInt(annotation.arguments().size());
+                for (final var argument : annotation.arguments()) {
+                    output.writeUTF(argument.name());
+                    writeAnnotationConstant(output, argument.value());
+                }
+            }
         }
     }
 
@@ -1527,6 +1660,44 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             case 1 -> new FunctionExport(input.readUTF(), input.readUTF(), readOptionalString(input),
                     readFunction(input, new ReadContext()), input.readInt(), input.readBoolean());
             case 15 -> new DocumentationExport(input.readUTF(), input.readUTF());
+            case 16 -> {
+                final var name = input.readUTF();
+                final var isPublic = input.readBoolean();
+                final var targets = new ArrayList<Stmt.AnnotationTarget>();
+                final var targetValues = Stmt.AnnotationTarget.values();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var ordinal = input.readUnsignedByte();
+                    if (ordinal >= targetValues.length) throw new IOException("Invalid annotation target.");
+                    targets.add(targetValues[ordinal]);
+                }
+                final var context = new ReadContext();
+                final var parameters = new ArrayList<AnnotationParameterExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    final var parameterName = input.readUTF();
+                    final var type = readType(input, context);
+                    parameters.add(new AnnotationParameterExport(parameterName, type,
+                            readOptionalAnnotationConstant(input)));
+                }
+                yield new AnnotationDeclarationExport(name, isPublic, targets, parameters);
+            }
+            case 17 -> {
+                final var name = input.readUTF();
+                final var packageName = input.readUTF();
+                final var targetOrdinal = input.readUnsignedByte();
+                final var targets = Stmt.AnnotationTarget.values();
+                if (targetOrdinal >= targets.length) throw new IOException("Invalid annotation target.");
+                final var targetName = input.readUTF();
+                final var signature = readOptionalString(input);
+                final var parameterIndex = input.readInt();
+                final var annotationName = input.readUTF();
+                final var arguments = new ArrayList<AnnotationArgumentExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    arguments.add(new AnnotationArgumentExport(input.readUTF(),
+                            readAnnotationConstant(input)));
+                }
+                yield new AnnotationApplicationExport(name, packageName, targets[targetOrdinal], targetName,
+                        signature, parameterIndex, annotationName, arguments);
+            }
             case 5 -> {
                 final var name = input.readUTF();
                 final var owner = input.readUTF();
@@ -1785,6 +1956,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                       final WriteContext context) throws IOException {
         output.writeUTF(function.name());
         writeTypeParameters(output, function.typeParameters(), context);
+        output.writeBoolean(function.receiverType() != null);
+        if (function.receiverType() != null) writeType(output, function.receiverType(), context);
         writeType(output, function.returnType(), context);
         output.writeInt(function.parameters().size());
         for (final var parameter : function.parameters()) writeType(output, parameter, context);
@@ -1796,12 +1969,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                    final ReadContext context) throws IOException {
         final var name = input.readUTF();
         final var typeParameters = readTypeParameters(input, context);
+        final var receiverType = input.readBoolean() ? readType(input, context) : null;
         final var returnType = readType(input, context);
         final var parameters = new ArrayList<TypeDescriptor>();
         for (int i = 0, count = readCount(input); i < count; i++) parameters.add(readType(input, context));
         final var effects = new ArrayList<TypeDescriptor>();
         for (int i = 0, count = readCount(input); i < count; i++) effects.add(readType(input, context));
-        return TypeDescriptor.functionWithEffectsOf(name, returnType, parameters, typeParameters, effects);
+        return receiverType == null
+                ? TypeDescriptor.functionWithEffectsOf(name, returnType, parameters, typeParameters, effects)
+                : TypeDescriptor.receiverFunctionOf(name, receiverType, returnType,
+                        parameters, typeParameters, effects);
     }
 
     private static void writeTypeParameters(final DataOutputStream output,
@@ -1815,6 +1992,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             output.writeByte(parameter.variance().ordinal());
             output.writeBoolean(parameter.admitsNullableArguments());
             output.writeBoolean(parameter.isEffectKind());
+            output.writeBoolean(parameter.isEffectRowKind());
             output.writeBoolean(parameter.admitsMutableArguments());
         }
         for (final var parameter : parameters) {
@@ -1832,6 +2010,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         final var variances = new ArrayList<TypeParameterDescriptor.Variance>(count);
         final var nullableArguments = new ArrayList<Boolean>(count);
         final var effectKinds = new ArrayList<Boolean>(count);
+        final var effectRowKinds = new ArrayList<Boolean>(count);
         final var mutableArguments = new ArrayList<Boolean>(count);
         final var parameters = new ArrayList<TypeParameterDescriptor>(count);
         for (int i = 0; i < count; i++) {
@@ -1846,12 +2025,14 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             variances.add(availableVariances[varianceOrdinal]);
             nullableArguments.add(input.readBoolean());
             effectKinds.add(input.readBoolean());
+            effectRowKinds.add(input.readBoolean());
             mutableArguments.add(input.readBoolean());
         }
         for (int i = 0; i < count; i++) {
             final var parameter = new TypeParameterDescriptor(context.runtimeScope(scopes.get(i)),
                     names.get(i), List.of(), higherKinded.get(i), variances.get(i),
-                    nullableArguments.get(i), effectKinds.get(i), mutableArguments.get(i));
+                    nullableArguments.get(i), effectKinds.get(i), effectRowKinds.get(i),
+                    mutableArguments.get(i));
             parameters.add(parameter);
             context.parameters.put(new WireTypeParameter(scopes.get(i), names.get(i)), parameter);
         }
@@ -1865,7 +2046,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var parameter = new TypeParameterDescriptor(old.scopeId(), old.name(), bounds,
                         old.isHigherKinded(), old.variance(),
                         old.admitsNullableArguments(), old.isEffectKind(),
-                        old.admitsMutableArguments());
+                        old.isEffectRowKind(), old.admitsMutableArguments());
                 parameters.set(i, parameter);
                 context.parameters.put(new WireTypeParameter(scopes.get(i), names.get(i)), parameter);
             }
@@ -1962,6 +2143,11 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     writeFunction(output, function, context);
                 }
             }
+            case EffectRowDescriptor row -> {
+                output.writeByte(23);
+                writeTypes(output, row.effects(), context);
+                writeTypes(output, new ArrayList<TypeDescriptor>(row.variables()), context);
+            }
             case InferDescriptor _, NullDescriptor _, CapturedTypeDescriptor _ ->
                     throw new IOException("Internal types cannot be exported in a Zeron library index.");
         }
@@ -2024,6 +2210,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 if (kind >= kinds.length) throw new IOException("Invalid type projection in library index.");
                 yield new TypeProjectionDescriptor(kinds[kind], readType(input, context));
             }
+            case 23 -> {
+                final var fixed = readTypes(input, context);
+                final var variables = new ArrayList<TypeParameterDescriptor>();
+                for (final var variable : readTypes(input, context)) {
+                    if (!(variable instanceof TypeParameterDescriptor parameter)
+                            || !parameter.isEffectRowKind()) {
+                        throw new IOException("Invalid effect-row variable in library index.");
+                    }
+                    variables.add(parameter);
+                }
+                yield new EffectRowDescriptor(fixed, variables);
+            }
             default -> throw new IOException("Unknown type kind in Zeron library index.");
         };
     }
@@ -2046,6 +2244,63 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     private static void writeStrings(final DataOutputStream output, final List<String> values) throws IOException {
         output.writeInt(values.size());
         for (final var value : values) output.writeUTF(value);
+    }
+
+    private static void writeOptionalAnnotationConstant(final DataOutputStream output,
+                                                        final AnnotationConstant value) throws IOException {
+        output.writeBoolean(value != null);
+        if (value != null) writeAnnotationConstant(output, value);
+    }
+
+    private static AnnotationConstant readOptionalAnnotationConstant(final DataInputStream input)
+            throws IOException {
+        return input.readBoolean() ? readAnnotationConstant(input) : null;
+    }
+
+    private static void writeAnnotationConstant(final DataOutputStream output,
+                                                final AnnotationConstant value) throws IOException {
+        switch (value) {
+            case AnnotationConstant.StringValue string -> {
+                output.writeByte(1);
+                output.writeUTF(string.value());
+            }
+            case AnnotationConstant.BooleanValue bool -> {
+                output.writeByte(2);
+                output.writeBoolean(bool.value());
+            }
+            case AnnotationConstant.IntegerValue integer -> {
+                output.writeByte(3);
+                output.writeUTF(integer.value().toString());
+            }
+            case AnnotationConstant.DecimalValue decimal -> {
+                output.writeByte(4);
+                output.writeUTF(decimal.value().toString());
+            }
+            case AnnotationConstant.NullValue ignored -> output.writeByte(5);
+            case AnnotationConstant.ArrayValue array -> {
+                output.writeByte(6);
+                output.writeInt(array.values().size());
+                for (final var element : array.values()) writeAnnotationConstant(output, element);
+            }
+        }
+    }
+
+    private static AnnotationConstant readAnnotationConstant(final DataInputStream input) throws IOException {
+        return switch (input.readUnsignedByte()) {
+            case 1 -> new AnnotationConstant.StringValue(input.readUTF());
+            case 2 -> new AnnotationConstant.BooleanValue(input.readBoolean());
+            case 3 -> new AnnotationConstant.IntegerValue(new BigInteger(input.readUTF()));
+            case 4 -> new AnnotationConstant.DecimalValue(new BigDecimal(input.readUTF()));
+            case 5 -> new AnnotationConstant.NullValue();
+            case 6 -> {
+                final var values = new ArrayList<AnnotationConstant>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    values.add(readAnnotationConstant(input));
+                }
+                yield new AnnotationConstant.ArrayValue(values);
+            }
+            default -> throw new IOException("Unknown annotation constant kind.");
+        };
     }
 
     private static List<String> readStrings(final DataInputStream input) throws IOException {
@@ -2081,6 +2336,37 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static Token token(final String name, final int line) {
         return new Token(TokenType.IDENTIFIER, name, null, line);
+    }
+
+    private static Expr annotationExpression(final AnnotationConstant constant,
+                                            final TypeDescriptor type) {
+        return switch (constant) {
+            case AnnotationConstant.StringValue value -> new Expr.Literal(value.value(), type);
+            case AnnotationConstant.BooleanValue value -> new Expr.Literal(value.value(), type);
+            case AnnotationConstant.IntegerValue value ->
+                    new Expr.Literal(value.value(), type, value.value(), null, null);
+            case AnnotationConstant.DecimalValue value ->
+                    new Expr.Literal(value.value(), type, null, value.value(), null);
+            case AnnotationConstant.NullValue ignored -> new Expr.Literal(null, type);
+            case AnnotationConstant.ArrayValue value -> new Expr.ArrayLiteral(
+                    value.values().stream().map(element -> annotationExpression(element,
+                            type instanceof ArrayDescriptor array ? array.elementType()
+                                    : TypeDescriptor.ofInfer())).toList(), type);
+        };
+    }
+
+    private static Stmt.AnnotationApplication annotationApplication(
+            final AnnotationApplicationExport exported) {
+        final var arguments = exported.arguments().stream()
+                .map(argument -> new Stmt.AnnotationArgument(token(argument.name()),
+                        annotationExpression(argument.value(), TypeDescriptor.ofInfer())))
+                .toList();
+        final var application = new Stmt.AnnotationApplication(
+                token(exported.annotationQualifiedName()), arguments, token(exported.targetName()));
+        application.resolve(exported.annotationQualifiedName(), exported.arguments().stream()
+                .map(argument -> new Stmt.ResolvedAnnotationArgument(argument.name(), argument.value()))
+                .toList());
+        return application;
     }
 
     private static <T> List<T> append(final List<T> values, final T value) {

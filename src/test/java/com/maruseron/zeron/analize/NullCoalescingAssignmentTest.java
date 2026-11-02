@@ -91,6 +91,50 @@ public final class NullCoalescingAssignmentTest {
     }
 
     @Test
+    public void postfixNonNullAssertionChecksOnceAndUnboxesNullablePrimitives() throws Exception {
+        final var className = "NonNullAssertion" + UUID.randomUUID().toString().replace("-", "");
+        final var classFile = Path.of("dist", className + ".class");
+        final var source = """
+                let mut evaluations = 0;
+                fn nullableValue(): Int? {
+                    evaluations += 1;
+                    return 12;
+                }
+                fn asserted(value: Int?): Int = value!!;
+                fn assertedReference(value: String?): String = value!!;
+                fn accept(value: Int): Int = value;
+                fn chained(value: Int?): Int = accept(value!!);
+                fn redundant(value: Int): Int = value!! + 1;
+                fn evaluatedOnce(): Int = nullableValue()!!;
+                fn evaluationCount(): Int = evaluations;
+                """;
+
+        try {
+            final var compiler = new CompilationService(parse(source), className);
+            compiler.resolve();
+            compiler.compile();
+
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var generated = loader.loadClass(className);
+                assertEquals(12, generated.getMethod("asserted", Integer.class).invoke(null, 12));
+                assertEquals("ok", generated.getMethod("assertedReference", String.class).invoke(null, "ok"));
+                assertEquals(21, generated.getMethod("chained", Integer.class).invoke(null, 21));
+                assertEquals(8, generated.getMethod("redundant", int.class).invoke(null, 7));
+                assertEquals(12, generated.getMethod("evaluatedOnce").invoke(null));
+                assertEquals(1, generated.getMethod("evaluationCount").invoke(null));
+                final var failure = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                        () -> generated.getMethod("asserted", Integer.class)
+                                .invoke(null, new Object[]{null}));
+                assertEquals(NullPointerException.class, failure.getCause().getClass());
+                assertEquals("Non-null assertion failed.", failure.getCause().getMessage());
+            }
+        } finally {
+            Files.deleteIfExists(classFile);
+        }
+    }
+
+    @Test
     public void nullAssignmentAndNullableFallbackUpdateFlowFactsConservatively() {
         final var valid = parse("""
                 fn refinedByFallback(initial: Int?): Int {

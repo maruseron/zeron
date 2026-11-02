@@ -525,8 +525,8 @@ constructor signature.
 5. **Expand the type-system surface.** Consider class inheritance, abstract classes,
     intersection types, bounds, variance,
     broader inference, and module-qualified type identity as separate designs.
-6. **Anonymous contract implementations accepted, pending.** ZEP-0017 specifies contextually typed
-    object expressions backed by unique opaque nominal classes. Structural typing and assignability
+6. **Anonymous contract implementations implemented.** ZEP-0017's contextually typed object
+    expressions are backed by unique opaque nominal classes. Structural typing and assignability
     between separate object expressions are excluded.
 7. **Omitted member visibility implemented.** Under ZEP-0022, omitted visibility on class and
     effect methods and properties means private; public remains explicit. Other declaration

@@ -15,6 +15,7 @@ import com.maruseron.zeron.domain.BooleanDescriptor;
 import com.maruseron.zeron.domain.BindingMutability;
 import com.maruseron.zeron.domain.ByteArrayDescriptor;
 import com.maruseron.zeron.domain.ByteDescriptor;
+import com.maruseron.zeron.domain.EffectRowDescriptor;
 import com.maruseron.zeron.domain.FloatDescriptor;
 import com.maruseron.zeron.domain.IntDescriptor;
 import com.maruseron.zeron.domain.LongDescriptor;
@@ -50,11 +51,13 @@ public final class Parser {
     private final List<Token> comments;
     private final List<Diagnostic> diagnostics = new ArrayList<>();
     private final Map<Token, String> documentation = new LinkedHashMap<>();
+    private final List<Stmt.AnnotationSite> annotationSites = new ArrayList<>();
     private final String anonymousClassSourceId;
     private final List<Token> forExpressionResultKeywords = new ArrayList<>();
     private final List<Token> dataClassInitializerNames = new ArrayList<>();
     private int current = 0;
     private String packageName = "";
+    private String currentNamespaceName;
     private String sourcePath;
     private final List<ImportDeclaration> imports = new ArrayList<>();
     private static final AtomicInteger TYPE_PARAMETER_SCOPES = new AtomicInteger();
@@ -235,24 +238,49 @@ public final class Parser {
         }
         statements.removeIf(statement -> statement == null);
 
-        return new ParseResult(new CompilationUnit(sourcePath, packageName, imports, statements, false, documentation),
+        return new ParseResult(new CompilationUnit(sourcePath, packageName, imports, statements, false,
+                documentation, annotationSites),
                 diagnostics, comments);
     }
 
     private Stmt declaration() {
-        final var declarationStart = peek();
-        final var doc = levelMarker == null ? documentationBefore(declarationStart) : null;
-        final var declaration = parseDeclaration();
-        final var name = declarationName(declaration);
-        if (doc != null && name != null
-                && (!(declaration instanceof Stmt.Namespace) || declarationStart.type() == NAMESPACE)) {
-            documentation.put(name, doc);
+        try {
+            final var annotations = annotationApplications();
+            final var declarationStart = peek();
+            final var doc = levelMarker == null ? documentationBefore(declarationStart) : null;
+            final var parsedDeclaration = parseDeclaration();
+            if (!annotations.isEmpty() && parsedDeclaration instanceof Stmt.Namespace) {
+                throw error(annotations.getFirst().location(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Annotations cannot target namespaces.");
+            }
+            final var declaration = parsedDeclaration == null || annotations.isEmpty()
+                    ? parsedDeclaration
+                    : new Stmt.AnnotatedDeclaration(parsedDeclaration, annotations);
+            if (parsedDeclaration != null && !annotations.isEmpty()) {
+                final var target = annotationTarget(parsedDeclaration);
+                final var targetName = declarationName(parsedDeclaration);
+                if (targetName != null) {
+                    final var signature = parsedDeclaration instanceof Stmt.FunctionDeclaration function
+                            ? function.typeDescriptor().descriptor() : null;
+                    recordAnnotationSite(target, annotationTargetName(targetName.lexeme()), signature, -1,
+                            isPublic(parsedDeclaration), annotations);
+                }
+            }
+            final var name = declarationName(declaration);
+            if (doc != null && name != null
+                    && (!(declaration instanceof Stmt.Namespace) || declarationStart.type() == NAMESPACE)) {
+                documentation.put(name, doc);
+            }
+            return declaration;
+        } catch (ParseError error) {
+            synchronize();
+            return null;
         }
-        return declaration;
     }
 
     private Stmt parseDeclaration() {
         try {
+            if (levelMarker == null && match(ANNOTATION)) return annotationDeclaration(false);
             if (match(LET)) return letDeclaration();
             if (match(FN))  return fnDeclaration();
             if (levelMarker == null && matchSoftKeyword("delegating")) {
@@ -271,6 +299,7 @@ public final class Parser {
 
             if (levelMarker == null && match(PUBLIC)) {
                 if (match(LET)) return letDeclaration(true);
+                if (match(ANNOTATION)) return annotationDeclaration(true);
                 if (matchSoftKeyword("handler")) return namedHandlerDeclaration(true);
                 if (matchSoftKeyword("data")) {
                     consume(CLASS, "Expect 'class' after 'data'.");
@@ -345,6 +374,9 @@ public final class Parser {
 
     private static Token declarationName(final Stmt declaration) {
         if (declaration == null) return null;
+        if (declaration instanceof Stmt.AnnotatedDeclaration annotated) {
+            return declarationName(annotated.declaration());
+        }
         return switch (declaration) {
             case Stmt.FunctionDeclaration function -> function.name();
             case Stmt.Var variable -> variable.name();
@@ -355,7 +387,114 @@ public final class Parser {
             case Stmt.SumDecl sum -> sum.name();
             case Stmt.ProductDecl product -> product.name();
             case Stmt.NewtypeDecl newtype -> newtype.name();
+            case Stmt.AnnotationDeclaration annotation -> annotation.name();
             default -> null;
+        };
+    }
+
+    private List<Stmt.AnnotationApplication> annotationApplications() {
+        final var annotations = new ArrayList<Stmt.AnnotationApplication>();
+        while (match(AT)) {
+            final var at = previous();
+            final var name = new StringBuilder(
+                    consume(IDENTIFIER, "Expect annotation name after '@'.").lexeme());
+            while (match(DOT)) {
+                name.append('.').append(consume(IDENTIFIER, "Expect annotation name after '.'.").lexeme());
+            }
+            final var annotationName = new Token(IDENTIFIER, name.toString(), null, at.span());
+            final var arguments = new ArrayList<Stmt.AnnotationArgument>();
+            if (match(LEFT_PAREN)) {
+                if (!check(RIGHT_PAREN)) {
+                    do {
+                        Token argumentName = null;
+                        if (check(IDENTIFIER) && checkNext(EQUAL)) {
+                            argumentName = advance();
+                            advance();
+                        }
+                        arguments.add(new Stmt.AnnotationArgument(argumentName, expression()));
+                    } while (match(COMMA));
+                }
+                consume(RIGHT_PAREN, "Expect ')' after annotation arguments.");
+            }
+            annotations.add(new Stmt.AnnotationApplication(annotationName, arguments, at));
+        }
+        return List.copyOf(annotations);
+    }
+
+    private Stmt.AnnotationDeclaration annotationDeclaration(final boolean isPublic) {
+        final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect annotation name."));
+        final var parameters = new ArrayList<Stmt.AnnotationParameter>();
+        if (match(LEFT_PAREN)) {
+            if (!check(RIGHT_PAREN)) {
+                do {
+                    final var parameterName = consume(IDENTIFIER, "Expect annotation parameter name.");
+                    consume(COLON, "Expect ':' after annotation parameter name.");
+                    final var type = collectType();
+                    final var defaultValue = match(EQUAL) ? expression() : null;
+                    parameters.add(new Stmt.AnnotationParameter(parameterName, type, defaultValue));
+                } while (match(COMMA));
+            }
+            consume(RIGHT_PAREN, "Expect ')' after annotation parameters.");
+        }
+        consumeSoftKeyword("on");
+        final var targets = new ArrayList<Stmt.AnnotationTarget>();
+        do {
+            final var target = advance();
+            try {
+                targets.add(Stmt.AnnotationTarget.valueOf(target.lexeme().toUpperCase()));
+            } catch (IllegalArgumentException exception) {
+                throw error(target, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Unknown annotation target '" + target.lexeme() + "'.");
+            }
+        } while (match(COMMA));
+        consume(SEMICOLON, "Expect ';' after annotation declaration.");
+        if (targets.isEmpty()) {
+            throw error(name, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    "An annotation must declare at least one target.");
+        }
+        return new Stmt.AnnotationDeclaration(name, parameters, targets, isPublic);
+    }
+
+    private void recordAnnotationSite(final Stmt.AnnotationTarget target, final String targetName,
+                                      final String signature, final int parameterIndex,
+                                      final boolean isPublic,
+                                      final List<Stmt.AnnotationApplication> applications) {
+        if (!applications.isEmpty()) {
+            annotationSites.add(new Stmt.AnnotationSite(target, targetName, signature,
+                    parameterIndex, isPublic, applications));
+        }
+    }
+
+    private String annotationTargetName(final String name) {
+        if (name.contains(".")) return name;
+        if (currentNamespaceName != null) {
+            final var namespace = packageName.isEmpty()
+                    ? currentNamespaceName : packageName + "." + currentNamespaceName;
+            return namespace + "." + name;
+        }
+        return packageName.isEmpty() ? name : packageName + "." + name;
+    }
+
+    private static Stmt.AnnotationTarget annotationTarget(final Stmt declaration) {
+        return switch (declaration) {
+            case Stmt.ClassDecl ignored -> Stmt.AnnotationTarget.CLASS;
+            case Stmt.ExternalClass ignored -> Stmt.AnnotationTarget.CLASS;
+            case Stmt.ContractDecl ignored -> Stmt.AnnotationTarget.CONTRACT;
+            case Stmt.ExternalFunction ignored -> Stmt.AnnotationTarget.FUNCTION;
+            case Stmt.FunctionDeclaration function -> function instanceof Stmt.ExtensionMethod
+                    ? Stmt.AnnotationTarget.METHOD : Stmt.AnnotationTarget.FUNCTION;
+            default -> null;
+        };
+    }
+
+    private static boolean isPublic(final Stmt declaration) {
+        return switch (declaration) {
+            case Stmt.ClassDecl classDeclaration -> classDeclaration.isPublic();
+            case Stmt.ExternalClass externalClass -> externalClass.isPublic();
+            case Stmt.ContractDecl contractDeclaration -> contractDeclaration.isPublic();
+            case Stmt.ExternalFunction externalFunction -> externalFunction.isPublic();
+            case Stmt.FunctionDeclaration function -> function.isPublic();
+            default -> false;
         };
     }
 
@@ -566,16 +705,24 @@ public final class Parser {
         final var name = consume(IDENTIFIER, "Expect namespace name.");
         consume(LEFT_BRACE, "Expect '{' after namespace name.");
         final var members = new ArrayList<Stmt>();
-        while (!check(RIGHT_BRACE) && !isAtEnd()) {
-            final var member = declaration();
-            if (member instanceof Stmt.FunctionDeclaration
-                    || member instanceof Stmt.Var variable
-                    && !variable.mutability().isReassignable()) {
-                members.add(member);
-            } else {
-                error(name, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                        "Namespaces may contain only functions and immutable values.");
+        final var enclosingNamespace = currentNamespaceName;
+        currentNamespaceName = name.lexeme();
+        try {
+            while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                final var member = declaration();
+                final var underlying = member instanceof Stmt.AnnotatedDeclaration annotated
+                        ? annotated.declaration() : member;
+                if (underlying instanceof Stmt.FunctionDeclaration
+                        || underlying instanceof Stmt.Var variable
+                        && !variable.mutability().isReassignable()) {
+                    members.add(member);
+                } else {
+                    error(name, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "Namespaces may contain only functions and immutable values.");
+                }
             }
+        } finally {
+            currentNamespaceName = enclosingNamespace;
         }
         consume(RIGHT_BRACE, "Expect '}' after namespace members.");
         return new Stmt.Namespace(name, members);
@@ -602,6 +749,7 @@ public final class Parser {
             final var methods = new ArrayList<Stmt>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
                 final var memberDocumentation = documentationBefore(peek());
+                final var memberAnnotations = annotationApplications();
                 final var methodPublic = match(PUBLIC);
                 final var isMutating = match(MUT);
                 if (match(PROPERTY)) {
@@ -624,6 +772,9 @@ public final class Parser {
                     methods.add(new Stmt.ExtensionMethod(propertyName, List.of(receiverParameter), functionType,
                             isPublic && property.isPublic(), false, property.getterBody(), List.of(), 1, false,
                             receiverType, List.copyOf(extensionTypeParameters.values()), List.of(), true));
+                    recordAnnotationSite(Stmt.AnnotationTarget.PROPERTY,
+                            receiverName + "." + propertyName.lexeme(), property.type().descriptor(), -1,
+                            isPublic && methodPublic, memberAnnotations);
                     if (memberDocumentation != null) {
                         documentation.put(propertyName, memberDocumentation);
                     }
@@ -662,6 +813,14 @@ public final class Parser {
                             parsed.variadic(), receiverType,
                             List.copyOf(extensionTypeParameters.values()),
                             List.copyOf(methodTypeParameters.values())));
+                    recordAnnotationSite(Stmt.AnnotationTarget.METHOD,
+                            receiverName + "." + methodName.lexeme(), functionType.descriptor(), -1,
+                            isPublic && methodPublic, memberAnnotations);
+                    for (var index = 0; index < parsed.parameterAnnotations().size(); index++) {
+                        recordAnnotationSite(Stmt.AnnotationTarget.PARAMETER,
+                                receiverName + "." + methodName.lexeme(), functionType.descriptor(),
+                                index, isPublic && methodPublic, parsed.parameterAnnotations().get(index));
+                    }
                     if (memberDocumentation != null) {
                         documentation.put(methodName, memberDocumentation);
                     }
@@ -747,6 +906,7 @@ public final class Parser {
         final var parameterNames = new ArrayList<Token>();
         final var parameterTypes = new ArrayList<TypeDescriptor>();
         final var defaultValues = new ArrayList<Expr>();
+        final var parameterAnnotations = new ArrayList<List<Stmt.AnnotationApplication>>();
         var hasDefault = false;
         var variadic = false;
         if (!check(RIGHT_PAREN)) {
@@ -757,7 +917,10 @@ public final class Parser {
                 }
                 if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                         "Can't have more than 254 parameters.");
-                parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
+                final var annotations = annotationApplications();
+                final var parameterName = consume(IDENTIFIER, "Expect parameter name.");
+                parameterNames.add(parameterName);
+                parameterAnnotations.add(annotations);
                 consume(COLON, "Expect ':' after parameter name.");
                 final var parameterType = collectType();
                 variadic = match(ELLIPSIS);
@@ -786,6 +949,11 @@ public final class Parser {
                 .toList();
         final var descriptor = TypeDescriptor.functionWithEffectsOf(name.lexeme(), returnType,
                 parameterTypes, List.of(), raisedEffects);
+        for (var index = 0; index < parameterAnnotations.size(); index++) {
+            recordAnnotationSite(Stmt.AnnotationTarget.PARAMETER,
+                    annotationTargetName(name.lexeme()), descriptor.descriptor(),
+                    index, isPublic, parameterAnnotations.get(index));
+        }
         return new Stmt.ExternalFunction(name, List.copyOf(parameterNames), descriptor, isPublic,
                 List.copyOf(defaultValues), parameterNames.size() - (variadic ? 1 : 0)
                         - defaultValues.size(), variadic, exceptionMappings);
@@ -810,6 +978,7 @@ public final class Parser {
         final var properties = new ArrayList<Stmt.ExternalStaticProperty>();
         while (!check(RIGHT_BRACE) && !isAtEnd()) {
             final var memberDocumentation = documentationBefore(peek());
+            final var memberAnnotations = annotationApplications();
             final var isMemberPublic = match(PUBLIC);
             final var isMutating = match(MUT);
             final var isStatic = match(STATIC);
@@ -826,8 +995,10 @@ public final class Parser {
                 consume(LEFT_PAREN, "Expect '(' after constructor name.");
                 final var parameters = new ArrayList<Token>();
                 final var parameterTypes = new ArrayList<TypeDescriptor>();
+                final var parameterAnnotations = new ArrayList<List<Stmt.AnnotationApplication>>();
                 if (!check(RIGHT_PAREN)) {
                     do {
+                        parameterAnnotations.add(annotationApplications());
                         parameters.add(consume(IDENTIFIER, "Expect constructor parameter name."));
                         consume(COLON, "Expect ':' after constructor parameter name.");
                         parameterTypes.add(collectType());
@@ -836,8 +1007,21 @@ public final class Parser {
                 consume(RIGHT_PAREN, "Expect ')' after constructor parameters.");
                 final var exceptionMappings = parseExternalExceptionMappings();
                 consume(SEMICOLON, "Expect ';' after external constructor.");
+                final var constructorSignature = TypeDescriptor.functionWithEffectsOf(
+                        constructorName.lexeme(), TypeDescriptor.ofName(name.lexeme()),
+                        parameterTypes, List.of(), exceptionMappings.stream()
+                                .map(Stmt.ExternalExceptionMapping::effectType).distinct().toList());
                 constructors.add(new Stmt.ExternalConstructor(constructorName, parameters,
                         parameterTypes, isMemberPublic, exceptionMappings));
+                recordAnnotationSite(Stmt.AnnotationTarget.CONSTRUCTOR,
+                        annotationTargetName(name.lexeme()) + "." + constructorName.lexeme(),
+                        constructorSignature.descriptor(), -1, isPublic && isMemberPublic, memberAnnotations);
+                for (var index = 0; index < parameterAnnotations.size(); index++) {
+                    recordAnnotationSite(Stmt.AnnotationTarget.PARAMETER,
+                            annotationTargetName(name.lexeme()) + "." + constructorName.lexeme(),
+                            constructorSignature.descriptor(), index, isPublic && isMemberPublic,
+                            parameterAnnotations.get(index));
+                }
                 if (memberDocumentation != null) {
                     documentation.put(constructorName, memberDocumentation);
                 }
@@ -852,6 +1036,9 @@ public final class Parser {
                 final var type = collectType();
                 consume(SEMICOLON, "Expect ';' after external property.");
                 properties.add(new Stmt.ExternalStaticProperty(propertyName, type, isMemberPublic));
+                recordAnnotationSite(Stmt.AnnotationTarget.PROPERTY,
+                        annotationTargetName(name.lexeme()) + "." + propertyName.lexeme(),
+                        type.descriptor(), -1, isPublic && isMemberPublic, memberAnnotations);
                 if (memberDocumentation != null) {
                     documentation.put(propertyName, memberDocumentation);
                 }
@@ -865,8 +1052,10 @@ public final class Parser {
             consume(LEFT_PAREN, "Expect '(' after external method name.");
             final var parameters = new ArrayList<Token>();
             final var parameterTypes = new ArrayList<TypeDescriptor>();
+            final var parameterAnnotations = new ArrayList<List<Stmt.AnnotationApplication>>();
             if (!check(RIGHT_PAREN)) {
                 do {
+                    parameterAnnotations.add(annotationApplications());
                     parameters.add(consume(IDENTIFIER, "Expect parameter name."));
                     consume(COLON, "Expect ':' after parameter name.");
                     parameterTypes.add(collectType());
@@ -881,10 +1070,18 @@ public final class Parser {
                     .map(Stmt.ExternalExceptionMapping::effectType)
                     .distinct()
                     .toList();
+            final var methodType = TypeDescriptor.functionWithEffectsOf(methodName.lexeme(), returnType,
+                    parameterTypes, List.of(), raisedEffects);
             methods.add(new Stmt.ExternalMethod(methodName, List.copyOf(parameters),
-                    TypeDescriptor.functionWithEffectsOf(methodName.lexeme(), returnType,
-                            parameterTypes, List.of(), raisedEffects),
+                    methodType,
                     isMemberPublic, isStatic, isMutating, List.of(), exceptionMappings));
+            final var targetName = annotationTargetName(name.lexeme()) + "." + methodName.lexeme();
+            recordAnnotationSite(Stmt.AnnotationTarget.METHOD, targetName, methodType.descriptor(),
+                    -1, isPublic && isMemberPublic, memberAnnotations);
+            for (var index = 0; index < parameterAnnotations.size(); index++) {
+                recordAnnotationSite(Stmt.AnnotationTarget.PARAMETER, targetName, methodType.descriptor(),
+                        index, isPublic && isMemberPublic, parameterAnnotations.get(index));
+            }
             if (memberDocumentation != null) {
                 documentation.put(methodName, memberDocumentation);
             }
@@ -907,6 +1104,7 @@ public final class Parser {
             final var parameterNames = new ArrayList<Token>();
             final var parameterTypes = new ArrayList<TypeDescriptor>();
             final var defaultValues = new ArrayList<Expr>();
+            final var parameterAnnotations = new ArrayList<List<Stmt.AnnotationApplication>>();
             var hasDefault = false;
             var variadic = false;
             if (!check(RIGHT_PAREN)) {
@@ -919,6 +1117,7 @@ public final class Parser {
                         error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                                 "Can't have more than 254 parameters.");
                     }
+                    parameterAnnotations.add(annotationApplications());
                     parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                     consume(COLON, "Expect ':' after parameter name.");
                     final var parameterType = collectType();
@@ -960,9 +1159,14 @@ public final class Parser {
                 body = block();
             }
 
-            return new Stmt.Function(name, parameterNames,
-                    TypeDescriptor.functionWithEffectsOf(name.lexeme(), returnType, parameterTypes,
-                        List.copyOf(typeParameters.values()), raisedEffects), body, isPublic, List.copyOf(defaultValues),
+            final var descriptor = TypeDescriptor.functionWithEffectsOf(name.lexeme(), returnType, parameterTypes,
+                    List.copyOf(typeParameters.values()), raisedEffects);
+            final var targetName = annotationTargetName(name.lexeme());
+            for (var index = 0; index < parameterAnnotations.size(); index++) {
+                recordAnnotationSite(Stmt.AnnotationTarget.PARAMETER, targetName, descriptor.descriptor(),
+                        index, isPublic, parameterAnnotations.get(index));
+            }
+            return new Stmt.Function(name, parameterNames, descriptor, body, isPublic, List.copyOf(defaultValues),
                     parameterNames.size() - (variadic ? 1 : 0) - defaultValues.size(), variadic);
         } finally {
             levelMarker = enclosingLevelMarker;
@@ -1025,6 +1229,7 @@ public final class Parser {
             parameters.put(parameter.lexeme(), descriptor);
             var nullableArguments = false;
             var effectKind = false;
+            var effectRowKind = false;
             var mutableArguments = false;
             if (match(COLON)) {
                 final var enclosingTypeParameters = activeTypeParameters;
@@ -1040,11 +1245,12 @@ public final class Parser {
                         nullableArguments = true;
                     } else if (check(EFFECT)) {
                         final var marker = advance();
-                        if (effectKind) {
+                        if (effectKind || effectRowKind) {
                             error(marker, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
                                     "Duplicate 'effect' type-parameter marker.");
                         }
-                        effectKind = true;
+                        effectRowKind = match(ELLIPSIS);
+                        effectKind = !effectRowKind;
                     } else if (match(MUT)) {
                         if (mutableArguments) {
                             error(previous(), DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
@@ -1061,22 +1267,24 @@ public final class Parser {
                     }
                 } while (match(PLUS));
                 activeTypeParameters = enclosingTypeParameters;
-                if (higherKinded && (nullableArguments || effectKind || mutableArguments)) {
+                if (higherKinded && (nullableArguments || effectKind || effectRowKind || mutableArguments)) {
                     error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
                             "Admissibility markers cannot be applied to higher-kinded type parameters.");
                     nullableArguments = false;
                     effectKind = false;
+                    effectRowKind = false;
                     mutableArguments = false;
                 }
-                if (effectKind && (nullableArguments || mutableArguments)) {
+                if ((effectKind || effectRowKind) && (nullableArguments || mutableArguments)) {
                     error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
                             "The 'effect' marker cannot be combined with 'nullable' or 'mut'.");
                     nullableArguments = false;
                     effectKind = false;
+                    effectRowKind = false;
                     mutableArguments = false;
                 }
                 descriptor = new TypeParameterDescriptor(scopeId, parameter.lexeme(), bounds, higherKinded,
-                        variance, nullableArguments, effectKind, mutableArguments);
+                        variance, nullableArguments, effectKind, effectRowKind, mutableArguments);
                 parameters.put(parameter.lexeme(), descriptor);
             }
         } while (match(COMMA));
@@ -1112,6 +1320,7 @@ public final class Parser {
                 if (!check(RIGHT_PAREN)) {
                     do {
                         final var componentDocumentation = documentationBefore(peek());
+                        final var componentAnnotations = annotationApplications();
                         final var componentName = consume(IDENTIFIER, "Expect data-class component name.");
                         consume(COLON, "Expect ':' after data-class component name.");
                         final var componentType = collectType();
@@ -1121,6 +1330,9 @@ public final class Parser {
                             expression();
                         }
                         dataComponents.add(new Stmt.ProductComponent(componentName, componentType));
+                        recordAnnotationSite(Stmt.AnnotationTarget.DATA_COMPONENT,
+                                name.lexeme() + "." + componentName.lexeme(), componentType.descriptor(),
+                                dataComponents.size() - 1, isTopLevelPublic, componentAnnotations);
                         if (componentDocumentation != null) {
                             documentation.put(componentName, componentDocumentation);
                         }
@@ -1167,7 +1379,11 @@ public final class Parser {
             Stmt.Constructor constructor = null;
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
                 final var memberDocumentation = documentationBefore(peek());
+                final var memberAnnotations = annotationApplications();
                 Token documentedMemberName = null;
+                var memberTarget = (Stmt.AnnotationTarget) null;
+                var memberSignature = (String) null;
+                var memberIsPublic = false;
                 if (isDataClass && isDataClassInitializerStart(name)) {
                     dataClassInitializerNames.add(advance());
                     final var raisedEffects = parseRaisedEffects();
@@ -1196,6 +1412,9 @@ public final class Parser {
                     final var isPublic = previous().type() == PUBLIC;
                     if (match(CONSTRUCTOR)) {
                         final var constructorName = consume(IDENTIFIER, "Expect constructor name after 'constructor'.");
+                        memberTarget = Stmt.AnnotationTarget.CONSTRUCTOR;
+                        memberSignature = constructorName.lexeme();
+                        memberIsPublic = isTopLevelPublic && isPublic;
                         if (isDataClass) {
                             error(constructorName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                                     "Data classes have only their canonical component constructor.");
@@ -1209,7 +1428,7 @@ public final class Parser {
                             documentedMemberName = constructorName;
                         } else {
                             final var named = namedConstructor(constructorName, isPublic, name,
-                                    List.copyOf(typeParameters.values()));
+                                    List.copyOf(typeParameters.values()), isTopLevelPublic);
                             namedConstructors.add(named);
                             documentedMemberName = named.name();
                         }
@@ -1225,11 +1444,19 @@ public final class Parser {
                             final var propertyName = consume(IDENTIFIER, "Expect property name.");
                             consume(COLON, "Expect ':' after property name.");
                             properties.add(classProperty(propertyName, isPublic, isMutating));
+                            memberTarget = Stmt.AnnotationTarget.PROPERTY;
+                            memberSignature = propertyName.lexeme();
+                            memberIsPublic = isTopLevelPublic && isPublic;
                             storedStateOrder.add(propertyName);
                             documentedMemberName = propertyName;
                         } else {
                             final var memberName = consumeMemberName("Expect method name or 'property'.");
-                            methods.add(classMethod(isPublic, isMutating, memberName));
+                            final var method = classMethod(isPublic, isMutating, memberName, name,
+                                    isTopLevelPublic);
+                            methods.add(method);
+                            memberTarget = Stmt.AnnotationTarget.METHOD;
+                            memberSignature = method.typeDescriptor().descriptor();
+                            memberIsPublic = isTopLevelPublic && isPublic;
                             documentedMemberName = memberName;
                         }
                     }
@@ -1242,11 +1469,17 @@ public final class Parser {
                         final var propertyName = consume(IDENTIFIER, "Expect property name.");
                         consume(COLON, "Expect ':' after property name.");
                         properties.add(classProperty(propertyName, false, isMutating));
+                        memberTarget = Stmt.AnnotationTarget.PROPERTY;
+                        memberSignature = propertyName.lexeme();
                         storedStateOrder.add(propertyName);
                         documentedMemberName = propertyName;
                     } else if (isClassMethodStart()) {
                         final var memberName = consumeMemberName("Expect method name.");
-                        methods.add(classMethod(false, isMutating, memberName));
+                        final var method = classMethod(false, isMutating, memberName, name,
+                                isTopLevelPublic);
+                        methods.add(method);
+                        memberTarget = Stmt.AnnotationTarget.METHOD;
+                        memberSignature = method.typeDescriptor().descriptor();
                         documentedMemberName = memberName;
                     } else if (isMutating) {
                         throw error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
@@ -1259,10 +1492,17 @@ public final class Parser {
                         final var initializer = match(EQUAL) ? expression() : null;
                         consume(SEMICOLON, "Expect ';' after field declaration.");
                         fields.add(new Stmt.Field(fieldName, fieldType, initializer));
+                        memberTarget = Stmt.AnnotationTarget.FIELD;
+                        memberSignature = fieldType.descriptor();
                         storedStateOrder.add(fieldName);
                         documentedMemberName = fieldName;
                     }
                 }
+                recordAnnotationSite(memberTarget, name.lexeme() + "."
+                                + (documentedMemberName == null
+                                        ? memberSignature == null ? "" : memberSignature
+                                        : documentedMemberName.lexeme()),
+                        memberSignature, -1, memberIsPublic, memberAnnotations);
                 if (memberDocumentation != null && documentedMemberName != null) {
                     documentation.put(documentedMemberName, memberDocumentation);
                 }
@@ -1376,7 +1616,9 @@ public final class Parser {
 
     private Stmt.Method classMethod(final boolean isPublic,
                                     final boolean isMutating,
-                                    final Token name) {
+                                    final Token name,
+                                    final Token className,
+                                    final boolean classIsPublic) {
         final var methodTypeParameters = typeParameterDeclaration(name, true, true);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = new LinkedHashMap<>(enclosingTypeParameters);
@@ -1388,6 +1630,13 @@ public final class Parser {
                 error(name, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                         "Class methods do not declare receiver parameters.");
             }
+            for (var index = 0; index < signature.parameterAnnotations().size(); index++) {
+                if (className != null) {
+                    recordAnnotationSite(Stmt.AnnotationTarget.PARAMETER,
+                            className.lexeme() + "." + name.lexeme(), signature.typeDescriptor().descriptor(),
+                            index, classIsPublic && isPublic, signature.parameterAnnotations().get(index));
+                }
+            }
             return new Stmt.Method(name, signature.parameters(), signature.typeDescriptor(),
                     isPublic, isMutating, signature.body(), signature.defaultValues(),
                     signature.parameters().size() - (signature.variadic() ? 1 : 0)
@@ -1395,6 +1644,12 @@ public final class Parser {
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
+    }
+
+    private Stmt.Method classMethod(final boolean isPublic,
+                                    final boolean isMutating,
+                                    final Token name) {
+        return classMethod(isPublic, isMutating, name, null, false);
     }
 
     private boolean isClassMethodStart() {
@@ -1472,10 +1727,12 @@ public final class Parser {
     private Stmt.NamedConstructor namedConstructor(final Token constructorName,
                                                    final boolean isPublic,
                                                    final Token className,
-                                                   final List<TypeParameterDescriptor> classTypeParameters) {
+                                                   final List<TypeParameterDescriptor> classTypeParameters,
+                                                   final boolean classIsPublic) {
         consume(LEFT_PAREN, "Expect '(' after named constructor name.");
         final var parameterNames = new ArrayList<Token>();
         final var parameterTypes = new ArrayList<TypeDescriptor>();
+        final var parameterAnnotations = new ArrayList<List<Stmt.AnnotationApplication>>();
         var variadic = false;
         if (!check(RIGHT_PAREN)) {
             do {
@@ -1485,6 +1742,7 @@ public final class Parser {
                 }
                 if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                         "Can't have more than 254 parameters.");
+                parameterAnnotations.add(annotationApplications());
                 parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 consume(COLON, "Expect ':' after parameter name.");
                 final var parameterType = collectType();
@@ -1499,6 +1757,11 @@ public final class Parser {
         final var raisedEffects = parseRaisedEffects();
         final var descriptor = TypeDescriptor.functionWithEffectsOf(constructorName.lexeme(), returnType,
                 parameterTypes, List.of(), raisedEffects);
+        for (var index = 0; index < parameterAnnotations.size(); index++) {
+            recordAnnotationSite(Stmt.AnnotationTarget.PARAMETER,
+                    className.lexeme() + "." + constructorName.lexeme(), descriptor.descriptor(),
+                    index, classIsPublic && isPublic, parameterAnnotations.get(index));
+        }
         final var enclosingLevelMarker = levelMarker;
         levelMarker = new LevelMarker(levelMarker);
         try {
@@ -1579,6 +1842,7 @@ public final class Parser {
             final var properties = new ArrayList<Stmt.ContractProperty>();
             while (!check(RIGHT_BRACE) && !isAtEnd()) {
                 final var memberDocumentation = documentationBefore(peek());
+                final var memberAnnotations = annotationApplications();
                 final var isDefault = match(DEFAULT);
                 final var isMutating = match(MUT);
                 final var isStatic = match(STATIC);
@@ -1596,7 +1860,11 @@ public final class Parser {
                             "Contract properties cannot have default implementations.");
                     final var propertyName = consume(IDENTIFIER, "Expect property name.");
                     consume(COLON, "Expect ':' after property name.");
-                    properties.add(new Stmt.ContractProperty(propertyName, collectType(), isMutating));
+                    final var propertyType = collectType();
+                    properties.add(new Stmt.ContractProperty(propertyName, propertyType, isMutating));
+                    recordAnnotationSite(Stmt.AnnotationTarget.PROPERTY,
+                            name.lexeme() + "." + propertyName.lexeme(), propertyType.descriptor(), -1,
+                            isTopLevelPublic, memberAnnotations);
                     if (memberDocumentation != null) documentation.put(propertyName, memberDocumentation);
                     consume(SEMICOLON, "Expect ';' after contract property requirement.");
                     continue;
@@ -1625,6 +1893,15 @@ public final class Parser {
                         error(methodName, DiagnosticCatalog.INVALID_CONTRACT_MEMBER,
                                 "Static contract methods cannot be mutating.");
                     }
+                    recordAnnotationSite(Stmt.AnnotationTarget.METHOD,
+                            name.lexeme() + "." + methodName.lexeme(),
+                            signature.typeDescriptor().descriptor(), -1, isTopLevelPublic, memberAnnotations);
+                    for (var index = 0; index < signature.parameterAnnotations().size(); index++) {
+                        recordAnnotationSite(Stmt.AnnotationTarget.PARAMETER,
+                                name.lexeme() + "." + methodName.lexeme(),
+                                signature.typeDescriptor().descriptor(), index, isTopLevelPublic,
+                                signature.parameterAnnotations().get(index));
+                    }
                     methods.add(new Stmt.ContractMethod(methodName, signature.parameters(),
                             signature.typeDescriptor(), isMutating, isDefault,
                             isDefault ? signature.body() : List.of(), signature.defaultValues(),
@@ -1647,7 +1924,8 @@ public final class Parser {
     private record ParsedMethod(List<Token> parameters,
                                 com.maruseron.zeron.domain.FunctionDescriptor typeDescriptor,
                                 List<Stmt> body, List<Expr> defaultValues, boolean variadic,
-                                boolean receiverParameter) {}
+                                boolean receiverParameter,
+                                List<List<Stmt.AnnotationApplication>> parameterAnnotations) {}
 
     private ParsedMethod methodSignature(final Token name,
                                          final boolean isContract,
@@ -1656,6 +1934,7 @@ public final class Parser {
         final var parameterNames = new ArrayList<Token>();
         final var parameterTypes = new ArrayList<TypeDescriptor>();
         final var defaultValues = new ArrayList<Expr>();
+        final var parameterAnnotations = new ArrayList<List<Stmt.AnnotationApplication>>();
         var hasDefault = false;
         var variadic = false;
         var receiverParameter = false;
@@ -1667,6 +1946,7 @@ public final class Parser {
                 }
                 if (parameterNames.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                         "Can't have more than 254 parameters.");
+                final var annotations = annotationApplications();
                 if (match(THIS)) {
                     if (!parameterNames.isEmpty()) {
                         error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
@@ -1674,7 +1954,9 @@ public final class Parser {
                     }
                     receiverParameter = true;
                     parameterNames.add(previous());
+                    parameterAnnotations.add(annotations);
                 } else {
+                    parameterAnnotations.add(annotations);
                     parameterNames.add(consume(IDENTIFIER, "Expect parameter name."));
                 }
                 consume(COLON, "Expect ':' after parameter name.");
@@ -1711,7 +1993,8 @@ public final class Parser {
         if (isContract) {
             consume(SEMICOLON, "Expect ';' after contract method signature.");
             return new ParsedMethod(List.copyOf(parameterNames), descriptor, List.of(),
-                    List.copyOf(defaultValues), variadic, receiverParameter);
+                    List.copyOf(defaultValues), variadic, receiverParameter,
+                    List.copyOf(parameterAnnotations));
         }
 
         levelMarker = new LevelMarker(levelMarker);
@@ -1723,19 +2006,33 @@ public final class Parser {
             return new ParsedMethod(List.copyOf(parameterNames),
                     TypeDescriptor.functionWithEffectsOf(name.lexeme(), returnType,
                             parameterTypes, typeParameters, raisedEffects),
-                    body, List.copyOf(defaultValues), variadic, receiverParameter);
+                    body, List.copyOf(defaultValues), variadic, receiverParameter,
+                    List.copyOf(parameterAnnotations));
         }
 
         consume(LEFT_BRACE, "Expect '{' before method body.");
         body = block();
         levelMarker = levelMarker.enclosing();
         return new ParsedMethod(List.copyOf(parameterNames), descriptor, body,
-                List.copyOf(defaultValues), variadic, receiverParameter);
+                List.copyOf(defaultValues), variadic, receiverParameter,
+                List.copyOf(parameterAnnotations));
     }
 
     private TypeDescriptor collectType() {
+        return collectType(true);
+    }
+
+    private TypeDescriptor collectType(final boolean allowUnaryFunctionArrow) {
         final var isMutable = match(AMPERSAND);
         TypeDescriptor type;
+
+        if (check(LEFT_BRACE)) {
+            if (isMutable) {
+                error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "An effect row cannot be mutable.");
+            }
+            return parseEffectRowType();
+        }
 
         if (match(LEFT_PAREN)) {
             final var parameters = new ArrayList<TypeDescriptor>();
@@ -1798,6 +2095,23 @@ public final class Parser {
             }
         }
 
+        if (check(DOT) && checkNext(LEFT_PAREN)) {
+            if (isMutable) type = new ReferenceDescriptor(type);
+            advance();
+            advance();
+            final var parameters = new ArrayList<TypeDescriptor>();
+            if (!check(RIGHT_PAREN)) {
+                do {
+                    parameters.add(collectType());
+                } while (match(COMMA));
+            }
+            consume(RIGHT_PAREN, "Expect ')' after receiver function parameter types.");
+            consume(ARROW, "Expect '->' after receiver function parameter types.");
+            final var returnType = collectType();
+            return TypeDescriptor.receiverFunctionOf("", type, returnType, parameters,
+                    List.of(), parseRaisedEffects());
+        }
+
         if (match(TILDE)) {
             consume(GREATER, "Expect '>' after '~' in a handler type.");
             final var handledEffects = parseEffectTypeSet();
@@ -1807,6 +2121,9 @@ public final class Parser {
 
         if (isMutable) type = new ReferenceDescriptor(type);
         if (match(HUH)) type = type.toNullable();
+        if (allowUnaryFunctionArrow && match(ARROW)) {
+            type = TypeDescriptor.functionOf("", collectType(), type);
+        }
 
         return type;
     }
@@ -1821,6 +2138,35 @@ public final class Parser {
         }
         consume(RIGHT_BRACE, "Expect '}' after handler effect types.");
         return List.copyOf(effects);
+    }
+
+    private EffectRowDescriptor parseEffectRowType() {
+        consume(LEFT_BRACE, "Expect '{' before an effect row.");
+        final var effects = new ArrayList<TypeDescriptor>();
+        final var variables = new ArrayList<TypeParameterDescriptor>();
+        if (!check(RIGHT_BRACE)) {
+            do {
+                final var member = collectType();
+                if (member instanceof TypeParameterDescriptor parameter && parameter.isEffectRowKind()) {
+                    if (!variables.isEmpty()) {
+                        error(previous(), DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                                "An effect row may contain at most one row variable.");
+                    }
+                    variables.add(parameter);
+                } else if (member instanceof EffectRowDescriptor row) {
+                    effects.addAll(row.effects());
+                    variables.addAll(row.variables());
+                } else {
+                    effects.add(member);
+                }
+            } while (match(COMMA));
+        }
+        consume(RIGHT_BRACE, "Expect '}' after an effect row.");
+        if (variables.size() > 1) {
+            error(previous(), DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    "An effect row may contain at most one row variable.");
+        }
+        return new EffectRowDescriptor(effects, variables);
     }
 
     private List<TypeDescriptor> collectTypeArguments() {
@@ -1866,7 +2212,7 @@ public final class Parser {
         if (!match(THROWS)) return List.of();
         final var mappings = new ArrayList<Stmt.ExternalExceptionMapping>();
         do {
-            final var javaExceptionType = collectType();
+            final var javaExceptionType = collectType(false);
             consume(ARROW, "Expect '->' between Java exception type and Zeron effect constructor.");
             final var effectType = collectType();
             consume(COLON_COLON, "Expect '::' before effect constructor name.");
@@ -1890,7 +2236,7 @@ public final class Parser {
 
     private Token unresolvedTypeToken(final Token token) {
         final var name = new StringBuilder(token.lexeme());
-        while (check(DOT) && !isNamedPatternSuffix()) {
+        while (check(DOT) && !checkNext(LEFT_PAREN) && !isNamedPatternSuffix()) {
             advance();
             name.append('.').append(consume(IDENTIFIER, "Expect name after '.'.").lexeme());
         }
@@ -2353,10 +2699,16 @@ public final class Parser {
         }
 
         var expr = call();
-        while (match(AS)) {
-            final var operator = previous();
-            final var safe = match(HUH);
-            expr = new Expr.Cast(expr, operator, collectType(), safe);
+        while (true) {
+            if (match(AS)) {
+                final var operator = previous();
+                final var safe = match(HUH);
+                expr = new Expr.Cast(expr, operator, collectType(), safe);
+            } else if (match(BANG_BANG)) {
+                expr = new Expr.Unary(previous(), expr, TypeDescriptor.ofInfer());
+            } else {
+                break;
+            }
         }
         return expr;
     }
@@ -2408,20 +2760,58 @@ public final class Parser {
                     error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                             "Only functions and named methods can be called.");
                 }
+            } else if (check(LEFT_BRACE)
+                    && (expr instanceof Expr.Variable || expr instanceof Expr.Property
+                    || expr instanceof Expr.Call || expr instanceof Expr.MemberCall)) {
+                final var lambda = trailingLambda();
+                if (expr instanceof Expr.Variable variable) {
+                    expr = new Expr.Call(variable.name, lambda.arrow, List.of(lambda),
+                            variable.explicitFunctionTypeArguments, TypeDescriptor.ofInfer());
+                } else if (expr instanceof Expr.Property property) {
+                    expr = new Expr.MemberCall(property.receiver, property.name, lambda.arrow,
+                            List.of(lambda), List.of(), TypeDescriptor.ofInfer(), property.safeNavigation());
+                } else if (expr instanceof Expr.Call call) {
+                    call.appendArgument(lambda);
+                } else if (expr instanceof Expr.MemberCall call) {
+                    call.appendArgument(lambda);
+                }
+            } else if (match(BANG_BANG)) {
+                expr = new Expr.Unary(previous(), expr, TypeDescriptor.ofInfer());
             } else if (match(LEFT_BRACKET)) {
                 final var index = expression();
                 consume(RIGHT_BRACKET, "Expect ']' after array index.");
                 expr = new Expr.Index(expr, index, TypeDescriptor.ofInfer());
             } else if (match(DOT, HUH_DOT)) {
                 final var safeNavigation = previous().type() == HUH_DOT;
-                final var property = consumeMemberName("Expect member name after '.'.");
-                expr = new Expr.Property(expr, property, TypeDescriptor.ofInfer(), safeNavigation);
+                if (!safeNavigation && match(THIS)) {
+                    final var receiverTypeName = staticExpressionPath(expr);
+                    if (receiverTypeName == null) {
+                        error(previous(), DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                                "A qualified 'this' must name an enclosing receiver type.");
+                    }
+                    expr = new Expr.Variable(withLexeme(previous(), receiverTypeName + ".this"),
+                            TypeDescriptor.ofInfer());
+                } else {
+                    final var property = consumeMemberName("Expect member name after '.'.");
+                    expr = new Expr.Property(expr, property, TypeDescriptor.ofInfer(), safeNavigation);
+                }
             } else {
                 break;
             }
         }
 
         return expr;
+    }
+
+    private static String staticExpressionPath(final Expr expression) {
+        return switch (expression) {
+            case Expr.Variable variable -> variable.name.lexeme();
+            case Expr.Property property -> {
+                final var receiverPath = staticExpressionPath(property.receiver);
+                yield receiverPath == null ? null : receiverPath + "." + property.name.lexeme();
+            }
+            default -> null;
+        };
     }
 
     private Expr finishCall(final Token callee, final List<TypeDescriptor> typeArguments) {
@@ -2633,15 +3023,17 @@ public final class Parser {
 
             if (looksLikeParenthesizedLambda()) {
                 final var params = new ArrayList<Token>();
+                final var parameterTypes = new ArrayList<TypeDescriptor>();
                 do {
                     if (params.size() >= 254) {
                         error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                                 "Can't have more than 254 parameters.");
                     }
                     params.add(consume(IDENTIFIER, "Expect parameter name."));
+                    parameterTypes.add(match(COLON) ? collectType(false) : TypeDescriptor.ofInfer());
                 } while (match(COMMA));
                 consume(RIGHT_PAREN, "Expect ')' after lambda parameters.");
-                return finishLambda(params);
+                return finishLambda(params, parameterTypes);
             }
 
             final var grouped = expression();
@@ -3009,7 +3401,7 @@ public final class Parser {
         stopQualifiedTypeAtNamedPattern = true;
         final TypeDescriptor type;
         try {
-            type = collectType();
+            type = collectType(false);
         } finally {
             stopQualifiedTypeAtNamedPattern = previousStop;
         }
@@ -3094,6 +3486,17 @@ public final class Parser {
         while (index < tokens.size()) {
             if (tokens.get(index).type() != IDENTIFIER) return false;
             index++;
+            if (index < tokens.size() && tokens.get(index).type() == COLON) {
+                index++;
+                var depth = 0;
+                while (index < tokens.size()) {
+                    final var type = tokens.get(index).type();
+                    if ((type == COMMA || type == RIGHT_PAREN) && depth == 0) break;
+                    if (type == LEFT_PAREN || type == LESS || type == LEFT_BRACKET) depth++;
+                    else if (type == RIGHT_PAREN || type == GREATER || type == RIGHT_BRACKET) depth--;
+                    index++;
+                }
+            }
             if (index >= tokens.size()) return false;
             if (tokens.get(index).type() == RIGHT_PAREN) {
                 return index + 1 < tokens.size() && tokens.get(index + 1).type() == ARROW;
@@ -3105,6 +3508,11 @@ public final class Parser {
     }
 
     private Expr.Lambda finishLambda(final List<Token> params) {
+        return finishLambda(params, params.stream()
+                .<TypeDescriptor>map(_ -> TypeDescriptor.ofInfer()).toList());
+    }
+
+    private Expr.Lambda finishLambda(final List<Token> params, final List<TypeDescriptor> parameterTypes) {
         final var arrow = consume(ARROW, "Expect '->' after parameters.");
         final var enclosingLevelMarker = levelMarker;
         final var wasParsingInitializer = parsingDataClassInitializer;
@@ -3124,8 +3532,110 @@ public final class Parser {
         final var inferredParameters = params.stream()
                 .map(_ -> TypeDescriptor.ofInfer())
                 .toArray(TypeDescriptor[]::new);
-        return new Expr.Lambda(arrow, params, body,
+        return new Expr.Lambda(arrow, params, parameterTypes, body,
                 TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), inferredParameters));
+    }
+
+    private Expr.Lambda trailingLambda() {
+        final var brace = consume(LEFT_BRACE, "Expect '{' before trailing lambda.");
+        final var params = new ArrayList<Token>();
+        final var parameterTypes = new ArrayList<TypeDescriptor>();
+        Token implicitParameter = null;
+        Token arrow = brace;
+        if (looksLikeTrailingLambdaParameters()) {
+            do {
+                params.add(consume(IDENTIFIER, "Expect trailing lambda parameter."));
+                parameterTypes.add(match(COLON) ? collectType(false) : TypeDescriptor.ofInfer());
+            } while (match(COMMA));
+            arrow = consume(ARROW, "Expect '->' after trailing lambda parameter.");
+        } else {
+            implicitParameter = new Token(IDENTIFIER, "it", null, brace.span());
+        }
+        final List<Stmt> body;
+        if (!params.isEmpty() && !check(LEFT_BRACE)
+                || params.isEmpty() && !check(RIGHT_BRACE)
+                && !hasTopLevelSemicolonBeforeRightBrace() && !startsTrailingLambdaStatement()) {
+            body = List.of(expressionReturn());
+            consume(RIGHT_BRACE, "Expect '}' after trailing lambda expression.");
+        } else {
+            if (check(LEFT_BRACE)) advance();
+            body = block();
+        }
+        return new Expr.Lambda(arrow, params, parameterTypes, body,
+                TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(),
+                        parameterTypes.toArray(TypeDescriptor[]::new)), implicitParameter);
+    }
+
+    private boolean hasTopLevelSemicolonBeforeRightBrace() {
+        var index = current;
+        var parentheses = 0;
+        var brackets = 0;
+        var braces = 0;
+        while (index < tokens.size()) {
+            final var type = tokens.get(index).type();
+            if (type == RIGHT_BRACE && braces == 0 && parentheses == 0 && brackets == 0) return false;
+            if (type == SEMICOLON && braces == 0 && parentheses == 0 && brackets == 0) return true;
+            switch (type) {
+                case LEFT_PAREN -> parentheses++;
+                case RIGHT_PAREN -> parentheses--;
+                case LEFT_BRACKET -> brackets++;
+                case RIGHT_BRACKET -> brackets--;
+                case LEFT_BRACE -> braces++;
+                case RIGHT_BRACE -> braces--;
+                default -> {}
+            }
+            index++;
+        }
+        return false;
+    }
+
+    private boolean startsTrailingLambdaStatement() {
+        return switch (peek().type()) {
+            case BREAK, CONTINUE, RETURN, USING, WHILE, UNTIL, LOOP, LET, FN, NAMESPACE,
+                    EFFECT, EXTENSION, EXTERNAL, LEFT_BRACE -> true;
+            case IF -> !startsIfExpression();
+            case FOR -> !(checkNext(IDENTIFIER) && tokens.get(current + 2).type() == IN);
+            default -> false;
+        };
+    }
+
+    private boolean startsIfExpression() {
+        if (!checkNext(LEFT_PAREN)) return false;
+        var index = current + 1;
+        var depth = 0;
+        while (index < tokens.size()) {
+            final var type = tokens.get(index).type();
+            if (type == LEFT_PAREN) depth++;
+            else if (type == RIGHT_PAREN && --depth == 0) {
+                return index + 1 < tokens.size() && tokens.get(index + 1).type() == THEN;
+            }
+            index++;
+        }
+        return false;
+    }
+
+    private boolean looksLikeTrailingLambdaParameters() {
+        var index = current;
+        while (index < tokens.size()) {
+            if (tokens.get(index).type() != IDENTIFIER) return false;
+            index++;
+            if (index < tokens.size() && tokens.get(index).type() == COLON) {
+                index++;
+                var depth = 0;
+                while (index < tokens.size()) {
+                    final var type = tokens.get(index).type();
+                    if ((type == COMMA || type == ARROW) && depth == 0) break;
+                    if (type == LEFT_PAREN || type == LESS || type == LEFT_BRACKET) depth++;
+                    else if (type == RIGHT_PAREN || type == GREATER || type == RIGHT_BRACKET) depth--;
+                    index++;
+                }
+            }
+            if (index >= tokens.size()) return false;
+            if (tokens.get(index).type() == ARROW) return true;
+            if (tokens.get(index).type() != COMMA) return false;
+            index++;
+        }
+        return false;
     }
 
     private boolean match(final TokenType... types) {

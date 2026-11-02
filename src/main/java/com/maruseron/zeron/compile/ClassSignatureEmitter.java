@@ -72,6 +72,7 @@ final class ClassSignatureEmitter {
                     ? projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "+" : "-"
                     : "") + typeSignature(projection.bound(), true);
             case CapturedTypeDescriptor capture -> typeSignature(capture.upperBound(), typeArgument);
+            case EffectRowDescriptor _ -> "Ljava/lang/Object;";
             case FunctionDescriptor function -> referenceDescriptorSignature(
                     TypeDescriptor.toJavaClassDesc((FunctionDescriptor) TypeSubstitution.erase(function))
                             .descriptorString());

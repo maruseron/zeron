@@ -23,9 +23,13 @@ final class LambdaResolver {
         }
         for (final var parameter : scheme.typeParameters()) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
-                        "Cannot infer type parameter '" + parameter.name()
-                                + "' for polymorphic lambda at this use."));
+                if (parameter.isEffectRowKind()) {
+                    RowInference.defaultEmpty(parameter, substitutions);
+                } else {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                            "Cannot infer type parameter '" + parameter.name()
+                                    + "' for polymorphic lambda at this use."));
+                }
             }
             final var actual = substitutions.get(parameter);
             final var normalizedActual = TypeResolver.validateTypeArgument(context, parameter, actual, where);
@@ -125,10 +129,14 @@ final class LambdaResolver {
 
         for (final var parameter : sourceType.typeParameters()) {
             if (!substitutions.containsKey(parameter)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
-                        reference.name,
-                        "Cannot infer type parameter '" + parameter.name()
-                                + "' for function value; provide an explicit type argument."));
+                if (parameter.isEffectRowKind()) {
+                    RowInference.defaultEmpty(parameter, substitutions);
+                } else {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE,
+                            reference.name,
+                            "Cannot infer type parameter '" + parameter.name()
+                                    + "' for function value; provide an explicit type argument."));
+                }
             }
             substitutions.put(parameter, TypeResolver.validateTypeArgument(
                     context, parameter, substitutions.get(parameter), reference.name));
@@ -176,7 +184,7 @@ final class LambdaResolver {
                 substitutions.put(parameter, actual);
                 return;
             }
-            TypeUnifier.unify(pattern, actual, substitutions, where);
+            TypeUnifier.unify(previous, actual, substitutions, where);
             return;
         }
         if (actual instanceof TypeParameterDescriptor) return;
@@ -245,8 +253,13 @@ final class LambdaResolver {
         context.frame.flowState = new FlowState();
         beginScope(context);
         try {
-            for (final var param : lambda.params) {
-                declare(context, SYNTHETIC_VAR, param, TypeDescriptor.ofInfer(), BindingMutability.IMMUTABLE);
+            for (int i = 0; i < lambda.params.size(); i++) {
+                final var param = lambda.params.get(i);
+                final var annotation = lambda.parameterTypes().get(i);
+                if (!(annotation instanceof InferDescriptor)) {
+                    TypeResolver.validateType(context, annotation, param);
+                }
+                declare(context, SYNTHETIC_VAR, param, annotation, BindingMutability.IMMUTABLE);
                 define(context, param);
             }
 
@@ -511,7 +524,14 @@ final class LambdaResolver {
     private static FunctionDescriptor resolveLambda(final ResolutionContext context, final Expr.Lambda lambda,
                                                      final FunctionDescriptor expectedType,
                                                      final boolean inferRaisedEffects) {
-        final var lambdaArity = lambda.params.size();
+        if (lambda.implicitParameter() != null && expectedType.arity() > 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    lambda.arrow,
+                    "An arrowless trailing lambda can infer 'it' only for a unary function; "
+                            + "name parameters explicitly for other arities."));
+        }
+        final var lambdaParameters = lambda.parameterTokens(expectedType.arity());
+        final var lambdaArity = lambdaParameters.size();
         if (lambdaArity != expectedType.arity()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
                     lambda.arrow,
@@ -525,10 +545,36 @@ final class LambdaResolver {
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
         beginScope(context);
+        Token receiverToken = null;
         try {
-            for (int i = 0; i < lambda.params.size(); i++) {
-                final var parameter = lambda.params.get(i);
-                final var parameterType = expectedType.parameters().get(i);
+            if (expectedType.receiverType() != null) {
+                receiverToken = new Token(com.maruseron.zeron.scan.TokenType.IDENTIFIER,
+                        "$zeron$receiver$" + context.frame.nextReceiverScopeId++,
+                        null, lambda.arrow.span());
+                lambda.setReceiverSymbolToken(receiverToken);
+                declare(context, SYNTHETIC_VAR, receiverToken,
+                        expectedType.receiverType(), BindingMutability.IMMUTABLE);
+                define(context, receiverToken);
+                context.frame.receiverScopes.push(
+                        new FunctionResolutionFrame.ReceiverScope(expectedType.receiverType(), receiverToken));
+            }
+            for (int i = 0; i < lambdaParameters.size(); i++) {
+                final var parameter = lambdaParameters.get(i);
+                final var annotation = i < lambda.parameterTypes().size()
+                        ? lambda.parameterTypes().get(i) : TypeDescriptor.ofInfer();
+                final var parameterType = annotation instanceof InferDescriptor
+                        ? expectedType.parameters().get(i)
+                        : annotation;
+                if (!(annotation instanceof InferDescriptor)) {
+                    TypeResolver.validateType(context, annotation, parameter);
+                    if (!annotation.equals(expectedType.parameters().get(i))) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, parameter,
+                                "Lambda parameter type " + TypeFormatter.format(annotation)
+                                        + " does not match expected type "
+                                        + TypeFormatter.format(expectedType.parameters().get(i)) + "."));
+                    }
+                }
                 declare(context, SYNTHETIC_VAR, parameter, parameterType, BindingMutability.IMMUTABLE);
                 define(context, parameter);
             }
@@ -547,27 +593,127 @@ final class LambdaResolver {
                 ensureAssignable(context, expectedType.returnType(), returnType, lambda.arrow);
             }
 
-            final var parameterTypes = new ArrayList<TypeDescriptor>(lambda.params.size());
-            for (final var parameter : lambda.params) {
+            final var parameterTypes = new ArrayList<TypeDescriptor>(lambdaParameters.size());
+            for (final var parameter : lambdaParameters) {
                 parameterTypes.add(context.symbols.getSymbol(parameter).type());
             }
-            final var resolvedType = TypeDescriptor.functionWithEffectsOf(expectedType.name(),
-                    expectedType.returnType() instanceof InferDescriptor || unresolvedReturn
-                            ? returnType : expectedType.returnType(),
-                    parameterTypes, expectedType.typeParameters(),
-                    inferRaisedEffects ? List.copyOf(context.frame.raisedEffects)
-                            : expectedType.raisedEffects());
-            if (!inferRaisedEffects) {
+            final var resolvedReturn = expectedType.returnType() instanceof InferDescriptor || unresolvedReturn
+                    ? returnType : expectedType.returnType();
+            final var inferRows = EffectRows.containsRowVariable(expectedType.raisedEffects());
+            final var raisedEffects = inferRaisedEffects || inferRows
+                    ? List.copyOf(context.frame.raisedEffects)
+                    : expectedType.raisedEffects();
+            final var resolvedType = expectedType.receiverType() == null
+                    ? TypeDescriptor.functionWithEffectsOf(expectedType.name(), resolvedReturn,
+                            parameterTypes, expectedType.typeParameters(), raisedEffects)
+                    : TypeDescriptor.receiverFunctionOf(expectedType.name(), expectedType.receiverType(),
+                            resolvedReturn, parameterTypes, expectedType.typeParameters(), raisedEffects);
+            if (lambda.codeModelType() != null) {
+                validateCodeModelLambda(context, lambda, lambdaParameters);
+            }
+            if (!inferRaisedEffects && !inferRows) {
                 RaisedEffectFlow.verifyCallable(context, expectedType.raisedEffects(), lambda.arrow);
             }
             lambda.setType(resolvedType);
             return resolvedType;
         } finally {
+            if (receiverToken != null) context.frame.receiverScopes.pop();
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
             RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
+    }
+
+    private static void validateCodeModelLambda(final ResolutionContext context,
+                                                final Expr.Lambda lambda,
+                                                final List<Token> parameters) {
+        if (lambda.body.size() != 1 || !(lambda.body.getFirst() instanceof Stmt.Return)
+                || ((Stmt.Return) lambda.body.getFirst()).value() == null) {
+            rejectCodeModel(context, lambda, "CodeModel lambdas must contain one expression.");
+        }
+        final var returned = (Stmt.Return) lambda.body.getFirst();
+        final var parameterTokens = Collections.newSetFromMap(new IdentityHashMap<Token, Boolean>());
+        parameterTokens.addAll(parameters);
+        if (lambda.receiverSymbolToken() != null) parameterTokens.add(lambda.receiverSymbolToken());
+        validateCodeModelExpression(context, lambda, returned.value(), parameterTokens);
+    }
+
+    private static void validateCodeModelExpression(final ResolutionContext context,
+                                                    final Expr.Lambda lambda,
+                                                    final Expr expression,
+                                                    final Set<Token> parameters) {
+        switch (expression) {
+            case Expr.Grouping grouping ->
+                    validateCodeModelExpression(context, lambda, grouping.expression, parameters);
+            case Expr.Literal literal -> {
+                final var type = literal.getType();
+                if (!(type instanceof StringDescriptor || type instanceof BooleanDescriptor
+                        || type instanceof IntDescriptor || type instanceof LongDescriptor
+                        || type instanceof ByteDescriptor || type instanceof FloatDescriptor
+                        || type instanceof NullDescriptor)) {
+                    rejectCodeModel(context, lambda, "This literal type is not supported in a CodeModel.");
+                }
+            }
+            case Expr.Variable variable -> {
+                if (variable.implicitFieldReceiver() != null) {
+                    rejectCodeModel(context, lambda, "Implicit member references are not supported in a CodeModel.");
+                }
+                final var symbol = variable.resolvedSymbolToken();
+                if (parameters.contains(symbol)) break;
+                if (!context.symbols.containsSymbol(symbol)
+                        || context.symbols.getSymbol(symbol).mutability().isReassignable()) {
+                    rejectCodeModel(context, lambda, "CodeModel captures must be immutable values.");
+                }
+            }
+            case Expr.Property property -> {
+                if (!property.resolvedAsProperty() || property.safeNavigation()
+                        || property.extensionCall() != null) {
+                    rejectCodeModel(context, lambda, "This property access is not supported in a CodeModel.");
+                }
+                validateCodeModelExpression(context, lambda, property.receiver, parameters);
+            }
+            case Expr.Binary binary -> {
+                final var operator = binary.operator.type();
+                if (!(operator == com.maruseron.zeron.scan.TokenType.EQUAL_EQUAL
+                        || operator == com.maruseron.zeron.scan.TokenType.BANG_EQUAL
+                        || operator == com.maruseron.zeron.scan.TokenType.GREATER
+                        || operator == com.maruseron.zeron.scan.TokenType.GREATER_EQUAL
+                        || operator == com.maruseron.zeron.scan.TokenType.LESS
+                        || operator == com.maruseron.zeron.scan.TokenType.LESS_EQUAL)) {
+                    rejectCodeModel(context, lambda, "Only comparisons are supported in a CodeModel.");
+                }
+                validateCodeModelExpression(context, lambda, binary.left, parameters);
+                validateCodeModelExpression(context, lambda, binary.right, parameters);
+            }
+            case Expr.Logical logical -> {
+                final var operator = logical.operator.type();
+                if (operator != com.maruseron.zeron.scan.TokenType.AND
+                        && operator != com.maruseron.zeron.scan.TokenType.OR) {
+                    rejectCodeModel(context, lambda, "Only Boolean conjunction and disjunction are supported.");
+                }
+                validateCodeModelExpression(context, lambda, logical.left, parameters);
+                validateCodeModelExpression(context, lambda, logical.right, parameters);
+            }
+            case Expr.Unary unary -> {
+                if (unary.operator.type() != com.maruseron.zeron.scan.TokenType.BANG) {
+                    rejectCodeModel(context, lambda, "Only Boolean negation is supported in a CodeModel.");
+                }
+                validateCodeModelExpression(context, lambda, unary.right, parameters);
+            }
+            case Expr.TypeTest test -> {
+                if (!test.nullTest) rejectCodeModel(context, lambda, "Only null tests are supported in a CodeModel.");
+                validateCodeModelExpression(context, lambda, test.value, parameters);
+            }
+            default -> rejectCodeModel(context, lambda, "This expression is not supported in a CodeModel.");
+        }
+    }
+
+    private static void rejectCodeModel(final ResolutionContext context,
+                                        final Expr.Lambda lambda,
+                                        final String message) {
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                lambda.arrow, message));
     }
 
     static boolean isFunctionReferenceCandidate(final ResolutionContext context, final Expr expression) {

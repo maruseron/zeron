@@ -34,7 +34,11 @@ public final class FunctionShapeKey {
     }
 
     private static String readableSignature(final FunctionDescriptor functionType) {
-        final var signature = new StringBuilder().append(functionType.arity());
+        final var signature = new StringBuilder();
+        if (functionType.receiverType() != null) {
+            signature.append("Receiver$").append(readableType(functionType.receiverType())).append('$');
+        }
+        signature.append(functionType.arity());
         for (final var parameter : functionType.parameters()) {
             signature.append('$').append(readableType(parameter));
         }
@@ -75,6 +79,7 @@ public final class FunctionShapeKey {
                     (projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "Out$" : "In$")
                             + readableType(projection.bound());
             case CapturedTypeDescriptor capture -> readableType(capture.upperBound());
+            case EffectRowDescriptor row -> "Row$" + row.name();
             case GenericDescriptor generic -> {
                 final var name = new StringBuilder(simpleName(generic.baseType().name()));
                 for (final var parameter : generic.typeParameters()) {
@@ -95,7 +100,9 @@ public final class FunctionShapeKey {
 
     private static void appendFunction(final StringBuilder encoding,
                                        final FunctionDescriptor functionType) {
-        encoding.append('F').append(functionType.arity()).append('(');
+        encoding.append(functionType.isReceiverFunction() ? "RF" : "F")
+                .append(functionType.arity()).append('(');
+        if (functionType.receiverType() != null) appendType(encoding, functionType.receiverType());
         for (final var parameter : functionType.parameters()) {
             appendType(encoding, parameter);
         }
@@ -166,6 +173,13 @@ public final class FunctionShapeKey {
                 encoding.append(')');
             }
             case CapturedTypeDescriptor capture -> appendType(encoding, capture.upperBound());
+            case EffectRowDescriptor row -> {
+                encoding.append("w(");
+                for (final var effect : row.effects()) appendType(encoding, effect);
+                encoding.append('|');
+                for (final var variable : row.variables()) appendType(encoding, variable);
+                encoding.append(')');
+            }
             case InferDescriptor _ ->
                     throw new IllegalArgumentException("Cannot canonicalize an inferred function shape");
         }

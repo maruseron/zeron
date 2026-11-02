@@ -35,6 +35,7 @@ final class CompilationContext {
     final String mainClassName;
     final boolean includeBundledSourcesInIndex;
     final boolean libraryBuild;
+    final List<ZeronLibraryIndex> libraries;
     final CompilationMetadata metadata;
     final List<Path> javaClassPathRoots;
     final FunctionBindingRegistry functionBindings;
@@ -67,6 +68,7 @@ final class CompilationContext {
                        final List<Path> javaClassPathRoots,
                        final FunctionBindingRegistry functionBindings) {
         compilationUnits = List.copyOf(units);
+        this.libraries = List.copyOf(libraries);
         classFile = ClassFile.of(ClassFile.ClassHierarchyResolverOption.of(
                 sourceTypeResolver(compilationUnits, generatedTypes)));
         this.outputDirectory = outputDirectory;
@@ -74,7 +76,7 @@ final class CompilationContext {
         this.libraryBuild = libraryBuild;
         this.javaClassPathRoots = List.copyOf(javaClassPathRoots);
         this.functionBindings = Objects.requireNonNull(functionBindings);
-        metadata = new CompilationMetadata(compilationUnits, libraries, mainClassName);
+        metadata = new CompilationMetadata(compilationUnits, this.libraries, mainClassName);
         topLevelDeclarations = compilationUnits.stream().filter(unit -> !unit.metadataOnly())
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
                 .map(NamespaceMembers.Member::declaration).toList();

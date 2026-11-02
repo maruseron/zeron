@@ -17,6 +17,24 @@ import static org.junit.Assert.assertTrue;
 
 public final class ResolutionDiagnosticsTest {
     @Test
+    public void reportsNullableMemberCallsWithAnActionableDiagnostic() {
+        final var unit = Parser.of(Scanner.from("""
+                class Widget {
+                    public read(): Int = 1;
+                }
+                fn invalid(value: Widget?): Int = value.read();
+                fn safe(value: Widget?): Int? = value?.read();
+                """).scanTokens()).parseCompilationUnit("src/main.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(1, result.errors().size());
+        assertEquals("ZR2013", result.errors().getFirst().code().toString());
+        assertTrue(result.errors().getFirst().message().contains("nullable receiver"));
+        assertTrue(result.errors().getFirst().message().contains("safe navigation"));
+    }
+
+    @Test
     public void reportsIndependentErrorsAfterAnInvalidImportWithoutReportingItsCascade() {
         final var unit = Parser.of(Scanner.from("""
                 import zeron.lang.missing as unavailable;

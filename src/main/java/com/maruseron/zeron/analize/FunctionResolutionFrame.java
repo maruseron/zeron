@@ -7,6 +7,7 @@ import com.maruseron.zeron.scan.Token;
 import java.util.*;
 
 final class FunctionResolutionFrame {
+    record ReceiverScope(TypeDescriptor type, Token token) {}
     private record WriteScopeState(Set<Token> scope, Set<Token> values) {}
     private record LoopState(LoopFlow loop, List<FlowState> breakStates,
                              List<FlowState> continueStates) {}
@@ -24,6 +25,8 @@ final class FunctionResolutionFrame {
                       boolean resolvingSumCaseCondition,
                       String currentClassName,
                       Stmt.ClassDecl currentMethodOwner,
+                      List<ReceiverScope> receiverScopes,
+                      int nextReceiverScopeId,
                       List<Stmt.Field> initializerVisibleFields,
                       Stmt.ClassDecl dataInitializerOwner,
                       java.util.Map<String, Stmt.Field> dataInitializerWritableFields) {}
@@ -39,6 +42,8 @@ final class FunctionResolutionFrame {
     boolean resolvingSumCaseCondition;
     String currentClassName;
     Stmt.ClassDecl currentMethodOwner;
+    final Deque<ReceiverScope> receiverScopes = new ArrayDeque<>();
+    int nextReceiverScopeId;
     List<Stmt.Field> initializerVisibleFields;
     Stmt.ClassDecl dataInitializerOwner;
     java.util.Map<String, Stmt.Field> dataInitializerWritableFields = java.util.Map.of();
@@ -53,7 +58,8 @@ final class FunctionResolutionFrame {
                 patternOutputNames, raisedEffects,
                 raisedEffects == null ? null : Set.copyOf(raisedEffects),
                 flowState, flowState.copy(), loopDepth, resolvingPattern, resolvingSumCaseCondition,
-                currentClassName, currentMethodOwner, initializerVisibleFields,
+                currentClassName, currentMethodOwner, List.copyOf(receiverScopes), nextReceiverScopeId,
+                initializerVisibleFields,
                 dataInitializerOwner, dataInitializerWritableFields);
     }
 
@@ -87,6 +93,9 @@ final class FunctionResolutionFrame {
         resolvingSumCaseCondition = checkpoint.resolvingSumCaseCondition();
         currentClassName = checkpoint.currentClassName();
         currentMethodOwner = checkpoint.currentMethodOwner();
+        receiverScopes.clear();
+        receiverScopes.addAll(checkpoint.receiverScopes());
+        nextReceiverScopeId = checkpoint.nextReceiverScopeId();
         initializerVisibleFields = checkpoint.initializerVisibleFields();
         dataInitializerOwner = checkpoint.dataInitializerOwner();
         dataInitializerWritableFields = checkpoint.dataInitializerWritableFields();

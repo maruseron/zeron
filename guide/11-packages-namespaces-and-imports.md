@@ -124,6 +124,36 @@ to the same namespace. This is handy for splitting related functions across file
 does not change package visibility rules; make a member `public` if code in other packages should
 use it.
 
+## Declaration annotations
+
+Annotations attach validated metadata to declarations, members, data components, or parameters.
+Declare an annotation with typed parameters and the targets where it is allowed:
+
+```zeron
+public annotation Entity on CLASS;
+public annotation Generated(strategy: String = "default") on FIELD, PROPERTY, DATA_COMPONENT;
+```
+
+Apply annotations with `@` immediately before the declaration or member. Arguments can be
+positional or named, and omitted arguments use their declared defaults:
+
+```zeron
+@Entity
+public class User {
+    @Generated(strategy = "identity")
+    public property id: Int;
+}
+```
+
+Annotation names resolve through the same package and import rules as other declarations. The
+compiler checks that each annotation is declared, permits the current target, and receives supported
+constant values of the declared types. Initial targets are `CLASS`, `CONTRACT`, `FUNCTION`, `METHOD`,
+`CONSTRUCTOR`, `FIELD`, `PROPERTY`, `DATA_COMPONENT`, and `PARAMETER`.
+
+Annotations are metadata, not runtime reflection. They have no effect unless a compiler feature or
+tool explicitly interprets them. Public annotation definitions and applications on exported API are
+available from compiled-library API indexes; metadata on private declarations is not exported.
+
 Project source roots and dependencies are configured in the manifest; see
 [configuration and releases](25-configuration-releases-and-roadmap.md). For extension imports,
 which make receiver-style operations available, see [extensions](12-extensions.md).

@@ -76,6 +76,9 @@ final class TypeCompatibility {
         if (expectedType instanceof FunctionDescriptor expectedFunction
                 && resolvedType instanceof FunctionDescriptor resolvedFunction
                 && expectedFunction.arity() == resolvedFunction.arity()
+                && (expectedFunction.receiverType() == null) == (resolvedFunction.receiverType() == null)
+                && (expectedFunction.receiverType() == null
+                    || canAssign(resolvedFunction.receiverType(), expectedFunction.receiverType()))
                 && expectedFunction.isHandler() == resolvedFunction.isHandler()
                 && (!expectedFunction.isHandler()
                     || new java.util.HashSet<>(expectedFunction.handledEffects())
@@ -86,7 +89,8 @@ final class TypeCompatibility {
                 && functionParametersAccept(expectedFunction, resolvedFunction)
                 && canAssign(expectedFunction.returnType(), resolvedFunction.returnType())
                 && (expectedFunction.isHandler()
-                    || expectedFunction.raisedEffects().containsAll(resolvedFunction.raisedEffects()))) {
+                    || EffectRows.includedIn(resolvedFunction.raisedEffects(),
+                            expectedFunction.raisedEffects()))) {
             return true;
         }
         if (expectedType instanceof GenericDescriptor expectedGeneric
@@ -105,12 +109,36 @@ final class TypeCompatibility {
         if (resolvedType instanceof ReferenceDescriptor reference
                 && (expectedType.equals(reference.baseType())
                 || canAssign(expectedType, reference.baseType()))) return true;
-        if (isContractProjection(expectedType, resolvedType)) return true;
+        if (isArrayIterableProjection(expectedType, resolvedType)
+                || isContractProjection(expectedType, resolvedType)) return true;
         if (resolvedType instanceof NullDescriptor && expectedType.isNullable()) return true;
         return expectedType instanceof NullableDescriptor nullable
                 && (canAssign(nullable.baseType(), resolvedType)
                 || resolvedType instanceof ReferenceDescriptor reference
                 && canAssign(nullable.baseType(), reference.baseType()));
+    }
+
+    TypeDescriptor inferenceView(final TypeDescriptor expectedType, final TypeDescriptor actualType) {
+        if (!(expectedType instanceof GenericDescriptor expected)
+                || !(actualType instanceof GenericDescriptor actual)) return actualType;
+        final var declaration = classes.get(actual.baseType().name());
+        if (declaration == null || declaration.typeParameters().size() != actual.typeParameters().size()) {
+            return actualType;
+        }
+        final var substitutions = new java.util.LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int index = 0; index < declaration.typeParameters().size(); index++) {
+            substitutions.put(declaration.typeParameters().get(index), actual.typeParameters().get(index));
+        }
+        for (final var applied : ContractComposition.forClass(contracts, declaration)) {
+            if (!applied.use().name().lexeme().equals(expected.baseType().name())) continue;
+            final var arguments = applied.use().typeArguments().stream()
+                    .map(argument -> TypeSubstitution.substitute(argument, substitutions))
+                    .toList();
+            if (arguments.size() == expected.typeParameters().size()) {
+                return TypeDescriptor.genericOf(expected.baseType(), arguments);
+            }
+        }
+        return actualType;
     }
 
     private boolean functionParametersAccept(final FunctionDescriptor expectedFunction,
@@ -196,6 +224,9 @@ final class TypeCompatibility {
             case FunctionDescriptor function -> containsTypeParameter(function.returnType(), parameter)
                     || function.parameters().stream().anyMatch(argument -> containsTypeParameter(argument, parameter))
                     || function.raisedEffects().stream().anyMatch(argument -> containsTypeParameter(argument, parameter));
+            case EffectRowDescriptor row -> row.effects().stream()
+                    .anyMatch(effect -> containsTypeParameter(effect, parameter))
+                    || row.variables().contains(parameter);
             default -> false;
         };
     }
@@ -253,6 +284,8 @@ final class TypeCompatibility {
             case FunctionDescriptor function -> containsProjectionOrCapture(function.returnType())
                     || function.parameters().stream().anyMatch(this::containsProjectionOrCapture)
                     || function.raisedEffects().stream().anyMatch(this::containsProjectionOrCapture);
+            case EffectRowDescriptor row -> row.effects().stream()
+                    .anyMatch(this::containsProjectionOrCapture);
             case AppliedConstructorDescriptor applied -> containsProjectionOrCapture(applied.argument());
             case TypeConstructorDescriptor constructor -> constructor.arguments().stream()
                     .anyMatch(this::containsProjectionOrCapture);
@@ -355,6 +388,21 @@ final class TypeCompatibility {
                     && contractUseAssignable(targetUse, appliedUse, !expectedMutable)) return true;
         }
         return false;
+    }
+
+    static boolean isArrayIterableProjection(final TypeDescriptor expectedType,
+                                             final TypeDescriptor resolvedType) {
+        if (expectedType instanceof ReferenceDescriptor) return false;
+        var target = expectedType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : expectedType;
+        if (target instanceof ReferenceDescriptor) return false;
+        if (!(target instanceof GenericDescriptor iterable)
+                || !iterable.baseType().name().equals("zeron.collections.Iterable")
+                || iterable.typeParameters().size() != 1) return false;
+        final var source = resolvedType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : resolvedType;
+        return source instanceof ArrayDescriptor array
+                && iterable.typeParameters().getFirst().equals(array.elementType());
     }
 
     private boolean contractUseAssignable(final Stmt.ContractUse expected,

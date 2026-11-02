@@ -17,10 +17,10 @@ From a Zeron source checkout, build with JDK 25 or later and Maven:
 
 ```powershell
 mvn package
-java -jar target/zeron-0.1-alpha.jar init
+java -jar target/zeron-0.5.0.jar init
 ```
 
-Use the versioned JAR name produced in `target/` if it differs from the example.
+The JAR filename includes the project version from `pom.xml`.
 
 ## Create a project
 

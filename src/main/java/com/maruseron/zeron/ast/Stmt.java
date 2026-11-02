@@ -6,6 +6,7 @@ import com.maruseron.zeron.domain.ArrayDescriptor;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
+import com.maruseron.zeron.domain.AnnotationConstant;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.ArrayList;
@@ -43,6 +44,82 @@ public sealed interface Stmt {
     }
 
     sealed interface Decl {}
+
+    enum AnnotationTarget {
+        CLASS, CONTRACT, FUNCTION, METHOD, CONSTRUCTOR, FIELD, PROPERTY, DATA_COMPONENT, PARAMETER
+    }
+
+    final class AnnotationParameter {
+        private final Token name;
+        private final TypeDescriptor type;
+        private final Expr defaultValue;
+        private AnnotationConstant resolvedDefault;
+
+        public AnnotationParameter(final Token name, final TypeDescriptor type, final Expr defaultValue) {
+            this.name = name;
+            this.type = type;
+            this.defaultValue = defaultValue;
+        }
+
+        public Token name() { return name; }
+        public TypeDescriptor type() { return type; }
+        public Expr defaultValue() { return defaultValue; }
+        public AnnotationConstant resolvedDefault() { return resolvedDefault; }
+        public void resolveDefault(final AnnotationConstant value) { resolvedDefault = value; }
+    }
+
+    record AnnotationArgument(Token name, Expr value) {}
+
+    final class AnnotationApplication {
+        private final Token name;
+        private final List<AnnotationArgument> arguments;
+        private final Token location;
+        private String resolvedName;
+        private List<ResolvedAnnotationArgument> resolvedArguments = List.of();
+
+        public AnnotationApplication(final Token name, final List<AnnotationArgument> arguments,
+                                     final Token location) {
+            this.name = name;
+            this.arguments = List.copyOf(arguments);
+            this.location = location;
+        }
+
+        public Token name() { return name; }
+        public List<AnnotationArgument> arguments() { return arguments; }
+        public Token location() { return location; }
+        public String resolvedName() { return resolvedName; }
+        public List<ResolvedAnnotationArgument> resolvedArguments() { return resolvedArguments; }
+        public void resolve(final String qualifiedName, final List<ResolvedAnnotationArgument> values) {
+            resolvedName = qualifiedName;
+            resolvedArguments = List.copyOf(values);
+        }
+    }
+
+    record ResolvedAnnotationArgument(String name, AnnotationConstant value) {}
+
+    record AnnotationSite(AnnotationTarget target, String targetName, String signature,
+                          int parameterIndex, boolean isPublic,
+                          List<AnnotationApplication> applications) {
+        public AnnotationSite {
+            applications = List.copyOf(applications);
+            if (parameterIndex < -1) throw new IllegalArgumentException("Invalid parameter index.");
+        }
+    }
+
+    record AnnotationDeclaration(Token name, List<AnnotationParameter> parameters,
+                                 List<AnnotationTarget> targets, boolean isPublic)
+            implements Stmt, Decl {
+        public AnnotationDeclaration {
+            parameters = List.copyOf(parameters);
+            targets = List.copyOf(targets);
+        }
+    }
+
+    record AnnotatedDeclaration(Stmt declaration, List<AnnotationApplication> annotations) implements Stmt {
+        public AnnotatedDeclaration {
+            annotations = List.copyOf(annotations);
+        }
+    }
 
     sealed interface FunctionDeclaration extends Stmt, Decl
             permits Function, ExternalFunction, ExtensionMethod {

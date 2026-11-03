@@ -132,13 +132,21 @@ This works for any parameter typed `(T) -> V`, including generic selector parame
 expected. APIs whose parameter is not a reader — a comparator like `sortBy(compare: (T, T) -> Ordering)`,
 for instance — still need a lambda.
 
-The reference exposes three things:
+The reference exposes these members:
 
 | Member | Meaning |
 | ------ | ------- |
 | `get(owner: T): V` | Reads the property from a value of the owner type |
 | `name: String` | The property's source name, such as `"name"` |
 | `identity: String` | The declaring type's qualified name and the property's name, for example `"example.User#name"` |
+| `id: PropertyId` | The declaration's identity as a `PropertyId`; `id.text()` equals `identity` |
+
+`PropertyId` is the standard-library value that names a property declaration. It is not generic in
+the owner or the value type, so it survives erasure and can be stored in a map or compared in bulk:
+it implements `Eq` and `Hashable`, and its `text()` returns the same string as `PropertyRef.identity`.
+Identities belong to declarations, so type arguments are not part of them: `Box<Int>::value` and
+`Box<String>::value` denote the same property. Like `PropertyRef`, a `PropertyId` is created only by
+the compiler.
 
 Two references are equal when they denote the same declaration, so `User::name == User::name` is
 true even when the two are written in different functions or different compiled libraries.
@@ -227,16 +235,50 @@ fn where(
 query.where(user -> user.age >= minimumAge);
 ```
 
-The argument must be an inline lambda. The compiler resolves and type-checks it normally, then
-builds an immutable model with typed nodes for parameter references, literals, property access,
-comparisons, Boolean operators, null tests, and immutable captures. Captured values are evaluated
-once when the call is made and are available separately from the expression tree, so a query
-library can bind them as SQL parameters rather than embedding them in generated SQL.
+The argument is an inline lambda or a property reference such as `User::name`. Both spellings
+produce the same model, so a selector can be written either way:
+
+```zeron
+users.orderBy(User::name);
+users.orderBy(user -> user.name);   // equivalent
+```
+
+The compiler resolves and type-checks the argument normally, then builds an immutable model. The
+model exposes `parameters`, `body`, `captures`, and `location`. Every node carries a `shape`, a
+`sourceType`, and a `location`:
+
+| `shape` variant | Meaning |
+| --------------- | ------- |
+| `ParameterNode(position)` | A reference to the lambda's parameter at `position` |
+| `CaptureNode(slot)` | A captured value, by `slot` in `captures` |
+| `LiteralNode(value)` | A literal, tagged as `BooleanLiteral`, `StringLiteral`, `IntegerLiteral`, `DecimalLiteral`, `FloatLiteral`, or `NullLiteral` |
+| `PropertyAccessNode(receiver, propertyId)` | Reading `propertyId` from `receiver` |
+| `ComparisonNode(comparison, left, right)` | A comparison with one of the `ComparisonOperator` cases |
+| `AndNode`, `OrNode`, `NotNode` | Boolean operators |
+| `NullTestNode(operand, isNull)` | A null test |
+
+Types are a sealed `CodeType`: a nominal type with its arguments, a nullable type, or a function
+type. Matching on shapes and types is exhaustive, so adding a variant later stops a consumer's
+`match` from compiling instead of silently falling through. `children()` returns a node's direct
+children for generic traversals.
+
+Captured values are evaluated once when the call is made and are available separately from the
+expression tree, so a query library can bind them as SQL parameters rather than embedding them in
+generated SQL. A capture whose type is `String`, `Boolean`, an integer type, `Float`, or `null` —
+including nullable variants — is a `LiteralCapture`, fully typed; any other immutable value is an
+`OpaqueCapture` whose meaning comes from the capture's `sourceType`.
+
+Models and nodes compare structurally with `==` and hash consistently. Locations, parameter names,
+capture names, and capture values do not take part, so `x -> x.age >= 18` equals
+`u -> u.age >= 18`, and two calls that build the same expression with different captured values can
+share a translation plan. `selectedProperty(model)` returns the `PropertyId` when the model is
+exactly a property read on its only parameter, and `null` otherwise.
 
 The initial model expression subset does not include arithmetic, method calls, mutation, or
-control flow; unsupported expressions are rejected rather than executed. A `CodeModel<F>` is not
-an executable function. If an API needs both the model and a callback, declare separate parameters
-for them.
+control flow; unsupported expressions are rejected rather than executed. Only an inline lambda or a
+property-reference literal is accepted: a `PropertyRef` value or a stored function has no source
+expression at the call site and is rejected. A `CodeModel<F>` is not an executable function. If an
+API needs both the model and a callback, declare separate parameters for them.
 
 ## Named functions or lambdas?
 

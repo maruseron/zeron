@@ -626,9 +626,9 @@ final class LambdaResolver {
         }
     }
 
-    private static void validateCodeModelLambda(final ResolutionContext context,
-                                                final Expr.Lambda lambda,
-                                                final List<Token> parameters) {
+    static void validateCodeModelLambda(final ResolutionContext context,
+                                        final Expr.Lambda lambda,
+                                        final List<Token> parameters) {
         if (lambda.body.size() != 1 || !(lambda.body.getFirst() instanceof Stmt.Return)
                 || ((Stmt.Return) lambda.body.getFirst()).value() == null) {
             rejectCodeModel(context, lambda, "CodeModel lambdas must contain one expression.");
@@ -697,7 +697,8 @@ final class LambdaResolver {
                 validateCodeModelExpression(context, lambda, logical.right, parameters);
             }
             case Expr.Unary unary -> {
-                if (unary.operator.type() != com.maruseron.zeron.scan.TokenType.BANG) {
+                if (unary.operator.type() != com.maruseron.zeron.scan.TokenType.BANG
+                        && unary.operator.type() != com.maruseron.zeron.scan.TokenType.NOT) {
                     rejectCodeModel(context, lambda, "Only Boolean negation is supported in a CodeModel.");
                 }
                 validateCodeModelExpression(context, lambda, unary.right, parameters);

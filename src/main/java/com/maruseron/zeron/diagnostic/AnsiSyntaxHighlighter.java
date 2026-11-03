@@ -326,7 +326,8 @@ public final class AnsiSyntaxHighlighter {
 
     private static boolean isCodeModelType(final String name) {
         return switch (name) {
-            case "CodeCapture", "CodeModel", "CodeNode", "CodeType" -> true;
+            case "SourceLocation", "CodeType", "CodeLiteral", "ComparisonOperator", "CodeShape",
+                    "CodeParameter", "CaptureValue", "CodeCapture", "CodeNode", "CodeModel" -> true;
             default -> false;
         };
     }

@@ -12,6 +12,7 @@ import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.TypeFormatter;
+import com.maruseron.zeron.domain.TypeSubstitution;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
@@ -34,6 +35,49 @@ final class PropertyReferenceResolver {
             return readerType;
         }
         return reference.getType();
+    }
+
+    /// Resolves a property-reference literal used as a `@CodeModel` argument. The reader lambda the
+    /// reference already carries is the equivalent of the explicit selector lambda, so it becomes the
+    /// model's source and is validated against the code-model expression subset.
+    static TypeDescriptor resolveCodeModel(final ResolutionContext context,
+                                           final Expr.PropertyReference reference,
+                                           final TypeDescriptor expectedType) {
+        if (!reference.resolved()) resolveReference(context, reference);
+        final var reader = reference.reader();
+        if (reader == null || !(reader.getType() instanceof FunctionDescriptor readerType)) {
+            return reference.getType();
+        }
+        final var expectedArgument = MemberInteropResolver.codeModelArgument(expectedType);
+        if (expectedArgument instanceof FunctionDescriptor expectedFunction) {
+            if (expectedFunction.arity() != readerType.arity()) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, reference.operator,
+                        "The property reader takes " + readerType.arity()
+                                + " parameter(s), but the code model expects "
+                                + expectedFunction.arity() + "."));
+            }
+            for (int index = 0; index < expectedFunction.arity()
+                    && index < readerType.arity(); index++) {
+                final var expectedParameter = expectedFunction.parameters().get(index);
+                if (!TypeSubstitution.containsTypeParameter(expectedParameter)) {
+                    Resolver.ensureAssignable(context, expectedParameter,
+                            readerType.parameters().get(index), reference.operator);
+                }
+            }
+            if (!TypeSubstitution.containsTypeParameter(expectedFunction.returnType())) {
+                Resolver.ensureAssignable(context, expectedFunction.returnType(),
+                        readerType.returnType(), reference.operator);
+            }
+        }
+        final var modelType = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName("zeron.compiler.CodeModel"), readerType);
+        reader.setCodeModelType(modelType);
+        LambdaResolver.validateCodeModelLambda(context, reader,
+                reader.parameterTokens(readerType.arity()));
+        reference.setCodeModelType(modelType);
+        reference.setType(modelType);
+        return modelType;
     }
 
     private static void resolveReference(final ResolutionContext context,

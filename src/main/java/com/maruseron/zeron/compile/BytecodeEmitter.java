@@ -754,6 +754,10 @@ final class BytecodeEmitter {
                 context.lastEmittedType = literal.getType();
             }
             case Expr.PropertyReference reference -> {
+                if (reference.codeModelType() != null) {
+                    emitCodeModel(context, composer, reference.reader());
+                    break;
+                }
                 if (reference.converted()) {
                     emitExpr(context, composer, reference.reader());
                     break;
@@ -764,10 +768,13 @@ final class BytecodeEmitter {
                 emitConversion(context, composer, reference.reader().getType(), readerType);
                 composer.ldc(reference.propertyName.lexeme());
                 composer.ldc(reference.identity());
+                emitPropertyId(composer, reference.declaringTypeName(),
+                        reference.propertyName.lexeme());
                 composer.invokestatic(propertyRefClass, SyntheticNames.PROPERTY_REF_FACTORY,
                         MethodTypeDesc.of(propertyRefClass,
                                 TypeDescriptor.toJavaClassDesc(readerType),
-                                ConstantDescs.CD_String, ConstantDescs.CD_String));
+                                ConstantDescs.CD_String, ConstantDescs.CD_String,
+                                ClassDesc.of(SyntheticNames.PROPERTY_ID_TYPE)));
                 context.lastEmittedType = reference.getType();
             }
             case Expr.Literal literal -> {
@@ -902,76 +909,74 @@ final class BytecodeEmitter {
         }
     }
 
+    private static final ClassDesc CODE_MODEL_CLASS = ClassDesc.of("zeron.compiler.CodeModel");
+    private static final ClassDesc CODE_NODE_CLASS = ClassDesc.of("zeron.compiler.CodeNode");
+    private static final ClassDesc CODE_TYPE_CLASS = ClassDesc.of("zeron.compiler.CodeType");
+    private static final ClassDesc CODE_SHAPE_CLASS = ClassDesc.of("zeron.compiler.CodeShape");
+    private static final ClassDesc CODE_LITERAL_CLASS = ClassDesc.of("zeron.compiler.CodeLiteral");
+    private static final ClassDesc CODE_PARAMETER_CLASS = ClassDesc.of("zeron.compiler.CodeParameter");
+    private static final ClassDesc CODE_CAPTURE_CLASS = ClassDesc.of("zeron.compiler.CodeCapture");
+    private static final ClassDesc CAPTURE_VALUE_CLASS = ClassDesc.of("zeron.compiler.CaptureValue");
+    private static final ClassDesc SOURCE_LOCATION_CLASS = ClassDesc.of("zeron.compiler.SourceLocation");
+    private static final ClassDesc COMPARISON_OPERATOR_CLASS =
+            ClassDesc.of("zeron.compiler.ComparisonOperator");
+    private static final ClassDesc PROPERTY_ID_CLASS = ClassDesc.of(SyntheticNames.PROPERTY_ID_TYPE);
+
+    private static ClassDesc compilerSumCase(final String sum, final String caseName) {
+        return ClassDesc.of("zeron.compiler." + sum + "$$sum$" + caseName);
+    }
+
+    private static void emitSingleton(final CodeBuilder composer, final ClassDesc caseClass) {
+        composer.getstatic(caseClass, "$zeron$singleton", caseClass);
+    }
+
     private static void emitCodeModel(final CompilationContext context,
                                       final CodeBuilder composer,
                                       final Expr.Lambda lambda) {
         final var functionType = (FunctionDescriptor) lambda.getType();
-        final var parameters = lambda.parameterTokens(functionType.arity());
+        final var parameterTokens = lambda.parameterTokens(functionType.arity());
         final var captures = context.lambdaPlan.captures(lambda);
         final var captureTypes = context.lambdaPlan.captureTypes(lambda);
         final var body = ((Stmt.Return) lambda.body.getFirst()).value();
-        final var modelClass = ClassDesc.of("zeron.compiler.CodeModel");
-        final var nodeClass = ClassDesc.of("zeron.compiler.CodeNode");
-        final var captureClass = ClassDesc.of("zeron.compiler.CodeCapture");
 
-        composer.new_(modelClass);
+        composer.new_(CODE_MODEL_CLASS);
         composer.dup();
-        composer.new_(nodeClass);
-        composer.dup();
-        composer.ldc("LAMBDA");
-        emitCodeType(context, composer, functionType);
-        composer.aconst_null();
-        composer.aconst_null();
-        composer.loadConstant(-1);
-        composer.loadConstant(parameters.size() + 1);
-        composer.anewarray(nodeClass);
-        for (int index = 0; index < parameters.size(); index++) {
+        composer.loadConstant(parameterTokens.size());
+        composer.anewarray(ConstantDescs.CD_Object);
+        for (int index = 0; index < parameterTokens.size(); index++) {
             composer.dup();
             composer.loadConstant(index);
-            composer.new_(nodeClass);
+            composer.new_(CODE_PARAMETER_CLASS);
             composer.dup();
-            composer.ldc("PARAMETER");
+            composer.loadConstant(index);
+            composer.ldc(parameterTokens.get(index).lexeme());
             emitCodeType(context, composer, functionType.parameters().get(index));
-            composer.ldc(parameters.get(index).lexeme());
-            composer.aconst_null();
-            composer.loadConstant(index);
-            composer.loadConstant(0);
-            composer.anewarray(nodeClass);
-            composer.invokespecial(nodeClass, "<init>",
-                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String,
-                            ClassDesc.of("zeron.compiler.CodeType"), ConstantDescs.CD_String,
-                            ConstantDescs.CD_Object, ConstantDescs.CD_int, ConstantDescs.CD_Object.arrayType()));
+            composer.invokespecial(CODE_PARAMETER_CLASS, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_int,
+                            ConstantDescs.CD_String, CODE_TYPE_CLASS));
             composer.aastore();
         }
-        composer.dup();
-        composer.loadConstant(parameters.size());
-        emitCodeNode(context, composer, lambda, body, parameters, captures);
-        composer.aastore();
-        composer.invokespecial(nodeClass, "<init>",
-                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String,
-                        ClassDesc.of("zeron.compiler.CodeType"), ConstantDescs.CD_String,
-                        ConstantDescs.CD_Object, ConstantDescs.CD_int, ConstantDescs.CD_Object.arrayType()));
+        emitCodeNode(context, composer, lambda, body, parameterTokens, captures);
         composer.loadConstant(captures.size());
-        composer.anewarray(captureClass);
+        composer.anewarray(ConstantDescs.CD_Object);
         for (int index = 0; index < captures.size(); index++) {
             composer.dup();
             composer.loadConstant(index);
-            composer.new_(captureClass);
+            composer.new_(CODE_CAPTURE_CLASS);
             composer.dup();
             composer.loadConstant(index);
             composer.ldc(captures.get(index).lexeme());
             emitCodeType(context, composer, captureTypes.get(index));
-            emitVariable(context, composer, captures.get(index));
-            emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
-            composer.invokespecial(captureClass, "<init>",
+            emitCaptureValue(context, composer, captures.get(index), captureTypes.get(index));
+            composer.invokespecial(CODE_CAPTURE_CLASS, "<init>",
                     MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_int,
-                            ConstantDescs.CD_String, ClassDesc.of("zeron.compiler.CodeType"),
-                            ConstantDescs.CD_Object));
+                            ConstantDescs.CD_String, CODE_TYPE_CLASS, CAPTURE_VALUE_CLASS));
             composer.aastore();
         }
-        composer.invokespecial(modelClass, "<init>",
-                MethodTypeDesc.of(ConstantDescs.CD_void, nodeClass,
-                        ConstantDescs.CD_Object.arrayType()));
+        emitSourceLocation(composer, lambda.arrow);
+        composer.invokespecial(CODE_MODEL_CLASS, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object.arrayType(),
+                        CODE_NODE_CLASS, ConstantDescs.CD_Object.arrayType(), SOURCE_LOCATION_CLASS));
         context.lastEmittedType = lambda.codeModelType();
     }
 
@@ -981,100 +986,399 @@ final class BytecodeEmitter {
                                      final Expr expression,
                                      final List<Token> parameters,
                                      final List<Token> captures) {
-        final var nodeClass = ClassDesc.of("zeron.compiler.CodeNode");
-        String kind;
-        String identity = null;
-        Object literal = null;
-        var slot = -1;
-        final List<Expr> children;
+        if (expression instanceof Expr.Grouping grouping) {
+            emitCodeNode(context, composer, lambda, grouping.expression, parameters, captures);
+            return;
+        }
+        composer.new_(CODE_NODE_CLASS);
+        composer.dup();
+        emitCodeShape(context, composer, lambda, expression, parameters, captures);
+        emitCodeType(context, composer, expression.getType());
+        emitSourceLocation(composer, codeNodeToken(expression, lambda.arrow));
+        composer.invokespecial(CODE_NODE_CLASS, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, CODE_SHAPE_CLASS,
+                        CODE_TYPE_CLASS, SOURCE_LOCATION_CLASS));
+    }
+
+    private static void emitCodeShape(final CompilationContext context,
+                                      final CodeBuilder composer,
+                                      final Expr.Lambda lambda,
+                                      final Expr expression,
+                                      final List<Token> parameters,
+                                      final List<Token> captures) {
         switch (expression) {
-            case Expr.Grouping grouping -> {
-                emitCodeNode(context, composer, lambda, grouping.expression, parameters, captures);
-                return;
-            }
-            case Expr.Literal value -> {
-                kind = "LITERAL";
-                literal = value.value;
-                children = List.of();
+            case Expr.Literal literal -> {
+                final var caseClass = compilerSumCase("CodeShape", "LiteralNode");
+                composer.new_(caseClass);
+                composer.dup();
+                emitCodeLiteral(context, composer, literal);
+                composer.invokespecial(caseClass, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, CODE_LITERAL_CLASS));
             }
             case Expr.Variable variable -> {
                 final var symbol = variable.resolvedSymbolToken();
                 final var parameterIndex = tokenIndex(parameters, symbol);
-                if (parameterIndex >= 0) {
-                    kind = "PARAMETER";
-                    identity = variable.name.lexeme();
-                    slot = parameterIndex;
-                } else {
-                    kind = "CAPTURE";
-                    identity = variable.name.lexeme();
-                    slot = tokenIndex(captures, symbol);
-                    if (slot < 0) throw new IllegalStateException("Validated CodeModel capture was not planned.");
+                final var caseClass = compilerSumCase("CodeShape",
+                        parameterIndex >= 0 ? "ParameterNode" : "CaptureNode");
+                final var position = parameterIndex >= 0
+                        ? parameterIndex : tokenIndex(captures, symbol);
+                if (position < 0) {
+                    throw new IllegalStateException("Validated CodeModel capture was not planned.");
                 }
-                children = List.of();
+                composer.new_(caseClass);
+                composer.dup();
+                composer.loadConstant(position);
+                composer.invokespecial(caseClass, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_int));
             }
             case Expr.Property property -> {
-                kind = "PROPERTY";
+                final var caseClass = compilerSumCase("CodeShape", "PropertyAccessNode");
                 final var owner = property.resolvedOwnerName() == null
                         ? property.receiver.getType().name() : property.resolvedOwnerName();
-                identity = owner + "." + property.name.lexeme();
-                children = List.of(property.receiver);
+                composer.new_(caseClass);
+                composer.dup();
+                emitCodeNode(context, composer, lambda, property.receiver, parameters, captures);
+                emitPropertyId(composer, owner, property.name.lexeme());
+                composer.invokespecial(caseClass, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, CODE_NODE_CLASS, PROPERTY_ID_CLASS));
             }
             case Expr.Binary binary -> {
-                kind = switch (binary.operator.type()) {
-                    case EQUAL_EQUAL -> "EQUAL";
-                    case BANG_EQUAL -> "NOT_EQUAL";
-                    case GREATER -> "GREATER_THAN";
-                    case GREATER_EQUAL -> "GREATER_THAN_OR_EQUAL";
-                    case LESS -> "LESS_THAN";
-                    case LESS_EQUAL -> "LESS_THAN_OR_EQUAL";
-                    default -> throw new IllegalStateException("Unsupported validated CodeModel comparison.");
-                };
-                children = List.of(binary.left, binary.right);
+                final var caseClass = compilerSumCase("CodeShape", "ComparisonNode");
+                composer.new_(caseClass);
+                composer.dup();
+                emitComparisonOperator(composer, binary.operator.type());
+                emitCodeNode(context, composer, lambda, binary.left, parameters, captures);
+                emitCodeNode(context, composer, lambda, binary.right, parameters, captures);
+                composer.invokespecial(caseClass, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, COMPARISON_OPERATOR_CLASS,
+                                CODE_NODE_CLASS, CODE_NODE_CLASS));
             }
             case Expr.Logical logical -> {
-                kind = logical.operator.type() == TokenType.AND ? "AND" : "OR";
-                children = List.of(logical.left, logical.right);
+                final var caseClass = compilerSumCase("CodeShape",
+                        logical.operator.type() == TokenType.AND ? "AndNode" : "OrNode");
+                composer.new_(caseClass);
+                composer.dup();
+                emitCodeNode(context, composer, lambda, logical.left, parameters, captures);
+                emitCodeNode(context, composer, lambda, logical.right, parameters, captures);
+                composer.invokespecial(caseClass, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, CODE_NODE_CLASS, CODE_NODE_CLASS));
             }
             case Expr.Unary unary -> {
-                kind = "NOT";
-                children = List.of(unary.right);
+                final var caseClass = compilerSumCase("CodeShape", "NotNode");
+                composer.new_(caseClass);
+                composer.dup();
+                emitCodeNode(context, composer, lambda, unary.right, parameters, captures);
+                composer.invokespecial(caseClass, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, CODE_NODE_CLASS));
             }
             case Expr.TypeTest test -> {
-                kind = "IS_NULL";
-                children = List.of(test.value);
+                final var caseClass = compilerSumCase("CodeShape", "NullTestNode");
+                composer.new_(caseClass);
+                composer.dup();
+                emitCodeNode(context, composer, lambda, test.value, parameters, captures);
+                composer.iconst_1();
+                composer.invokespecial(caseClass, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, CODE_NODE_CLASS,
+                                ConstantDescs.CD_boolean));
             }
             default -> throw new IllegalStateException("Unsupported validated CodeModel expression: "
                     + expression.getClass().getSimpleName());
         }
+    }
 
-        composer.new_(nodeClass);
-        composer.dup();
-        composer.ldc(kind);
-        emitCodeType(context, composer, expression.getType());
-        if (identity == null) composer.aconst_null();
-        else composer.ldc(identity);
-        if (expression instanceof Expr.Literal literalExpression
-                && literalExpression.getType() instanceof NullDescriptor) {
-            composer.aconst_null();
-        } else if (expression instanceof Expr.Literal) {
-            emitExpr(context, composer, expression);
-            emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
-        } else {
-            composer.aconst_null();
+    private static void emitComparisonOperator(final CodeBuilder composer,
+                                               final TokenType operator) {
+        final var caseName = switch (operator) {
+            case EQUAL_EQUAL -> "Equal";
+            case BANG_EQUAL -> "NotEqual";
+            case LESS -> "LessThan";
+            case LESS_EQUAL -> "LessThanOrEqual";
+            case GREATER -> "GreaterThan";
+            case GREATER_EQUAL -> "GreaterThanOrEqual";
+            default -> throw new IllegalStateException("Unsupported validated CodeModel comparison.");
+        };
+        emitSingleton(composer, compilerSumCase("ComparisonOperator", caseName));
+    }
+
+    private static void emitCodeLiteral(final CompilationContext context,
+                                        final CodeBuilder composer,
+                                        final Expr.Literal literal) {
+        if (literal.value == null || literal.getType() instanceof NullDescriptor) {
+            emitSingleton(composer, compilerSumCase("CodeLiteral", "NullLiteral"));
+            return;
         }
-        composer.loadConstant(slot);
-        composer.loadConstant(children.size());
-        composer.anewarray(nodeClass);
-        for (int index = 0; index < children.size(); index++) {
+        if (literal.getType() instanceof StringDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "StringLiteral");
+            composer.new_(caseClass);
             composer.dup();
-            composer.loadConstant(index);
-            emitCodeNode(context, composer, lambda, children.get(index), parameters, captures);
-            composer.aastore();
+            composer.ldc((String) literal.value);
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            return;
         }
-        composer.invokespecial(nodeClass, "<init>",
+        if (literal.getType() instanceof BooleanDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "BooleanLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            if ((Boolean) literal.value) composer.iconst_1();
+            else composer.iconst_0();
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_boolean));
+            return;
+        }
+        if (literal.getType() instanceof IntDescriptor
+                || literal.getType() instanceof LongDescriptor
+                || literal.getType() instanceof ByteDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "IntegerLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            composer.ldc(integerLiteralText(literal));
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            return;
+        }
+        if (literal.getType() instanceof FloatDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "FloatLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            composer.ldc(((Number) literal.value).doubleValue());
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_double));
+            return;
+        }
+        if (literal.exactDecimal() != null) {
+            final var caseClass = compilerSumCase("CodeLiteral", "DecimalLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            composer.ldc(literal.exactDecimal().toString());
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            return;
+        }
+        throw new IllegalStateException("Unsupported validated CodeModel literal type: "
+                + literal.getType());
+    }
+
+    private static String integerLiteralText(final Expr.Literal literal) {
+        if (literal.exactInteger() != null) return literal.exactInteger().toString();
+        return String.valueOf(literal.value);
+    }
+
+    private static void emitCaptureValue(final CompilationContext context,
+                                         final CodeBuilder composer,
+                                         final Token capture,
+                                         final TypeDescriptor type) {
+        if (type instanceof NullDescriptor) {
+            emitNullLiteralCapture(composer);
+            return;
+        }
+        final var nullable = type instanceof NullableDescriptor;
+        final var base = nullable ? ((NullableDescriptor) type).baseType() : type;
+        if (isCodeLiteralType(base)) {
+            if (!nullable) {
+                emitLiteralCapture(context, composer, capture, base, false);
+                return;
+            }
+            final var nullPath = composer.newLabel();
+            final var done = composer.newLabel();
+            emitVariable(context, composer, capture);
+            composer.ifnull(nullPath);
+            emitLiteralCapture(context, composer, capture, base, true);
+            composer.goto_(done);
+            composer.labelBinding(nullPath);
+            emitNullLiteralCapture(composer);
+            composer.labelBinding(done);
+            return;
+        }
+        if (isReferenceValue(base)) {
+            final var nullPath = composer.newLabel();
+            final var done = composer.newLabel();
+            emitVariable(context, composer, capture);
+            composer.ifnull(nullPath);
+            emitOpaqueCapture(context, composer, capture, base);
+            composer.goto_(done);
+            composer.labelBinding(nullPath);
+            emitNullLiteralCapture(composer);
+            composer.labelBinding(done);
+            return;
+        }
+        emitOpaqueCapture(context, composer, capture, base);
+    }
+
+    private static boolean isCodeLiteralType(final TypeDescriptor type) {
+        return type instanceof StringDescriptor || type instanceof BooleanDescriptor
+                || type instanceof IntDescriptor || type instanceof LongDescriptor
+                || type instanceof ByteDescriptor || type instanceof FloatDescriptor;
+    }
+
+    private static boolean isReferenceValue(final TypeDescriptor type) {
+        return !(type instanceof IntDescriptor || type instanceof LongDescriptor
+                || type instanceof FloatDescriptor || type instanceof BooleanDescriptor
+                || type instanceof ByteDescriptor || type instanceof CharDescriptor);
+    }
+
+    private static void emitLiteralCapture(final CompilationContext context,
+                                           final CodeBuilder composer,
+                                           final Token capture,
+                                           final TypeDescriptor type,
+                                           final boolean boxed) {
+        final var caseClass = compilerSumCase("CaptureValue", "LiteralCapture");
+        composer.new_(caseClass);
+        composer.dup();
+        emitCodeLiteralFromVariable(context, composer, capture, type, boxed);
+        composer.invokespecial(caseClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, CODE_LITERAL_CLASS));
+    }
+
+    private static void emitCodeLiteralFromVariable(final CompilationContext context,
+                                                    final CodeBuilder composer,
+                                                    final Token capture,
+                                                    final TypeDescriptor type,
+                                                    final boolean boxed) {
+        if (type instanceof StringDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "StringLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            emitVariable(context, composer, capture);
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            return;
+        }
+        if (type instanceof BooleanDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "BooleanLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            emitVariable(context, composer, capture);
+            if (boxed) {
+                composer.invokevirtual(ClassDesc.of("java.lang.Boolean"), "booleanValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_boolean));
+            }
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_boolean));
+            return;
+        }
+        if (type instanceof IntDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "IntegerLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            emitVariable(context, composer, capture);
+            if (boxed) {
+                composer.invokevirtual(ClassDesc.of("java.lang.Integer"), "intValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_int));
+            }
+            composer.invokestatic(ClassDesc.of("java.lang.Integer"), "toString",
+                    MethodTypeDesc.of(ConstantDescs.CD_String, ConstantDescs.CD_int));
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            return;
+        }
+        if (type instanceof LongDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "IntegerLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            emitVariable(context, composer, capture);
+            if (boxed) {
+                composer.invokevirtual(ClassDesc.of("java.lang.Long"), "longValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_long));
+            }
+            composer.invokestatic(ClassDesc.of("java.lang.Long"), "toString",
+                    MethodTypeDesc.of(ConstantDescs.CD_String, ConstantDescs.CD_long));
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            return;
+        }
+        if (type instanceof ByteDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "IntegerLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            emitVariable(context, composer, capture);
+            if (boxed) {
+                composer.invokevirtual(ClassDesc.of("java.lang.Byte"), "byteValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_byte));
+            }
+            composer.invokestatic(ClassDesc.of("java.lang.Byte"), "toString",
+                    MethodTypeDesc.of(ConstantDescs.CD_String, ConstantDescs.CD_byte));
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
+            return;
+        }
+        if (type instanceof FloatDescriptor) {
+            final var caseClass = compilerSumCase("CodeLiteral", "FloatLiteral");
+            composer.new_(caseClass);
+            composer.dup();
+            emitVariable(context, composer, capture);
+            if (boxed) {
+                composer.invokevirtual(ClassDesc.of("java.lang.Double"), "doubleValue",
+                        MethodTypeDesc.of(ConstantDescs.CD_double));
+            }
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_double));
+            return;
+        }
+        throw new IllegalStateException("Capture is not a code-model literal kind: " + type);
+    }
+
+    private static void emitOpaqueCapture(final CompilationContext context,
+                                          final CodeBuilder composer,
+                                          final Token capture,
+                                          final TypeDescriptor type) {
+        final var caseClass = compilerSumCase("CaptureValue", "OpaqueCapture");
+        composer.new_(caseClass);
+        composer.dup();
+        emitVariable(context, composer, capture);
+        emitConversion(context, composer, type, TypeDescriptor.ofAny());
+        composer.invokespecial(caseClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
+    }
+
+    private static void emitNullLiteralCapture(final CodeBuilder composer) {
+        final var caseClass = compilerSumCase("CaptureValue", "LiteralCapture");
+        composer.new_(caseClass);
+        composer.dup();
+        emitSingleton(composer, compilerSumCase("CodeLiteral", "NullLiteral"));
+        composer.invokespecial(caseClass, "<init>",
+                MethodTypeDesc.of(ConstantDescs.CD_void, CODE_LITERAL_CLASS));
+    }
+
+    private static void emitPropertyId(final CodeBuilder composer,
+                                       final String owner,
+                                       final String name) {
+        composer.ldc(owner);
+        composer.ldc(name);
+        composer.invokestatic(PROPERTY_ID_CLASS, SyntheticNames.PROPERTY_ID_FACTORY,
+                MethodTypeDesc.of(PROPERTY_ID_CLASS, ConstantDescs.CD_String,
+                        ConstantDescs.CD_String));
+    }
+
+    private static void emitSourceLocation(final CodeBuilder composer, final Token token) {
+        final var span = token.span();
+        final var start = span.start();
+        final var end = span.end();
+        composer.new_(SOURCE_LOCATION_CLASS);
+        composer.dup();
+        composer.ldc(span.sourcePath() == null ? "" : span.sourcePath());
+        composer.loadConstant(start.line());
+        composer.loadConstant(start.column() == null ? 0 : start.column());
+        composer.loadConstant(end.line());
+        composer.loadConstant(end.column() == null ? 0 : end.column());
+        composer.invokespecial(SOURCE_LOCATION_CLASS, "<init>",
                 MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String,
-                        ClassDesc.of("zeron.compiler.CodeType"), ConstantDescs.CD_String,
-                        ConstantDescs.CD_Object, ConstantDescs.CD_int, ConstantDescs.CD_Object.arrayType()));
+                        ConstantDescs.CD_int, ConstantDescs.CD_int,
+                        ConstantDescs.CD_int, ConstantDescs.CD_int));
+    }
+
+    private static Token codeNodeToken(final Expr expression, final Token fallback) {
+        return switch (expression) {
+            case Expr.Variable variable -> variable.name;
+            case Expr.Property property -> property.name;
+            case Expr.Binary binary -> binary.operator;
+            case Expr.Logical logical -> logical.operator;
+            case Expr.Unary unary -> unary.operator;
+            case Expr.TypeTest test -> test.operator;
+            case Expr.Literal literal ->
+                    literal.numericToken() == null ? fallback : literal.numericToken();
+            default -> fallback;
+        };
     }
 
     private static int tokenIndex(final List<Token> tokens, final Token target) {
@@ -1087,63 +1391,67 @@ final class BytecodeEmitter {
     private static void emitCodeType(final CompilationContext context,
                                      final CodeBuilder composer,
                                      final TypeDescriptor type) {
-        final var typeClass = ClassDesc.of("zeron.compiler.CodeType");
-        final var kind = codeTypeKind(type);
-        final var name = codeTypeName(type);
-        final var arguments = codeTypeArguments(type);
-        composer.new_(typeClass);
-        composer.dup();
-        composer.ldc(kind);
-        composer.ldc(name);
-        composer.loadConstant(arguments.size());
-        composer.anewarray(typeClass);
-        for (int index = 0; index < arguments.size(); index++) {
+        if (type instanceof NullableDescriptor nullable) {
+            final var caseClass = compilerSumCase("CodeType", "NullableType");
+            composer.new_(caseClass);
             composer.dup();
-            composer.loadConstant(index);
-            emitCodeType(context, composer, arguments.get(index));
-            composer.aastore();
+            emitCodeType(context, composer, nullable.baseType());
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, CODE_TYPE_CLASS));
+            return;
         }
-        composer.invokespecial(typeClass, "<init>",
+        if (type instanceof FunctionDescriptor function) {
+            final var caseClass = compilerSumCase("CodeType", "FunctionType");
+            composer.new_(caseClass);
+            composer.dup();
+            emitCodeTypeArray(context, composer, function.invocationParameters());
+            emitCodeType(context, composer, function.returnType());
+            composer.invokespecial(caseClass, "<init>",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object.arrayType(),
+                            CODE_TYPE_CLASS));
+            return;
+        }
+        final var caseClass = compilerSumCase("CodeType", "NominalType");
+        composer.new_(caseClass);
+        composer.dup();
+        composer.ldc(codeTypeName(type));
+        emitCodeTypeArray(context, composer, codeTypeArguments(type));
+        composer.invokespecial(caseClass, "<init>",
                 MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String,
-                        ConstantDescs.CD_String, ConstantDescs.CD_Object.arrayType()));
+                        ConstantDescs.CD_Object.arrayType()));
     }
 
-    private static String codeTypeKind(final TypeDescriptor type) {
-        if (type instanceof NullableDescriptor) return "nullable";
-        if (type instanceof ArrayDescriptor || type instanceof ByteArrayDescriptor) return "array";
-        if (type instanceof FunctionDescriptor) return "function";
-        if (type instanceof GenericDescriptor || type instanceof NominalDescriptor) return "nominal";
-        if (type instanceof TypeParameterDescriptor) return "type_parameter";
-        if (type instanceof ReferenceDescriptor) return "reference";
-        if (type instanceof TypeProjectionDescriptor projection) {
-            return projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "out" : "in";
+    private static void emitCodeTypeArray(final CompilationContext context,
+                                          final CodeBuilder composer,
+                                          final List<TypeDescriptor> types) {
+        composer.loadConstant(types.size());
+        composer.anewarray(ConstantDescs.CD_Object);
+        for (int index = 0; index < types.size(); index++) {
+            composer.dup();
+            composer.loadConstant(index);
+            emitCodeType(context, composer, types.get(index));
+            composer.aastore();
         }
-        if (type instanceof NullDescriptor) return "null";
-        return "primitive";
     }
 
     private static String codeTypeName(final TypeDescriptor type) {
-        if (type instanceof FunctionDescriptor function) return "Function/" + function.arity();
-        if (type instanceof NullableDescriptor nullable) return codeTypeName(nullable.baseType());
         if (type instanceof ArrayDescriptor) return "Array";
         if (type instanceof ByteArrayDescriptor) return "ByteArray";
         if (type instanceof GenericDescriptor generic) return generic.baseType().name();
-        if (type instanceof ReferenceDescriptor reference) return codeTypeName(reference.baseType());
-        if (type instanceof TypeProjectionDescriptor projection) return codeTypeName(projection.bound());
+        if (type instanceof ReferenceDescriptor) return "&";
+        if (type instanceof TypeProjectionDescriptor projection) {
+            return projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "out" : "in";
+        }
+        if (type instanceof CapturedTypeDescriptor capture) return codeTypeName(capture.upperBound());
         return type.name();
     }
 
     private static List<TypeDescriptor> codeTypeArguments(final TypeDescriptor type) {
-        if (type instanceof NullableDescriptor nullable) return List.of(nullable.baseType());
         if (type instanceof ArrayDescriptor array) return List.of(array.elementType());
         if (type instanceof GenericDescriptor generic) return generic.typeParameters();
-        if (type instanceof FunctionDescriptor function) {
-            final var arguments = new ArrayList<TypeDescriptor>(function.parameters());
-            arguments.add(function.returnType());
-            return List.copyOf(arguments);
-        }
         if (type instanceof ReferenceDescriptor reference) return List.of(reference.baseType());
         if (type instanceof TypeProjectionDescriptor projection) return List.of(projection.bound());
+        if (type instanceof CapturedTypeDescriptor capture) return codeTypeArguments(capture.upperBound());
         return List.of();
     }
 

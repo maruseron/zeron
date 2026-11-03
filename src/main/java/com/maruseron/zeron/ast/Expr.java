@@ -338,6 +338,7 @@ public sealed interface Expr {
         private String identity;
         private Token propertyToken;
         private Lambda reader;
+        private TypeDescriptor codeModelType;
         private boolean resolved;
         private boolean converted;
 
@@ -363,6 +364,10 @@ public sealed interface Expr {
         public void setPropertyToken(final Token propertyToken) { this.propertyToken = propertyToken; }
         public Lambda reader() { return reader; }
         public void setReader(final Lambda reader) { this.reader = reader; }
+        public TypeDescriptor codeModelType() { return codeModelType; }
+        public void setCodeModelType(final TypeDescriptor codeModelType) {
+            this.codeModelType = codeModelType;
+        }
         public boolean resolved() { return resolved; }
         public void markResolved() { resolved = true; }
         public boolean converted() { return converted; }

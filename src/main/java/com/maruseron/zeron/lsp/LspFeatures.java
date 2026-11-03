@@ -1446,7 +1446,9 @@ final class LspFeatures {
         }
 
         private void addCodeModelTypes() {
-            List.of("CodeCapture", "CodeModel", "CodeNode", "CodeType").forEach(name -> {
+            List.of("SourceLocation", "CodeType", "CodeLiteral", "ComparisonOperator", "CodeShape",
+                    "CodeParameter", "CaptureValue", "CodeCapture", "CodeNode", "CodeModel")
+                    .forEach(name -> {
                 final var qualifiedName = "zeron.compiler." + name;
                 if (byQualifiedName.containsKey(qualifiedName)) return;
                 add(new Symbol(name, qualifiedName, "zeron.compiler", null,
@@ -1458,7 +1460,7 @@ final class LspFeatures {
         private static String codeModelTypeDetail(final String packageName, final String name) {
             if (!packageName.equals("zeron.compiler")) return "type " + name;
             return switch (name) {
-                case "CodeCapture", "CodeNode", "CodeType" -> "class " + name;
+                case "CodeNode" -> "class CodeNode";
                 case "CodeModel" -> "class CodeModel<F>";
                 default -> "type " + name;
             };

@@ -10,6 +10,11 @@
 - Added typed declarative annotations with target and constant-argument validation, and preserved
   public annotation definitions and applications in API-index schema 9. Added runtime
   `CodeModel<F>` values for inspecting selected inline predicate lambdas.
+- Added `PropertyId` to the standard library and a read-only `PropertyRef.id` whose `text()` equals
+  `identity`. Replaced the `zeron.compiler` code-model API with sealed `CodeShape`, `CodeType`,
+  `CodeLiteral`, and `ComparisonOperator` types, typed parameters and capture values, source
+  locations, structural equality and hashing, and `selectedProperty`. A `@CodeModel` argument may
+  now be written as a property-reference literal such as `User::name` as well as an inline lambda.
 - Added receiver-based and receiverless default operations to higher-kinded contracts, including
   compiled-library support and derived `Applicative.map2`, `Monad.flatten`, `Foldable.count`, `Foldable.isEmpty`,
   `Traversable.sequence`, and `Comonad.duplicate`.

@@ -1,60 +1,220 @@
 package zeron.compiler;
 
+import zeron.lang.Eq;
+import zeron.lang.Hashable;
+import zeron.lang.PropertyId;
+
 public annotation CodeModel on PARAMETER;
 
-public class CodeNode {
-    kindValue: String;
-    sourceTypeValue: CodeType;
-    identityValue: String?;
-    literalValue: Any?;
-    slotValue: Int;
-    childrenValue: Array<CodeNode>;
+/// The source range that produced a node, a parameter list, or a model.
+///
+/// The file is relative to the compilation's source root, as in diagnostics. Missing columns are
+/// recorded as `0`.
+public type SourceLocation =
+    (file: String, startLine: Int, startColumn: Int, endLine: Int, endColumn: Int);
+
+/// The source-level type of a node or capture.
+///
+/// Code models never need reflection to describe types: a type is nominal with arguments, nullable,
+/// or a function type.
+public type CodeType =
+      NominalType(name: String, arguments: Array<CodeType>)
+    | NullableType(inner: CodeType)
+    | FunctionType(parameters: Array<CodeType>, result: CodeType);
+
+/// A literal value tagged by its kind.
+///
+/// The tag is determined by the node's `sourceType`; the compiler guarantees the correspondence.
+/// Numeric text is the canonical decimal text of the value, so the exact numeric type is given by
+/// `sourceType`.
+public type CodeLiteral deriving Hashable =
+      NullLiteral
+    | BooleanLiteral(value: Boolean)
+    | StringLiteral(value: String)
+    | IntegerLiteral(decimalText: String)
+    | DecimalLiteral(decimalText: String)
+    | FloatLiteral(value: Float);
+
+/// The comparison operators of the code-model expression subset.
+public type ComparisonOperator deriving Hashable =
+      Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual;
+
+/// The structure of a code-model node.
+///
+/// Each variant carries only the fields that are meaningful for it, so there are no optional
+/// fields. Parameter names and capture names live in the model, not in the node.
+public type CodeShape deriving Hashable =
+      ParameterNode(position: Int)
+    | CaptureNode(slot: Int)
+    | LiteralNode(value: CodeLiteral)
+    | PropertyAccessNode(receiver: CodeNode, propertyId: PropertyId)
+    | ComparisonNode(comparison: ComparisonOperator, left: CodeNode, right: CodeNode)
+    | AndNode(left: CodeNode, right: CodeNode)
+    | OrNode(left: CodeNode, right: CodeNode)
+    | NotNode(operand: CodeNode)
+    | NullTestNode(operand: CodeNode, isNull: Boolean);
+
+/// One node of a code model.
+///
+/// Nodes are immutable and constructed only by the compiler. Equality and hashing are structural:
+/// they compare `shape` and `sourceType` and ignore `location`. Names live outside nodes.
+public class CodeNode is Eq<CodeNode>, Hashable<CodeNode> {
+    public property shape: CodeShape;
+    public property sourceType: CodeType;
+    public property location: SourceLocation;
 
     public constructor new;
 
-    public kind(): String = kindValue;
-    public sourceType(): CodeType = sourceTypeValue;
-    public identity(): String? = identityValue;
-    public literal(): Any? = literalValue;
-    public slot(): Int = slotValue;
-    public childCount(): Int = childrenValue.length;
-    public child(index: Int): CodeNode = childrenValue[index];
+    /// Returns this node's direct children, in source order.
+    public children(): Array<CodeNode> {
+        let empty: Array<CodeNode> = [];
+        return match (this.shape) {
+            case CodeShape.ParameterNode(_) -> empty;
+            case CodeShape.CaptureNode(_) -> empty;
+            case CodeShape.LiteralNode(_) -> empty;
+            case CodeShape.PropertyAccessNode(receiver, _) -> [receiver];
+            case CodeShape.ComparisonNode(_, left, right) -> [left, right];
+            case CodeShape.AndNode(left, right) -> [left, right];
+            case CodeShape.OrNode(left, right) -> [left, right];
+            case CodeShape.NotNode(operand) -> [operand];
+            case CodeShape.NullTestNode(operand, _) -> [operand];
+        };
+    }
+
+    /// Compares this node with `other` structurally, ignoring locations.
+    public eq(other: CodeNode): Boolean =
+        this.shape == other.shape and typeEq(this.sourceType, other.sourceType);
+
+    /// Returns a structural hash consistent with `eq`.
+    public hash(): Int = hashValue(this.shape) * 31 + typeHash(this.sourceType);
 }
 
-public class CodeType {
-    kindValue: String;
-    nameValue: String;
-    argumentsValue: Array<CodeType>;
+/// One parameter of a code model. Names are for display and do not take part in equality.
+public type CodeParameter = (position: Int, name: String, sourceType: CodeType);
+
+/// The value a code model capture was called with.
+///
+/// A literal kind, including `null`, is a `LiteralCapture`; any other immutable value is an
+/// `OpaqueCapture`, whose meaning is given by the capture's `sourceType`.
+public type CaptureValue =
+      LiteralCapture(value: CodeLiteral)
+    | OpaqueCapture(value: Any);
+
+/// One captured binding. Names and values do not take part in model equality; `slot` and
+/// `sourceType` do.
+public type CodeCapture = (slot: Int, name: String, sourceType: CodeType, value: CaptureValue);
+
+/// The structure of an expression, together with the parameters and captured values needed to
+/// evaluate it.
+///
+/// Equality and hashing are structural. They compare parameter positions and types, the body, and
+/// capture slots and types. Locations, parameter names, capture names, and capture values are
+/// ignored, so equal models can share a translation plan while each call binds its own values.
+public class CodeModel<F> is Eq<CodeModel<F>>, Hashable<CodeModel<F>> {
+    public property parameters: Array<CodeParameter>;
+    public property body: CodeNode;
+    public property captures: Array<CodeCapture>;
+    public property location: SourceLocation;
 
     public constructor new;
 
-    public kind(): String = kindValue;
-    public name(): String = nameValue;
-    public argumentCount(): Int = argumentsValue.length;
-    public argument(index: Int): CodeType = argumentsValue[index];
+    /// Compares this model with `other` structurally, ignoring locations, names, and values.
+    public eq(other: CodeModel<F>): Boolean {
+        if (this.parameters.length != other.parameters.length) return false;
+        let mut index = 0;
+        while (index < this.parameters.length) {
+            let left = this.parameters[index];
+            let right = other.parameters[index];
+            if (left.position != right.position
+                    or not typeEq(left.sourceType, right.sourceType)) return false;
+            index += 1;
+        }
+        if (not this.body.eq(other.body)) return false;
+        if (this.captures.length != other.captures.length) return false;
+        index = 0;
+        while (index < this.captures.length) {
+            let left = this.captures[index];
+            let right = other.captures[index];
+            if (left.slot != right.slot
+                    or not typeEq(left.sourceType, right.sourceType)) return false;
+            index += 1;
+        }
+        return true;
+    }
+
+    /// Returns a structural hash consistent with `eq`.
+    public hash(): Int {
+        let mut hash = 17;
+        for (let parameter in this.parameters) {
+            hash = hash * 31 + parameter.position;
+            hash = hash * 31 + typeHash(parameter.sourceType);
+        }
+        hash = hash * 31 + this.body.hash();
+        for (let capture in this.captures) {
+            hash = hash * 31 + capture.slot;
+            hash = hash * 31 + typeHash(capture.sourceType);
+        }
+        return hash;
+    }
 }
 
-public class CodeCapture {
-    slotValue: Int;
-    nameValue: String;
-    sourceTypeValue: CodeType;
-    valueValue: Any?;
-
-    public constructor new;
-
-    public slot(): Int = slotValue;
-    public name(): String = nameValue;
-    public sourceType(): CodeType = sourceTypeValue;
-    public value(): Any? = valueValue;
+/// Returns the selected property when `model` is exactly an access to a property on its only
+/// parameter, and `null` otherwise.
+public fn selectedProperty<F>(model: CodeModel<F>): PropertyId? {
+    if (model.parameters.length != 1) return null;
+    return match (model.body.shape) {
+        case CodeShape.PropertyAccessNode(receiver, selected) ->
+            match (receiver.shape) {
+                case CodeShape.ParameterNode(position) ->
+                    if (position == 0) then selected else null;
+                case _ -> null;
+            };
+        case _ -> null;
+    };
 }
 
-public class CodeModel<F> {
-    rootValue: CodeNode;
-    captureValues: Array<CodeCapture>;
+fn typeEq(left: CodeType, right: CodeType): Boolean = match (left) {
+    case CodeType.NominalType(name, arguments) ->
+        match (right) {
+            case CodeType.NominalType(otherName, otherArguments) ->
+                name == otherName and typeArrayEq(arguments, otherArguments);
+            case _ -> false;
+        };
+    case CodeType.NullableType(inner) ->
+        match (right) {
+            case CodeType.NullableType(other) -> typeEq(inner, other);
+            case _ -> false;
+        };
+    case CodeType.FunctionType(parameters, result) ->
+        match (right) {
+            case CodeType.FunctionType(otherParameters, otherResult) ->
+                typeArrayEq(parameters, otherParameters) and typeEq(result, otherResult);
+            case _ -> false;
+        };
+};
 
-    public constructor new;
-
-    public root(): CodeNode = rootValue;
-    public captureCount(): Int = captureValues.length;
-    public capture(index: Int): CodeCapture = captureValues[index];
+fn typeArrayEq(left: Array<CodeType>, right: Array<CodeType>): Boolean {
+    if (left.length != right.length) return false;
+    let mut index = 0;
+    while (index < left.length) {
+        if (not typeEq(left[index], right[index])) return false;
+        index += 1;
+    }
+    return true;
 }
+
+fn typeHash(codeType: CodeType): Int = match (codeType) {
+    case CodeType.NominalType(name, arguments) ->
+        hashValue(name) * 31 + typeArrayHash(arguments);
+    case CodeType.NullableType(inner) -> typeHash(inner) * 31 + 1;
+    case CodeType.FunctionType(parameters, result) ->
+        typeArrayHash(parameters) * 31 + typeHash(result) * 7 + 2;
+};
+
+fn typeArrayHash(values: Array<CodeType>): Int {
+    let mut hash = 1;
+    for (let value in values) hash = hash * 31 + typeHash(value);
+    return hash;
+}
+
+fn hashValue<T: Hashable<T>>(value: T): Int = value.hash();

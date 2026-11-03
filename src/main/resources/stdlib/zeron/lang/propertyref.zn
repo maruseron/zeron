@@ -1,5 +1,23 @@
 package zeron.lang;
 
+/// Identifies a property declaration.
+///
+/// The identity belongs to the declaring symbol: a contract property and a class property with the
+/// same name are different identities, even when the class conforms to the contract. Type arguments
+/// are not part of the identity. The compiler creates every instance, so source programs cannot
+/// fabricate an identity; opening construction to libraries is left to a future proposal.
+public class PropertyId deriving Eq, Hashable {
+    /// The qualified name of the declaring type.
+    public property owner: String;
+    /// The property's source name.
+    public property name: String;
+
+    private constructor new;
+
+    /// Returns the identity text, `owner#name`, the same text as `PropertyRef.identity`.
+    public text(): String = this.owner + "#" + this.name;
+}
+
 /// A statically resolved reference to a property of a nominal type.
 ///
 /// References are written `Type::property`. The compiler creates every instance, so the value
@@ -7,8 +25,8 @@ package zeron.lang;
 /// implicitly to its reader function `T -> V`; that conversion loses the property identity.
 ///
 /// Two references are equal (`==`) when they denote the same declaration, which makes a reference
-/// usable as a key. `get` reads the property from an owner value, and `name` and `identity` describe
-/// the declaration.
+/// usable as a key. `get` reads the property from an owner value, and `name`, `identity`, and `id`
+/// describe the declaration.
 public class PropertyRef<T: nullable + mut, V: nullable + mut> is Eq<PropertyRef<T, V>> {
     private property reader: (T) -> V;
     /// The property's source name, without its owner type.
@@ -16,6 +34,8 @@ public class PropertyRef<T: nullable + mut, V: nullable + mut> is Eq<PropertyRef
     /// The property's stable identity, formed from the declaring type's qualified name, `#`, and
     /// the property name; two references are equal when their identities are equal.
     public property identity: String;
+    /// The property declaration this reference denotes. `id.text()` equals `identity`.
+    public property id: PropertyId;
 
     private constructor new;
 

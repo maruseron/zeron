@@ -1715,7 +1715,8 @@ final class MemberInteropResolver {
         return argument instanceof Expr.Lambda
                 || LambdaResolver.isFunctionReferenceCandidate(context, argument)
                 || argument instanceof Expr.PropertyReference
-                && LambdaResolver.functionType(context, parameterType) != null;
+                && (LambdaResolver.functionType(context, parameterType) != null
+                    || codeModelArgument(parameterType) != null);
     }
 
     /// Infers a call's type parameters from a property reference used as a function argument. The
@@ -1726,8 +1727,32 @@ final class MemberInteropResolver {
                                                final TypeDescriptor actual,
                                                final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                                                final Token where) {
+        final var formalCodeModel = codeModelArgument(formal);
+        if (formalCodeModel != null) {
+            final var actualCodeModel = codeModelArgument(actual);
+            if (actualCodeModel == null) return;
+            if (formalCodeModel instanceof TypeParameterDescriptor typeParameter) {
+                if (!substitutions.containsKey(typeParameter)) {
+                    TypeUnifier.unify(typeParameter, actualCodeModel, substitutions, where);
+                }
+                return;
+            }
+            if (formalCodeModel instanceof FunctionDescriptor formalFunction
+                    && actualCodeModel instanceof FunctionDescriptor actualFunction) {
+                unifyFunctionParameterTypes(formalFunction, actualFunction, substitutions, where);
+            }
+            return;
+        }
         if (!(formal instanceof FunctionDescriptor formalFunction)
                 || !(actual instanceof FunctionDescriptor actualFunction)) return;
+        unifyFunctionParameterTypes(formalFunction, actualFunction, substitutions, where);
+    }
+
+    private static void unifyFunctionParameterTypes(
+            final FunctionDescriptor formalFunction,
+            final FunctionDescriptor actualFunction,
+            final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+            final Token where) {
         for (int index = 0; index < formalFunction.arity() && index < actualFunction.arity(); index++) {
             final var parameter = formalFunction.parameters().get(index);
             if (parameter instanceof TypeParameterDescriptor typeParameter
@@ -1797,7 +1822,9 @@ final class MemberInteropResolver {
                     memberParameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             final var expected = TypeSubstitution.substitute(
                     memberParameterType(genericType.parameters(), i, fixedArity, variadic), substitutions);
-            if (LambdaResolver.functionType(context, expected) == null) {
+            if (LambdaResolver.functionType(context, expected) == null
+                    && !(argument instanceof Expr.PropertyReference
+                        && codeModelArgument(expected) != null)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                         call.name,
                         "A function value argument requires a function parameter type."));
@@ -2841,6 +2868,9 @@ final class MemberInteropResolver {
     static TypeDescriptor resolveArgument(final ResolutionContext context, final Expr argument,
                                            final TypeDescriptor expectedType) {
         if (argument instanceof Expr.PropertyReference reference) {
+            if (codeModelArgument(expectedType) != null) {
+                return PropertyReferenceResolver.resolveCodeModel(context, reference, expectedType);
+            }
             return PropertyReferenceResolver.resolve(context, reference, expectedType);
         }
         final var wrappedCodeModel = codeModelFunctionType(expectedType);
@@ -2906,13 +2936,16 @@ final class MemberInteropResolver {
         return unwrapped instanceof Expr.Lambda lambda ? lambda : null;
     }
 
-    private static FunctionDescriptor codeModelFunctionType(final TypeDescriptor type) {
+    static TypeDescriptor codeModelArgument(final TypeDescriptor type) {
         final var unwrapped = type instanceof ReferenceDescriptor reference ? reference.baseType() : type;
         if (!(unwrapped instanceof GenericDescriptor generic)
                 || !generic.baseType().name().equals("zeron.compiler.CodeModel")) return null;
-        return generic.typeParameters().size() == 1
-                && generic.typeParameters().getFirst() instanceof FunctionDescriptor function
-                ? function : null;
+        return generic.typeParameters().size() == 1 ? generic.typeParameters().getFirst() : null;
+    }
+
+    static FunctionDescriptor codeModelFunctionType(final TypeDescriptor type) {
+        final var argument = codeModelArgument(type);
+        return argument instanceof FunctionDescriptor function ? function : null;
     }
 
     static Stmt.Field findField(final ResolutionContext context, final String className, final Token name) {

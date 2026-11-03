@@ -443,6 +443,8 @@ final class NominalTypeEmitter {
                                     classEvidenceSlots));
                     if (className.equals(SyntheticNames.PROPERTY_REF_TYPE)) {
                         emitPropertyReferenceFactory(builder, declaration, classDesc, constructorType);
+                    } else if (className.equals(SyntheticNames.PROPERTY_ID_TYPE)) {
+                        emitPropertyIdFactory(builder, classDesc, constructorType);
                     }
                     if (!classEvidenceSlots.isEmpty()) {
                         builder.withMethodBody("<init>", constructorType, constructorFlags,
@@ -619,7 +621,9 @@ final class NominalTypeEmitter {
                 .map(property -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(property.type())))
                 .orElse(ConstantDescs.CD_Object);
         builder.withMethodBody(SyntheticNames.PROPERTY_REF_FACTORY,
-                MethodTypeDesc.of(classDesc, readerType, ConstantDescs.CD_String, ConstantDescs.CD_String),
+                MethodTypeDesc.of(classDesc, readerType, ConstantDescs.CD_String,
+                        ConstantDescs.CD_String,
+                        ClassDesc.of(SyntheticNames.PROPERTY_ID_TYPE)),
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 code -> {
                     code.new_(classDesc);
@@ -627,6 +631,24 @@ final class NominalTypeEmitter {
                     code.aload(0);
                     code.aload(1);
                     code.aload(2);
+                    code.aload(3);
+                    code.invokespecial(classDesc, "<init>", constructorType);
+                    code.areturn();
+                });
+    }
+
+    /// Emits the compiler-only factory that constructs a `PropertyId`.
+    private static void emitPropertyIdFactory(final ClassBuilder builder,
+                                              final ClassDesc classDesc,
+                                              final MethodTypeDesc constructorType) {
+        builder.withMethodBody(SyntheticNames.PROPERTY_ID_FACTORY,
+                MethodTypeDesc.of(classDesc, ConstantDescs.CD_String, ConstantDescs.CD_String),
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                code -> {
+                    code.new_(classDesc);
+                    code.dup();
+                    code.aload(0);
+                    code.aload(1);
                     code.invokespecial(classDesc, "<init>", constructorType);
                     code.areturn();
                 });

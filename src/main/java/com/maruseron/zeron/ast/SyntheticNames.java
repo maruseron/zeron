@@ -13,6 +13,10 @@ public final class SyntheticNames {
     /// The compiler-only factory that constructs property references. `$` is not a legal
     /// character in a Zeron identifier, so source code cannot call this member.
     public static final String PROPERTY_REF_FACTORY = "$zeron$propertyRef";
+    /// The standard-library property-identity type.
+    public static final String PROPERTY_ID_TYPE = "zeron.lang.PropertyId";
+    /// The compiler-only factory that constructs property identities.
+    public static final String PROPERTY_ID_FACTORY = "$zeron$propertyId";
 
     private SyntheticNames() {}
 

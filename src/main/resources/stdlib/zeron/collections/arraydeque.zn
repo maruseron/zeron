@@ -1,0 +1,214 @@
+package zeron.collections;
+
+import zeron.control.Foldable;
+import zeron.internal.unwrapSome;
+
+class ArrayDequeIterator<T: mut> is Iterator<T> {
+    values: ArrayDeque<T>;
+    position: Int;
+
+    private constructor new;
+
+    public constructor from(values: ArrayDeque<T>) = ArrayDequeIterator<T>.new(values, 0);
+
+    public mut next(): Step<T> {
+        if (this.position >= this.values.size) return Step<T>.Done();
+        let value = this.values.at(this.position);
+        this.position = this.position + 1;
+        return Step.Yield(unwrapSome(value));
+    }
+}
+
+/// A growable, index-addressable sequence backed by a circular array.
+///
+/// An `ArrayDeque` keeps a head index into a contiguous backing array. Adding or removing at either
+/// end is amortized constant time, and indexed reads are constant time. Removing from the middle is
+/// not part of the deque contract and is not offered.
+public class ArrayDeque<T: mut>
+    is Iterable<T>,
+       Sized<T>,
+       List<T>,
+       Sequenced<T>,
+       Deque<T>,
+       Sink<T>,
+       RandomAccess<T>,
+       Clearable,
+       Reversible<ArrayDeque<_>>,
+       InPlaceReversible<ArrayDeque<_>>,
+       Foldable<ArrayDeque<_>>,
+       Collector<ArrayDeque<_>> {
+    values: &Array<T>;
+    head: Int;
+    elementCount: Int;
+
+    private constructor new;
+
+    /// Creates an empty deque.
+    public constructor empty() = ArrayDeque<T>.new(allocateArray<T>(4), 0, 0);
+
+    /// Creates a deque holding each argument, in order.
+    public constructor of(elements: T...) = ArrayDeque<T>.fromArray(elements);
+
+    /// Creates a deque holding a copy of every element of `source`.
+    public constructor fromArray(source: Array<T>) {
+        let mut capacity = 4;
+        while (capacity < source.length) capacity = capacity * 2;
+        let values = allocateArray<T>(capacity);
+        let mut index = 0;
+        while (index < source.length) {
+            values[index] = source[index];
+            index = index + 1;
+        }
+        return ArrayDeque<T>.new(values, 0, source.length);
+    }
+
+    private indexAt(offset: Int): Int = (this.head + offset) % this.values.length;
+
+    private mut ensureCapacity(required: Int): Unit {
+        if (required > values.length) {
+            let mut capacity = values.length * 2;
+            if (capacity < required) capacity = required;
+            let expanded = allocateArray<T>(capacity);
+            let mut index = 0;
+            while (index < elementCount) {
+                expanded[index] = values[this.indexAt(index)];
+                index = index + 1;
+            }
+            this.values = expanded;
+            this.head = 0;
+        }
+    }
+
+    /// The number of elements in the deque.
+    public property size: Int {
+        get = elementCount;
+    }
+
+    /// Whether the deque has no elements.
+    public isEmpty(): Boolean = elementCount == 0;
+
+    /// The number of elements, in constant time.
+    public count(): Int = this.size;
+
+    /// Returns the element at `index`, or `None` when the index is out of range.
+    public at(index: Int): Option<T> =
+        if (index >= 0 and index < elementCount)
+            then Option.Some(values[this.indexAt(index)])
+            else Option.None<T>();
+
+    /// Returns the first element, or `None` when the deque is empty.
+    public first(): Option<T> = at(0);
+
+    /// Returns the last element, or `None` when the deque is empty.
+    public last(): Option<T> = at(elementCount - 1);
+
+    /// Appends `value` and returns `true`; a deque always accepts another element.
+    public mut add(value: T): Boolean {
+        this.addLast(value);
+        return true;
+    }
+
+    /// Adds `value` at the initial end of the deque.
+    public mut addFirst(value: T): Unit {
+        this.ensureCapacity(elementCount + 1);
+        let mut position = this.head - 1;
+        if (position < 0) position = position + this.values.length;
+        this.values[position] = value;
+        this.head = position;
+        this.elementCount = elementCount + 1;
+    }
+
+    /// Adds `value` at the final end of the deque.
+    public mut addLast(value: T): Unit {
+        this.ensureCapacity(elementCount + 1);
+        this.values[this.indexAt(elementCount)] = value;
+        this.elementCount = elementCount + 1;
+    }
+
+    /// Removes and returns the first element, or `None` when the deque is empty.
+    public mut removeFirst(): Option<T> {
+        if (elementCount == 0) return Option.None<T>();
+        let value = this.values[this.head];
+        clearArraySlot<T>(this.values, this.head);
+        let mut next = this.head + 1;
+        if (next >= this.values.length) next = 0;
+        this.head = next;
+        this.elementCount = elementCount - 1;
+        return Option.Some(value);
+    }
+
+    /// Removes and returns the last element, or `None` when the deque is empty.
+    public mut removeLast(): Option<T> {
+        if (elementCount == 0) return Option.None<T>();
+        let index = this.indexAt(elementCount - 1);
+        let value = this.values[index];
+        clearArraySlot<T>(this.values, index);
+        this.elementCount = elementCount - 1;
+        return Option.Some(value);
+    }
+
+    /// Removes every element.
+    public mut clear(): Unit {
+        let mut index = 0;
+        while (index < elementCount) {
+            clearArraySlot<T>(this.values, this.indexAt(index));
+            index = index + 1;
+        }
+        this.head = 0;
+        this.elementCount = 0;
+    }
+
+    /// Combines the elements from left to right into a single value.
+    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+        let mut result = initial;
+        let mut index = 0;
+        while (index < elementCount) {
+            result = combine(result, values[this.indexAt(index)]);
+            index = index + 1;
+        }
+        return result;
+    }
+
+    private mut swapOffsets(left: Int, right: Int): Unit {
+        let leftIndex = this.indexAt(left);
+        let rightIndex = this.indexAt(right);
+        let tmp = this.values[leftIndex];
+        this.values[leftIndex] = this.values[rightIndex];
+        this.values[rightIndex] = tmp;
+    }
+
+    implementation InPlaceReversible<ArrayDeque<_>> {
+        fn reverse<A>(this: &ArrayDeque<A>): &ArrayDeque<A> {
+            let mut left = 0;
+            let mut right = this.elementCount - 1;
+            while (left < right) {
+                this.swapOffsets(left, right);
+                left = left + 1;
+                right = right - 1;
+            }
+            return this;
+        }
+    }
+
+    implementation Reversible<ArrayDeque<_>> {
+        fn reversed<A>(this: ArrayDeque<A>): ArrayDeque<A> {
+            let mut result = ArrayDeque.empty<A>();
+            let mut index = this.elementCount - 1;
+            while (index >= 0) {
+                result.addLast(this.values[this.indexAt(index)]);
+                index = index - 1;
+            }
+            return result;
+        }
+    }
+
+    delegating implementation Foldable<ArrayDeque<_>> {
+    }
+
+    delegating implementation Collector<ArrayDeque<_>> {
+        fn empty<A: mut>(): &ArrayDeque<A> = ArrayDeque<A>.empty();
+    }
+
+    /// Returns an iterator over the elements, from first to last.
+    public iterator(): &Iterator<T> = ArrayDequeIterator<T>.from(this);
+}

@@ -104,4 +104,4 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0091](./ZEP-0091.md) | Annotation Consumption | Draft | Unscheduled | — |
 | [ZEP-0092](./ZEP-0092.md) | Generated Serialization Operations | Draft | Unscheduled | — |
 | [ZEP-0093](./ZEP-0093.md) | Unified Property Identity and a Typed Code-Model API | Implemented | Unscheduled | — |
-| [ZEP-0094](./ZEP-0094.md) | Collection Contracts | Accepted | Unscheduled | — |
+| [ZEP-0094](./ZEP-0094.md) | Collection Contracts | Implemented | Unscheduled | — |

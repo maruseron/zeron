@@ -411,6 +411,7 @@ public final class PublicMemberCatalog {
         final var extensions = new ArrayList<ExtensionSpec>();
         for (final var exported : library.declarations()) {
             switch (exported) {
+                case ZeronLibraryIndex.ModelExport _ -> { }
                 case ZeronLibraryIndex.ClassExport declaration -> {
                     final var members = new ArrayList<MemberSpec>();
                     if (declaration.canonicalConstructorPublic()) {

@@ -129,6 +129,19 @@ public final class ZeronLibraryIndexDump {
                     System.out.println("  JVM owner: " + value.jvmOwner());
                     System.out.println("  Initialization owner: " + value.initializationOwner());
                 }
+                case ZeronLibraryIndex.ModelExport model -> {
+                    System.out.println("model " + model.qualifiedName() + " is "
+                            + model.contract().qualifiedName() + " for "
+                            + formatType(model.targetType()));
+                    System.out.println("  Implementation: " + model.implementationClassName());
+                    for (final var field : model.fields()) {
+                        System.out.println("  " + field.propertyId() + " -> " + field.externalName());
+                    }
+                    for (final var assignment : model.assignments()) {
+                        System.out.println("  " + assignment.propertyName() + " = "
+                                + formatType(assignment.type()));
+                    }
+                }
                 case ZeronLibraryIndex.ExternalClassExport externalClass -> {
                     System.out.println("external class " + externalClass.qualifiedName()
                             + " = " + externalClass.javaBinaryName());

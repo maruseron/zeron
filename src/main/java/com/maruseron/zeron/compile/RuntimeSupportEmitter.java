@@ -242,17 +242,43 @@ final class RuntimeSupportEmitter {
             for (final var slot : ContractComposition.methods(context.resolution.contracts(), iterableUse)) {
                 final var substituted = (FunctionDescriptor) TypeSubstitution.substitute(
                         slot.method().typeDescriptor(), slot.applied().substitutions());
-                if (!slot.method().name().lexeme().equals("forEach")
-                        || substituted.parameters().size() != 1
-                        || !(substituted.parameters().getFirst() instanceof FunctionDescriptor callback)) {
-                    continue;
+                final var callbacks = new LinkedHashSet<FunctionDescriptor>();
+                for (final var parameter : substituted.parameters()) {
+                    collectFunctionTypes(parameter, callbacks);
                 }
-                final var erasedCallback = (FunctionDescriptor) TypeSubstitution.erase(callback);
-                final var key = FunctionShapeKey.of(erasedCallback);
-                if (context.lambdaPlan.functionShapes().containsKey(key)) continue;
-                context.registerGeneratedInterface(FunctionShapeNames.interfaceName(key));
-                emitFunctionShape(context.outputDirectory, key, erasedCallback);
+                collectFunctionTypes(substituted.returnType(), callbacks);
+                for (final var callback : callbacks) {
+                    final var erasedCallback = (FunctionDescriptor) TypeSubstitution.erase(callback);
+                    final var key = FunctionShapeKey.of(erasedCallback);
+                    if (context.lambdaPlan.functionShapes().containsKey(key)) continue;
+                    context.registerGeneratedInterface(FunctionShapeNames.interfaceName(key));
+                    emitFunctionShape(context.outputDirectory, key, erasedCallback);
+                }
             }
+        }
+    }
+
+    private static void collectFunctionTypes(final TypeDescriptor type,
+                                             final Set<FunctionDescriptor> target) {
+        switch (type) {
+            case FunctionDescriptor function -> {
+                target.add(function);
+                if (function.receiverType() != null) collectFunctionTypes(function.receiverType(), target);
+                for (final var parameter : function.parameters()) collectFunctionTypes(parameter, target);
+                collectFunctionTypes(function.returnType(), target);
+            }
+            case com.maruseron.zeron.domain.ArrayDescriptor array ->
+                    collectFunctionTypes(array.elementType(), target);
+            case com.maruseron.zeron.domain.NullableDescriptor nullable ->
+                    collectFunctionTypes(nullable.baseType(), target);
+            case com.maruseron.zeron.domain.ReferenceDescriptor reference ->
+                    collectFunctionTypes(reference.baseType(), target);
+            case com.maruseron.zeron.domain.GenericDescriptor generic -> {
+                for (final var parameter : generic.typeParameters()) {
+                    collectFunctionTypes(parameter, target);
+                }
+            }
+            default -> {}
         }
     }
 

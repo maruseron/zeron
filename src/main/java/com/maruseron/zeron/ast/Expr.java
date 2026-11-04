@@ -374,6 +374,27 @@ public sealed interface Expr {
         public void markConverted() { converted = true; }
     }
 
+    /// The identity of a property declaration, without building a `PropertyRef`.
+    ///
+    /// A reference also carries a reader function, which only source-level references need.
+    /// Compiler-generated descriptors identify mapped properties by identity alone, so they emit
+    /// the id directly; this expression is not writable in source.
+    final class PropertyIdReference implements Expr {
+        public final String owner;
+        public final Token propertyName;
+        private TypeDescriptor type;
+
+        public PropertyIdReference(final String owner, final Token propertyName,
+                                   final TypeDescriptor type) {
+            this.owner = owner;
+            this.propertyName = propertyName;
+            this.type = type;
+        }
+
+        @Override public TypeDescriptor getType() { return type; }
+        @Override public void setType(final TypeDescriptor type) { this.type = type; }
+    }
+
     final class PropertyCompoundAssignment implements Expr {
         public final Property property;
         public final Token operator;
@@ -905,6 +926,61 @@ public sealed interface Expr {
             this.type = type;
             implementation.setType(type);
         }
+    }
+
+    /// A `model Name is Contract<...> { ... }` declaration.
+    ///
+    /// A model declaration binds its name to a single value, so it is a `Stmt.Var` whose
+    /// initializer is this descriptor, in the same way a named handler declaration binds a
+    /// handler. Resolution synthesizes the singleton class implementing the parent contract and
+    /// holding the mappings; the clauses stay here so diagnostics point at the declaration.
+    final class ModelLiteral implements Expr {
+        public final Token keyword;
+        public final Token name;
+        public final Stmt.ContractUse contract;
+        public final List<Mapping> mappings;
+        public final List<Assignment> assignments;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+        private TypeDescriptor targetType = TypeDescriptor.ofInfer();
+        private List<ResolvedMapping> resolvedMappings = List.of();
+        private String generatedClassName;
+        private Stmt.ClassDecl declaration;
+        private boolean declarationResolved;
+
+        public ModelLiteral(final Token keyword, final Token name, final Stmt.ContractUse contract,
+                            final List<Mapping> mappings, final List<Assignment> assignments) {
+            this.keyword = keyword;
+            this.name = name;
+            this.contract = contract;
+            this.mappings = List.copyOf(mappings);
+            this.assignments = List.copyOf(assignments);
+        }
+
+        /// Maps a property of the target type to its name in the external representation.
+        public record Mapping(Token property, Token externalName) {}
+
+        /// Assigns a constant to a property of the model's parent contract.
+        public record Assignment(Token property, Expr value) {}
+
+        /// A mapping after resolution: the property's stable identity and its external name.
+        public record ResolvedMapping(String propertyId, String externalName) {}
+
+        public TypeDescriptor targetType() { return targetType; }
+        public void setTargetType(final TypeDescriptor value) { targetType = value; }
+        public List<ResolvedMapping> resolvedMappings() { return resolvedMappings; }
+        public void setResolvedMappings(final List<ResolvedMapping> value) {
+            resolvedMappings = List.copyOf(value);
+        }
+
+        public String generatedClassName() { return generatedClassName; }
+        public void setGeneratedClassName(final String className) { generatedClassName = className; }
+        public Stmt.ClassDecl declaration() { return declaration; }
+        public void setDeclaration(final Stmt.ClassDecl value) { declaration = value; }
+        public boolean declarationResolved() { return declarationResolved; }
+        public void markDeclarationResolved() { declarationResolved = true; }
+
+        @Override public TypeDescriptor getType() { return type; }
+        @Override public void setType(final TypeDescriptor type) { this.type = type; }
     }
 
     final class Call implements Expr {

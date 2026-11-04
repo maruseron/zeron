@@ -229,11 +229,11 @@ final class CallResolver {
                             parameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
             if (!hasExplicitTypeArguments) {
-                TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
+                TypeUnifier.unifyForInference(parameterType(genericType.parameters(), i, fixedArity, variadic),
                         context.typeCompatibility.inferenceView(
                                 parameterType(genericType.parameters(), i, fixedArity, variadic),
                                 resolvedArguments[i]),
-                        substitutions, call.callee, rowInference);
+                        substitutions, call.callee, rowInference, context.typeCompatibility);
             }
         }
 
@@ -256,13 +256,18 @@ final class CallResolver {
                 if (argument instanceof Expr.PropertyReference) {
                     MemberInteropResolver.unifyPropertyReferenceArgument(
                             parameterType(genericType.parameters(), i, fixedArity, variadic),
-                            resolvedArguments[i], substitutions, call.callee);
+                            resolvedArguments[i], substitutions, call.callee, context.typeCompatibility);
                 } else {
-                    TypeUnifier.unify(parameterType(genericType.parameters(), i, fixedArity, variadic),
+                    // A lambda or function reference has no final shape until the expected
+                    // parameter type is known. Bind-only inference contributes type arguments and
+                    // effect-row bounds without comparing concrete positions; the assignability
+                    // check below owns variance, so a broadly accepting callback such as
+                    // `(Any?) -> Unit` is still accepted where `(Int) -> Unit` is expected.
+                    TypeUnifier.unifyForInference(parameterType(genericType.parameters(), i, fixedArity, variadic),
                             context.typeCompatibility.inferenceView(
                                     parameterType(genericType.parameters(), i, fixedArity, variadic),
                                     resolvedArguments[i]),
-                            substitutions, call.callee, rowInference);
+                            substitutions, call.callee, rowInference, context.typeCompatibility);
                 }
             }
         }

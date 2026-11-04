@@ -104,10 +104,10 @@ public final class ReplTest {
         final var originalErr = System.err;
         try {
             System.setIn(new ByteArrayInputStream(
-                    ("import zeron.collections.List;\n"
-                            + "for i in [1, 2, 3, 4, 5] collect i * 2 into List<Int>.empty();\n"
+                    ("import zeron.collections.ArrayList;\n"
+                            + "for i in [1, 2, 3, 4, 5] collect i * 2 into ArrayList<Int>.empty();\n"
                             + "let mapped = for i in [1, 2, 3, 4, 5] "
-                            + "collect i * 2 into List<Int>.empty();\nmapped.size\n:quit\n")
+                            + "collect i * 2 into ArrayList<Int>.empty();\nmapped.size\n:quit\n")
                             .getBytes(StandardCharsets.UTF_8)));
             System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(error, true, StandardCharsets.UTF_8));
@@ -122,7 +122,7 @@ public final class ReplTest {
         }
         final var transcript = output.toString(StandardCharsets.UTF_8)
                 + error.toString(StandardCharsets.UTF_8);
-        assertTrue(transcript, transcript.contains("zeron.collections.List@"));
+        assertTrue(transcript, transcript.contains("zeron.collections.ArrayList@"));
         assertTrue(transcript, output.toString(StandardCharsets.UTF_8).contains("5"));
     }
 

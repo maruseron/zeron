@@ -1,0 +1,219 @@
+package zeron.collections;
+
+import zeron.control.Foldable;
+import zeron.internal.unwrapSome;
+
+// These private self-calls are compiler intrinsics lowered to direct array operations.
+fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
+
+fn clearArraySlot<T: nullable + mut>(values: &Array<T>, index: Int): Unit =
+    clearArraySlot<T>(values, index);
+
+class ArrayListIterator<T: mut> is Iterator<T> {
+    values: ArrayList<T>;
+    position: Int;
+
+    private constructor new;
+
+    public constructor from(values: ArrayList<T>) = ArrayListIterator<T>.new(values, 0);
+
+    public mut next(): Step<T> {
+        if (this.position >= this.values.size) return Step<T>.Done();
+        let value = this.values.at(this.position);
+        this.position = this.position + 1;
+        return Step.Yield(unwrapSome(value));
+    }
+}
+
+/// A growable, index-addressable sequence of values.
+///
+/// An `ArrayList` keeps its elements in a contiguous backing array that grows as needed, so reads
+/// by index are constant time and adding at the end is amortized constant time. Removing or
+/// inserting in the middle shifts the following elements.
+public class ArrayList<T: mut>
+    is Iterable<T>,
+       Sized<T>,
+       List<T>,
+       Sink<T>,
+       RandomAccess<T>,
+       Sequenced<T>,
+       PositionalEditor<T>,
+       Clearable,
+       Reversible<ArrayList<_>>,
+       InPlaceReversible<ArrayList<_>>,
+       Foldable<ArrayList<_>>,
+       Collector<ArrayList<_>> {
+    values: &Array<T>;
+    elementCount: Int;
+
+    private constructor new;
+
+    /// Creates a list holding each argument, in order.
+    public constructor of(elements: T...) = ArrayList<T>.fromArray(elements);
+
+    /// Creates an empty list.
+    public constructor empty() = ArrayList<T>.new(allocateArray<T>(4), 0);
+
+    /// Creates a list holding a copy of every element of `source`.
+    public constructor fromArray(source: Array<T>) {
+        let result = ArrayList<T>.empty();
+        let mut index = 0;
+        while (index < source.length) {
+            result.add(source[index]);
+            index = index + 1;
+        }
+        return result;
+    }
+
+    private mut ensureCapacity(required: Int): Unit {
+        if (required > values.length) {
+            let mut capacity = values.length * 2;
+            if (capacity < required) capacity = required;
+            let mut expanded = allocateArray<T>(capacity);
+            let mut index = 0;
+            while (index < elementCount) {
+                expanded[index] = values[index];
+                index = index + 1;
+            }
+            this.values = expanded;
+        }
+    }
+
+    private checkIndex(index: Int): Boolean = index >= 0 and index < elementCount;
+
+    /// The number of elements in the list.
+    public property size: Int {
+        get = elementCount;
+    }
+
+    /// Whether the list has no elements.
+    public isEmpty(): Boolean = elementCount == 0;
+
+    /// The number of elements, in constant time.
+    public count(): Int = this.size;
+
+    /// Returns the element at `index`, or `None` when the index is out of range.
+    public at(index: Int): Option<T> =
+        if (checkIndex(index)) then Option.Some(values[index]) else Option.None<T>();
+
+    /// Returns the first element, or `None` when the list is empty.
+    public first(): Option<T> = at(0);
+
+    /// Returns the last element, or `None` when the list is empty.
+    public last(): Option<T> = at(elementCount - 1);
+
+    /// Replaces the element at `index`, returning the previous element or `None` when the index
+    /// is out of range.
+    public mut replaceAt(index: Int, value: T): Option<T> {
+        if (checkIndex(index)) {
+            let previous = at(index);
+            this.values[index] = value;
+            return previous;
+        }
+        return Option.None<T>();
+    }
+
+    /// Appends `value` and returns `true`; a list always accepts another element.
+    public mut add(value: T): Boolean {
+        this.ensureCapacity(elementCount + 1);
+        this.values[elementCount] = value;
+        this.elementCount = elementCount + 1;
+        return true;
+    }
+
+    /// Inserts `value` before the element currently at `index`, shifting later elements right.
+    ///
+    /// Returns `false`, and changes nothing, when `index` is negative or greater than `size`.
+    public mut insert(index: Int, value: T): Boolean {
+        if (index < 0 or index > elementCount) return false;
+        this.ensureCapacity(elementCount + 1);
+        let mut cursor = elementCount;
+        while (cursor > index) {
+            this.values[cursor] = values[cursor - 1];
+            cursor = cursor - 1;
+        }
+        this.values[index] = value;
+        this.elementCount = elementCount + 1;
+        return true;
+    }
+
+    /// Removes the element at `index`, shifting later elements left, and returns it.
+    ///
+    /// Returns `None` when the index is out of range.
+    public mut removeAt(index: Int): Option<T> {
+        if (checkIndex(index)) {
+            let removed = at(index);
+            let mut cursor = index;
+            while (cursor + 1 < elementCount) {
+                this.values[cursor] = values[cursor + 1];
+                cursor = cursor + 1;
+            }
+            this.elementCount = elementCount - 1;
+            clearArraySlot<T>(values, elementCount);
+            return removed;
+        }
+        return Option.None();
+    }
+
+    /// Removes every element.
+    public mut clear(): Unit {
+        let mut index = 0;
+        while (index < elementCount) {
+            clearArraySlot<T>(values, index);
+            index = index + 1;
+        }
+        this.elementCount = 0;
+    }
+
+    /// Combines the elements from left to right into a single value.
+    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+        let mut result = initial;
+        let mut index = 0;
+        while (index < elementCount) {
+            result = combine(result, values[index]);
+            index = index + 1;
+        }
+        return result;
+    }
+
+    private mut swapAt(left: Int, right: Int): Unit {
+        let tmp = this.values[left];
+        this.values[left] = this.values[right];
+        this.values[right] = tmp;
+    }
+
+    implementation InPlaceReversible<ArrayList<_>> {
+        fn reverse<A>(this: &ArrayList<A>): &ArrayList<A> {
+            let mut left = 0;
+            let mut right = this.elementCount - 1;
+            while (left < right) {
+                this.swapAt(left, right);
+                left += 1;
+                right -= 1;
+            }
+            return this;
+        }
+    }
+
+    implementation Reversible<ArrayList<_>> {
+        fn reversed<A>(this: ArrayList<A>): ArrayList<A> {
+            let mut result = ArrayList.empty<A>();
+            let mut index = this.elementCount - 1;
+            while (index >= 0) {
+                result.add(this.values[index]);
+                index -= 1;
+            }
+            return result;
+        }
+    }
+
+    delegating implementation Foldable<ArrayList<_>> {
+    }
+
+    delegating implementation Collector<ArrayList<_>> {
+        fn empty<A: mut>(): &ArrayList<A> = ArrayList<A>.empty();
+    }
+
+    /// Returns an iterator over the elements, in index order.
+    public iterator(): &Iterator<T> = ArrayListIterator<T>.from(this);
+}

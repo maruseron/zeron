@@ -29,7 +29,7 @@ function in one submission and call it in the next:
 Use `let mut` for a binding that you intend to reassign. Imports entered at the prompt are also
 persistent; to use a library type, import it before the expression that refers to it. Redeclaring
 an existing binding is rejected so a later submission cannot silently change what a name means.
-For example, after importing `zeron.collections.List`, you can create a list in one submission,
+For example, after importing `zeron.collections.ArrayList`, you can create a list in one submission,
 then inspect its `size` or call one of its read operations in another. Use a collected
 for-expression when you want to build a list from an iterable.
 
@@ -41,7 +41,7 @@ apply.
 
 The prompt provides `:help` for commands and `:quit` to leave. It evaluates Zeron expressions; it
 is not a JavaScript-style shell, and names still need to be imported if they are not in scope. For
-example, to use the standard-library `List`, first enter `import zeron.collections.List;`.
+example, to use the standard-library `ArrayList`, first enter `import zeron.collections.ArrayList;`.
 Collected for-expressions can then use that type as a collector, as shown in
 [subject 16](16-for-expressions.md).
 

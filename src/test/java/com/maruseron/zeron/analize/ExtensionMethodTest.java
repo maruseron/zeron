@@ -24,14 +24,14 @@ public final class ExtensionMethodTest {
             final var app = unit("""
                     package app;
                     import zeron.collections.*;
-                    extension List<Int> {
+                    extension ArrayList<Int> {
                         fn sum(): Int = this.stream().fold(0, (acc, item) -> acc + item);
                     }
-                    extension List<String> {
+                    extension ArrayList<String> {
                         fn sum(): String = this.stream().fold("", (acc, item) -> acc + item);
                     }
-                    fn integerSum(): Int = List<Int>.of(1, 2, 3).sum();
-                    fn stringSum(): String = List<String>.of("a", "b", "c").sum();
+                    fn integerSum(): Int = ArrayList<Int>.of(1, 2, 3).sum();
+                    fn stringSum(): String = ArrayList<String>.of("a", "b", "c").sum();
                     """, "Main.zn");
             final var compiler = CompilationService.forCompilationUnits(
                     List.of(app), "app.Main", "app", List.of(), true, List.of(), output);
@@ -52,10 +52,10 @@ public final class ExtensionMethodTest {
     public void rejectsDuplicateExtensionForSameReceiverAndName() {
         final var extensions = unit("""
                 package app;
-                extension List<Int> {
+                extension ArrayList<Int> {
                     fn sum(): Int = 1;
                 }
-                extension List<Int> {
+                extension ArrayList<Int> {
                     fn sum(): Int = 2;
                 }
                 """, "Extensions.zn");
@@ -70,11 +70,11 @@ public final class ExtensionMethodTest {
     public void rejectsExtensionsThatCollideAfterJvmErasure() {
         final var extensions = unit("""
                 package app;
-                import zeron.collections.List;
-                extension List<Int> {
+                import zeron.collections.ArrayList;
+                extension ArrayList<Int> {
                     fn label(): String = "integer";
                 }
-                extension List<String> {
+                extension ArrayList<String> {
                     fn label(): String = "string";
                 }
                 """, "Extensions.zn");
@@ -86,11 +86,11 @@ public final class ExtensionMethodTest {
 
         final var defaultArgumentExtensions = unit("""
                 package app;
-                import zeron.collections.List;
-                extension List<Int> {
+                import zeron.collections.ArrayList;
+                extension ArrayList<Int> {
                     fn format(value: Int = 0): String = "integer";
                 }
-                extension List<String> {
+                extension ArrayList<String> {
                     fn format(value: String = ""): String = "string";
                 }
                 """, "DefaultExtensions.zn");
@@ -107,10 +107,10 @@ public final class ExtensionMethodTest {
             final var app = unit("""
                     package app;
                     import zeron.collections.*;
-                    extension List<Int> {
+                    extension ArrayList<Int> {
                         fn sum(): Int = this.stream().fold(0, (acc, item) -> acc + item);
                     }
-                    fn result(): Int = List<Int>.of(1, 2, 3).sum();
+                    fn result(): Int = ArrayList<Int>.of(1, 2, 3).sum();
                     """, "Main.zn");
             final var compiler = CompilationService.forCompilationUnits(
                     List.of(app), "app.Main", "app", List.of(), true, List.of(), output);
@@ -133,7 +133,7 @@ public final class ExtensionMethodTest {
                     package app;
                     import zeron.collections.*;
                     fn main() {
-                        List.of(1, 2, 3).forEach(println);
+                        ArrayList.of(1, 2, 3).forEach(println);
                     }
                     """, "Main.zn");
             final var compiler = CompilationService.forCompilationUnits(

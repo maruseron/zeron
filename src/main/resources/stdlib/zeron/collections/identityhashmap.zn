@@ -1,0 +1,90 @@
+package zeron.collections;
+
+import java.lang.System;
+
+import zeron.lang.Option;
+import zeron.lang.Pair;
+
+fn identityHash(value: Any?): Int = System.identityHashCode(value);
+
+fn sameReference(left: Any?, right: Any?): Boolean = left === right;
+
+/// A hash table that compares keys by reference identity.
+///
+/// `IdentityHashMap` uses `System.identityHashCode` and `===`, so two distinct objects are distinct
+/// keys even when they are structurally equal. `K` is unconstrained, so values without `Eq` or
+/// `Hashable` can be keys. Identity is meaningful for reference values; boxed primitives are
+/// distinct objects unless the same instance is reused.
+public class IdentityHashMap<K, V: mut>
+    is Iterable<Pair<K, V>>,
+       Sized<Pair<K, V>>,
+       KeyedSink<K, V>,
+       Clearable,
+       Map<K, V> {
+    table: &HashTable<K, V>;
+
+    private constructor new;
+
+    /// Creates an empty map using reference identity for keys.
+    public constructor empty() =
+        IdentityHashMap<K, V>.new(
+            HashTable<K, V>.withOperations(
+                (key) -> identityHash(key),
+                (left, right) -> sameReference(left, right)
+            )
+        );
+
+    /// Creates a map holding each entry; a later duplicate key replaces the earlier value.
+    public constructor of(entries: &Pair<K, V>...) {
+        let mut result = IdentityHashMap.empty<K, V>();
+        for (let entry in entries) result.put(entry.fst, entry.snd);
+        return result;
+    }
+
+    /// The number of entries in the map.
+    public property size: Int {
+        get = table.size;
+    }
+
+    /// Whether the map has no entries.
+    public isEmpty(): Boolean = table.isEmpty();
+
+    /// The number of entries, in constant time.
+    public count(): Int = this.size;
+
+    /// Whether the map holds an entry for `key`, compared by reference identity.
+    public containsKey(key: K): Boolean = table.containsKey(key);
+
+    /// Returns the value stored for `key`, or `None` when the key is absent.
+    public get(key: K): Option<V> = table.get(key);
+
+    /// Stores `value` for `key`, returning the value it replaced or `None` for a new key.
+    public mut put(key: K, value: V): Option<V> = table.put(key, value);
+
+    /// Stores `value` only when `key` is absent, returning the previously stored value, if any.
+    public mut putIfAbsent(key: K, value: V): Option<V> = table.putIfAbsent(key, value);
+
+    /// Recomputes the entry for `key` from its current value.
+    public mut compute<E: effect...>(
+        key: K,
+        transform: (K, Option<V>) -> Option<V> raises E
+    ): Option<V> raises E = table.compute(key, transform);
+
+    /// Returns the value stored for `key`, computing and storing `transform(key)` when absent.
+    public mut computeIfAbsent<E: effect...>(
+        key: K,
+        transform: (K) -> V raises E
+    ): V raises E = table.computeIfAbsent(key, transform);
+
+    /// Removes the entry for `key`, returning the value it held or `None` when the key is absent.
+    public mut remove(key: K): Option<V> = table.remove(key);
+
+    /// Removes every entry.
+    public mut clear(): Unit = table.clear();
+
+    /// Returns an iterator over the entries as key-value pairs, in unspecified order.
+    public iterator(): &Iterator<Pair<K, V>> = table.iterator();
+
+    /// Returns an iterator over the keys, in unspecified order.
+    public keyIterator(): &Iterator<K> = table.keyIterator();
+}

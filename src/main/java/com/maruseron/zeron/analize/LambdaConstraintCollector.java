@@ -286,6 +286,9 @@ final class LambdaConstraintCollector {
             case Expr.SuffixedLiteral literal -> scan(literal.factoryCall());
             case Expr.Lambda _, Expr.Variable _, Expr.Literal _ -> {}
             case Expr.PropertyReference reference -> scan(reference.reader());
+            case Expr.ModelLiteral literal ->
+                literal.assignments.forEach(assignment -> scan(assignment.value()));
+            case Expr.PropertyIdReference _ -> {}
         }
     }
 

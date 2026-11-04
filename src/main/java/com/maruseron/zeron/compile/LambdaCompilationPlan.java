@@ -16,7 +16,9 @@ final class LambdaCompilationPlan {
                              FunctionDescriptor targetType, String helperName,
                              List<Expr.EvidenceArgument> evidenceArguments) {}
 
-    private record FunctionAdapterKey(FunctionDescriptor source, FunctionDescriptor target) {}
+    private record FunctionAdapterKey(String sourceInterface, String targetInterface) {}
+    private record FunctionAdapterDefinition(FunctionDescriptor source, FunctionDescriptor target,
+                                             String name) {}
     private record FunctionReferenceKey(String functionName, Stmt.FunctionDeclaration declaration,
                                         FunctionDescriptor targetType) {}
     private record LambdaMemberKey(String owner, String member) {}
@@ -31,8 +33,8 @@ final class LambdaCompilationPlan {
     private final Map<Expr.Lambda, String> lambdaTemplateFactoryNames = new IdentityHashMap<>();
     private final Map<Expr.Lambda, List<Token>> lambdaCaptures = new IdentityHashMap<>();
     private final Map<Expr.Lambda, List<TypeDescriptor>> lambdaCaptureTypes = new IdentityHashMap<>();
-    private final Map<FunctionAdapterKey, String> functionAdapterNames = new LinkedHashMap<>();
-    private final Map<FunctionAdapterKey, String> nullableFunctionAdapterNames = new LinkedHashMap<>();
+    private final Map<FunctionAdapterKey, FunctionAdapterDefinition> functionAdapters = new LinkedHashMap<>();
+    private final Map<FunctionAdapterKey, FunctionAdapterDefinition> nullableFunctionAdapters = new LinkedHashMap<>();
     private final Map<FunctionReferenceKey, FunctionReference> functionReferences = new LinkedHashMap<>();
     private final Map<Expr.Variable, FunctionReference> referencesByExpression = new IdentityHashMap<>();
     private final Set<LambdaMemberKey> lambdaFieldReads = new HashSet<>();
@@ -100,24 +102,25 @@ final class LambdaCompilationPlan {
     }
 
     List<FunctionAdapter> adapters() {
-        return functionAdapterNames.entrySet().stream()
-                .map(entry -> new FunctionAdapter(entry.getKey().source(), entry.getKey().target(), entry.getValue()))
+        return functionAdapters.values().stream()
+                .map(adapter -> new FunctionAdapter(adapter.source(), adapter.target(), adapter.name()))
                 .toList();
     }
 
     List<NullableFunctionAdapter> nullableAdapters() {
-    return nullableFunctionAdapterNames.entrySet().stream()
-        .map(entry -> new NullableFunctionAdapter(
-            entry.getKey().source(), entry.getKey().target(), entry.getValue()))
+    return nullableFunctionAdapters.values().stream()
+        .map(adapter -> new NullableFunctionAdapter(adapter.source(), adapter.target(), adapter.name()))
         .toList();
     }
 
     String adapterName(final FunctionDescriptor source, final FunctionDescriptor target) {
-        return functionAdapterNames.get(new FunctionAdapterKey(source, target));
+        final var adapter = functionAdapters.get(adapterKey(source, target));
+        return adapter == null ? null : adapter.name();
     }
 
     String nullableAdapterName(final FunctionDescriptor source, final FunctionDescriptor target) {
-        return nullableFunctionAdapterNames.get(new FunctionAdapterKey(source, target));
+        final var adapter = nullableFunctionAdapters.get(adapterKey(source, target));
+        return adapter == null ? null : adapter.name();
     }
 
     List<FunctionReference> functionReferences() {
@@ -1105,9 +1108,9 @@ final class LambdaCompilationPlan {
         if (isNullableFunctionView(sourceType) && isNullableFunctionView(targetType)) {
             final var erasedSource = (FunctionDescriptor) TypeSubstitution.erase(source);
             final var erasedTarget = (FunctionDescriptor) TypeSubstitution.erase(target);
-            nullableFunctionAdapterNames.computeIfAbsent(
-                    new FunctionAdapterKey(erasedSource, erasedTarget),
-                    _ -> "$nullableAdapter$" + nullableFunctionAdapterNames.size());
+            nullableFunctionAdapters.computeIfAbsent(adapterKey(erasedSource, erasedTarget),
+                    _ -> new FunctionAdapterDefinition(erasedSource, erasedTarget,
+                            "$nullableAdapter$" + nullableFunctionAdapters.size()));
         }
 
         if (target.receiverType() != null) {
@@ -1144,9 +1147,17 @@ final class LambdaCompilationPlan {
         if (TypeDescriptor.toJavaClassDesc(erasedSource).equals(TypeDescriptor.toJavaClassDesc(erasedTarget))) {
             return false;
         }
-        functionAdapterNames.computeIfAbsent(new FunctionAdapterKey(erasedSource, erasedTarget),
-                _ -> "$adapter$" + functionAdapterNames.size());
+        functionAdapters.computeIfAbsent(adapterKey(erasedSource, erasedTarget),
+                _ -> new FunctionAdapterDefinition(erasedSource, erasedTarget,
+                        "$adapter$" + functionAdapters.size()));
         return true;
+    }
+
+    private static FunctionAdapterKey adapterKey(final FunctionDescriptor source,
+                                                 final FunctionDescriptor target) {
+        return new FunctionAdapterKey(
+                TypeDescriptor.toJavaClassDesc(source).descriptorString(),
+                TypeDescriptor.toJavaClassDesc(target).descriptorString());
     }
 
     private Bind lookupCapture(final Token name) {

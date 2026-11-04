@@ -166,7 +166,7 @@ public final class StandardLibraryTest {
         final var source = """
                 import zeron.collections.*;
 
-                type List<T> = Nil | Cons(head: T, tail: List<T>);
+                type ArrayList<T> = Nil | Cons(head: T, tail: ArrayList<T>);
 
                 fn stringify<T: Display>(value: T): String = value.toString();
                 fn main() {}
@@ -276,21 +276,21 @@ public final class StandardLibraryTest {
     public void matchClassHierarchyIncludesBundledTypesAlongsideLambdaShapes() throws Exception {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-match-hierarchy-");
         final var source = parse("Main.zn", """
-                import zeron.collections.List;
+                import zeron.collections.ArrayList;
                 import zeron.lang.Option;
-                import List.map;
+                import ArrayList.map;
                 namespace List {
-                    public fn sort<T>(list: &List<T>): Unit = ();
+                    public fn sort<T>(list: &ArrayList<T>): Unit = ();
                 }
-                public extension<T> List<T> {
-                    public fn map<U>(f: (T) -> U): &List<U> {
-                        let result = List<U>.empty();
+                public extension<T> ArrayList<T> {
+                    public fn map<U>(f: (T) -> U): &ArrayList<U> {
+                        let result = ArrayList<U>.empty();
                         for (let value in this) result.add(f(value));
                         return result;
                     }
                 }
                 fn result(): Int {
-                    let values = List<Int>.of(1, 2);
+                    let values = ArrayList<Int>.of(1, 2);
                     let mapped = values.map(value -> value + 1);
                     List.sort(mapped);
                     let option: Option<Int> = Option.Some(5);
@@ -319,7 +319,7 @@ public final class StandardLibraryTest {
     public void genericClassFactoryCallsInferArgumentsFromValuesAndContext() throws Exception {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-class-inference-");
         final var source = parse("Main.zn", """
-                import zeron.collections.List;
+                import zeron.collections.ArrayList;
                 class Cell<T> {
                     public property value: T;
                     public constructor new;
@@ -331,16 +331,16 @@ public final class StandardLibraryTest {
                     public constructor create(make: () -> T) = Generated<T>.new(make());
                 }
                 fn inferredFromValues(): Int {
-                    let values = List.of(1, 2, 3);
+                    let values = ArrayList.of(1, 2, 3);
                     return values.size;
                 }
                 fn inferredFromAnnotation(): Int {
-                    let values: List<Int> = List.empty();
+                    let values: ArrayList<Int> = ArrayList.empty();
                     return values.size;
                 }
-                fn returnsInferredList(): List<Int> = List.empty();
-                fn acceptsList(values: List<Int>): Int = values.size;
-                fn inferredFromArgument(): Int = acceptsList(List.empty());
+                fn returnsInferredList(): ArrayList<Int> = ArrayList.empty();
+                fn acceptsList(values: ArrayList<Int>): Int = values.size;
+                fn inferredFromArgument(): Int = acceptsList(ArrayList.empty());
                 fn inferredCanonicalConstructor(): Int = Cell.new(7).value;
                 fn inferredNamedConstructor(): Int = Cell.from(9).value;
                 fn inferredFromLambdaResult(): Int = Generated.create(() -> 13).value;
@@ -371,32 +371,32 @@ public final class StandardLibraryTest {
     @Test
     public void genericClassFactoryInferenceRejectsMissingAndConflictingEvidence() {
         final var noEvidence = parse("Main.zn", """
-                import zeron.collections.List;
-                fn result() = List.empty();
+                import zeron.collections.ArrayList;
+                fn result() = ArrayList.empty();
                 """);
         final var noEvidenceCompiler = CompilationService.forCompilationUnits(
                 List.of(noEvidence), "ClassInferenceMissing", "");
         assertThrows(ResolutionError.class, noEvidenceCompiler::resolve);
 
         final var conflicting = parse("Main.zn", """
-                import zeron.collections.List;
-                fn result() = List.of(1, "text");
+                import zeron.collections.ArrayList;
+                fn result() = ArrayList.of(1, "text");
                 """);
         final var conflictingCompiler = CompilationService.forCompilationUnits(
                 List.of(conflicting), "ClassInferenceConflict", "");
         assertThrows(ResolutionError.class, conflictingCompiler::resolve);
 
         final var incompatibleExpectedType = parse("ExpectedType.zn", """
-                import zeron.collections.List;
-                fn result(): List<String> = List.of(1);
+                import zeron.collections.ArrayList;
+                fn result(): ArrayList<String> = ArrayList.of(1);
                 """);
         final var incompatibleExpectedTypeCompiler = CompilationService.forCompilationUnits(
                 List.of(incompatibleExpectedType), "ClassInferenceExpectedConflict", "");
         assertThrows(ResolutionError.class, incompatibleExpectedTypeCompiler::resolve);
 
         final var incompatibleExplicitType = parse("ExplicitType.zn", """
-                import zeron.collections.List;
-                fn result() = List<String>.of(1);
+                import zeron.collections.ArrayList;
+                fn result() = ArrayList<String>.of(1);
                 """);
         final var incompatibleExplicitTypeCompiler = CompilationService.forCompilationUnits(
                 List.of(incompatibleExplicitType), "ClassInferenceExplicitConflict", "");
@@ -611,7 +611,7 @@ public final class StandardLibraryTest {
         final var source = Files.createTempFile(Path.of("target"), "Variadic" + suffix, ".zn");
         Files.writeString(source, """
                 package %s;
-                import zeron.collections.List;
+                import zeron.collections.ArrayList;
                 fn tally(prefix: Int, values: Int...): Int = prefix + values.length;
                 fn count<T>(values: T...): Int = values.length;
                 fn arrayCount(values: Int...): Int = values.length;
@@ -639,8 +639,8 @@ public final class StandardLibraryTest {
                     let operation: (Array<Int>) -> Int = arrayCount;
                     return operation([1, 2, 3]);
                 }
-                fn listEmpty(): Int = List<Int>.of().size;
-                fn listMany(): Int = List<Int>.of(1, 2, 3).size;
+                fn listEmpty(): Int = ArrayList<Int>.of().size;
+                fn listMany(): Int = ArrayList<Int>.of(1, 2, 3).size;
                 """.formatted(packageName));
 
         try {
@@ -1138,7 +1138,7 @@ public final class StandardLibraryTest {
         final var className = packageName + ".CollectionHktTest" + suffix;
         final var source = parse("CollectionHktTest.zn", """
                 package %s;
-                import zeron.collections.List;
+                import zeron.collections.ArrayList;
                 import zeron.collections.Stream;
                 import zeron.control.Foldable;
                 import zeron.control.Functor;
@@ -1211,10 +1211,10 @@ public final class StandardLibraryTest {
                 fn resultErrorFold(): Int =
                     foldAll<Result<_, String>>(Result.err<Int, String>("bad"));
 
-                fn listFold(): Int = List<Int>.of(1, 2, 3).foldLeft(0,
+                fn listFold(): Int = ArrayList<Int>.of(1, 2, 3).foldLeft(0,
                     (total, value) -> total + value);
                 fn listGenericFold(): Int =
-                    foldAll<List<_>>(List<Int>.of(1, 2, 3));
+                    foldAll<ArrayList<_>>(ArrayList<Int>.of(1, 2, 3));
                 fn arrayFold(): Int {
                     let values: &Array<Int> = [4, 5, 6];
                     return values.foldLeft(0, (total, value) -> total + value);
@@ -1779,7 +1779,7 @@ public final class StandardLibraryTest {
         final var className = packageName + ".ForExpressionTest" + suffix;
         final var source = parse("ForExpressionTest.zn", """
                 package %s;
-                import zeron.collections.List;
+                import zeron.collections.ArrayList;
                 import zeron.collections.Stream;
                 import zeron.collections.Step;
                 class Calls {
@@ -1803,46 +1803,46 @@ public final class StandardLibraryTest {
                 fn collectedArrayPipeline(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
                     return values.size * 100 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1);
                 }
                 fn collectedArrayPipelineSize(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
 
                     return values.size;
                 }
                 fn collectedArrayPipelineFirst(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
 
                     return values.at(0).getOrElse(-1);
                 }
                 fn collectedArrayPipelineSecond(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
 
                     return values.at(1).getOrElse(-1);
                 }
                 fn collectedArrayPipelineReversed(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
                     return values.at(1).getOrElse(-1)
                         + values.at(0).getOrElse(-1) * 100;
                 }
                 fn collectedFirstElementTimes100(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
                     return values.at(0).getOrElse(-1) * 100;
                 }
                 fn collectedArrayWithoutFilter(): Int {
                     let values = for item in [1, 2, 3, 4]
-                        collect item into List<Int>.empty();
+                        collect item into ArrayList<Int>.empty();
                     return values.size * 1000
                         + values.at(0).getOrElse(-1) * 100
                         + values.at(1).getOrElse(-1) * 10
@@ -1851,27 +1851,27 @@ public final class StandardLibraryTest {
                 fn collectedArrayWithFilter(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
-                        collect item into List<Int>.empty();
+                        collect item into ArrayList<Int>.empty();
                     return values.size * 100 + values.at(0).getOrElse(-1) * 10
                         + values.at(1).getOrElse(-1);
                 }
                 fn collectedArrayWithMap(): Int {
                     let values = for item in [1, 2, 3, 4]
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
                     return values.size * 100 + values.at(0).getOrElse(-1) * 10
                         + values.at(1).getOrElse(-1);
                 }
                 fn collectedArrayFilterThenMap(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item %% 2 == 0
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
                     return values.size * 100 + values.at(0).getOrElse(-1) * 10
                         + values.at(1).getOrElse(-1);
                 }
                 fn collectedArrayPipelineAlternativeFilter(): Int {
                     let values = for item in [1, 2, 3, 4]
                         if item == 2 or item == 4
-                        collect item * 3 into List<Int>.empty();
+                        collect item * 3 into ArrayList<Int>.empty();
                     return values.size * 100 + values.at(0).getOrElse(-1) * 10
                         + values.at(1).getOrElse(-1);
                 }
@@ -1901,29 +1901,29 @@ public final class StandardLibraryTest {
                     return stream.fold(0, (acc, item) -> acc * 100 + item);
                 }
                 fn directListAccess(): Int {
-                    let values = List<Int>.of(6, 12);
+                    let values = ArrayList<Int>.of(6, 12);
                     return values.size * 100
                         + values.at(0).getOrElse(-1)
                         + values.at(1).getOrElse(-1);
                 }
                 fn collectedIterablePipeline(): Int {
                     let values = for item in Stream<Int>.fromArray([2, 5])
-                        collect item + 1 into List<Int>.empty();
+                        collect item + 1 into ArrayList<Int>.empty();
                     return values.at(0).getOrElse(-1) * 10 + values.at(1).getOrElse(-1);
                 }
                 fn collectedCapturePipeline(factor: Int): Int {
                     let values = for item in [1, 2, 3]
                         let scaled = item * factor
                         if scaled > factor
-                        for expanded in List<Int>.of(scaled, scaled + factor)
-                        collect expanded into List<Int>.empty();
+                        for expanded in ArrayList<Int>.of(scaled, scaled + factor)
+                        collect expanded into ArrayList<Int>.empty();
                     return values.size * 100 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1)
                         + values.at(2).getOrElse(-1) + values.at(3).getOrElse(-1);
                 }
                 fn lazyFlatMapPipeline(): Int {
                     let calls = Calls.new(0);
                     let values = for item in [1, 2, 3]
-                        for output in List<Int>.of(calls.record(item), calls.record(item + 10))
+                        for output in ArrayList<Int>.of(calls.record(item), calls.record(item + 10))
                         yield output;
                     let before = calls.read();
                     let sum = values.fold(0, (total, item) -> total + item);
@@ -1931,16 +1931,16 @@ public final class StandardLibraryTest {
                 }
                 fn collectedFlatMapPipeline(): Int {
                     let values = for item in [1, 2, 3]
-                        for output in List<Int>.of(item, item + 1)
+                        for output in ArrayList<Int>.of(item, item + 1)
                         if output %% 2 == 0
-                        collect output into List<Int>.empty();
+                        collect output into ArrayList<Int>.empty();
                     return values.size * 100 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1) + values.at(2).getOrElse(-1);
                 }
                 fn nestedFlatMapPipeline(): Int {
                     let values = for outer in [1, 2]
-                        for middle in List<Int>.of(outer, outer + 1)
-                        for inner in List<Int>.of(middle * 10, middle * 100)
-                        collect inner into List<Int>.empty();
+                        for middle in ArrayList<Int>.of(outer, outer + 1)
+                        for inner in ArrayList<Int>.of(middle * 10, middle * 100)
+                        collect inner into ArrayList<Int>.empty();
                     return values.size * 1000 + values.at(0).getOrElse(-1) + values.at(1).getOrElse(-1) + values.at(7).getOrElse(-1);
                 }
                 fn lazyLimitAndWhilePipeline(): Int {
@@ -1959,7 +1959,7 @@ public final class StandardLibraryTest {
                 }
                 fn collectedLimitsAfterFlatMap(): Int {
                     let values = (for item in [1, 2, 3]
-                        for output in List<Int>.of(item, item * 10)
+                        for output in ArrayList<Int>.of(item, item * 10)
                         yield output).drop(2).take(3).toList();
                     return values.size * 1000 + values.at(0).getOrElse(-1) * 100 + values.at(1).getOrElse(-1) * 10 + values.at(2).getOrElse(-1);
                 }
@@ -2039,8 +2039,8 @@ public final class StandardLibraryTest {
         final var packageName = "immutableForSink" + suffix;
         final var source = parse("Main.zn", """
                 package %s;
-                import zeron.collections.List;
-                fn collect(sink: List<Int>): List<Int> =
+                import zeron.collections.ArrayList;
+                fn collect(sink: ArrayList<Int>): ArrayList<Int> =
                     for item in [1, 2] collect item into sink;
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(
@@ -2210,9 +2210,9 @@ public final class StandardLibraryTest {
         final var className = packageName + ".ListTest" + suffix;
         final var source = parse("ListTest.zn", """
                 package %s;
-                import zeron.collections.List;
+                import zeron.collections.ArrayList;
                 fn result(): Int {
-                    let mut values: &List<Int> = List<Int>.empty();
+                    let mut values: &ArrayList<Int> = ArrayList<Int>.empty();
                     values.add(2);
                     values.add(4);
                     values.add(6);
@@ -2221,14 +2221,14 @@ public final class StandardLibraryTest {
                     values.insert(1, 3);
                     let replaced = values.replaceAt(2, 5);
                     let removed = values.removeAt(4);
-                    let readonly: List<Int> = values;
+                    let readonly: ArrayList<Int> = values;
                     let mut total = 0;
                     for (let value in readonly) total += value;
                     return total + replaced.getOrElse(-1) + removed.getOrElse(-1) + readonly.size;
                 }
-                fn empty(): Boolean = List<Int>.empty().isEmpty();
+                fn empty(): Boolean = ArrayList<Int>.empty().isEmpty();
                 fn copied(): Int {
-                    let mut values: &List<Int> = List<Int>.fromArray([7, 8, 9]);
+                    let mut values: &ArrayList<Int> = ArrayList<Int>.fromArray([7, 8, 9]);
                     values.add(10);
                     values.clear();
                     values.add(11);
@@ -2260,8 +2260,8 @@ public final class StandardLibraryTest {
         final var packageName = "readonlyList" + suffix;
         final var source = parse("ReadOnlyList.zn", """
                 package %s;
-                import zeron.collections.List;
-                fn invalid(values: List<Int>): Unit {
+                import zeron.collections.ArrayList;
+                fn invalid(values: ArrayList<Int>): Unit {
                     values.add(1);
                 }
                 """.formatted(packageName));

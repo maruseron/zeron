@@ -1,0 +1,303 @@
+package zeron.collections;
+
+import zeron.internal.generateArray;
+import zeron.internal.unwrapSome;
+import zeron.lang.Option;
+import zeron.lang.Pair;
+
+class HashTableEntry<K, V: mut> {
+    keyValue: K;
+    cachedHash: Int;
+    storedValue: V;
+    nextEntry: HashTableEntry<K, V>?;
+
+    private constructor new;
+
+    public constructor of(key: K, value: V, hash: Int, next: HashTableEntry<K, V>?) =
+        HashTableEntry<K, V>.new(key, hash, value, next);
+
+    public key(): K = this.keyValue;
+
+    public hash(): Int = this.cachedHash;
+
+    public value(): V = this.storedValue;
+
+    public next(): HashTableEntry<K, V>? = this.nextEntry;
+}
+
+class HashTableIterator<K, V: mut> is Iterator<Pair<K, V>> {
+    buckets: &Array<HashTableEntry<K, V>?>;
+    bucketIndex: Int;
+    current: HashTableEntry<K, V>?;
+
+    private constructor new;
+
+    public constructor from(buckets: &Array<HashTableEntry<K, V>?>) =
+        HashTableIterator<K, V>.new(buckets, 0, null);
+
+    public mut next(): Step<Pair<K, V>> {
+        while (this.current is null) {
+            if (this.bucketIndex >= this.buckets.length) return Step<Pair<K, V>>.Done();
+            let entry = this.buckets[this.bucketIndex];
+            this.bucketIndex = this.bucketIndex + 1;
+            if (entry is null) {
+                this.current = null;
+            } else {
+                this.current = entry;
+            }
+        }
+        let entry = this.current;
+        if (entry is null) return Step<Pair<K, V>>.Done();
+        this.current = entry.next();
+        return Step.Yield(Pair<K, V>.new(entry.key(), entry.value()));
+    }
+}
+
+class HashTableKeyIterator<K, V: mut> is Iterator<K> {
+    buckets: &Array<HashTableEntry<K, V>?>;
+    bucketIndex: Int;
+    current: HashTableEntry<K, V>?;
+
+    private constructor new;
+
+    public constructor from(buckets: &Array<HashTableEntry<K, V>?>) =
+        HashTableKeyIterator<K, V>.new(buckets, 0, null);
+
+    public mut next(): Step<K> {
+        while (this.current is null) {
+            if (this.bucketIndex >= this.buckets.length) return Step<K>.Done();
+            let entry = this.buckets[this.bucketIndex];
+            this.bucketIndex = this.bucketIndex + 1;
+            if (entry is null) {
+                this.current = null;
+            } else {
+                this.current = entry;
+            }
+        }
+        let entry = this.current;
+        if (entry is null) return Step<K>.Done();
+        this.current = entry.next();
+        return Step.Yield(entry.key());
+    }
+}
+
+/// A chained hash table parameterized by a hash and an equality operation.
+///
+/// `HashTable` owns the bucket structure shared by `HashMap` and `IdentityHashMap`. The two
+/// functions must agree: keys that `equalityFunction` considers equal must produce the same hash
+/// from `hashFunction`.
+class HashTable<K, V: mut> {
+    buckets: &Array<HashTableEntry<K, V>?>;
+    elementCount: Int;
+    hashFunction: (K) -> Int;
+    equalityFunction: (K, K) -> Boolean;
+
+    private constructor new;
+
+    public constructor withOperations(
+        hashFunction: (K) -> Int,
+        equalityFunction: (K, K) -> Boolean
+    ) =
+        HashTable<K, V>.new(
+            generateArray<HashTableEntry<K, V>?>(8, (_) -> null),
+            0,
+            hashFunction,
+            equalityFunction
+        );
+
+    private bucketIndex(hash: Int, capacity: Int): Int {
+        let mut index = hash % capacity;
+        if (index < 0) index = index + capacity;
+        return index;
+    }
+
+    private findEntry(key: K, hash: Int): HashTableEntry<K, V>? {
+        let equalityFunction = this.equalityFunction;
+        let mut entry = this.buckets[this.bucketIndex(hash, this.buckets.length)];
+        until (entry is null) {
+            if (entry.hash() == hash and equalityFunction(entry.key(), key)) return entry;
+            entry = entry.next();
+        }
+        return null;
+    }
+
+    private mut replaceEntry(index: Int, key: K, value: V, hash: Int): Option<V> {
+        let equalityFunction = this.equalityFunction;
+        let mut prefix: HashTableEntry<K, V>? = null;
+        let mut entry = this.buckets[index];
+        until (entry is null) {
+            if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
+                let previousValue = entry.value();
+                let mut rebuilt =
+                    HashTableEntry<K, V>.of(entry.key(), value, hash, entry.next());
+                until (prefix is null) {
+                    let previous = prefix;
+                    rebuilt =
+                        HashTableEntry<K, V>.of(
+                            previous.key(),
+                            previous.value(),
+                            previous.hash(),
+                            rebuilt
+                        );
+                    prefix = previous.next();
+                }
+                this.buckets[index] = rebuilt;
+                return Option.Some(previousValue);
+            }
+            prefix =
+                HashTableEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), prefix);
+            entry = entry.next();
+        }
+        return Option<V>.None();
+    }
+
+    private mut removeEntry(index: Int, key: K, hash: Int): Option<V> {
+        let equalityFunction = this.equalityFunction;
+        let mut prefix: HashTableEntry<K, V>? = null;
+        let mut entry = this.buckets[index];
+        until (entry is null) {
+            if (entry.hash() == hash and equalityFunction(entry.key(), key)) {
+                let removedValue = entry.value();
+                let mut rebuilt = entry.next();
+                until (prefix is null) {
+                    let previous = prefix;
+                    rebuilt =
+                        HashTableEntry<K, V>.of(
+                            previous.key(),
+                            previous.value(),
+                            previous.hash(),
+                            rebuilt
+                        );
+                    prefix = previous.next();
+                }
+                this.buckets[index] = rebuilt;
+                return Option.Some(removedValue);
+            }
+            prefix =
+                HashTableEntry<K, V>.of(entry.key(), entry.value(), entry.hash(), prefix);
+            entry = entry.next();
+        }
+        return Option<V>.None();
+    }
+
+    private mut resize(): Unit {
+        let capacity = this.buckets.length * 2;
+        let expanded = generateArray<HashTableEntry<K, V>?>(capacity, (_) -> null);
+        let mut bucket = 0;
+        while (bucket < this.buckets.length) {
+            let mut entry = this.buckets[bucket];
+            while (true) {
+                if (entry is null) break;
+                let next = entry.next();
+                let index = this.bucketIndex(entry.hash(), capacity);
+                expanded[index] =
+                    HashTableEntry<K, V>.of(
+                        entry.key(),
+                        entry.value(),
+                        entry.hash(),
+                        expanded[index]
+                    );
+                entry = next;
+            }
+            bucket = bucket + 1;
+        }
+        this.buckets = expanded;
+    }
+
+    public property size: Int {
+        get = this.elementCount;
+    }
+
+    public isEmpty(): Boolean = this.elementCount == 0;
+
+    public containsKey(key: K): Boolean {
+        let hashFunction = this.hashFunction;
+        return not (this.findEntry(key, hashFunction(key)) is null);
+    }
+
+    public get(key: K): Option<V> {
+        let hashFunction = this.hashFunction;
+        let entry = this.findEntry(key, hashFunction(key));
+        if (entry is null) return Option<V>.None();
+        return Option.Some(entry.value());
+    }
+
+    public mut put(key: K, value: V): Option<V> {
+        let hashFunction = this.hashFunction;
+        let hash = hashFunction(key);
+        let entry = this.findEntry(key, hash);
+        if (entry is not null) {
+            let index = this.bucketIndex(hash, this.buckets.length);
+            return this.replaceEntry(index, key, value, hash);
+        }
+        if (this.elementCount + 1 > this.buckets.length - this.buckets.length / 4) this.resize();
+        let index = this.bucketIndex(hash, this.buckets.length);
+        this.buckets[index] =
+            HashTableEntry<K, V>.of(key, value, hash, this.buckets[index]);
+        this.elementCount = this.elementCount + 1;
+        return Option<V>.None();
+    }
+
+    public mut putIfAbsent(key: K, value: V): Option<V> {
+        let mut val = get(key);
+        if (val matches Option.None()) {
+            val = put(key, value);
+        }
+        return val;
+    }
+
+    public mut compute<E: effect...>(
+        key: K,
+        transform: (K, Option<V>) -> Option<V> raises E
+    ): Option<V> raises E {
+        let val = get(key);
+        let new = transform(key, val);
+        if (new matches Option.None()) {
+            if (val.isSome()) {
+                remove(key);
+            }
+            return new;
+        }
+        put(key, new.value);
+        return new;
+    }
+
+    public mut computeIfAbsent<E: effect...>(
+        key: K,
+        transform: (K) -> V raises E
+    ): V raises E {
+        let val = get(key);
+        if (val matches Option.None()) {
+            let res = transform(key);
+            put(key, res);
+            return res;
+        }
+        return unwrapSome(val);
+    }
+
+    public mut remove(key: K): Option<V> {
+        let hashFunction = this.hashFunction;
+        let hash = hashFunction(key);
+        let index = this.bucketIndex(hash, this.buckets.length);
+        let existing = this.findEntry(key, hash);
+        if (existing === null) return Option<V>.None();
+        let removed = this.removeEntry(index, key, hash);
+        if (removed.isSome()) {
+            this.elementCount = this.elementCount - 1;
+        }
+        return removed;
+    }
+
+    public mut clear(): Unit {
+        let mut index = 0;
+        while (index < this.buckets.length) {
+            this.buckets[index] = null;
+            index = index + 1;
+        }
+        this.elementCount = 0;
+    }
+
+    public iterator(): &Iterator<Pair<K, V>> = HashTableIterator<K, V>.from(this.buckets);
+
+    public keyIterator(): &Iterator<K> = HashTableKeyIterator<K, V>.from(this.buckets);
+}

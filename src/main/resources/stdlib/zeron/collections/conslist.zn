@@ -1,0 +1,130 @@
+package zeron.collections;
+
+import zeron.control.Foldable;
+
+class ConsNode<T: mut> {
+    storedHead: T;
+    storedTail: ConsNode<T>?;
+
+    private constructor new;
+
+    public constructor of(head: T, tail: ConsNode<T>?) =
+        ConsNode<T>.new(head, tail);
+
+    public head(): T = this.storedHead;
+
+    public tail(): ConsNode<T>? = this.storedTail;
+}
+
+class ConsListIterator<T: mut> is Iterator<T> {
+    current: ConsNode<T>?;
+
+    private constructor new;
+
+    public constructor from(node: ConsNode<T>?) = ConsListIterator<T>.new(node);
+
+    public mut next(): Step<T> {
+        let node = this.current;
+        if (node is null) return Step<T>.Done();
+        this.current = node.tail();
+        return Step.Yield(node.head());
+    }
+}
+
+/// A persistent singly linked sequence of values.
+///
+/// A `ConsList` shares its tail between values, so `prepend` is constant time and never changes the
+/// receiver. The length is cached in each header, so `size` is constant time even though `last`
+/// walks the spine. A cons list is a `List` but does not declare any mutation capability.
+public class ConsList<T: mut>
+    is Iterable<T>,
+       Sized<T>,
+       List<T>,
+       Sequenced<T>,
+       Reversible<ConsList<_>>,
+       Foldable<ConsList<_>> {
+    node: ConsNode<T>?;
+    elementCount: Int;
+
+    private constructor new;
+
+    /// Creates an empty list.
+    public constructor empty() = ConsList<T>.new(null, 0);
+
+    /// Creates a list whose first element is `head` and whose remaining elements are `tail`'s.
+    public constructor cons(head: T, tail: ConsList<T>) =
+        ConsList<T>.new(ConsNode<T>.of(head, tail.node), tail.elementCount + 1);
+
+    /// Creates a list holding each argument, in order.
+    public constructor of(elements: T...) = ConsList<T>.fromArray(elements);
+
+    /// Creates a list holding a copy of every element of `source`, in order.
+    public constructor fromArray(source: Array<T>) {
+        let mut node: ConsNode<T>? = null;
+        let mut index = source.length - 1;
+        while (index >= 0) {
+            node = ConsNode<T>.of(source[index], node);
+            index = index - 1;
+        }
+        return ConsList<T>.new(node, source.length);
+    }
+
+    /// Returns a new list with `value` as its first element and this list as its tail.
+    public prepend(value: T): ConsList<T> = ConsList<T>.cons(value, this);
+
+    /// The number of elements in the list.
+    public property size: Int {
+        get = elementCount;
+    }
+
+    /// Whether the list has no elements.
+    public isEmpty(): Boolean = elementCount == 0;
+
+    /// The number of elements, in constant time.
+    public count(): Int = this.size;
+
+    /// Returns the first element, or `None` when the list is empty.
+    public first(): Option<T> {
+        let node = this.node;
+        if (node is null) return Option.None<T>();
+        return Option.Some(node.head());
+    }
+
+    /// Returns the last element, or `None` when the list is empty.
+    public last(): Option<T> {
+        let mut node = this.node;
+        let mut found = Option.None<T>();
+        while (node is not null) {
+            let current = node;
+            found = Option.Some(current.head());
+            node = current.tail();
+        }
+        return found;
+    }
+
+    /// Combines the elements from left to right into a single value.
+    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+        let mut result = initial;
+        let mut node = this.node;
+        while (node is not null) {
+            let current = node;
+            result = combine(result, current.head());
+            node = current.tail();
+        }
+        return result;
+    }
+
+    implementation Reversible<ConsList<_>> {
+        fn reversed<A>(this: ConsList<A>): ConsList<A> {
+            let mut node: ConsNode<A>? = null;
+            for (let value in this) node = ConsNode<A>.of(value, node);
+            return ConsList<A>.new(node, this.elementCount);
+        }
+    }
+
+    delegating implementation Foldable<ConsList<_>> {
+    }
+
+    /// Returns an iterator over the elements, from first to last.
+    public iterator(): &Iterator<T> = ConsListIterator<T>.from(this.node);
+}

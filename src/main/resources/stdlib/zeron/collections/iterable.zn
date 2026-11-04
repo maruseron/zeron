@@ -10,8 +10,49 @@ public contract Iterable<T: mut> {
     iterator(): &Iterator<T>;
 
     /// Applies `consumer` to every element, in order, and discards the results.
-    default forEach(consumer: (T) -> Unit): Unit {
+    ///
+    /// The callback runs during the call, so its effect row propagates to the caller.
+    default forEach<E: effect...>(consumer: (T) -> Unit raises E): Unit raises E {
         for (let element in this) consumer(element);
+    }
+
+    /// Combines the elements from left to right into a single value.
+    ///
+    /// The accumulator runs during the call, so its effect row propagates to the caller.
+    default fold<R: mut, E: effect...>(
+        initial: R,
+        accumulator: (R, T) -> R raises E
+    ): R raises E {
+        let mut result = initial;
+        for (let item in this) result = accumulator(result, item);
+        return result;
+    }
+
+    /// Whether any element is accepted by `predicate`, stopping at the first acceptance.
+    default any<E: effect...>(predicate: (T) -> Boolean raises E): Boolean raises E {
+        for (let item in this) if (predicate(item)) return true;
+        return false;
+    }
+
+    /// Whether every element is accepted by `predicate`, stopping at the first rejection.
+    ///
+    /// An empty sequence satisfies `all` for any predicate.
+    default all<E: effect...>(predicate: (T) -> Boolean raises E): Boolean raises E {
+        for (let item in this) if (not predicate(item)) return false;
+        return true;
+    }
+
+    /// Counts the elements by traversing the sequence.
+    default count(): Int {
+        let mut total = 0;
+        for (let item in this) total = total + 1;
+        return total;
+    }
+
+    /// Whether the sequence has no elements, stopping after the first one.
+    default isEmpty(): Boolean {
+        for (let item in this) return false;
+        return true;
     }
 
     /// Returns a stream over the same elements, in the same order.

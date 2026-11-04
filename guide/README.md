@@ -38,6 +38,7 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [Operator overloading](31-operator-overloading.md)
 1. [Custom numeric literal suffixes](32-custom-numeric-literal-suffixes.md)
 1. [Numeric hierarchy and exact literals](33-numeric-hierarchy-and-exact-literals.md)
+1. [Model declarations](34-model-declarations.md)
 1. [Raised effects](22-raised-effects.md)
 1. [Resource management](26-resource-management.md)
 
@@ -52,3 +53,7 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 
 1. [VS Code and the language server](28-vscode-and-language-server.md)
 1. [Formatting and diagnostics](29-formatting-and-diagnostics.md)
+
+## Addendum
+
+1. [Why unit?](35-why-unit.md)

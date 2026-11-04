@@ -1,6 +1,6 @@
 package zeron.function;
 
-import zeron.collections.Map;
+import zeron.collections.HashMap;
 
 /// The identity function.
 public fn identity<A: mut>(a: A): A = a;
@@ -72,7 +72,7 @@ public fn either<A: mut>(f: A -> Boolean, g: A -> Boolean): A -> Boolean =
 /// to store and reuse previously computed results for identical inputs.
 /// This operation requires the argument type `A` to satisfy the Hashable contract.
 public fn memoize<A: Hashable<A>, B: mut>(f: A -> B): A -> B {
-    let cache = Map.empty<A, B>();
+    let cache = HashMap.empty<A, B>();
     
     return a -> cache.computeIfAbsent(a, k -> f(k));
 }

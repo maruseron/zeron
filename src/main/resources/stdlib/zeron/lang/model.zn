@@ -1,0 +1,76 @@
+package zeron.lang;
+
+/// Describes how a nominal type maps to an external representation.
+///
+/// A `model` declaration creates the single implementation the compiler recognizes: it records the
+/// mapped properties, their external names, and the parent contract's properties. Nothing here
+/// knows the external format; a consumer supplies its own contract, for example one that adds a
+/// table name, and reads the descriptor through `Model`.
+///
+/// Mappings are read-only metadata. A model does not wrap the mapped type, add members to it, or
+/// change its representation, and it never constructs it.
+public contract Model<T: nullable + mut> {
+    /// The mapped fields, in the order the model declaration lists them.
+    property fields: Array<AnyField<T>>;
+
+    /// Returns the typed field mapped from `source`, or `None` when `source` is not mapped.
+    ///
+    /// The lookup uses property identity: a reference to a contract property does not find a
+    /// mapping of a class property with the same name, because they are different declarations.
+    default field<V: nullable + mut>(source: PropertyRef<T, V>): Option<Field<T, V>> {
+        for (let candidate in this.fields) {
+            if (candidate.sourceId == source.id) {
+                return Option<Field<T, V>>.Some(
+                        Field<T, V>.new(candidate.externalName, candidate.sourceId, source));
+            }
+        }
+        return Option<Field<T, V>>.None();
+    }
+
+    /// Returns the field whose source property has the identity `id`, or `None` when it is not
+    /// mapped.
+    ///
+    /// The result erases the property's value type, because an identity carries none. Use `field`
+    /// for typed access.
+    default fieldOf(id: PropertyId): Option<AnyField<T>> {
+        for (let candidate in this.fields) {
+            if (candidate.sourceId == id) return Option<AnyField<T>>.Some(candidate);
+        }
+        return Option<AnyField<T>>.None();
+    }
+}
+
+/// A mapped field with its property's value type erased.
+///
+/// `Model.fields` enumerates mappings through this class, so a consumer can read every external
+/// name without knowing the value types. A typed view of one mapping is a `Field`. Model
+/// declarations create every instance.
+public class AnyField<T: nullable + mut> {
+    /// The name this field has in the external representation.
+    public property externalName: String;
+
+    /// The identity of the mapped source property.
+    public property sourceId: PropertyId;
+
+    public constructor new;
+}
+
+/// A typed view of one mapped field.
+///
+/// `source` is the mapped property reference, so `get` reads the property without a cast and
+/// without runtime type information, and `sourceId` equals `source.id`.
+public class Field<T: nullable + mut, V: nullable + mut> {
+    /// The name this field has in the external representation.
+    public property externalName: String;
+
+    /// The identity of the mapped source property.
+    public property sourceId: PropertyId;
+
+    /// The mapped property.
+    public property source: PropertyRef<T, V>;
+
+    public constructor new;
+
+    /// Reads the mapped property from `owner`.
+    public get(owner: T): V = this.source.get(owner);
+}

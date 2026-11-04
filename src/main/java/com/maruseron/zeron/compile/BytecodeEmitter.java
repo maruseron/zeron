@@ -672,6 +672,24 @@ final class BytecodeEmitter {
             case Expr.Raise raise -> ExpressionFlowEmitter.emitRaise(context, composer, raise);
             case Expr.Handle handle -> ExpressionFlowEmitter.emitHandle(context, composer, handle);
             case Expr.HandlerLiteral handler -> emitExpr(context, composer, handler.implementation);
+            case Expr.ModelLiteral model -> {
+                final var declaration = model.declaration();
+                final var classDesc = ClassDesc.of(model.generatedClassName());
+                final var constructorTypes = declaration.canonicalConstructorTypes();
+                final var constructorParameters = constructorTypes.stream()
+                        .map(type -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(type)))
+                        .toList();
+                composer.new_(classDesc);
+                composer.dup();
+                for (int index = 0; index < model.assignments.size(); index++) {
+                    emitExpr(context, composer, model.assignments.get(index).value());
+                    emitConversion(context, composer, context.lastEmittedType,
+                            TypeSubstitution.erase(constructorTypes.get(index)));
+                }
+                composer.invokespecial(classDesc, "<init>",
+                        MethodTypeDesc.of(ConstantDescs.CD_void, constructorParameters));
+                context.lastEmittedType = model.getType();
+            }
             case Expr.HandlerDispatch dispatch ->
                     ExpressionFlowEmitter.emitHandlerDispatch(context, composer, dispatch);
             case Expr.Logical logical -> ExpressionFlowEmitter.emitLogical(context, composer, logical);
@@ -776,6 +794,10 @@ final class BytecodeEmitter {
                                 ConstantDescs.CD_String, ConstantDescs.CD_String,
                                 ClassDesc.of(SyntheticNames.PROPERTY_ID_TYPE)));
                 context.lastEmittedType = reference.getType();
+            }
+            case Expr.PropertyIdReference identity -> {
+                emitPropertyId(composer, identity.owner, identity.propertyName.lexeme());
+                context.lastEmittedType = identity.getType();
             }
             case Expr.Literal literal -> {
                 if (literal.numericConversionCall() != null) {

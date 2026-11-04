@@ -2,8 +2,33 @@
 
 ## Unreleased
 
+### Standard library
+
+- Renamed the collection classes to `ArrayList`, `HashSet`, and `HashMap`, and turned `List`, `Set`,
+  and `Map` into contracts, so a function can accept any implementation. Added the `Sized`,
+  `PositionalEditor`, `Removable`, `KeyedSink`, and `Clearable` capability contracts and split
+  `Reversible` and `Sortable` into copying and in-place variants. `ArrayList.insert` now returns
+  `Boolean` to report an out-of-range index.
+- Moved the terminal operations onto `Iterable` as default methods: `forEach`, `fold`, `any`, and
+  `all` are effect-row-polymorphic, and `count` and `isEmpty` work on any sequence. `Stream` repeats
+  the row parameters on its overrides, and the hash-backed collections override `count` with their
+  constant-time size. A generic call now binds only its own type parameters when inferring from
+  arguments and leaves variance to assignability, so a broadly accepting callback such as
+  `println` is accepted where a narrower function type is expected.
+- Added baseline alternative implementations for the collection contracts: `LinkedList<T>` and
+  `ArrayDeque<T>` are mutable deques, `ConsList<T>` is a persistent list, and `IdentityHashMap<K, V>`
+  compares keys by reference identity without an `Eq` or `Hashable` bound. Added the `Deque<T>`
+  capability contract and `System.identityHashCode` for identity-based hashing, and extracted the
+  shared `HashTable` internals used by `HashMap` and `IdentityHashMap`.
+
 ### Compiler and language work
 
+- Added `model` declarations: `model Name is Contract<T> { property -> "external"; property = constant; }`
+  binds a singleton descriptor value that validates mapped properties through their identity,
+  rejects duplicate and unknown mappings, and requires the parent contract's property assignments.
+  The descriptor is backed by the new `zeron.lang.Model`, `zeron.lang.AnyField`, and
+  `zeron.lang.Field` standard-library types. Public models are preserved in the API index, so a
+  model from a compiled library can be imported, read, and passed as its contract.
 - Added property references (`T::p`, such as `User::name`) with a new standard-library
   `PropertyRef<T, V>` value that exposes `get`, `name`, and a stable `identity`, converts
   implicitly to `T -> V`, and compares by declaration across separate compilations.

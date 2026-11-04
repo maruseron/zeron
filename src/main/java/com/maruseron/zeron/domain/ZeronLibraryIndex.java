@@ -66,6 +66,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             final var statements = declarationsByPackage.computeIfAbsent(packageName, _ -> new ArrayList<>());
             switch (exported) {
                 case DocumentationExport ignored -> { }
+                case ModelExport ignored -> { }
                 case AnnotationDeclarationExport annotation -> {
                     final var parameters = annotation.parameters().stream()
                             .map(parameter -> new Stmt.AnnotationParameter(token(parameter.name()),
@@ -327,7 +328,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     public sealed interface ExportedDeclaration permits NamespacedDeclaration, ClassExport, ContractExport,
             SumExport, ProductExport, NewtypeExport, WitnessExport, ExternalClassExport, DocumentationExport,
-            AnnotationDeclarationExport, AnnotationApplicationExport {
+            AnnotationDeclarationExport, AnnotationApplicationExport, ModelExport {
         String qualifiedName();
     }
 
@@ -397,6 +398,45 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(jvmOwner);
             Objects.requireNonNull(initializationOwner);
+            Objects.requireNonNull(type);
+        }
+    }
+
+    /// A `model` declaration: the value a model name denotes.
+    ///
+    /// The value itself is exported as a `ValueExport` whose type is the model's implementation
+    /// class, which is exported alongside it as a `ClassExport`. This record preserves the
+    /// declaration, so tools can report the mapping and changes to external names stay visible to
+    /// consumers across compilations.
+    public record ModelExport(String qualifiedName,
+                              String implementationClassName,
+                              TypeDescriptor targetType,
+                              ContractUseExport contract,
+                              List<ModelFieldExport> fields,
+                              List<ModelAssignmentExport> assignments)
+            implements ExportedDeclaration {
+        public ModelExport {
+            Objects.requireNonNull(qualifiedName);
+            Objects.requireNonNull(implementationClassName);
+            Objects.requireNonNull(targetType);
+            Objects.requireNonNull(contract);
+            fields = List.copyOf(fields);
+            assignments = List.copyOf(assignments);
+        }
+    }
+
+    /// One property mapping of a model, keyed by the property's stable identity text.
+    public record ModelFieldExport(String propertyId, String externalName) {
+        public ModelFieldExport {
+            Objects.requireNonNull(propertyId);
+            Objects.requireNonNull(externalName);
+        }
+    }
+
+    /// One parent-contract property assignment of a model.
+    public record ModelAssignmentExport(String propertyName, TypeDescriptor type) {
+        public ModelAssignmentExport {
+            Objects.requireNonNull(propertyName);
             Objects.requireNonNull(type);
         }
     }
@@ -1026,6 +1066,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         }
                         exports.add(new ValueExport(name, owner, initializationOwner,
                                 member.namespaceName(), valueTypes.apply(variable)));
+                        if (variable.initializer()
+                                instanceof com.maruseron.zeron.ast.Expr.ModelLiteral model
+                                && model.declaration() != null) {
+                            exports.add(modelExport(name, model));
+                            exports.add(modelClassExport(model.generatedClassName(),
+                                    model.declaration()));
+                        }
                     }
                     case Stmt.ClassDecl classDeclaration when classDeclaration.isPublic() -> {
                         final var classQualifiedName = qualify(
@@ -1309,6 +1356,43 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         return new ZeronLibraryIndex(StandardLibrary.API_VERSION, exports);
     }
 
+    private static ModelExport modelExport(final String qualifiedName,
+                                           final com.maruseron.zeron.ast.Expr.ModelLiteral model) {
+        final var assignmentTypes = model.declaration().canonicalConstructorTypes();
+        final var assignments = new ArrayList<ModelAssignmentExport>();
+        for (int index = 0; index < model.assignments.size(); index++) {
+            assignments.add(new ModelAssignmentExport(
+                    model.assignments.get(index).property().lexeme(),
+                    index < assignmentTypes.size()
+                            ? assignmentTypes.get(index) : TypeDescriptor.ofInfer()));
+        }
+        return new ModelExport(qualifiedName, model.generatedClassName(), model.targetType(),
+                new ContractUseExport(model.contract.name().lexeme(), model.contract.typeArguments()),
+                model.resolvedMappings().stream()
+                        .map(mapping -> new ModelFieldExport(mapping.propertyId(),
+                                mapping.externalName()))
+                        .toList(),
+                assignments);
+    }
+
+    /// Exports a model's implementation class. Consumers never construct it: the model's value
+    /// comes from the library's accessor, so only its contracts and readable properties matter.
+    private static ClassExport modelClassExport(final String qualifiedName,
+                                                final Stmt.ClassDecl declaration) {
+        return new ClassExport(qualifiedName, declaration.typeParameters(),
+                declaration.contractUses().stream()
+                        .map(use -> new ContractUseExport(use.name().lexeme(), use.typeArguments()))
+                        .toList(),
+                List.of(), List.of(), false, false,
+                List.of(), List.of(),
+                declaration.properties().stream()
+                        .filter(Stmt.Property::isPublic)
+                        .map(property -> new PropertyExport(property.name().lexeme(), property.type(),
+                                property.isMutating()))
+                        .toList(),
+                List.of(), List.of(), false, List.of());
+    }
+
     private static boolean isPublicDeclaration(final Stmt declaration) {
         return switch (declaration) {
             case Stmt.FunctionDeclaration function -> function.isPublic();
@@ -1444,6 +1528,26 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeBoolean(extension.variadic());
                 output.writeBoolean(extension.property());
                 writeStrings(output, extension.parameterNames());
+            }
+            case ModelExport model -> {
+                output.writeByte(18);
+                output.writeUTF(model.qualifiedName());
+                output.writeUTF(model.implementationClassName());
+                final var context = new WriteContext();
+                output.writeUTF(model.contract().qualifiedName());
+                output.writeInt(model.contract().typeArguments().size());
+                for (final var type : model.contract().typeArguments()) writeType(output, type, context);
+                writeType(output, model.targetType(), context);
+                output.writeInt(model.fields().size());
+                for (final var field : model.fields()) {
+                    output.writeUTF(field.propertyId());
+                    output.writeUTF(field.externalName());
+                }
+                output.writeInt(model.assignments().size());
+                for (final var assignment : model.assignments()) {
+                    output.writeUTF(assignment.propertyName());
+                    writeType(output, assignment.type(), context);
+                }
             }
             case ValueExport value -> {
                 output.writeByte(4);
@@ -1712,6 +1816,27 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var property = input.readBoolean();
                 yield new ExtensionExport(name, owner, namespace, receiverType, receiverTypeParameterCount,
                         signature, mutating, minimumArity, variadic, property, readStrings(input));
+            }
+            case 18 -> {
+                final var name = input.readUTF();
+                final var implementationClassName = input.readUTF();
+                final var context = new ReadContext();
+                final var contractName = input.readUTF();
+                final var contractArguments = new ArrayList<TypeDescriptor>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    contractArguments.add(readType(input, context));
+                }
+                final var targetType = readType(input, context);
+                final var fields = new ArrayList<ModelFieldExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    fields.add(new ModelFieldExport(input.readUTF(), input.readUTF()));
+                }
+                final var assignments = new ArrayList<ModelAssignmentExport>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    assignments.add(new ModelAssignmentExport(input.readUTF(), readType(input, context)));
+                }
+                yield new ModelExport(name, implementationClassName, targetType,
+                        new ContractUseExport(contractName, contractArguments), fields, assignments);
             }
             case 4 -> new ValueExport(input.readUTF(), input.readUTF(), input.readUTF(),
                     readOptionalString(input), readType(input, new ReadContext()));

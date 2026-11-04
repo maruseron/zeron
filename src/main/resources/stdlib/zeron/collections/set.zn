@@ -2,48 +2,13 @@ package zeron.collections;
 
 import zeron.lang.Hashable;
 
-/// A collection of distinct values with membership tests by equality.
+/// A collection of distinct values with membership tests.
 ///
-/// Iteration order is not specified. Membership and insertion rely on `Hashable<T>`, which implies
-/// `Eq<T>`; mutating operations require a mutable reference to the set.
-public class Set<T: Hashable<T>> is Iterable<T>, Sink<T> {
-    values: &Map<T, Unit>;
-
-    private constructor new;
-
-    /// Wraps `values`, taking its keys as the set's elements.
-    public constructor withMap(values: &Map<T, Unit>) = Set<T>.new(values);
-
-    /// Creates an empty set.
-    public constructor empty() = Set<T>.withMap(Map.empty<T, Unit>());
-
-    /// Creates a set holding each distinct element of `elements`.
-    public constructor of(elements: T...) {
-        let mut result = Set.empty<T>();
-        for (let element in elements) result.add(element);
-        return result;
-    }
-
-    /// The number of elements in the set.
-    public property size: Int {
-        get = values.size;
-    }
-
-    /// Whether the set has no elements.
-    public isEmpty(): Boolean = values.isEmpty();
-
+/// Membership and insertion use the same equivalence relation, so a set never holds two equivalent
+/// elements. The contract does not prescribe how equivalence is implemented: a hash set uses
+/// `Hashable`, an identity set reference identity, and an ordered set its ordering. Iteration order
+/// is not specified.
+public contract Set<T: mut> requires Iterable<T> {
     /// Whether `value` is an element of the set.
-    public contains(value: T): Boolean = values.containsKey(value);
-
-    /// Adds `value` to the set, returning `true` when it was not already present.
-    public mut add(value: T): Boolean = not values.put(value, ()).isSome();
-
-    /// Removes `value` from the set, returning `true` when it was present.
-    public mut remove(value: T): Boolean = values.remove(value).isSome();
-
-    /// Removes every element from the set.
-    public mut clear(): Unit = values.clear();
-
-    /// Returns an iterator over the set's elements, in unspecified order.
-    public iterator(): &Iterator<T> = values.keyIterator();
+    contains(value: T): Boolean;
 }

@@ -1,0 +1,102 @@
+package zeron.collections;
+
+import zeron.lang.Eq;
+import zeron.lang.Hashable;
+import zeron.lang.Option;
+import zeron.lang.Pair;
+
+// TODO: no hover on `key.hash`. work on this!
+fn hashKey<T: Hashable<T>>(key: T): Int = key.hash();
+
+fn equalKeys<T: Eq<T>>(left: T, right: T): Boolean = left == right;
+
+/// A hash table mapping distinct keys to values.
+///
+/// Keys are compared with `Eq` and bucketed by `Hashable`, so equal keys must produce equal hashes
+/// and must not change in a way that affects either operation while they are in the map. Iteration
+/// order is not specified.
+public class HashMap<K: Hashable<K>, V: mut>
+    is Iterable<Pair<K, V>>,
+       Sized<Pair<K, V>>,
+       KeyedSink<K, V>,
+       Clearable,
+       Map<K, V> {
+    table: &HashTable<K, V>;
+
+    private constructor new;
+
+    /// Creates an empty map that buckets keys with `hashFunction` and compares them with
+    /// `equalityFunction`.
+    ///
+    /// The two functions must agree: keys that `equalityFunction` considers equal must produce the
+    /// same hash from `hashFunction`.
+    public constructor withOperations(
+        hashFunction: (K) -> Int,
+        equalityFunction: (K, K) -> Boolean
+    ) =
+        HashMap<K, V>.new(
+            HashTable<K, V>.withOperations(hashFunction, equalityFunction)
+        );
+
+    /// Creates an empty map using the standard hashing and equality of `K`.
+    public constructor empty() =
+        HashMap<K, V>.withOperations(hashKey::<K>, equalKeys::<K>);
+
+    /// Creates a map holding each entry; a later duplicate key replaces the earlier value.
+    public constructor of(entries: &Pair<K, V>...) {
+        let mut result = HashMap.empty<K, V>();
+        for (let entry in entries) result.put(entry.fst, entry.snd);
+        return result;
+    }
+
+    /// The number of entries in the map.
+    public property size: Int {
+        get = table.size;
+    }
+
+    /// Whether the map has no entries.
+    public isEmpty(): Boolean = table.isEmpty();
+
+    /// The number of entries, in constant time.
+    public count(): Int = this.size;
+
+    /// Whether the map holds an entry for `key`.
+    public containsKey(key: K): Boolean = table.containsKey(key);
+
+    /// Returns the value stored for `key`, or `None` when the key is absent.
+    public get(key: K): Option<V> = table.get(key);
+
+    /// Stores `value` for `key`, returning the value it replaced or `None` for a new key.
+    public mut put(key: K, value: V): Option<V> = table.put(key, value);
+
+    /// Stores `value` only when `key` is absent, returning the previously stored value, if any.
+    public mut putIfAbsent(key: K, value: V): Option<V> = table.putIfAbsent(key, value);
+
+    /// Recomputes the entry for `key` from its current value.
+    ///
+    /// `transform` receives the key and the value currently stored, or `None` when the key is
+    /// absent. Returning `None` removes the entry; returning a value stores it. The result is
+    /// returned.
+    public mut compute<E: effect...>(
+        key: K,
+        transform: (K, Option<V>) -> Option<V> raises E
+    ): Option<V> raises E = table.compute(key, transform);
+
+    /// Returns the value stored for `key`, computing and storing `transform(key)` when absent.
+    public mut computeIfAbsent<E: effect...>(
+        key: K,
+        transform: (K) -> V raises E
+    ): V raises E = table.computeIfAbsent(key, transform);
+
+    /// Removes the entry for `key`, returning the value it held or `None` when the key is absent.
+    public mut remove(key: K): Option<V> = table.remove(key);
+
+    /// Removes every entry.
+    public mut clear(): Unit = table.clear();
+
+    /// Returns an iterator over the entries as key-value pairs, in unspecified order.
+    public iterator(): &Iterator<Pair<K, V>> = table.iterator();
+
+    /// Returns an iterator over the keys, in unspecified order.
+    public keyIterator(): &Iterator<K> = table.keyIterator();
+}

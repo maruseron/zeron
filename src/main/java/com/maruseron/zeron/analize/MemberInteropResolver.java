@@ -1183,7 +1183,7 @@ final class MemberInteropResolver {
                     ? null : ExpressionFlowResolver.resolveExpression(context, argument));
         }
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        TypeUnifier.unify(method.receiverType(), selected.projection(), substitutions, call.name);
+        TypeUnifier.unify(method.receiverType(), selected.projection(), substitutions, call.name, context.typeCompatibility);
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
             final var explicitType = call.explicitTypeArguments.get(i);
             TypeResolver.validateType(context, explicitType, call.name);
@@ -1195,7 +1195,7 @@ final class MemberInteropResolver {
             resolvedArguments[i] = actualArguments.get(i);
             final var formal = extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic());
             if (TypeSubstitution.containsTypeParameter(formal)) {
-                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+                TypeUnifier.unifyForInference(formal, resolvedArguments[i], substitutions, call.name, context.typeCompatibility);
             }
         }
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -1209,9 +1209,9 @@ final class MemberInteropResolver {
             resolvedArguments[i] = resolveArgument(context, call.arguments.get(i), expected);
             if (TypeSubstitution.containsTypeParameter(formal)) {
                 if (call.arguments.get(i) instanceof Expr.PropertyReference) {
-                    unifyPropertyReferenceArgument(formal, resolvedArguments[i], substitutions, call.name);
+                    unifyPropertyReferenceArgument(formal, resolvedArguments[i], substitutions, call.name, context.typeCompatibility);
                 } else {
-                    TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name);
+                    TypeUnifier.unifyForInference(formal, resolvedArguments[i], substitutions, call.name, context.typeCompatibility);
                 }
             }
         }
@@ -1309,7 +1309,7 @@ final class MemberInteropResolver {
             for (final var projection : receiverProjections) {
                 final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
                 try {
-                    TypeUnifier.unify(method.receiverType(), projection, substitutions, method.name());
+                    TypeUnifier.unify(method.receiverType(), projection, substitutions, method.name(), context.typeCompatibility);
                 } catch (final ResolutionError _) {
                     continue;
                 }
@@ -1506,12 +1506,12 @@ final class MemberInteropResolver {
                     ? ExpressionFlowResolver.resolveExpression(context, argument) : priorType;
             final var formal = classFactoryParameterType(signature, i, fixedArity, variadic);
             if (containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
-                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name, rowInference);
+                TypeUnifier.unifyForInference(formal, resolvedArguments[i], substitutions, call.name, rowInference, context.typeCompatibility);
             }
         }
 
         if (explicitClassTypeArguments.isEmpty()) {
-            inferClassArgumentsFromExpectedType(declaration, substitutions, expectedType, call.name);
+            inferClassArgumentsFromExpectedType(declaration, substitutions, expectedType, call.name, context.typeCompatibility);
         }
 
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -1527,7 +1527,7 @@ final class MemberInteropResolver {
             }
             resolvedArguments[i] = resolveArgument(context, argument, expected);
             if (containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
-                TypeUnifier.unify(formal, resolvedArguments[i], substitutions, call.name, rowInference);
+                TypeUnifier.unifyForInference(formal, resolvedArguments[i], substitutions, call.name, rowInference, context.typeCompatibility);
             }
         }
 
@@ -1697,15 +1697,16 @@ final class MemberInteropResolver {
     }
 
     private static void inferClassArgumentsFromExpectedType(final Stmt.ClassDecl declaration,
-                                                             final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
-                                                             TypeDescriptor expectedType,
-                                                             final Token where) {
+                                                            final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                                                            TypeDescriptor expectedType,
+                                                            final Token where,
+                                                            final TypeProjector projector) {
         if (expectedType instanceof ReferenceDescriptor reference) expectedType = reference.baseType();
         if (expectedType instanceof NullableDescriptor nullable) expectedType = nullable.baseType();
         if (!(expectedType instanceof GenericDescriptor || expectedType instanceof NominalDescriptor)
                 || !expectedType.name().equals(declaration.name().lexeme())) return;
         final var pattern = classType(declaration);
-        if (pattern instanceof GenericDescriptor) TypeUnifier.unify(pattern, expectedType, substitutions, where);
+        if (pattern instanceof GenericDescriptor) TypeUnifier.unify(pattern, expectedType, substitutions, where, projector);
     }
 
     /// Whether an argument must wait for the call's type parameters before it is resolved, because
@@ -1726,43 +1727,45 @@ final class MemberInteropResolver {
     static void unifyPropertyReferenceArgument(final TypeDescriptor formal,
                                                final TypeDescriptor actual,
                                                final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
-                                               final Token where) {
+                                               final Token where,
+                                               final TypeProjector projector) {
         final var formalCodeModel = codeModelArgument(formal);
         if (formalCodeModel != null) {
             final var actualCodeModel = codeModelArgument(actual);
             if (actualCodeModel == null) return;
             if (formalCodeModel instanceof TypeParameterDescriptor typeParameter) {
                 if (!substitutions.containsKey(typeParameter)) {
-                    TypeUnifier.unify(typeParameter, actualCodeModel, substitutions, where);
+                    TypeUnifier.unify(typeParameter, actualCodeModel, substitutions, where, projector);
                 }
                 return;
             }
             if (formalCodeModel instanceof FunctionDescriptor formalFunction
                     && actualCodeModel instanceof FunctionDescriptor actualFunction) {
-                unifyFunctionParameterTypes(formalFunction, actualFunction, substitutions, where);
+                unifyFunctionParameterTypes(formalFunction, actualFunction, substitutions, where, projector);
             }
             return;
         }
         if (!(formal instanceof FunctionDescriptor formalFunction)
                 || !(actual instanceof FunctionDescriptor actualFunction)) return;
-        unifyFunctionParameterTypes(formalFunction, actualFunction, substitutions, where);
+        unifyFunctionParameterTypes(formalFunction, actualFunction, substitutions, where, projector);
     }
 
     private static void unifyFunctionParameterTypes(
             final FunctionDescriptor formalFunction,
             final FunctionDescriptor actualFunction,
             final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
-            final Token where) {
+            final Token where,
+            final TypeProjector projector) {
         for (int index = 0; index < formalFunction.arity() && index < actualFunction.arity(); index++) {
             final var parameter = formalFunction.parameters().get(index);
             if (parameter instanceof TypeParameterDescriptor typeParameter
                     && !substitutions.containsKey(typeParameter)) {
                 TypeUnifier.unify(typeParameter, actualFunction.parameters().get(index),
-                        substitutions, where);
+                        substitutions, where, projector);
             }
         }
         TypeUnifier.unify(formalFunction.returnType(), actualFunction.returnType(),
-                substitutions, where);
+                substitutions, where, projector);
     }
 
     private static TypeDescriptor resolveGenericMemberCall(final ResolutionContext context, final Expr.MemberCall call,
@@ -1803,7 +1806,7 @@ final class MemberInteropResolver {
             substitutions.put(typeParameters.get(i), explicitType);
         }
         if (receiverParameter != null) {
-            TypeUnifier.unify(receiverParameter, receiverType, substitutions, call.name, rowInference);
+            TypeUnifier.unify(receiverParameter, receiverType, substitutions, call.name, rowInference, context.typeCompatibility);
         }
 
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
@@ -1812,8 +1815,8 @@ final class MemberInteropResolver {
             if (defersUntilExpectedType(context, argument,
                     memberParameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
-            TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
-                    resolvedArguments[i], substitutions, call.name, rowInference);
+            TypeUnifier.unifyForInference(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
+                    resolvedArguments[i], substitutions, call.name, rowInference, context.typeCompatibility);
         }
 
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -1833,10 +1836,10 @@ final class MemberInteropResolver {
             if (argument instanceof Expr.PropertyReference) {
                 unifyPropertyReferenceArgument(
                         memberParameterType(genericType.parameters(), i, fixedArity, variadic),
-                        resolvedArguments[i], substitutions, call.name);
+                        resolvedArguments[i], substitutions, call.name, context.typeCompatibility);
             } else {
-                TypeUnifier.unify(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
-                        resolvedArguments[i], substitutions, call.name, rowInference);
+                TypeUnifier.unifyForInference(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
+                        resolvedArguments[i], substitutions, call.name, rowInference, context.typeCompatibility);
             }
         }
 
@@ -2104,7 +2107,7 @@ final class MemberInteropResolver {
                             genericParameterPattern, substitutions);
                     if (containsAnyTypeParameter(inferencePattern, inferenceParameters)) {
                         try {
-                            TypeUnifier.unify(inferencePattern, actualTypes.get(i), substitutions, call.name);
+                            TypeUnifier.unifyForInference(inferencePattern, actualTypes.get(i), substitutions, call.name, context.typeCompatibility);
                         } catch (final ResolutionError _) {
                             applicable = false;
                             break;

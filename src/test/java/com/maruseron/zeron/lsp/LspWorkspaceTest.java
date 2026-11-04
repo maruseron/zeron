@@ -1305,7 +1305,7 @@ public class LspWorkspaceTest {
         assertEquals("List<T>", fromItem.getDetail());
         assertFalse(completion.getItems().stream()
                 .anyMatch(item -> item.getDetail() != null
-                        && item.getDetail().contains("zeron.collections.List")));
+                        && item.getDetail().contains("zeron.collections.ArrayList")));
 
         final var instanceOffset = source.indexOf("list.custom", source.indexOf("fn main"))
                 + "list.".length();
@@ -1316,7 +1316,7 @@ public class LspWorkspaceTest {
         assertEquals("Int", customItem.getDetail());
         assertFalse(instanceCompletion.getItems().stream()
                 .anyMatch(item -> item.getDetail() != null
-                        && item.getDetail().contains("zeron.collections.List")));
+                        && item.getDetail().contains("zeron.collections.ArrayList")));
 
         final var consOffset = source.lastIndexOf("Cons");
         final var consHover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(

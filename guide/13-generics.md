@@ -18,6 +18,7 @@ Write a type parameter in angle brackets after the function name. Use it in the 
 result types wherever those types should match:
 
 ```zeron
+// read "first of T"
 fn first<T>(values: Array<T>): T = values[0];
 ```
 
@@ -146,8 +147,8 @@ propagation. For the marker rules and nested generic boundaries, see the
 ## Type erasure
 
 Zeron checks generic types while building a program, but the JVM does not keep every generic type
-argument as a separate runtime class. This is called **type erasure**. For example, `List<Int>` and
-`List<String>` are both represented at runtime by the same `List` class; `Array<T>` is represented
+argument as a separate runtime class. This is called **type erasure**. For example, `ArrayList<Int>` and
+`ArrayList<String>` are both represented at runtime by the same `ArrayList` class; `Array<T>` is represented
 as an array of JVM references.
 
 As a result, generic code cannot ask at runtime which concrete type was used for `T`. The type

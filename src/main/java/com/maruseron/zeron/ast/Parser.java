@@ -289,6 +289,7 @@ public final class Parser {
             }
             if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
             if (levelMarker == null && matchSoftKeyword("handler")) return namedHandlerDeclaration(false);
+            if (levelMarker == null && matchSoftKeyword("model")) return modelDeclaration(false);
             if (match(NAMESPACE)) return namespaceDeclaration();
             if (match(EFFECT)) return effectDeclaration(false);
             if (match(EXTENSION)) return extensionDeclaration(false);
@@ -301,6 +302,7 @@ public final class Parser {
                 if (match(LET)) return letDeclaration(true);
                 if (match(ANNOTATION)) return annotationDeclaration(true);
                 if (matchSoftKeyword("handler")) return namedHandlerDeclaration(true);
+                if (matchSoftKeyword("model")) return modelDeclaration(true);
                 if (matchSoftKeyword("data")) {
                     consume(CLASS, "Expect 'class' after 'data'.");
                     return classDeclaration(true, false, true);
@@ -872,6 +874,43 @@ public final class Parser {
         final var name = consume(IDENTIFIER, "Expect handler name.");
         final var literal = handlerLiteral(keyword);
         return new Stmt.Var(name, TypeDescriptor.ofInfer(), literal,
+                BindingMutability.IMMUTABLE, isPublic);
+    }
+
+    private Stmt.Var modelDeclaration(final boolean isPublic) {
+        final var keyword = previous();
+        final var name = consume(IDENTIFIER, "Expect model name.");
+        consume(IS, "Expect 'is' after the model name.");
+        final var contractName = unresolvedTypeToken(
+                consume(IDENTIFIER, "Expect the contract after 'is'."));
+        final var hasTypeArguments = match(LESS);
+        final var typeArguments = hasTypeArguments
+                ? collectTypeArguments()
+                : List.<TypeDescriptor>of();
+        if (hasTypeArguments) consume(GREATER, "Expect '>' after contract type arguments.");
+        final var contract = new Stmt.ContractUse(contractName, typeArguments);
+        consume(LEFT_BRACE, "Expect '{' before model clauses.");
+
+        final var mappings = new ArrayList<Expr.ModelLiteral.Mapping>();
+        final var assignments = new ArrayList<Expr.ModelLiteral.Assignment>();
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            final var property = consume(IDENTIFIER, "Expect a property name in the model body.");
+            if (match(ARROW)) {
+                final var externalName = consume(STRING,
+                        "Expect a string literal after '->'.");
+                mappings.add(new Expr.ModelLiteral.Mapping(property, externalName));
+                match(SEMICOLON);
+            } else if (match(EQUAL)) {
+                assignments.add(new Expr.ModelLiteral.Assignment(property, expression()));
+                consume(SEMICOLON, "Expect ';' after a model property assignment.");
+            } else {
+                throw error(peek(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                        "Expect '->' or '=' after a property name in a model body.");
+            }
+        }
+        consume(RIGHT_BRACE, "Expect '}' after model clauses.");
+        return new Stmt.Var(name, TypeDescriptor.ofInfer(),
+                new Expr.ModelLiteral(keyword, name, contract, mappings, assignments),
                 BindingMutability.IMMUTABLE, isPublic);
     }
 
@@ -2066,10 +2105,10 @@ public final class Parser {
                 consume(GREATER, "Expect '>' after type.");
             }
 
-                type = qualifiedTypeName.lexeme().indexOf('.') < 0
-                    ? activeTypeParameters.get(qualifiedTypeName.lexeme())
-                    : null;
-                if (type == null) type = TypeDescriptor.of(qualifiedTypeName.lexeme());
+            type = qualifiedTypeName.lexeme().indexOf('.') < 0
+                ? activeTypeParameters.get(qualifiedTypeName.lexeme())
+                : null;
+            if (type == null) type = TypeDescriptor.of(qualifiedTypeName.lexeme());
             if (isGeneric) {
                 if (type instanceof TypeParameterDescriptor parameter && parameter.isHigherKinded()) {
                     if (inner.size() != 1) {

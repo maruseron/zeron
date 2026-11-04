@@ -833,6 +833,7 @@ final class ExpressionFlowResolver {
             }
             case Expr.Handle handle -> resolveHandle(context, handle);
             case Expr.HandlerLiteral handler -> resolveHandlerLiteral(context, handler);
+            case Expr.ModelLiteral model -> resolveModelLiteral(context, model);
             case Expr.HandlerDispatch dispatch -> dispatch.getType();
             case Expr.Coalesce coalesce -> {
                 final var leftType = resolve(context, coalesce.left);
@@ -896,6 +897,7 @@ final class ExpressionFlowResolver {
             }
             case Expr.PropertyReference reference ->
                     PropertyReferenceResolver.resolve(context, reference, null);
+            case Expr.PropertyIdReference identity -> identity.getType();
             case Expr.AnonymousObject object -> resolveAnonymousObject(context, object);
             case Expr.Literal literal -> resolveLiteral(context, literal);
             case Expr.SuffixedLiteral literal -> resolveSuffixedLiteral(context, literal);
@@ -1452,6 +1454,179 @@ final class ExpressionFlowResolver {
         } finally {
             context.frame.flowState = initialFlow;
             context.frame.raisedEffects = enclosingEffects;
+        }
+    }
+
+    private static TypeDescriptor resolveModelLiteral(final ResolutionContext context,
+                                                      final Expr.ModelLiteral model) {
+        if (model.generatedClassName() == null) synthesizeModel(context, model);
+        if (!model.declarationResolved()) {
+            DeclarationResolver.resolveClass(context, model.declaration());
+            model.markDeclarationResolved();
+        }
+        final var type = new ReferenceDescriptor(TypeDescriptor.ofName(model.generatedClassName()));
+        model.setType(type);
+        return type;
+    }
+
+    private static void synthesizeModel(final ResolutionContext context, final Expr.ModelLiteral model) {
+        final var contract = model.contract;
+        contract.resolveName(TypeResolver.resolveTypeName(
+                context, contract.name().lexeme(), contract.name()));
+        for (final var argument : contract.typeArguments()) {
+            TypeResolver.resolveTypeNames(context, argument, model.keyword);
+        }
+        final var contractName = contract.name().lexeme();
+        final var targetType = modelTargetType(context, model, contractName);
+        final var fieldType = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName("zeron.lang.AnyField"), List.of(targetType));
+
+        final var fieldStatements = new ArrayList<Stmt>();
+        final var fieldValues = new ArrayList<Expr>();
+        final var mapped = new LinkedHashSet<String>();
+        final var resolvedMappings = new ArrayList<Expr.ModelLiteral.ResolvedMapping>();
+        var index = 0;
+        for (final var mapping : model.mappings) {
+            final var bindingName = new Token(TokenType.IDENTIFIER, "field" + index++, null,
+                    mapping.property().span());
+            final var reference = new Expr.PropertyReference(mapping.property(), targetType,
+                    mapping.property());
+            PropertyReferenceResolver.resolve(context, reference, null);
+            if (!mapped.add(reference.identity())) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT, mapping.property(),
+                        "Property '" + mapping.property().lexeme()
+                                + "' is mapped twice in this model."));
+            }
+            resolvedMappings.add(new Expr.ModelLiteral.ResolvedMapping(reference.identity(),
+                    String.valueOf(mapping.externalName().literal())));
+            final var identity = new Expr.PropertyIdReference(reference.declaringTypeName(),
+                    mapping.property(), new ReferenceDescriptor(
+                            TypeDescriptor.ofName("zeron.lang.PropertyId")));
+            final var externalName = new Expr.Literal(mapping.externalName().literal(),
+                    TypeDescriptor.ofString());
+            final Expr owner = new Expr.Property(new Expr.Property(
+                    new Expr.Variable(new Token(TokenType.IDENTIFIER, "zeron", null,
+                            mapping.property().span()), TypeDescriptor.ofInfer()),
+                    new Token(TokenType.IDENTIFIER, "lang", null, mapping.property().span()),
+                    TypeDescriptor.ofInfer()),
+                    new Token(TokenType.IDENTIFIER, "AnyField", null, mapping.property().span()),
+                    TypeDescriptor.ofInfer());
+            final var call = new Expr.MemberCall(owner,
+                    new Token(TokenType.IDENTIFIER, "new", null, mapping.property().span()),
+                    mapping.property(), List.of(externalName, identity), List.of(),
+                    TypeDescriptor.ofInfer(), false);
+            call.setExplicitOwnerTypeArguments(List.of(targetType));
+            fieldStatements.add(new Stmt.Var(bindingName, fieldType, call,
+                    BindingMutability.IMMUTABLE));
+            fieldValues.add(new Expr.Variable(bindingName, TypeDescriptor.ofInfer()));
+        }
+        model.setTargetType(targetType);
+        model.setResolvedMappings(resolvedMappings);
+        fieldStatements.add(new Stmt.Return(
+                new Expr.ArrayLiteral(fieldValues, TypeDescriptor.ofInfer()), model.keyword));
+        final var fieldsProperty = new Stmt.Property(
+                new Token(TokenType.IDENTIFIER, "fields", null, model.keyword.span()),
+                TypeDescriptor.arrayOf(fieldType), null, true, false,
+                List.copyOf(fieldStatements), null, null, false);
+
+        final var properties = new ArrayList<Stmt.Property>();
+        final var storedStateOrder = new ArrayList<Token>();
+        final var assigned = new LinkedHashSet<String>();
+        final var receiverType = contract.typeArguments().isEmpty()
+                ? TypeDescriptor.ofName(contractName)
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(contractName),
+                        contract.typeArguments());
+        for (final var assignment : model.assignments) {
+            if (!assigned.add(assignment.property().lexeme())) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT, assignment.property(),
+                        "Property '" + assignment.property().lexeme()
+                                + "' is assigned twice in this model."));
+            }
+            final var property = MemberInteropResolver.findProperty(context, contractName,
+                    assignment.property());
+            if (property == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                        assignment.property(), "The contract '" + contractName
+                                + "' has no property '" + assignment.property().lexeme() + "'."));
+                continue;
+            }
+            if (!(assignment.value() instanceof Expr.Literal)
+                    && !(assignment.value() instanceof Expr.PropertyReference)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_INITIALIZER,
+                        assignment.property(),
+                        "A model property assignment must be a constant: a literal or a property reference."));
+            }
+            final var expected = MemberInteropResolver.resolvedPropertyType(context, contractName,
+                    property, receiverType);
+            final var valueType = resolve(context, assignment.value());
+            ensureAssignable(context, expected, valueType, assignment.property());
+            properties.add(new Stmt.Property(assignment.property(), expected, null, true, false,
+                    null, null, null, true));
+            storedStateOrder.add(assignment.property());
+        }
+        requireModelAssignments(context, model, assigned);
+
+        properties.add(fieldsProperty);
+        storedStateOrder.add(fieldsProperty.name());
+
+        final var simpleName = model.name.lexeme();
+        final var namespaceName = context.currentNamespaceName;
+        final var modelName = context.packageName.isEmpty()
+                ? namespaceName == null || namespaceName.isEmpty()
+                        ? simpleName : namespaceName + "." + simpleName
+                : namespaceName == null || namespaceName.isEmpty()
+                        ? context.packageName + "." + simpleName
+                        : NamespaceMembers.qualifiedName(context.packageName, namespaceName, simpleName);
+        // The model's name denotes a value, not a type, so the implementation class must not
+        // take that name: a member call on the value would otherwise resolve as a static call.
+        final var generatedName = modelName + "$model";
+        final var className = new Token(TokenType.IDENTIFIER, generatedName, null, model.name.span());
+        final var declaration = new Stmt.ClassDecl(className, List.of(), List.of(contract),
+                List.of(), List.copyOf(properties), new Stmt.Constructor(
+                        new Token(TokenType.IDENTIFIER, "new", null, model.name.span()), false),
+                // The implementation class is public in bytecode: a consumer in another package
+                // calls its getter and inherited contract methods. Its name is unlexable in source
+                // (`$`), so exporting it does not make the model name a type.
+                List.of(), List.of(), List.of(), true, false, List.of(),
+                List.copyOf(storedStateOrder));
+        model.setGeneratedClassName(generatedName);
+        model.setDeclaration(declaration);
+        context.types.add(generatedName);
+        context.classes.put(generatedName, declaration);
+        context.typePackages.put(generatedName, context.packageName);
+        context.declarationPackages.put(generatedName, context.packageName);
+        context.sourcePathsByToken.put(className, context.currentSourcePath);
+    }
+
+    private static TypeDescriptor modelTargetType(final ResolutionContext context,
+                                                  final Expr.ModelLiteral model,
+                                                  final String contractName) {
+        for (final var applied : ContractComposition.closure(context, model.contract)) {
+            if (!applied.declaration().name().lexeme().equals("zeron.lang.Model")) continue;
+            final var arguments = applied.use().typeArguments();
+            if (!arguments.isEmpty()) return arguments.getFirst();
+        }
+        Zeron.resolutionError(new ResolutionError(
+                DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, model.name,
+                "The contract '" + contractName
+                        + "' must require zeron.lang.Model<T> for a model."));
+        return TypeDescriptor.ofInfer();
+    }
+
+    private static void requireModelAssignments(final ResolutionContext context,
+                                                final Expr.ModelLiteral model,
+                                                final Set<String> assigned) {
+        for (final var applied : ContractComposition.closure(context, model.contract)) {
+            if (applied.declaration().name().lexeme().equals("zeron.lang.Model")) continue;
+            for (final var property : applied.declaration().properties()) {
+                if (assigned.contains(property.name().lexeme())) continue;
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, model.name,
+                        "The model must assign the contract property '"
+                                + property.name().lexeme() + "'."));
+            }
         }
     }
 

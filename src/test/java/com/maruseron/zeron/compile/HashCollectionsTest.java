@@ -18,16 +18,16 @@ public final class HashCollectionsTest {
         final var className = "HashCollections" + UUID.randomUUID().toString().replace("-", "");
         final var classFile = Path.of("dist", className + ".class");
         final var source = """
-                import zeron.collections.Map;
-                import zeron.collections.Set;
+                import zeron.collections.HashMap;
+                import zeron.collections.HashSet;
                 import zeron.lang.Hashable;
                 import zeron.lang.Pair;
 
-                fn emptyMapFor<T: Hashable<T>>(): &Map<T, Int> = Map.empty<T, Int>();
-                fn emptySetFor<T: Hashable<T>>(): &Set<T> = Set.empty<T>();
+                fn emptyMapFor<T: Hashable<T>>(): &HashMap<T, Int> = HashMap.empty<T, Int>();
+                fn emptySetFor<T: Hashable<T>>(): &HashSet<T> = HashSet.empty<T>();
 
                 fn mapBehavior(): Boolean {
-                    let mut values = Map.empty<Int, String>();
+                    let mut values = HashMap.empty<Int, String>();
                     let firstInsert = values.put(1, "one");
                     if (firstInsert.isSome()) return false;
                     values.put(9, "nine");
@@ -54,7 +54,7 @@ public final class HashCollectionsTest {
                     }
                     if (values.size != 6 or keySum != 21 or pairCount != 6) return false;
 
-                    let mut initialized = Map.of(
+                    let mut initialized = HashMap.of(
                             Pair<Int, String>.new(12, "twelve"),
                             Pair<Int, String>.new(13, "thirteen"));
                     if (initialized.size != 2 or initialized.get(13).getOrElse("") != "thirteen") {
@@ -73,7 +73,7 @@ public final class HashCollectionsTest {
                 }
 
                 fn setBehavior(): Boolean {
-                    let mut values = Set.empty<Int>();
+                    let mut values = HashSet.empty<Int>();
                     if (not values.add(1)) return false;
                     if (not values.add(9)) return false;
                     if (values.add(1)) return false;
@@ -88,7 +88,7 @@ public final class HashCollectionsTest {
                     for (let value in values) count = count + 1;
                     if (count != 6 or values.size != 6) return false;
 
-                    let mut initialized = Set.of(4, 4, 5);
+                    let mut initialized = HashSet.of(4, 4, 5);
                     if (initialized.size != 2) return false;
                     initialized.clear();
                     return initialized.isEmpty();
@@ -96,7 +96,7 @@ public final class HashCollectionsTest {
 
                 fn collectedSetBehavior(): Boolean {
                     let collected = for item in [1, 1, 2]
-                        collect item into Set.empty<Int>();
+                        collect item into HashSet.empty<Int>();
                     return collected.size == 2 and collected.contains(1) and collected.contains(2);
                 }
                 """;

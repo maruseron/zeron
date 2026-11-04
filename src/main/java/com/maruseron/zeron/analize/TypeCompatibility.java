@@ -6,10 +6,12 @@ import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
-final class TypeCompatibility {
+final class TypeCompatibility implements TypeProjector {
     private final Map<String, Stmt.ClassDecl> classes;
     private final Map<String, Stmt.ContractDecl> contracts;
 
@@ -116,6 +118,41 @@ final class TypeCompatibility {
                 && (canAssign(nullable.baseType(), resolvedType)
                 || resolvedType instanceof ReferenceDescriptor reference
                 && canAssign(nullable.baseType(), reference.baseType()));
+    }
+
+    public Optional<TypeDescriptor> projectTo(final TypeDescriptor source,
+                                              final TypeDescriptor targetBase) {
+        final var sourceUse = ContractComposition.fromType(source);
+        if (sourceUse == null) return Optional.empty();
+
+        final var targetName = targetBase instanceof ReferenceDescriptor reference 
+            ? reference.baseType()
+            : targetBase instanceof GenericDescriptor generic 
+                ? generic.baseType() 
+                : targetBase;
+
+        final var targetContract = contracts.get(targetName.name());
+        if (targetContract == null) return Optional.empty();
+
+        final var closure = ContractComposition.closure(contracts, sourceUse);
+
+        return closure.stream()
+                .filter(applied -> applied.declaration().name().equals(targetContract.name()))
+                .map(this::toTypeDescriptor)
+                .findFirst();
+    }
+
+    private TypeDescriptor toTypeDescriptor(ContractComposition.Applied applied) {
+        final var declaration = applied.declaration();
+        final var arguments = applied.use().typeArguments();
+
+        final var baseType = TypeDescriptor.ofName(declaration.name().lexeme());
+
+        if (arguments.isEmpty()) {
+            return baseType;
+        }
+
+        return TypeDescriptor.genericOf(baseType, arguments);
     }
 
     TypeDescriptor inferenceView(final TypeDescriptor expectedType, final TypeDescriptor actualType) {
@@ -451,8 +488,8 @@ final class TypeCompatibility {
         return true;
     }
 
-    private java.util.List<TypeParameterDescriptor> declarationTypeParameters(final String typeName,
-                                                                               final int arity) {
+    private List<TypeParameterDescriptor> declarationTypeParameters(final String typeName,
+                                                                    final int arity) {
         final var classDeclaration = classes.get(typeName);
         if (classDeclaration != null && classDeclaration.typeParameters().size() == arity) {
             return classDeclaration.typeParameters();

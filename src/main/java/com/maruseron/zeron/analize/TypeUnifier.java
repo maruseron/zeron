@@ -15,9 +15,10 @@ final class TypeUnifier {
     static void unify(final TypeDescriptor pattern,
                       TypeDescriptor actual,
                       final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
-                      final Token where) {
+                      final Token where,
+                      final TypeProjector projector) {
         final var rows = new RowInference();
-        unify(pattern, actual, substitutions, where, rows, true);
+        unify(pattern, actual, substitutions, where, rows, true, projector, false);
         rows.solve(substitutions, where);
     }
 
@@ -25,8 +26,48 @@ final class TypeUnifier {
                       TypeDescriptor actual,
                       final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                       final Token where,
-                      final RowInference rows) {
-        unify(pattern, actual, substitutions, where, rows, true);
+                      final RowInference rows,
+                      final TypeProjector projector) {
+        unify(pattern, actual, substitutions, where, rows, true, projector, false);
+    }
+
+    /// Binds type parameters from an argument during call inference.
+    ///
+    /// Unlike `unify`, a position whose pattern contains no type parameter contributes no
+    /// constraint instead of an equality check. Assignability decides those positions afterwards,
+    /// which is what makes a contravariant callback such as `(Any?) -> Unit` acceptable where
+    /// `(Int) -> Unit` is expected.
+    static void unifyForInference(final TypeDescriptor pattern,
+                                  TypeDescriptor actual,
+                                  final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                                  final Token where,
+                                  final TypeProjector projector) {
+        final var rows = new RowInference();
+        unify(pattern, actual, substitutions, where, rows, true, projector, true);
+        rows.solve(substitutions, where);
+    }
+
+    static void unifyForInference(final TypeDescriptor pattern,
+                                  TypeDescriptor actual,
+                                  final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                                  final Token where,
+                                  final RowInference rows,
+                                  final TypeProjector projector) {
+        unify(pattern, actual, substitutions, where, rows, true, projector, true);
+    }
+
+    /// Binds the row variables of `patternEffects` from `actualEffects`.
+    ///
+    /// A pattern without a row variable contributes no constraint: a pure function value satisfies
+    /// every row, and inclusion in the other direction belongs to assignability.
+    static void bindEffectRows(final List<TypeDescriptor> patternEffects,
+                               final List<TypeDescriptor> actualEffects,
+                               final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                               final Token where) {
+        if (EffectRows.of(patternEffects).variables().isEmpty()) return;
+        final var rows = new RowInference();
+        unifyEffects(patternEffects, actualEffects, substitutions, where, rows, true);
+        rows.solve(substitutions, where);
     }
 
     private static void unify(final TypeDescriptor pattern,
@@ -34,12 +75,15 @@ final class TypeUnifier {
                               final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                               final Token where,
                               final RowInference rows,
-                              final boolean covariant) {
+                              final boolean covariant,
+                              final TypeProjector projector,
+                              final boolean bindOnly) {
+        if (bindOnly && !TypeSubstitution.containsTypeParameter(pattern)) return;
         if (pattern instanceof TypeProjectionDescriptor projection) {
             if (actual instanceof TypeProjectionDescriptor actualProjection) {
                 actual = actualProjection.bound();
             }
-            unify(projection.bound(), actual, substitutions, where, rows, covariant);
+            unify(projection.bound(), actual, substitutions, where, rows, covariant, projector, bindOnly);
             return;
         }
         if (pattern instanceof TypeParameterDescriptor parameter) {
@@ -82,14 +126,14 @@ final class TypeUnifier {
             if (actual instanceof AppliedConstructorDescriptor actualApplied) {
                 if (!applied.constructor().equals(actualApplied.constructor())) {
                     unify(applied.constructor(), actualApplied.constructor(), substitutions, where, rows,
-                            covariant);
+                            covariant, projector, bindOnly);
                 }
-                unify(applied.argument(), actualApplied.argument(), substitutions, where, rows, covariant);
+                unify(applied.argument(), actualApplied.argument(), substitutions, where, rows, covariant, projector, bindOnly);
                 return;
             }
             final var selected = substitutions.get(applied.constructor());
             if (selected instanceof TypeConstructorDescriptor constructor) {
-                unify(constructor.apply(applied.argument()), actual, substitutions, where, rows, covariant);
+                unify(constructor.apply(applied.argument()), actual, substitutions, where, rows, covariant, projector, bindOnly);
                 return;
             }
             if (actual instanceof GenericDescriptor generic && generic.typeParameters().size() == 1) {
@@ -97,7 +141,7 @@ final class TypeUnifier {
                         new TypeConstructorDescriptor(generic.baseType(), java.util.List.of(
                                 TypeDescriptor.ofInfer())));
                 unify(applied.argument(), generic.typeParameters().getFirst(), substitutions, where, rows,
-                        covariant);
+                        covariant, projector, bindOnly);
                 return;
             }
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE, where,
@@ -114,14 +158,14 @@ final class TypeUnifier {
             final var actualBase = actual instanceof NullableDescriptor nullableActual
                     ? nullableActual.baseType()
                     : actual;
-            unify(nullablePattern.baseType(), actualBase, substitutions, where, rows, covariant);
+            unify(nullablePattern.baseType(), actualBase, substitutions, where, rows, covariant, projector, bindOnly);
             return;
         }
         if (pattern instanceof ReferenceDescriptor(var baseType)) {
             final var actualBase = actual instanceof ReferenceDescriptor(var type)
                     ? type
                     : actual;
-            unify(baseType, actualBase, substitutions, where, rows, covariant);
+            unify(baseType, actualBase, substitutions, where, rows, covariant, projector, bindOnly);
             return;
         }
         if (pattern instanceof ArrayDescriptor && actual instanceof ReferenceDescriptor(var baseType)
@@ -130,7 +174,7 @@ final class TypeUnifier {
         }
         if (pattern instanceof ArrayDescriptor(var elementType)
                 && actual instanceof ArrayDescriptor(var actualType)) {
-            unify(elementType, actualType, substitutions, where, rows, covariant);
+            unify(elementType, actualType, substitutions, where, rows, covariant, projector, bindOnly);
             return;
         }
         if (pattern instanceof GenericDescriptor genericPattern
@@ -139,7 +183,7 @@ final class TypeUnifier {
                 && genericPattern.typeParameters().size() == genericActual.typeParameters().size()) {
             for (int i = 0; i < genericPattern.typeParameters().size(); i++) {
                 unify(genericPattern.typeParameters().get(i),
-                        genericActual.typeParameters().get(i), substitutions, where, rows, covariant);
+                        genericActual.typeParameters().get(i), substitutions, where, rows, covariant, projector, bindOnly);
             }
             return;
         }
@@ -154,7 +198,7 @@ final class TypeUnifier {
                 && constructorPattern.arguments().size() == constructorActual.arguments().size()) {
             for (int i = 0; i < constructorPattern.arguments().size(); i++) {
                 unify(constructorPattern.arguments().get(i), constructorActual.arguments().get(i),
-                        substitutions, where, rows, covariant);
+                        substitutions, where, rows, covariant, projector, bindOnly);
             }
             return;
         }
@@ -164,17 +208,28 @@ final class TypeUnifier {
                 && (functionPattern.receiverType() == null) == (functionActual.receiverType() == null)) {
             if (functionPattern.receiverType() != null) {
                 unify(functionPattern.receiverType(), functionActual.receiverType(), substitutions, where,
-                        rows, covariant);
+                        rows, covariant, projector, bindOnly);
             }
             for (int i = 0; i < functionPattern.arity(); i++) {
                 unify(functionPattern.parameters().get(i), functionActual.parameters().get(i),
-                        substitutions, where, rows, !covariant);
+                        substitutions, where, rows, !covariant, projector, bindOnly);
             }
             unify(functionPattern.returnType(), functionActual.returnType(), substitutions, where, rows,
-                    covariant);
+                    covariant, projector, bindOnly);
             unifyEffects(functionPattern.raisedEffects(), functionActual.raisedEffects(),
                     substitutions, where, rows, covariant);
             return;
+        }
+        if (pattern instanceof GenericDescriptor genericPattern
+                && actual instanceof GenericDescriptor genericActual
+                && !genericPattern.baseType().equals(genericActual.baseType())) {
+
+            final var projected = projector.projectTo(genericActual, genericPattern.baseType());
+
+            if (projected.isPresent()) {
+                unify(pattern, projected.get(), substitutions, where, rows, covariant, projector, bindOnly);
+                return;
+            }
         }
         if (pattern.equals(actual)) return;
         if (!pattern.equals(actual)

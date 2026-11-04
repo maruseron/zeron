@@ -686,6 +686,16 @@ public final class Resolver {
                 return TypeSubstitution.substitute(contractUse.typeArguments().getFirst(), substitutions);
             }
         }
+        final var contract = context.contracts.get(baseName);
+        if (contract != null) {
+            final var substitutions = substitutionsFor(context, contract.typeParameters(), arrayType);
+            for (final var contractRequirements : contract.requiredContracts()) {
+                if (!iterableName.equals(contractRequirements.name().lexeme()) 
+                        || contractRequirements.typeArguments().size() != 1) continue;
+                recordIterationProtocol(context, where, iterableName);
+                return TypeSubstitution.substitute(contractRequirements.typeArguments().getFirst(), substitutions);
+            }
+        }
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_ITERABLE, where,
                 "Iterative control flow requires Array<T>, an integer range literal, or a type conforming to Iterable<T>."));
         return TypeDescriptor.ofInfer();

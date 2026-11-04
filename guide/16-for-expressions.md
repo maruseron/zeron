@@ -19,10 +19,10 @@ Each `for name in source` clause introduces a nested generator. Later generators
 each path that reaches them, and traversed completely before the earlier generator advances:
 
 ```zeron
-import zeron.collections.List;
+import zeron.collections.ArrayList;
 
 let expanded = for number in [1, 2]
-    for result in List<Int>.of(number, number * 10)
+    for result in ArrayList<Int>.of(number, number * 10)
     yield result;
 ```
 
@@ -67,15 +67,15 @@ Use `collect expression into sink` as the final clause when the values should be
 sink immediately:
 
 ```zeron
-import zeron.collections.List;
+import zeron.collections.ArrayList;
 
 let evens = for number in [1, 2, 3, 4, 5, 6]
     if number %% 2 == 0
-    collect number * 10 into List<Int>.empty();
+    collect number * 10 into ArrayList<Int>.empty();
 ```
 
 The expression returns the same sink after adding each projected value, so `evens` is a
-`List<Int>`. The sink is evaluated once before traversal. If a source, clause, projection, or sink
+`ArrayList<Int>`. The sink is evaluated once before traversal. If a source, clause, projection, or sink
 addition fails, evaluation stops; earlier effects and sink mutations are not rolled back.
 
 `yield` and `collect` are alternatives, and exactly one result clause is required at the end. Use

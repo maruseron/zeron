@@ -19,7 +19,7 @@ final class LambdaResolver {
         if (TypeSubstitution.containsTypeParameter(expectedType)) {
             unifyFunctionReferenceType(context, scheme, expectedType, substitutions, where);
         } else {
-            TypeUnifier.unify(scheme, expectedType, substitutions, where);
+            TypeUnifier.unify(scheme, expectedType, substitutions, where, context.typeCompatibility);
         }
         for (final var parameter : scheme.typeParameters()) {
             if (!substitutions.containsKey(parameter)) {
@@ -123,7 +123,7 @@ final class LambdaResolver {
             if (TypeSubstitution.containsTypeParameter(expectedFunction)) {
                 unifyFunctionReferenceType(context, sourceType, expectedFunction, substitutions, reference.name);
             } else {
-                TypeUnifier.unify(sourceType, expectedFunction, substitutions, reference.name);
+                TypeUnifier.unify(sourceType, expectedFunction, substitutions, reference.name, context.typeCompatibility);
             }
         }
 
@@ -184,7 +184,7 @@ final class LambdaResolver {
                 substitutions.put(parameter, actual);
                 return;
             }
-            TypeUnifier.unify(previous, actual, substitutions, where);
+            TypeUnifier.unify(previous, actual, substitutions, where, context.typeCompatibility);
             return;
         }
         if (actual instanceof TypeParameterDescriptor) return;
@@ -231,9 +231,11 @@ final class LambdaResolver {
             }
             unifyFunctionReferenceType(context, functionPattern.returnType(),
                     functionActual.returnType(), substitutions, where);
+            TypeUnifier.bindEffectRows(functionPattern.raisedEffects(),
+                    functionActual.raisedEffects(), substitutions, where);
             return;
         }
-        TypeUnifier.unify(pattern, actual, substitutions, where);
+        TypeUnifier.unify(pattern, actual, substitutions, where, context.typeCompatibility);
     }
 
     static FunctionDescriptor functionType(final ResolutionContext context, final TypeDescriptor type) {
@@ -497,6 +499,9 @@ final class LambdaResolver {
                         || referencesAnyVariable(context, arm.expression(), armNames);
             });
             case Expr.HandlerLiteral handler -> referencesAnyVariable(context, handler.implementation, names);
+            case Expr.ModelLiteral literal -> literal.assignments.stream()
+                    .anyMatch(assignment -> referencesAnyVariable(context, assignment.value(), names));
+            case Expr.PropertyIdReference _ -> false;
             case Expr.Logical logical -> referencesAnyVariable(context, logical.left, names)
                 || referencesAnyVariable(context, logical.right, names);
             case Expr.Coalesce coalesce -> referencesAnyVariable(context, coalesce.left, names)

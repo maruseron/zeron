@@ -92,15 +92,18 @@ of all the numbers first. The `IntRange` type is provided in `zeron.ranges`.
 
 ## Lists and streams
 
-The `zeron.collections` package also provides `List<T>` and `Stream<T>`. Both can be visited with
-a `for` loop and can work with values of many types, but they are useful for different jobs.
+The `zeron.collections` package also provides `ArrayList<T>`, `HashSet<T>`, `HashMap<K, V>`, and
+`Stream<T>`. All of them can be visited with a `for` loop, but they are useful for different jobs.
 
-Use `List<T>` when you want a growable collection that stores values and can be changed:
+`List<T>`, `Set<T>`, and `Map<K, V>` are contracts, so a function can accept any implementation.
+The standard library ships one implementation of each: `ArrayList<T>` keeps its elements in order
+and can be indexed, `HashSet<T>` holds distinct values, and `HashMap<K, V>` associates keys with
+values. Build a collection through its class:
 
 ```zeron
-import zeron.collections.List;
+import zeron.collections.ArrayList;
 
-let mut names: &List<String> = List<String>.empty();
+let mut names: &ArrayList<String> = ArrayList<String>.empty();
 names.add("Ada");
 names.add("Grace");
 let firstName = names.at(0);
@@ -108,6 +111,54 @@ let firstName = names.at(0);
 
 The list keeps its items so you can add, remove, or look them up later. Use it when you need to
 build up a collection or keep one around for repeated access.
+
+A read-only parameter names the contract, so every implementation can be passed:
+
+```zeron
+import zeron.collections.List;
+
+fn total(values: List<Int>): Int {
+    let mut sum = 0;
+    for (let value in values) sum = sum + value;
+    return sum;
+}
+```
+
+Every `Iterable` also offers the terminal operations `forEach`, `fold`, `any`, `all`, `count`, and
+`isEmpty`. The callback-taking ones are effect-row-polymorphic: their callback runs during the
+call, so its effects become part of the caller's row, and `any`/`all` stop at the first decisive
+element.
+
+Mutation is expressed by capability contracts rather than by one mutable collection contract. A
+function that adds elements takes `Sink<T>`, one that edits by position takes
+`PositionalEditor<T>`, one that writes by key takes `KeyedSink<K, V>`, and one that drops a value
+takes `Removable<T>`. `Sized`, `RandomAccess`, `Reversible`, `Sortable`, and `Clearable` describe
+the remaining optional capabilities.
+
+The standard library also ships baseline alternative implementations, which show that the contracts
+do not prescribe storage:
+
+| Type | Representation | Notable capabilities |
+| --- | --- | --- |
+| `LinkedList<T>` | mutable doubly linked list | `List`, `Sequenced`, `Deque`, `Sink`, `Clearable` |
+| `ArrayDeque<T>` | mutable circular array | `List`, `Sequenced`, `Deque`, `RandomAccess`, `Sink`, `Clearable` |
+| `ConsList<T>` | persistent singly linked list | `List`, `Sequenced`; `prepend` returns a new list |
+| `IdentityHashMap<K, V>` | hash table keyed by reference identity | `Map`, `KeyedSink`, `Sized`, `Clearable` |
+
+`Deque<T>` is a capability contract requiring `List<T> + Sequenced<T>`, with `addFirst`, `addLast`,
+`removeFirst`, and `removeLast`. `LinkedList` and `ArrayDeque` implement it; `ConsList` does not,
+because a persistent list cannot mutate its ends. A function that only needs those operations can
+take `&Deque<Int>`. `IdentityHashMap` compares keys with `===`, so its keys need neither `Eq` nor
+`Hashable`, and two structurally equal objects are distinct keys.
+
+```zeron
+import zeron.collections.ArrayDeque;
+
+let mut deque = ArrayDeque<Int>.empty();
+deque.addFirst(1);
+deque.addLast(3);
+let first = deque.removeFirst();
+```
 
 A `Stream<T>` is useful when you want to describe steps for producing or transforming values. Its
 operations include `map`, `filter`, `flatMap`, `take`, `drop`, `takeWhile`, and `dropWhile`:

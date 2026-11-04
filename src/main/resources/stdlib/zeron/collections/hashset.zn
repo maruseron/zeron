@@ -1,0 +1,58 @@
+package zeron.collections;
+
+import zeron.lang.Hashable;
+
+/// A collection of distinct values with membership tests by equality.
+///
+/// Iteration order is not specified. Membership and insertion rely on `Hashable<T>`, which implies
+/// `Eq<T>`; mutating operations require a mutable reference to the set.
+public class HashSet<T: Hashable<T>>
+    is Iterable<T>,
+       Sized<T>,
+       Sink<T>,
+       Removable<T>,
+       Clearable,
+       Set<T> {
+    values: &HashMap<T, Unit>;
+
+    private constructor new;
+
+    /// Wraps `values`, taking its keys as the set's elements.
+    public constructor withMap(values: &HashMap<T, Unit>) = HashSet<T>.new(values);
+
+    /// Creates an empty set.
+    public constructor empty() = HashSet<T>.withMap(HashMap.empty<T, Unit>());
+
+    /// Creates a set holding each distinct element of `elements`.
+    public constructor of(elements: T...) {
+        let mut result = HashSet.empty<T>();
+        for (let element in elements) result.add(element);
+        return result;
+    }
+
+    /// The number of elements in the set.
+    public property size: Int {
+        get = values.size;
+    }
+
+    /// Whether the set has no elements.
+    public isEmpty(): Boolean = values.isEmpty();
+
+    /// The number of elements, in constant time.
+    public count(): Int = this.size;
+
+    /// Whether `value` is an element of the set.
+    public contains(value: T): Boolean = values.containsKey(value);
+
+    /// Adds `value` to the set, returning `true` when it was not already present.
+    public mut add(value: T): Boolean = not values.put(value, ()).isSome();
+
+    /// Removes `value` from the set, returning `true` when it was present.
+    public mut remove(value: T): Boolean = values.remove(value).isSome();
+
+    /// Removes every element from the set.
+    public mut clear(): Unit = values.clear();
+
+    /// Returns an iterator over the set's elements, in unspecified order.
+    public iterator(): &Iterator<T> = values.keyIterator();
+}

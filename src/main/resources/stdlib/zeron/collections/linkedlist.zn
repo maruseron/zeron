@@ -1,0 +1,265 @@
+package zeron.collections;
+
+import zeron.control.Foldable;
+
+class LinkedListNode<T: mut> {
+    storedValue: T;
+    previousNode: &LinkedListNode<T>?;
+    nextNode: &LinkedListNode<T>?;
+
+    private constructor new;
+
+    public constructor of(
+        value: T,
+        previous: &LinkedListNode<T>?,
+        next: &LinkedListNode<T>?
+    ) = LinkedListNode<T>.new(value, previous, next);
+
+    public value(): T = this.storedValue;
+
+    public previous(): &LinkedListNode<T>? = this.previousNode;
+
+    public next(): &LinkedListNode<T>? = this.nextNode;
+
+    public mut replaceValue(value: T): Unit {
+        this.storedValue = value;
+    }
+
+    public mut linkPrevious(node: &LinkedListNode<T>?): Unit {
+        this.previousNode = node;
+    }
+
+    public mut linkNext(node: &LinkedListNode<T>?): Unit {
+        this.nextNode = node;
+    }
+}
+
+class LinkedListIterator<T: mut> is Iterator<T> {
+    current: &LinkedListNode<T>?;
+
+    private constructor new;
+
+    public constructor from(node: &LinkedListNode<T>?) = LinkedListIterator<T>.new(node);
+
+    public mut next(): Step<T> {
+        let node = this.current;
+        if (node is null) return Step<T>.Done();
+        this.current = node.next();
+        return Step.Yield(node.value());
+    }
+}
+
+/// A doubly linked sequence of values.
+///
+/// A `LinkedList` keeps a reference to its first and last node, so adding or removing at either end
+/// is constant time and indexing walks from the nearer end. The list is mutable and does not
+/// declare `PositionalEditor`, because editing the middle of a linked list has no index-based
+/// constant-time operation.
+public class LinkedList<T: mut>
+    is Iterable<T>,
+       Sized<T>,
+       List<T>,
+       Sequenced<T>,
+       Deque<T>,
+       Sink<T>,
+       Clearable,
+       Reversible<LinkedList<_>>,
+       InPlaceReversible<LinkedList<_>>,
+       Foldable<LinkedList<_>>,
+       Collector<LinkedList<_>> {
+    head: &LinkedListNode<T>?;
+    tail: &LinkedListNode<T>?;
+    elementCount: Int;
+
+    private constructor new;
+
+    /// Creates an empty list.
+    public constructor empty() = LinkedList<T>.new(null, null, 0);
+
+    /// Creates a list holding each argument, in order.
+    public constructor of(elements: T...) = LinkedList<T>.fromArray(elements);
+
+    /// Creates a list holding a copy of every element of `source`.
+    public constructor fromArray(source: Array<T>) {
+        let mut result = LinkedList<T>.empty();
+        let mut index = 0;
+        while (index < source.length) {
+            result.add(source[index]);
+            index = index + 1;
+        }
+        return result;
+    }
+
+    /// The number of elements in the list.
+    public property size: Int {
+        get = elementCount;
+    }
+
+    /// Whether the list has no elements.
+    public isEmpty(): Boolean = elementCount == 0;
+
+    /// The number of elements, in constant time.
+    public count(): Int = this.size;
+
+    /// Returns the first element, or `None` when the list is empty.
+    public first(): Option<T> {
+        let node = this.head;
+        if (node is null) return Option.None<T>();
+        return Option.Some(node.value());
+    }
+
+    /// Returns the last element, or `None` when the list is empty.
+    public last(): Option<T> {
+        let node = this.tail;
+        if (node is null) return Option.None<T>();
+        return Option.Some(node.value());
+    }
+
+    /// Returns the element at `index`, or `None` when the index is out of range.
+    ///
+    /// The walk starts at the nearer end, so this is `O(min(index, size - index))`.
+    public at(index: Int): Option<T> {
+        if (index < 0 or index >= elementCount) return Option.None<T>();
+        if (index < elementCount / 2) {
+            let mut node = this.head;
+            let mut position = 0;
+            while (position < index) {
+                let current = node;
+                if (current is null) return Option.None<T>();
+                node = current.next();
+                position = position + 1;
+            }
+            let current = node;
+            if (current is null) return Option.None<T>();
+            return Option.Some(current.value());
+        }
+        let mut node = this.tail;
+        let mut position = elementCount - 1;
+        while (position > index) {
+            let current = node;
+            if (current is null) return Option.None<T>();
+            node = current.previous();
+            position = position - 1;
+        }
+        let current = node;
+        if (current is null) return Option.None<T>();
+        return Option.Some(current.value());
+    }
+
+    /// Appends `value` and returns `true`; a list always accepts another element.
+    public mut add(value: T): Boolean {
+        this.addLast(value);
+        return true;
+    }
+
+    /// Adds `value` at the initial end of the list.
+    public mut addFirst(value: T): Unit {
+        let node = LinkedListNode<T>.of(value, null, this.head);
+        let head = this.head;
+        if (head is null) {
+            this.tail = node;
+        } else {
+            head.linkPrevious(node);
+        }
+        this.head = node;
+        this.elementCount = elementCount + 1;
+    }
+
+    /// Adds `value` at the final end of the list.
+    public mut addLast(value: T): Unit {
+        let node = LinkedListNode<T>.of(value, this.tail, null);
+        let tail = this.tail;
+        if (tail is null) {
+            this.head = node;
+        } else {
+            tail.linkNext(node);
+        }
+        this.tail = node;
+        this.elementCount = elementCount + 1;
+    }
+
+    /// Removes and returns the first element, or `None` when the list is empty.
+    public mut removeFirst(): Option<T> {
+        let node = this.head;
+        if (node is null) return Option.None<T>();
+        let next = node.next();
+        this.head = next;
+        if (next is null) {
+            this.tail = null;
+        } else {
+            next.linkPrevious(null);
+        }
+        this.elementCount = elementCount - 1;
+        return Option.Some(node.value());
+    }
+
+    /// Removes and returns the last element, or `None` when the list is empty.
+    public mut removeLast(): Option<T> {
+        let node = this.tail;
+        if (node is null) return Option.None<T>();
+        let previous = node.previous();
+        this.tail = previous;
+        if (previous is null) {
+            this.head = null;
+        } else {
+            previous.linkNext(null);
+        }
+        this.elementCount = elementCount - 1;
+        return Option.Some(node.value());
+    }
+
+    /// Removes every element.
+    public mut clear(): Unit {
+        this.head = null;
+        this.tail = null;
+        this.elementCount = 0;
+    }
+
+    /// Combines the elements from left to right into a single value.
+    public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R {
+        let mut result = initial;
+        let mut node = this.head;
+        while (node is not null) {
+            let current = node;
+            result = combine(result, current.value());
+            node = current.next();
+        }
+        return result;
+    }
+
+    implementation InPlaceReversible<LinkedList<_>> {
+        fn reverse<A>(this: &LinkedList<A>): &LinkedList<A> {
+            let mut left = this.head;
+            let mut right = this.tail;
+            while (left is not null and right is not null) {
+                let leftNode = left;
+                let rightNode = right;
+                if (leftNode === rightNode) break;
+                let tmp = leftNode.value();
+                leftNode.replaceValue(rightNode.value());
+                rightNode.replaceValue(tmp);
+                left = leftNode.next();
+                right = rightNode.previous();
+            }
+            return this;
+        }
+    }
+
+    implementation Reversible<LinkedList<_>> {
+        fn reversed<A>(this: LinkedList<A>): LinkedList<A> {
+            let mut result = LinkedList.empty<A>();
+            for (let value in this) result.addFirst(value);
+            return result;
+        }
+    }
+
+    delegating implementation Foldable<LinkedList<_>> {
+    }
+
+    delegating implementation Collector<LinkedList<_>> {
+        fn empty<A: mut>(): &LinkedList<A> = LinkedList<A>.empty();
+    }
+
+    /// Returns an iterator over the elements, from first to last.
+    public iterator(): &Iterator<T> = LinkedListIterator<T>.from(this.head);
+}

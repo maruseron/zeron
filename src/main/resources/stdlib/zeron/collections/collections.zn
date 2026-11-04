@@ -8,6 +8,15 @@ public contract RandomAccess<T: mut> {
     at(index: Int): Option<T>;
 }
 
+/// A collection with a known, constant-time element count.
+///
+/// Finiteness is anchored in the signature: `size` can only be answered by a collection that ends.
+/// A value that can only be counted by traversal is an `Iterable`, not a `Sized` collection.
+public contract Sized<T: mut> requires Iterable<T> {
+    /// The number of elements the collection holds.
+    property size: Int;
+}
+
 /// A collection with a defined first and last element.
 public contract Sequenced<T: mut> {
     /// Returns the first element, or `None` when the collection is empty.
@@ -18,19 +27,52 @@ public contract Sequenced<T: mut> {
     last(): Option<T>;
 }
 
-/// A collection that can be traversed backwards.
+/// A sequence that can add and remove elements at both ends.
+///
+/// A deque is a `List` and exposes its first and last elements through `Sequenced`. Implementations
+/// may provide constant-time access at both ends; the contract does not require it.
+public contract Deque<T: mut> requires List<T> + Sequenced<T> {
+    /// Adds `value` at the initial end of the sequence.
+    mut addFirst(value: T): Unit;
+
+    /// Adds `value` at the final end of the sequence.
+    mut addLast(value: T): Unit;
+
+    /// Removes and returns the first element, or `None` when the sequence is empty.
+    mut removeFirst(): Option<T>;
+
+    /// Removes and returns the last element, or `None` when the sequence is empty.
+    mut removeLast(): Option<T>;
+}
+
+/// A collection that can produce a reversed copy.
 ///
 /// Reversing changes the order of the elements only; element values themselves are not modified.
 public contract Reversible<C<_>> {
-    /// Reverses the collection in place and returns it.
-    mut reverse<T>(this: C<T>): C<T>;
-
     /// Returns a reversed copy, leaving the receiver unchanged.
     reversed<T>(this: C<T>): C<T>;
 }
 
-/// A collection whose elements can be reordered by a comparison.
+/// A collection that can be reversed in place.
+///
+/// Persistent implementations provide `Reversible` and do not declare this capability.
+public contract InPlaceReversible<C<_>> {
+    /// Reverses the collection in place and returns it.
+    mut reverse<T>(this: C<T>): C<T>;
+}
+
+/// A collection that can produce a reordered copy.
 public contract Sortable<C<_>> {
+    /// Returns a sorted copy, leaving the receiver unchanged.
+    sortedBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): C<T>;
+
+    /// Returns a copy sorted by the natural order of its elements.
+    default sorted<T: nullable + mut + Comparable<T>>(this: C<T>): C<T> =
+        this.sortedBy((a, b) -> a.compareTo(b));
+}
+
+/// A collection that can be reordered in place.
+public contract InPlaceSortable<C<_>> {
     /// Sorts the collection in place, using `compare` to order pairs of elements.
     ///
     /// The sort is stable only if an implementation documents it as such.
@@ -39,13 +81,6 @@ public contract Sortable<C<_>> {
     /// Sorts the collection in place using the natural order of its elements.
     default mut sort<T: nullable + mut + Comparable<T>>(this: &C<T>): Unit =
         this.sortBy((a, b) -> a.compareTo(b));
-
-    /// Returns a sorted copy, leaving the receiver unchanged.
-    sortedBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): C<T>;
-
-    /// Returns a copy sorted by the natural order of its elements.
-    default sorted<T: nullable + mut + Comparable<T>>(this: C<T>): C<T> = 
-        this.sortedBy((a, b) -> a.compareTo(b));
 }
 
 /// A collection that accepts added values.
@@ -54,6 +89,59 @@ public contract Sink<T: mut> {
     ///
     /// Collections that reject duplicates report `false` for an element they already hold.
     mut add(value: T): Boolean;
+}
+
+/// A collection that can be edited by position.
+///
+/// A list that cannot be edited in place, such as a persistent or linked list, does not declare this
+/// capability.
+public contract PositionalEditor<T: mut> {
+    /// Inserts `value` before the element currently at `index`, returning `false` when the index is
+    /// out of range.
+    mut insert(index: Int, value: T): Boolean;
+
+    /// Removes the element at `index` and returns it, or `None` when the index is out of range.
+    mut removeAt(index: Int): Option<T>;
+
+    /// Replaces the element at `index` and returns the previous element, or `None` when the index is
+    /// out of range.
+    mut replaceAt(index: Int, value: T): Option<T>;
+}
+
+/// A collection that can drop a value by equality.
+public contract Removable<T: mut> {
+    /// Removes one occurrence of `value`, returning `true` when it was present.
+    mut remove(value: T): Boolean;
+}
+
+/// An associative collection that accepts writes by key.
+///
+/// The callbacks run during the call, so their effect row propagates to the caller.
+public contract KeyedSink<K, V: mut> {
+    /// Stores `value` for `key`, returning the value it replaced or `None` for a new key.
+    mut put(key: K, value: V): Option<V>;
+
+    /// Stores `value` only when `key` is absent, returning the previously stored value, if any.
+    mut putIfAbsent(key: K, value: V): Option<V>;
+
+    /// Recomputes the entry for `key` from its current value, storing or removing it as the result
+    /// says, and returns that result.
+    mut compute<E: effect...>(
+        key: K,
+        transform: (K, Option<V>) -> Option<V> raises E
+    ): Option<V> raises E;
+
+    /// Returns the value stored for `key`, computing and storing `transform(key)` when absent.
+    mut computeIfAbsent<E: effect...>(key: K, transform: (K) -> V raises E): V raises E;
+
+    /// Removes the entry for `key`, returning the value it held or `None` when the key is absent.
+    mut remove(key: K): Option<V>;
+}
+
+/// A collection whose elements can all be discarded at once.
+public contract Clearable {
+    /// Removes every element.
+    mut clear(): Unit;
 }
 
 /// A collection that can be built incrementally from its elements.

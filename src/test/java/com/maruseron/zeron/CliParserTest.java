@@ -73,7 +73,7 @@ public final class CliParserTest {
         assertEquals(List.of(source.toString()), files.sourceFiles());
         assertEquals(List.of(library), files.libraries());
         assertEquals(List.of(host), files.javaClassPathRoots());
-        assertFalse(files.bundleStandardLibrarySources());
+        assertEquals(StandardLibraryMode.COMPILED, files.standardLibraryMode());
         assertEquals(output, files.jarOutput());
         assertTrue(files.debug());
 
@@ -85,6 +85,7 @@ public final class CliParserTest {
         assertEquals(List.of(sourceRoot), project.sourceRoots());
         assertEquals(entry, project.entry());
         assertTrue(project.sourceFiles().isEmpty());
+        assertEquals(StandardLibraryMode.DEFAULT, project.standardLibraryMode());
     }
 
     @Test
@@ -168,7 +169,7 @@ public final class CliParserTest {
                 "--root", sourceRoot.toString(), "--entry", "first.zn", "--entry", "second.zn",
                 "--stdlib", "compiled", "--stdlib", "source");
         assertEquals(Path.of("second.zn"), compilation.entry());
-        assertTrue(compilation.bundleStandardLibrarySources());
+        assertEquals(StandardLibraryMode.SOURCE, compilation.standardLibraryMode());
     }
 
     @Test

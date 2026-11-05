@@ -75,7 +75,12 @@ final class StatementResolver {
                 }
                 context.frame.flowState.markUnreachable();
             }
-            case Stmt.Expression(Expr expression) -> ExpressionFlowResolver.resolveExpression(context, expression);
+            case Stmt.Expression(Expr expression) -> {
+                final var resultType = ExpressionFlowResolver.resolveExpression(context, expression);
+                if (resultType instanceof NeverDescriptor) {
+                    context.frame.flowState.markUnreachable();
+                }
+            }
             case Stmt.Function fn -> {
                 TypeResolver.validateFunctionTypes(context, fn.typeDescriptor(), fn.name());
                 TypeResolver.validateTypeParameterBounds(context, fn.typeDescriptor(), fn.name());

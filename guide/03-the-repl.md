@@ -18,13 +18,16 @@ Bindings and imports remain available in later submissions:
 
 The REPL prints values for expressions but does not treat every declaration as a value to display.
 Use a follow-up expression to inspect the result of a binding or call. For example, define a
-function in one submission and call it in the next:
+`let`-bound function value in one submission and call it in the next:
 
 ```text
-> fn square(n: Int): Int = n * n
+> let square: (Int) -> Int = (n: Int) -> n * n
 > square(6)
 36
 ```
+
+Top-level `fn`, type, and contract declarations are not persistent REPL declarations. Put reusable
+functions and types in source files; use bindings and imports for interactive work.
 
 Use `let mut` for a binding that you intend to reassign. Imports entered at the prompt are also
 persistent; to use a library type, import it before the expression that refers to it. Redeclaring

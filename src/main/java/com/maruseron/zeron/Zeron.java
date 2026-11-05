@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static java.lang.IO.println;
 
@@ -57,6 +58,9 @@ public class Zeron {
             return runCliInvocation(args);
         } catch (final ResolutionError _) {
             return exitCode();
+        } catch (final IllegalArgumentException exception) {
+            System.err.println("error: " + exception.getMessage());
+            return USAGE_ERROR_EXIT_CODE;
         }
     }
 
@@ -122,10 +126,10 @@ public class Zeron {
         try {
             if (command.entry() != null) {
                 runProject(command.sourceRoots(), command.entry(), command.libraries(),
-                        command.javaClassPathRoots(), command.bundleStandardLibrarySources(), outputDirectory);
+                        command.javaClassPathRoots(), command.standardLibraryMode(), outputDirectory);
             } else {
                 runFiles(command.sourceFiles(), command.libraries(), command.javaClassPathRoots(),
-                        command.bundleStandardLibrarySources(), outputDirectory);
+                        command.standardLibraryMode(), outputDirectory);
             }
             if (command.jarOutput() != null && exitCode() == 0) {
                 ZeronLibraryJar.write(outputDirectory, command.jarOutput());
@@ -144,6 +148,7 @@ public class Zeron {
         }
 
         Files.createDirectories(sourcePath.getParent());
+        final var standardLibraryMode = bundledStandardLibraryJar().isPresent() ? "compiled" : "source";
         var manifestCreated = false;
         try {
             Files.writeString(manifestPath, """
@@ -153,8 +158,8 @@ public class Zeron {
                     output = "dist"
 
                     [platform]
-                    stdlib = "source"
-                    """, java.nio.file.StandardOpenOption.CREATE_NEW);
+                    stdlib = "%s"
+                    """.formatted(standardLibraryMode), java.nio.file.StandardOpenOption.CREATE_NEW);
             manifestCreated = true;
             Files.writeString(sourcePath, """
                     fn main() {
@@ -170,12 +175,12 @@ public class Zeron {
 
     private static int runProjectCommand(final CliParser.ProjectCommand command) throws IOException {
         final var project = command.project();
-        final var mainClass = runProject(project.sourceRoots(), project.entry(), project.libraryRoots(),
-                project.javaClassPathRoots(), project.bundleStandardLibrarySources(),
+        final var compilation = runProject(project.sourceRoots(), project.entry(), project.libraryRoots(),
+                project.javaClassPathRoots(), project.standardLibraryMode(),
                 project.outputDirectory());
-        if (!command.launch() || exitCode() != 0) return exitCode();
-        return runGeneratedClass(mainClass, project.outputDirectory(),
-                project.libraryRoots(), project.javaClassPathRoots());
+        if (compilation == null || !command.launch() || exitCode() != 0) return exitCode();
+        return runGeneratedClass(compilation.mainClass(), project.outputDirectory(),
+                compilation.libraryRoots(), project.javaClassPathRoots());
     }
 
     private static int exitCode() {
@@ -244,11 +249,10 @@ public class Zeron {
     private static void runFiles(final List<String> paths,
                                  final List<Path> libraryRoots,
                                  final List<Path> javaClassPathRoots,
-                                 final boolean bundleStandardLibrarySources,
+                                 final StandardLibraryMode standardLibraryMode,
                                  final Path outputDirectory) throws IOException {
-        final var libraries = loadLibraries(libraryRoots);
+        final var setup = resolveStandardLibrary(standardLibraryMode, libraryRoots);
         validateJavaClassPathRoots(javaClassPathRoots);
-        validateStandardLibraryMode(libraries, bundleStandardLibrarySources);
         final var units = new ArrayList<CompilationUnit>();
         for (final var path : paths) {
             final var sourcePath = Paths.get(path);
@@ -267,19 +271,18 @@ public class Zeron {
         final var programName = packageName.isEmpty()
                 ? sourceClassName(Paths.get(paths.getFirst()))
                 : packageName + "." + sourceClassName(Paths.get(paths.getFirst()));
-        runUnits(units, programName, packageName, libraries,
-            bundleStandardLibrarySources, javaClassPathRoots, outputDirectory);
+        runUnits(units, programName, packageName, setup.libraries(),
+            setup.bundleStandardLibrarySources(), javaClassPathRoots, outputDirectory);
     }
 
-    private static String runProject(final List<Path> roots,
+    private static ProjectCompilation runProject(final List<Path> roots,
                                    final Path entry,
                                    final List<Path> libraryRoots,
                                    final List<Path> javaClassPathRoots,
-                                   final boolean bundleStandardLibrarySources,
+                                   final StandardLibraryMode standardLibraryMode,
                                    final Path outputDirectory) throws IOException {
-        final var libraries = loadLibraries(libraryRoots);
+        final var setup = resolveStandardLibrary(standardLibraryMode, libraryRoots);
         validateJavaClassPathRoots(javaClassPathRoots);
-        validateStandardLibraryMode(libraries, bundleStandardLibrarySources);
         final var absoluteRoots = roots.stream().map(path -> path.toAbsolutePath().normalize()).toList();
         final var absoluteEntry = entry.isAbsolute()
                 ? entry.normalize()
@@ -343,9 +346,9 @@ public class Zeron {
         final var programName = entryUnit.packageName().isEmpty()
                 ? sourceClassName(absoluteEntry)
                 : entryUnit.packageName() + "." + sourceClassName(absoluteEntry);
-        runUnits(units, programName, entryUnit.packageName(), libraries,
-            bundleStandardLibrarySources, javaClassPathRoots, outputDirectory);
-        return programName;
+        runUnits(units, programName, entryUnit.packageName(), setup.libraries(),
+            setup.bundleStandardLibrarySources(), javaClassPathRoots, outputDirectory);
+        return new ProjectCompilation(programName, setup.libraryRoots());
     }
 
     private static int sourceRootIndex(final List<Path> roots, final Path sourcePath) {
@@ -380,8 +383,48 @@ public class Zeron {
         resolution.errors().forEach(Zeron::reportResolutionDiagnostic);
         if (!resolution.errors().isEmpty()) return;
 
+        cleanOutputDirectory(outputDirectory, units);
         final var compilation = compiler.compileWithDiagnostics();
         compilation.diagnostics().forEach(Zeron::reportCompilationDiagnostic);
+    }
+
+    static void cleanOutputDirectory(final Path outputDirectory,
+                                     final List<CompilationUnit> units) throws IOException {
+        final var target = outputDirectory.toAbsolutePath().normalize();
+        final var currentDirectory = Path.of("").toAbsolutePath().normalize();
+        if (target.getParent() == null) {
+            throw new IllegalArgumentException("Refusing to clean the filesystem root as an output directory.");
+        }
+        if (target.equals(currentDirectory)) {
+            throw new IllegalArgumentException(
+                    "Refusing to clean the current directory as an output directory: " + target);
+        }
+        final var home = System.getProperty("user.home");
+        if (home != null && !home.isBlank()
+                && target.equals(Path.of(home).toAbsolutePath().normalize())) {
+            throw new IllegalArgumentException(
+                    "Refusing to clean the user home directory as an output directory: " + target);
+        }
+        if (Files.exists(target) && !Files.isDirectory(target)) {
+            throw new IllegalArgumentException("Output path is not a directory: " + target);
+        }
+        if (Files.exists(target.resolve("zeron.toml")) || Files.exists(target.resolve(".git"))) {
+            throw new IllegalArgumentException(
+                    "Refusing to clean a project or repository directory as an output directory: " + target);
+        }
+        for (final var unit : units) {
+            final var sourcePath = unit.sourcePath();
+            if (sourcePath == null || sourcePath.isBlank()) continue;
+            final var source = Path.of(sourcePath).toAbsolutePath().normalize();
+            if (source.startsWith(target)) {
+                throw new IllegalArgumentException("Refusing to clean output directory " + target
+                        + " because it contains compilation source " + source + ".");
+            }
+        }
+        Files.createDirectories(target);
+        try (final var entries = Files.list(target)) {
+            for (final var entry : entries.toList()) deleteTree(entry);
+        }
     }
 
     static List<ZeronLibraryIndex> loadLibraries(final List<Path> libraryRoots) throws IOException {
@@ -394,18 +437,75 @@ public class Zeron {
         return List.copyOf(libraries);
     }
 
-    static void validateStandardLibraryMode(final List<ZeronLibraryIndex> libraries,
-                                            final boolean bundleStandardLibrarySources) {
-        if (bundleStandardLibrarySources) return;
+    record ProjectCompilation(String mainClass, List<Path> libraryRoots) {
+        ProjectCompilation {
+            libraryRoots = List.copyOf(libraryRoots);
+        }
+    }
+
+    record StandardLibrarySetup(boolean bundleStandardLibrarySources,
+                                List<Path> libraryRoots,
+                                List<ZeronLibraryIndex> libraries) {
+        StandardLibrarySetup {
+            libraryRoots = List.copyOf(libraryRoots);
+            libraries = List.copyOf(libraries);
+        }
+    }
+
+    static StandardLibrarySetup resolveStandardLibrary(final StandardLibraryMode mode,
+                                                       final List<Path> libraryRoots) throws IOException {
+        final var libraries = loadLibraries(libraryRoots);
+        if (mode == StandardLibraryMode.SOURCE) {
+            return new StandardLibrarySetup(true, libraryRoots, libraries);
+        }
+        if (exportsStandardLibrary(libraries)) {
+            return new StandardLibrarySetup(false, libraryRoots, libraries);
+        }
+        final var bundledJar = bundledStandardLibraryJar();
+        if (bundledJar.isPresent()) {
+            final var resolvedRoots = new ArrayList<>(libraryRoots);
+            resolvedRoots.add(bundledJar.get());
+            final var resolvedLibraries = new ArrayList<>(libraries);
+            resolvedLibraries.add(ZeronLibraryIndex.readFromJar(bundledJar.get()));
+            return new StandardLibrarySetup(false, resolvedRoots, resolvedLibraries);
+        }
+        if (mode == StandardLibraryMode.COMPILED) {
+            throw new IllegalArgumentException("Compiled standard-library mode requires a standard-library "
+                    + "library. Install a Zeron release that bundles lib/zeron-stdlib-*.jar, add one to "
+                    + "[dependencies].zeron-libraries, or set [platform].stdlib = \"source\".");
+        }
+        debug("No compiled standard library found; using bundled standard-library sources.");
+        return new StandardLibrarySetup(true, libraryRoots, libraries);
+    }
+
+    private static boolean exportsStandardLibrary(final List<ZeronLibraryIndex> libraries) {
         final var availableTypes = libraries.stream()
                 .flatMap(library -> library.declarations().stream())
                 .map(declaration -> declaration.qualifiedName())
                 .collect(java.util.stream.Collectors.toSet());
-        if (!availableTypes.containsAll(STANDARD_LIBRARY_TYPES)) {
-            final var missingTypes = new java.util.TreeSet<>(STANDARD_LIBRARY_TYPES);
-            missingTypes.removeAll(availableTypes);
-            throw new IllegalArgumentException("--stdlib compiled requires a library index exporting: "
-                    + String.join(", ", missingTypes));
+        return availableTypes.containsAll(STANDARD_LIBRARY_TYPES);
+    }
+
+    static Optional<Path> bundledStandardLibraryJar() throws IOException {
+        final var installationHome = System.getProperty("zeron.home");
+        if (installationHome == null || installationHome.isBlank()) return Optional.empty();
+        final var libraryDirectory = Path.of(installationHome).resolve("lib");
+        if (!Files.isDirectory(libraryDirectory)) return Optional.empty();
+        try (final var entries = Files.list(libraryDirectory)) {
+            final var candidates = entries
+                    .filter(Files::isRegularFile)
+                    .filter(path -> {
+                        final var name = path.getFileName().toString();
+                        return name.startsWith("zeron-stdlib-") && name.endsWith(".jar");
+                    })
+                    .sorted()
+                    .toList();
+            if (candidates.isEmpty()) return Optional.empty();
+            if (candidates.size() > 1) {
+                throw new IllegalArgumentException("Multiple compiled standard libraries found in "
+                        + libraryDirectory + ": " + candidates);
+            }
+            return Optional.of(candidates.getFirst());
         }
     }
 
@@ -414,6 +514,7 @@ public class Zeron {
         final var resolution = compiler.resolveWithDiagnostics();
         resolution.errors().forEach(Zeron::reportResolutionDiagnostic);
         if (!resolution.errors().isEmpty()) return;
+        cleanOutputDirectory(outputDirectory, List.of());
         compiler.compileWithDiagnostics().diagnostics().forEach(Zeron::reportCompilationDiagnostic);
     }
 

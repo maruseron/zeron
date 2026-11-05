@@ -286,7 +286,7 @@ HKT operation directly.
 Preserve three separate questions:
 
 1. Can a local name be rebound? This is controlled by binding mutability, such as `let` versus `let mut`.
-2. Can code mutate the object reached through a reference? This is controlled by reference capability, proposed as read-only `T` versus mutable `&T`.
+2. Can code mutate the object reached through a reference? This is controlled by reference capability: read-only `T` versus mutable `&T`.
 3. Which class operations mutate the receiver? Mutating methods require mutable receiver capability.
 
 An immutable binding may hold a mutable reference, and a reassignable binding may hold a read-only reference. These are not interchangeable permissions. A fresh `Class.new(...)` expression has type `&Class`; it can be projected to a read-only `Class` view, but a read-only view cannot be upgraded. `&T` does not imply exclusive ownership or borrow checking; aliases may observe the same mutation.

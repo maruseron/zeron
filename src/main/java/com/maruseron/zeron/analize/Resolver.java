@@ -624,6 +624,15 @@ public final class Resolver {
         return currentType instanceof InferDescriptor ? TypeDescriptor.ofUnit() : currentType;
     }
 
+    static void ensureReturnsOnAllPaths(final ResolutionContext context, final Token where,
+                                        final TypeDescriptor returnType) {
+        if (!context.frame.flowState.isReachable()) return;
+        if (returnType instanceof UnitDescriptor || returnType instanceof InferDescriptor) return;
+        Zeron.resolutionError(new ResolutionError(
+                DiagnosticCatalog.INVALID_CONTROL_FLOW_OR_INITIALIZATION_FLOW, where,
+                "A function with a non-Unit return type must return a value on every normal path."));
+    }
+
     static TypeDescriptor ensureExact(final ResolutionContext context, final Token where,
                                       final TypeDescriptor typeA,
                                       final TypeDescriptor typeB) {

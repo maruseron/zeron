@@ -93,18 +93,15 @@ fn main(): Unit {
 entry = "src/Main.zn"
 source-roots = ["src"]
 output = "output"
-
-[platform]
-stdlib = "compiled"
-
-[dependencies]
-zeron-libraries = ["../lib/$standardLibraryJarName"]
 "@
     [System.IO.File]::WriteAllText((Join-Path $smokeRoot "zeron.toml"),
         $smokeManifest, (New-Object System.Text.UTF8Encoding($false)))
     $smokeOutput = & $launcher run --manifest (Join-Path $smokeRoot "zeron.toml") 2>&1
     if ($LASTEXITCODE -ne 0 -or ($smokeOutput -join "`n") -notmatch "zeron-release-smoke-ok") {
-        throw "Packaged compiled-standard-library smoke test failed: $($smokeOutput -join "`n")"
+        throw "Packaged default-standard-library smoke test failed: $($smokeOutput -join "`n")"
+    }
+    if (Test-Path (Join-Path $smokeRoot "output\zeron\collections\ArrayList.class")) {
+        throw "Default build compiled standard-library sources into the program output."
     }
 
     $sourceSmokeManifest = @"
@@ -112,6 +109,9 @@ zeron-libraries = ["../lib/$standardLibraryJarName"]
 entry = "src/Main.zn"
 source-roots = ["src"]
 output = "output-source"
+
+[platform]
+stdlib = "source"
 "@
     $sourceSmokeManifestPath = Join-Path $smokeRoot "zeron-source.toml"
     [System.IO.File]::WriteAllText($sourceSmokeManifestPath,

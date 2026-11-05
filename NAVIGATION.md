@@ -5,7 +5,9 @@
 The pipeline is scanner ([`scan/`](./src/main/java/com/maruseron/zeron/scan/)) ->
 parser/AST ([`ast/`](./src/main/java/com/maruseron/zeron/ast/)) ->
 resolver ([`analize/`](./src/main/java/com/maruseron/zeron/analize/)) ->
-bytecode compiler ([`compile/`](./src/main/java/com/maruseron/zeron/compile/)). Keep language
+bytecode compiler ([`compile/`](./src/main/java/com/maruseron/zeron/compile/)). Type descriptors,
+symbol tables, intrinsic/binding registries, and compiled-library index types shared by those
+phases live in [`domain/`](./src/main/java/com/maruseron/zeron/domain/). Keep language
 semantics in the resolver and type descriptors; keep JVM representation decisions in the compiler.
 
 ## Resolution
@@ -19,14 +21,23 @@ rules belong in their focused resolver modules.
 
 Resolver responsibilities are split by phase and language construct:
 
-- `DeclarationRegistry` registers symbols and declarations.
-- `ImportResolver` validates per-unit imports.
-- `TopLevelValuePlanner` orders top-level value resolution.
-- `DeclarationResolver` handles declarations.
-- `StatementResolver` handles statements and control flow.
-- `ExpressionFlowResolver` handles expression typing and flow-sensitive state.
+- `DeclarationRegistry` registers symbols and declarations; `ImportResolver` validates per-unit
+  imports; `TopLevelValuePlanner` orders top-level value resolution.
+- `DeclarationResolver`, `StatementResolver`, and `ExpressionFlowResolver` handle declarations,
+  statements and control flow, and expression typing with flow-sensitive state.
 - `CallResolver`, `MemberInteropResolver`, `LambdaResolver`, `TypeResolver`, and
-  `IntrinsicResolver` handle their respective expression and type domains.
+  `IntrinsicResolver` handle calls, Java/nominal member interop, lambdas, types, and intrinsics.
+- `AnnotationResolver` validates annotation declarations, applications, targets, and constant
+  arguments; `PropertyReferenceResolver` resolves property and typed code-model references.
+- `TypeCompatibility` (with `TypeProjector`), `TypeUnifier`, `VariancePositionValidator`, and
+  `WitnessPatternUnifier` implement assignability and projections, generic unification, variance
+  position checks, and witness-overlap analysis.
+- `TypeClassEvidence`, `ContractComposition`, and `HktDefaultSupport` build contract evidence,
+  compose applied contracts, and support higher-kinded default methods.
+- `RowInference` solves effect-row inclusion constraints; `RaisedEffectFlow` propagates raised
+  effects; `ComprehensionLowerer` lowers for-expressions to pipeline/stream operations.
+- `FlowState`, `FunctionResolutionFrame`, and `LoopFlow` provide the shared flow, reachability,
+  loop, and function-frame state used by the statement and expression resolvers.
 
 `ResolutionContext` owns per-run symbols, type/declaration maps, import environment, diagnostics,
 and resolver collaborators. `ResolutionDiagnostics` collects errors for the returned result. Pass
@@ -45,7 +56,11 @@ Compiler emission modules are organized by responsibility:
 
 - `InitializationPlanner` orders top-level initializers.
 - `CompilationMetadata` indexes declaration owners and generated-holder metadata.
-- `RuntimeSupportEmitter` emits `Unit` and function-shape support classes.
+- `LambdaCompilationPlan` plans function shapes, lambda captures and helpers, template factories,
+  adapters, and field/method bridges for lambda implementations.
+- `RuntimeSupportEmitter` emits runtime support on demand (`Unit`, raised-effect, resource,
+  equality, hashing, array, Unicode, numeric, and HTTP helpers) and the generated function-shape
+  interfaces.
 - `DeclarationEmitter` emits top-level declarations and file-holder methods.
 - `NominalTypeEmitter` emits classes/contracts, constructors, properties, and bridges.
 - `StatementEmitter` emits statements and loops.
@@ -53,6 +68,7 @@ Compiler emission modules are organized by responsibility:
   conditionals, matches, type tests, casts, and comparisons).
 - `LambdaSupportEmitter` emits lambda bodies, references, and adapters.
 - `ClassSignatureEmitter` encodes JVM generic signatures.
+- `ConstantFolder` folds constant expressions used by emission decisions.
 - `BytecodeEmitter` coordinates file emission and retains the remaining expression, call,
   conversion, and shared bytecode operations.
 

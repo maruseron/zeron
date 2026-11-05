@@ -107,9 +107,10 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     runtime-version-aware multi-release JAR lookup. Public JDK class metadata is discovered directly
     from exported system-module packages, without class initialization or default imports. Arbitrary
     Java field reads and mutable-instance writes support public declared fields with mapped
-    descriptors; static writes and final-field writes are rejected. Java methods support `Object[]`
-    parameters/results; Zeron array arguments are shallow-copied at the boundary, while typed
-    reference and primitive array signatures remain unsupported.
+    descriptors; static writes and final-field writes are rejected. Java methods support `Object[]`,
+    `int[]`, `long[]`, `double[]`, and `boolean[]` parameters/results; Zeron array arguments are
+    shallow-copied at the boundary, while typed reference arrays other than `Object[]`, `float[]`,
+    `short[]`, `char[]`, and multidimensional arrays remain unsupported.
 - Checked exceptions declared by Java methods are rejected for direct interop calls. External
     facades may opt into explicit checked-exception-to-effect mappings; unchecked exceptions and
     `Error`s continue to propagate unchanged, and Java constructors with checked exceptions are not
@@ -189,7 +190,8 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
 - **Implemented — native sums, nominal products, and guarded newtypes.** Direct-carrier newtype
     lowering and discriminated unions beyond native sums and sealed contracts remain deferred; see
     [design-document-14](design-document-14_sum-product-types-and-newtypes.md).
-- **Planned — additional immutable collection types and dedicated list-comprehension syntax.**
+- **Implemented — collection contracts, mutable and persistent collection implementations, and
+    for-expressions.** Additional immutable collection types remain planned.
 - **Implemented — safe navigation (`?.`), null coalescing (`??`), null-fallback assignment (`??=`),
     and explicit reference identity (`===`).** Value equality uses `Eq<T>` evidence, and custom
     relational comparisons use `Comparable<T>` and `Ordering`. See the
@@ -204,12 +206,12 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     syntax, canonical `new` constructors, and external-class methods remain deferred. Named
     constructors are static factories and accept the same variadic parameters as functions. The
     bundled `zeron.collections.List<T>.of(elements: T...)` factory provides a standard example.
-- **Proposed — trailing-lambda syntax:** allow one block lambda after a call, as in `repeat(3) { index ->
-    println(index) }`, with parentheses optional when the lambda is the only argument (`run {
-    initialize() }`). Use unparenthesized comma-separated parameter names; a body without `->`
-    denotes a zero-parameter lambda. Multiline call chains and nested trailing lambdas need
-    readability evaluation; ordinary parenthesized lambdas remain an escape hatch. Multiple
-    trailing lambdas per call are out of scope.
+- **Implemented — trailing-lambda syntax:** one block lambda may follow a call, as in `repeat(3) {
+    index -> println(index) }`, with parentheses optional when the lambda is the only argument
+    (`run { initialize() }`). Parameters use unparenthesized comma-separated names; a body without
+    `->` denotes a zero-parameter lambda, and an arrowless block may use the implicit `it` parameter
+    when the expected function type has one parameter. Ordinary parenthesized lambdas remain
+    available. Multiple trailing lambdas per call remain out of scope.
 - **Implemented — anonymous objects** can explicitly implement named contracts for one-off adapters
     and test doubles. Anonymous record values remain excluded because they would introduce
     structural typing.
@@ -270,10 +272,11 @@ be written as ordinary declared types.
 
 | Type | Meaning | Current status |
 | --- | --- | --- |
-| `Never` | Bottom type: an expression that does not produce a value or return normally. | Descriptor exists; throw expressions and complete control-flow integration are not implemented. |
+| `Never` | Bottom type: an expression that does not produce a value or return normally. | Supported; `raise` expressions have type `Never` and participate in branch joining, handling, and reachability analysis. |
 | `Any` | Top type for all non-null values. | Implicit widening is implemented; it lowers to JVM `Object`. `Any?` also accepts nullable values and `null`. `is`-based narrowing and checked/safe casts are implemented for supported targets. |
 | `Unit` | The single unit value, used when a computation has no useful result. | Supported as a type; the `()` literal is distinct from `Never` and has a shared non-null runtime singleton. |
 | `Int` | Integer values. | Supported. |
+| `Long` | Long values. | Supported. |
 | `Char` | One Unicode scalar value, represented as an integer at runtime. | Supported; single-quoted literals and explicit scalar-aware String operations are available. |
 | `Float` | Floating-point values. | Supported. |
 | `Boolean` | Truth values. | Supported. |
@@ -286,7 +289,7 @@ be written as ordinary declared types.
   to a nullable type, but a binding initialized only with `null` needs an explicit nullable
   annotation, such as `let value: Int? = null;`.
 - Class and contract declarations resolve to package-qualified nominal types across the current
-    compilation set. Module-qualified identity remains future work.
+  compilation set. Module-qualified identity remains future work.
 
 #### Function types
 

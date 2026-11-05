@@ -169,9 +169,11 @@ to their raw JVM class or interface; see [design-document-05_classes-and-contrac
 
 Generic call inference is structural and intentionally bounded. It handles direct type variables,
 function signatures, arrays (including a mutable array literal projected to a read-only parameter),
-nullable/reference wrappers, and existing generic descriptors. It is not a general subtype solver:
-variance is not yet implemented (its accepted design is in
-[ZEP-0051](../zeps/ZEP-0051.md)), and inference from a desired result type alone is unsupported.
+nullable/reference wrappers, existing generic descriptors, and the implemented variance and
+projection contexts. It is not a general constraint solver, and inference from a desired result
+type alone is unsupported. Declaration-site covariance
+([ZEP-0051](../zeps/ZEP-0051.md)) and use-site `out`/`in` projections
+([ZEP-0052](../zeps/ZEP-0052.md)) are implemented.
 Because each Zeron callable name has a single declaration, calls infer that declaration's
 generic parameters directly; there is no candidate ranking or return-type-based selection.
 Contract bounds may authorize readonly contract methods on generic function and method type
@@ -245,7 +247,7 @@ shape matrix and broader adapter reuse still need coverage.
   and explicit type arguments against every bound; generic bodies may call a bound's non-mutating
   methods through a cast and interface dispatch. Generic class and contract type parameters may also
   be bounded; instances retain evidence for class methods and contract defaults. Mutating methods,
-  operator constraints, variance, and broader inference remain deferred. See
+  operator constraints, declaration-site contravariance, and broader inference remain deferred. See
   [design-document-15_type-class-witnesses-and-generic-bounds.md](design-document-15_type-class-witnesses-and-generic-bounds.md).
 6. **Let-bound polymorphic lambdas: constrained rank-1 generalization implemented.** Immutable
     identity and constant-result lambdas retain their existing scheme behavior. Direct immutable

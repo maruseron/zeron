@@ -288,7 +288,9 @@ final class DeclarationResolver {
         try {
             if (method.isDefault()) {
                 resolveStmts(context, method.body());
-                ensureReturns(context, method.name(), methodType.returnType(), method.body());
+                final var resolvedReturn = ensureReturns(
+                        context, method.name(), methodType.returnType(), method.body());
+                ensureReturnsOnAllPaths(context, method.name(), resolvedReturn);
                 RaisedEffectFlow.verifyCallable(context, methodType.raisedEffects(), method.name());
             }
         } finally {
@@ -888,7 +890,9 @@ final class DeclarationResolver {
         }
         try {
             resolveStmts(context, method.body());
-            ensureReturns(context, method.name(), method.typeDescriptor().returnType(), method.body());
+            final var resolvedReturn = ensureReturns(
+                    context, method.name(), method.typeDescriptor().returnType(), method.body());
+            ensureReturnsOnAllPaths(context, method.name(), resolvedReturn);
             RaisedEffectFlow.verifyCallable(context, method.typeDescriptor().raisedEffects(), method.name());
         } finally {
             context.frame.receiverScopes.pop();

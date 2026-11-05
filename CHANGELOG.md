@@ -23,6 +23,13 @@
 
 ### Compiler and language work
 
+- Made the bundled compiled standard library the default for project and direct compilations.
+  `zeron` resolves `lib/zeron-stdlib-*.jar` from the installation, prefers an explicitly listed
+  standard-library library, and falls back to bundled sources only when no artifact is available.
+  `zeron init` selects `compiled` in installed distributions and `source` in source checkouts.
+  `--stdlib source` and `[platform].stdlib = "source"` remain the explicit opt-in for
+  standard-library development.
+
 - Added `model` declarations: `model Name is Contract<T> { property -> "external"; property = constant; }`
   binds a singleton descriptor value that validates mapped properties through their identity,
   rejects duplicate and unknown mappings, and requires the parent contract's property assignments.
@@ -72,6 +79,19 @@
 - Refined stable closed-sum values on the negative path of direct `matches` tests, including
   grouped and negated conditions.
 - Fixed adapter discovery for witness helper calls.
+- Rejected function, method, extension-method, and default-contract-method bodies that can fall off
+  the end without returning a value when the return type is not `Unit`, reporting `ZR2011` instead
+  of emitting bytecode that fails verification. Bodies ending in `raise` or another expression of
+  type `Never` are recognized as non-returning, and Unit or inferred-Unit bodies remain allowed.
+- Expanded constant folding to cover Int `%`, bitwise operators, shifts, relational operators,
+  grouping, and Boolean `and`, `or`, and `not` for constant literals. Unsupported operators and
+  division or remainder by zero now fall back to normal emission instead of crashing the compiler
+  with `IllegalStateException`.
+- Emit runtime support classes on demand. After generating program classes, the compiler scans them
+  for support-class references and copies only the referenced units plus their transitive
+  dependencies. Programs that do not use HTTP, rationals, or big integers no longer carry those
+  support classes, while effects, resources, equality/hashing, Unicode, Java arrays, and array
+  iterables are still emitted when used.
 - Fixed captured function types in generic lambdas, enabling the `zeron.function` combinators and predicates.
 - Improved inference for generic function references in open expected types, allowing `flatMap(identity)` and
   `Monad.flatten` without explicit type arguments.
@@ -112,6 +132,11 @@
 
 ### CLI and tooling
 
+- Clear the configured output directory after resolution succeeds and before emitting bytecode, so
+  stale classes from renamed lambdas or removed declarations no longer accumulate. Cleanup refuses
+  unsafe targets: the filesystem root, the current directory, the user home, a directory containing
+  `zeron.toml` or `.git`, an output path that is a file, and an output directory that contains a
+  compilation source.
 - Stopped offering compiler-generated witness helper definitions as completion candidates.
 - Stopped offering completion suggestions while the cursor is inside line, documentation, or block
   comments.

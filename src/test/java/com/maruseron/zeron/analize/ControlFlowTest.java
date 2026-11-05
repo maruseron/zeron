@@ -16,6 +16,7 @@ import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public final class ControlFlowTest {
     @Test
@@ -362,6 +363,66 @@ public final class ControlFlowTest {
                     return;
                 }
                 """)));
+    }
+
+    @Test
+    public void rejectsNonUnitBodiesThatCanFallOffTheEnd() {
+        final var result = new ResolutionService().resolveWithDiagnostics(parse("""
+                class Widget {
+                    public constructor new;
+                    public value(): Int {
+                        let local = 1;
+                    }
+                }
+                contract Broken {
+                    default value(): Int {
+                        let local = 1;
+                    }
+                }
+                extension Int {
+                    public fn broken(): Int {
+                        let local = 1;
+                    }
+                }
+                fn missing(): Int {
+                    let local = 1;
+                }
+                fn conditional(value: Int): Int {
+                    if (value > 0) return value;
+                }
+                fn valid(value: Int): Int {
+                    if (value > 0) return value;
+                    return 0;
+                }
+                fn validLoop(): Int {
+                    loop {
+                    }
+                }
+                fn unitFallThrough() {
+                    let local = 1;
+                }
+                """));
+
+        assertEquals(5, result.errors().size());
+        assertTrue(result.errors().toString(), result.errors().stream()
+                .allMatch(error -> error.code().toString().equals("ZR2011")));
+    }
+
+    @Test
+    public void allowsNonUnitBodiesThatEndInANonReturningExpression() {
+        final var result = new ResolutionService().resolveWithDiagnostics(parse("""
+                effect Failure {}
+                fn fails(): Int raises Failure {
+                    raise Failure.new();
+                }
+                fn callsFails(): Int raises Failure = fails();
+                fn failsFromBothBranches(flag: Boolean): Int raises Failure {
+                    if (flag) raise Failure.new();
+                    else raise Failure.new();
+                }
+                """));
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
     }
 
     @Test

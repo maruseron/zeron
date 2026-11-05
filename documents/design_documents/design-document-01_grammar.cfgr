@@ -17,14 +17,18 @@ module ZeronGrammar;
 program                    : [packageDeclaration] {importDeclaration} {topLevelDeclaration} EOF ;
 packageDeclaration         : "package" qualifiedName ";" ;
 qualifiedName              : IDENTIFIER {"." IDENTIFIER} ;
-importDeclaration          : "import" [soft("suffix")] qualifiedName ["as" IDENTIFIER] ";" ;
+importDeclaration          : "import" [soft("suffix")]
+                             (qualifiedName ["as" IDENTIFIER] | qualifiedName "." "*") ";" ;
 
-topLevelDeclaration        : varDecl | funDecl | classDecl | contractDecl | sealedContractDecl | typeDecl
+topLevelDeclaration        : varDecl | funDecl | classDecl | dataClassDecl | contractDecl | sealedContractDecl
+                           | typeDecl
                            | externalFunctionDecl | publicFunDecl | publicExternalFunctionDecl
-                           | handlerDecl | publicHandlerDecl
+                           | handlerDecl | publicHandlerDecl | modelDecl | publicModelDecl
+                           | namespaceDecl | annotationDecl | publicAnnotationDecl
                            | externalClassDecl | publicExternalClassDecl
                            | effectDecl | publicEffectDecl | extensionDecl | publicExtensionDecl
-                           | publicClassDecl | publicContractDecl | publicSealedContractDecl | publicTypeDecl
+                           | publicClassDecl | publicDataClassDecl | publicContractDecl
+                           | publicSealedContractDecl | publicTypeDecl
                            | witnessDecl ;
 publicFunDecl              : "public" funDecl ;
 publicExternalFunctionDecl : "public" externalFunctionDecl ;
@@ -37,6 +41,22 @@ publicSealedContractDecl   : "public" sealedContractDecl ;
 publicTypeDecl             : "public" typeDecl ;
 publicHandlerDecl          : "public" handlerDecl ;
 handlerDecl                : soft("handler") IDENTIFIER handlerBody ;
+publicModelDecl            : "public" modelDecl ;
+modelDecl                  : soft("model") IDENTIFIER "is" contractUse "{" { modelClause } "}" ;
+modelClause                : IDENTIFIER "->" STRING [";"]
+                           | IDENTIFIER "=" expression ";" ;
+namespaceDecl              : "namespace" IDENTIFIER "{" { namespaceMember } "}" ;
+namespaceMember            : [annotationApplication] (funDecl | publicFunDecl | varDecl) ;
+annotationDecl             : "annotation" IDENTIFIER
+                             ["(" [annotationParameter {"," annotationParameter}] ")"]
+                             soft("on") annotationTarget {"," annotationTarget} ";" ;
+publicAnnotationDecl       : "public" annotationDecl ;
+annotationParameter        : IDENTIFIER ":" type ["=" expression] ;
+annotationTarget           : IDENTIFIER ;
+annotationApplication      : "@" qualifiedName ["(" [annotationArgument {"," annotationArgument}] ")"] ;
+annotationArgument         : [IDENTIFIER "="] expression ;
+dataClassDecl              : soft("data") classDecl ;
+publicDataClassDecl        : "public" dataClassDecl ;
 sealedContractDecl         : "sealed" contractDecl ;
 typeDecl                   : "type" IDENTIFIER [typeParameters] [derivingClause] "="
                              (productComponents | sumCase {"|" sumCase}) ";" ;
@@ -59,7 +79,9 @@ externalClassDecl          : "external" "class" IDENTIFIER "=" STRING "{" extern
 externalClassMember        : ["public"] ["mut"] IDENTIFIER "(" plainParameters ")" ":" type ";"
                            | ["public"] "static" "property" IDENTIFIER ":" type ";" ;
 typeParameters             : "<" typeParameter {"," typeParameter} ">" ;
-typeParameter              : IDENTIFIER [":" type {"+" type}] ;
+typeParameter              : [soft("out")] IDENTIFIER ["<" "_" ">"]
+                             [":" typeParameterConstraint {"+" typeParameterConstraint}] ;
+typeParameterConstraint    : type | soft("nullable") | "mut" | "effect" ["..."] ;
 parameters                 : [parameter {"," parameter}] ;
 parameter                  : IDENTIFIER ":" type ["..."] ["=" expression] ;
 plainParameters            : [plainParameter {"," plainParameter}] ;
@@ -158,16 +180,21 @@ term                       : factor {("-" | "+") factor} ;
 factor                     : unary {("/" | "*" | "%") unary} ;
 unary                      : "raise" unary
                            | ("not" | "-" | "+" | "~" | "typeof") unary
-                           | cast ;
-cast                       : call {"as" ["?"] type} ;
+                           | postfix ;
+postfix                    : call {"as" ["?"] type | "!!"} ;
 call                       : (genericFunctionCall | genericClassFactoryCall | functionValueReference | primary)
                              {callSuffix} ;
-callSuffix                 : arguments | "[" expression "]" | ("." | "?.") memberName ;
+callSuffix                 : arguments | "[" expression "]" | ("." | "?.") memberName
+                           | trailingLambda ;
+trailingLambda             : "{" [trailingLambdaParameter {"," trailingLambdaParameter} "->"]
+                             (expression | block) "}" ;
+trailingLambdaParameter    : IDENTIFIER [":" type] ;
 genericFunctionCall        : IDENTIFIER typeArguments arguments ;
 functionValueReference     : IDENTIFIER "::" typeArguments ;
 genericClassFactoryCall    : IDENTIFIER [typeArguments] "." IDENTIFIER arguments ;
 arguments                  : "(" [expression {"," expression}] ")" ;
-typeArguments              : "<" type {"," type} ">" ;
+typeArguments              : "<" typeArgument {"," typeArgument} ">" ;
+typeArgument               : [soft("out") | "in"] (type | "_") ;
 type                       : ["&"] (receiverFunctionType | typeAtom)
                              ["~>" effectSet ["raises" effectSet]] ["?"] ;
 receiverFunctionType       : qualifiedName "." "(" [type {"," type}] ")"
@@ -177,7 +204,7 @@ typeAtom                   : qualifiedName ["<" typeArgumentsBody ">"]
                            | "(" ")" "->" type [raisesClause]
                            | "(" type ")" ["->" type [raisesClause]]
                            | "(" type "," type {"," type} ")" "->" type [raisesClause] ;
-typeArgumentsBody          : type {"," type} ;
+typeArgumentsBody          : typeArgument {"," typeArgument} ;
 
 primary                    : INT
                            | LONG
@@ -224,7 +251,8 @@ forClause                  : "for" IDENTIFIER "in" expression
 forResult                  : soft("yield") expression
                            | soft("collect") expression soft("into") expression ;
 lambda                     : IDENTIFIER "->" lambdaBody
-                           | "(" [IDENTIFIER {"," IDENTIFIER}] ")" "->" lambdaBody ;
+                           | "(" [lambdaParameter {"," lambdaParameter}] ")" "->" lambdaBody ;
+lambdaParameter            : IDENTIFIER [":" type] ;
 lambdaBody                 : expression | block ;
 range                      : INT ".." INT ;
 anonymousObjectExpr        : "object" ":" contractUse {"+" contractUse}
@@ -236,6 +264,20 @@ anonymousObjectMember      : ["public"] ["mut"] "property" IDENTIFIER ":" type
                            | IDENTIFIER ":" type "=" expression ";" ;
 
 # Semantic/parser constraints:
+# - An annotation application (`@Name` or `@Name(args)`) may precede a top-level declaration or a
+#   supported member where the annotation's declared target allows it. The declaration productions
+#   omit that prefix for brevity; annotations cannot target namespaces.
+# - A wildcard import ends in `.*`, cannot have an alias, and cannot be a suffix import.
+# - Namespace members are functions and immutable values; public mutable values remain unsupported.
+# - `model` and `data` are soft keywords.
+# - A type parameter may use `nullable`, `mut`, or `effect` (or `effect...`) as admissibility
+#   markers instead of ordinary contract bounds. `effect...` denotes an effect-row parameter.
+# - The `out` prefix is allowed only on class and contract type parameters. A higher-kinded
+#   parameter is written `F<_>` and cannot be covariant; class/contract covariance is checked for
+#   unsafe positions rather than trusted from the annotation.
+# - Postfix `!!` asserts that an expression is non-null and produces its non-null type.
+# - A trailing lambda may follow a callable name or call expression. An arrowless block with an
+#   expected one-parameter function type receives the implicit binding `it`.
 # - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
 # - Each package/namespace callable name and each class/contract method name identifies one
 #   declaration. Ordinary Zeron functions and methods do not overload. Extension methods may share
@@ -310,8 +352,9 @@ anonymousObjectMember      : ["public"] ["mut"] "property" IDENTIFIER ":" type
 # - Generic function values use `name::<Type, ...>` for explicit specialization, or a bare name
 #   when an expected function type determines every type parameter. These values are monomorphic.
 # - Class and contract declaration type parameters remain unbounded. Bounds on generic function or
-#   method type parameters must name contracts; only non-mutating contract methods are available
-#   through a bounded type parameter. Operator constraints remain unsupported.
+#   method type parameters must name contracts or use the admissibility markers above; only
+#   non-mutating contract methods are available through a bounded type parameter. Operator
+#   constraints remain unsupported.
 # - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
 # - Generic type applications on Zeron classes/contracts and imported Java generic types may
 #   project an argument as `out Type` or `in Type`. Projections are type-only views; they do not

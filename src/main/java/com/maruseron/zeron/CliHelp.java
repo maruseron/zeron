@@ -33,6 +33,7 @@ final class CliHelp {
               --library <path>        Add a Zeron library directory or JAR (repeatable)
               --java-classpath <path> Add a Java class directory or JAR (repeatable)
               --stdlib <mode>         Select source or compiled stdlib for direct compilation
+                                      (default: compiled when the installation bundles it)
               --jar-output <file>     Package compiler output as a Zeron library JAR
               --build-stdlib <dir>    Compile the bundled standard library
 
@@ -146,7 +147,9 @@ final class CliHelp {
                     Usage: zeron <compilation-input> --stdlib <source|compiled>
 
                     Select bundled standard-library sources or a compiled standard-library library.
-                    Project builds select this in zeron.toml instead.
+                    Without this flag, compilation uses the compiled standard library bundled in
+                    the Zeron installation's lib/ directory and falls back to bundled sources when
+                    no such artifact is available. Project builds select this in zeron.toml instead.
                     """),
             Map.entry("--jar-output", """
                     Usage: zeron <compilation-input> --jar-output <file.jar>

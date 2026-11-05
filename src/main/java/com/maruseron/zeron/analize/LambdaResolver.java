@@ -762,6 +762,7 @@ final class LambdaResolver {
                     function.name(),
                     function.typeDescriptor().returnType(),
                     function.body());
+            ensureReturnsOnAllPaths(context, function.name(), resolvedType);
             if (function.typeDescriptor().returnType() instanceof InferDescriptor) {
                 context.symbols.setResolvedReturnType(
                         MemberInteropResolver.functionSymbolToken(context, function.name()), resolvedType);
@@ -793,7 +794,9 @@ final class LambdaResolver {
             resolveParametersAndDefaults(context, extension, extension.parameters(),
                     extension.typeDescriptor(), extension.defaultValues(), extension.minimumArity());
             resolveStmts(context, extension.body());
-            ensureReturns(context, extension.name(), extension.typeDescriptor().returnType(), extension.body());
+            final var resolvedReturn = ensureReturns(context,
+                    extension.name(), extension.typeDescriptor().returnType(), extension.body());
+            ensureReturnsOnAllPaths(context, extension.name(), resolvedReturn);
             RaisedEffectFlow.verifyCallable(context, extension.typeDescriptor().raisedEffects(), extension.name());
         } finally {
             context.frame.expectedReturnTypes.pop();

@@ -211,7 +211,7 @@ final class CliParser {
         Path entry = null;
         Path standardLibraryOutput = null;
         Path jarOutput = null;
-        var bundleStandardLibrarySources = true;
+        var standardLibraryMode = StandardLibraryMode.DEFAULT;
         var debug = false;
 
         for (var index = 0; index < args.length; index++) {
@@ -243,8 +243,8 @@ final class CliParser {
             } else if (argument.equals("--stdlib")) {
                 if (++index >= args.length) return invalid("--stdlib requires 'source' or 'compiled'.");
                 final var mode = args[index];
-                if (mode.equals("source")) bundleStandardLibrarySources = true;
-                else if (mode.equals("compiled")) bundleStandardLibrarySources = false;
+                if (mode.equals("source")) standardLibraryMode = StandardLibraryMode.SOURCE;
+                else if (mode.equals("compiled")) standardLibraryMode = StandardLibraryMode.COMPILED;
                 else return invalid("--stdlib must be 'source' or 'compiled'.");
             } else if (argument.startsWith("-")) {
                 return invalid("Unknown option: " + argument);
@@ -273,7 +273,8 @@ final class CliParser {
 
         if (entry == null && sourceRoots.isEmpty() && sourceFiles.isEmpty()) {
             if (jarOutput != null) return invalid("--jar-output requires compilation input.");
-            if (!libraryRoots.isEmpty() || !javaClassPathRoots.isEmpty() || !bundleStandardLibrarySources) {
+            if (!libraryRoots.isEmpty() || !javaClassPathRoots.isEmpty()
+                    || standardLibraryMode == StandardLibraryMode.COMPILED) {
                 return invalid("Library options require source files or a project entry.");
             }
             return parsed(new Repl(debug));
@@ -330,7 +331,7 @@ final class CliParser {
             if (collision.isPresent()) return invalid(collision.get());
         }
         return parsed(new Compile(sourceFiles, sourceRoots, entry, libraryRoots, javaClassPathRoots,
-                bundleStandardLibrarySources, jarOutput, debug));
+                standardLibraryMode, jarOutput, debug));
     }
 
     private static Optional<String> readableFileError(final Path path, final String description) {
@@ -528,7 +529,7 @@ final class CliParser {
 
     record Compile(List<String> sourceFiles, List<Path> sourceRoots, Path entry,
                    List<Path> libraries, List<Path> javaClassPathRoots,
-                   boolean bundleStandardLibrarySources, Path jarOutput, boolean debug)
+                   StandardLibraryMode standardLibraryMode, Path jarOutput, boolean debug)
             implements Invocation {
         Compile {
             sourceFiles = List.copyOf(sourceFiles);

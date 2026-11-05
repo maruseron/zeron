@@ -34,6 +34,27 @@ public final class ConstantFolderTest {
     }
 
     @Test
+    public void foldsIntegerBitwiseShiftRelationalAndBooleanExpressions() {
+        assertEquals(2, ConstantFolder.fold(expression("5 % 3;")));
+        assertEquals(1, ConstantFolder.fold(expression("5 & 3;")));
+        assertEquals(7, ConstantFolder.fold(expression("5 | 2;")));
+        assertEquals(4, ConstantFolder.fold(expression("5 ^ 1;")));
+        assertEquals(8, ConstantFolder.fold(expression("1 << 3;")));
+        assertEquals(2, ConstantFolder.fold(expression("8 >> 2;")));
+        assertEquals(-1, ConstantFolder.fold(expression("~0;")));
+        assertEquals(1, ConstantFolder.fold(expression("1 < 2;")));
+        assertEquals(1, ConstantFolder.fold(expression("2 >= 2;")));
+        assertEquals(0, ConstantFolder.fold(expression("3 > 4;")));
+        assertEquals(1, ConstantFolder.fold(expression("not false;")));
+        assertEquals(0, ConstantFolder.fold(expression("not true;")));
+        assertEquals(1, ConstantFolder.fold(expression("true and true;")));
+        assertEquals(0, ConstantFolder.fold(expression("true and false;")));
+        assertEquals(1, ConstantFolder.fold(expression("false or true;")));
+        assertNull(ConstantFolder.fold(expression("5 / 0;")));
+        assertNull(ConstantFolder.fold(expression("5 % 0;")));
+    }
+
+    @Test
     public void classifiesFoldedFieldValuesAndTypes() {
         assertTrue(ConstantFolder.isConstantFieldValue(TypeDescriptor.ofInt(), 3));
         assertTrue(ConstantFolder.isConstantFieldValue(TypeDescriptor.ofString(), "text"));

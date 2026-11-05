@@ -21,7 +21,14 @@ Add `--jar-output target/zeron-stdlib.jar` to produce a JAR. Keep this artifact 
 `dist/`, which is the normal generated-program output. The standard library includes compiler-known
 runtime support such as `zeron.lang.Unit`.
 
-To consume a local Zeron class directory or JAR in a project, declare it in the manifest:
+Release archives already contain a versioned standard-library JAR under `lib/`; the launcher sets
+`zeron.home`, so projects use it without a manifest entry. Compilation resolves
+`lib/zeron-stdlib-*.jar` automatically when `[platform].stdlib` is omitted or set to `compiled`,
+and reports an error if `compiled` is requested explicitly but no artifact is available. A source
+checkout or test run without `zeron.home` falls back to the bundled standard-library sources.
+
+To consume an additional local Zeron class directory or JAR in a project, declare it in the
+manifest:
 
 ```toml
 [dependencies]
@@ -29,9 +36,8 @@ zeron-libraries = ["lib/shared.jar"]
 ```
 
 Use `zeron build` to compile against the manifest dependencies and `zeron run` to include those
-dependencies when launching the entry class. Compiled-standard-library mode requires a compatible
-standard-library artifact to be listed as a Zeron library. Java dependencies use the separate
-`java-classpath` key.
+dependencies when launching the entry class. An explicitly listed standard-library artifact takes
+precedence over the bundled one. Java dependencies use the separate `java-classpath` key.
 
 For API inspection, run `zeron dump <api-index|class-directory|library.jar>`. This prints the
 declarations exported by that library index. The index is not a substitute for runtime classes: an

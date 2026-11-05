@@ -16,12 +16,16 @@ import java.lang.classfile.TypeKind;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.ConstantDescs;
 import java.lang.constant.MethodTypeDesc;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 final class RuntimeSupportEmitter {
@@ -40,7 +44,119 @@ final class RuntimeSupportEmitter {
     private static final ClassDesc ITERATOR_CLASS = ClassDesc.of("zeron.collections.Iterator");
     private static final ClassDesc OBJECT_ARRAY_CLASS = ConstantDescs.CD_Object.arrayType();
 
+    private static final List<SupportUnit> RUNTIME_SUPPORT_UNITS = List.of(
+            new SupportUnit("zeron/lang/Unit", List.of("zeron/lang/Unit"), Set.of(),
+                    context -> emitUnitClass(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/RaisedEffect", List.of("zeron/runtime/RaisedEffect"), Set.of(),
+                    context -> emitRaisedEffectClass(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/EffectValue", List.of("zeron/runtime/EffectValue"), Set.of(),
+                    context -> emitRuntimeClass(context.outputDirectory, "EffectValue")),
+            new SupportUnit("zeron/runtime/EffectSupport", List.of("zeron/runtime/EffectSupport"),
+                    Set.of("zeron/runtime/EffectValue"),
+                    context -> emitRuntimeClass(context.outputDirectory, "EffectSupport")),
+            new SupportUnit("zeron/runtime/ResourceSupport", List.of("zeron/runtime/ResourceSupport"),
+                    Set.of("zeron/runtime/RaisedEffect", "zeron/lang/Unit"),
+                    context -> emitResourceSupportClass(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/EqSupport", List.of("zeron/runtime/EqSupport"),
+                    Set.of("zeron/lang/Unit"),
+                    context -> emitEqualitySupportClass(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/HashSupport", List.of("zeron/runtime/HashSupport"),
+                    Set.of("zeron/lang/Unit"),
+                    context -> emitHashSupportClass(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/StringUnicode", List.of("zeron/runtime/StringUnicode"), Set.of(),
+                    context -> emitStringUnicodeSupportClass(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/BigIntegerSupport",
+                    List.of("zeron/runtime/BigIntegerSupport"), Set.of(),
+                    context -> emitBigIntegerSupportClass(context.outputDirectory)),
+            new SupportUnit("com/maruseron/zeron/runtime/NumericSupport",
+                    List.of("com/maruseron/zeron/runtime/NumericSupport"), Set.of(),
+                    context -> emitJavaRuntimeClass(context.outputDirectory, "NumericSupport")),
+            new SupportUnit("com/maruseron/zeron/runtime/RationalValue",
+                    List.of("com/maruseron/zeron/runtime/RationalValue"),
+                    Set.of("com/maruseron/zeron/runtime/NumericSupport"),
+                    context -> emitJavaRuntimeClass(context.outputDirectory, "RationalValue")),
+            new SupportUnit("zeron/runtime/JavaArraySupport", List.of("zeron/runtime/JavaArraySupport"),
+                    Set.of(), context -> emitJavaArraySupportClass(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/HttpSupport", List.of(
+                    "zeron/runtime/HttpSupport",
+                    "zeron/runtime/HttpSupport$ClientHandle",
+                    "zeron/runtime/HttpSupport$SendOutcome",
+                    "zeron/runtime/HttpSupport$Failure",
+                    "zeron/runtime/HttpSupport$ResponseHandle",
+                    "zeron/runtime/HttpSupport$TimedBodyInputStream",
+                    "zeron/runtime/HttpSupport$ReadEvent"), Set.of(),
+                    context -> emitHttpSupportClasses(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/ArrayIterable", List.of("zeron/runtime/ArrayIterable"),
+                    Set.of("zeron/lang/Unit"),
+                    RuntimeSupportEmitter::emitArrayIterableSupportClass));
+
+    private static final Map<String, SupportUnit> RUNTIME_SUPPORT_UNITS_BY_REFERENCE =
+            runtimeSupportUnitsByReference();
+    private static final Set<String> MANAGED_SUPPORT_CLASSES = managedSupportClasses();
+
     private RuntimeSupportEmitter() {}
+
+    @FunctionalInterface
+    private interface SupportEmitter {
+        void emit(CompilationContext context) throws IOException;
+    }
+
+    private record SupportUnit(String referenceName,
+                               List<String> classNames,
+                               Set<String> dependencies,
+                               SupportEmitter emitter) {}
+
+    static void emitReferencedRuntimeSupport(final CompilationContext context) throws IOException {
+        final var emitted = new LinkedHashSet<SupportUnit>();
+        final var pending = new ArrayDeque<>(referencedRuntimeSupportUnits(context.outputDirectory));
+        while (!pending.isEmpty()) {
+            final var unit = pending.removeFirst();
+            if (!emitted.add(unit)) continue;
+            unit.emitter().emit(context);
+            for (final var dependency : unit.dependencies()) {
+                final var dependencyUnit = RUNTIME_SUPPORT_UNITS_BY_REFERENCE.get(dependency);
+                if (dependencyUnit != null && !emitted.contains(dependencyUnit)) {
+                    pending.addLast(dependencyUnit);
+                }
+            }
+        }
+    }
+
+    private static List<SupportUnit> referencedRuntimeSupportUnits(final Path outputDirectory)
+            throws IOException {
+        if (!Files.isDirectory(outputDirectory)) return List.of();
+        final var referenced = new LinkedHashSet<SupportUnit>();
+        try (final var paths = Files.walk(outputDirectory)) {
+            for (final var path : paths
+                    .filter(candidate -> candidate.toString().endsWith(".class")).toList()) {
+                final var relative = outputDirectory.relativize(path).toString().replace('\\', '/');
+                final var internalName = relative.substring(0, relative.length() - ".class".length());
+                if (MANAGED_SUPPORT_CLASSES.contains(internalName)) continue;
+                final var contents = new String(Files.readAllBytes(path), StandardCharsets.ISO_8859_1);
+                for (final var unit : RUNTIME_SUPPORT_UNITS) {
+                    if (contents.contains(unit.referenceName())) referenced.add(unit);
+                }
+            }
+        }
+        return List.copyOf(referenced);
+    }
+
+    private static Map<String, SupportUnit> runtimeSupportUnitsByReference() {
+        final var byReference = new HashMap<String, SupportUnit>();
+        for (final var unit : RUNTIME_SUPPORT_UNITS) {
+            byReference.put(unit.referenceName(), unit);
+        }
+        return Map.copyOf(byReference);
+    }
+
+    private static Set<String> managedSupportClasses() {
+        final var managed = new LinkedHashSet<String>();
+        for (final var unit : RUNTIME_SUPPORT_UNITS) {
+            managed.addAll(unit.classNames());
+        }
+        managed.add("zeron/runtime/LambdaTemplateSupport");
+        return Set.copyOf(managed);
+    }
 
     static void emitUnitClass(final Path outputDirectory) throws IOException {
         final var output = outputDirectory.resolve(Path.of("zeron", "lang", "Unit.class"));
@@ -334,11 +450,6 @@ final class RuntimeSupportEmitter {
         }
     }
 
-    static void emitNumericSupportClasses(final Path outputDirectory) throws IOException {
-        emitJavaRuntimeClass(outputDirectory, "NumericSupport");
-        emitJavaRuntimeClass(outputDirectory, "RationalValue");
-    }
-
     static void emitJavaArraySupportClass(final Path outputDirectory) throws IOException {
         final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "JavaArraySupport.class"));
         Files.createDirectories(output.getParent());
@@ -434,11 +545,6 @@ final class RuntimeSupportEmitter {
                         code.areturn();
                     });
         });
-    }
-
-    static void emitEffectSupportClasses(final Path outputDirectory) throws IOException {
-        emitRuntimeClass(outputDirectory, "EffectValue");
-        emitRuntimeClass(outputDirectory, "EffectSupport");
     }
 
     private static void emitRuntimeClass(final Path outputDirectory, final String className) throws IOException {

@@ -21,8 +21,8 @@ a source package a JVM module.
   ordinary public immutable top-level values and public namespace-member values. A provider's
   values initialize in provider order when the first exported value is read; unused libraries are
   not initialized. Non-entry functions require explicit return types.
-- Bundled source mode is the default and includes every `.zn` file under
-  `src/main/resources/stdlib/`. Maven generates a sorted classpath source index from that tree during
+- Bundled source mode includes every `.zn` file under `src/main/resources/stdlib/`; it is the
+  fallback when no compiled artifact is available. Maven generates a sorted classpath source index from that tree during
   resource generation; runtime loading uses the index, so adding a standard-library source does not
   require a separate registration-list edit. Standard-library declarations remain explicit imports,
   and the canonical source tree mirrors package names.
@@ -96,13 +96,18 @@ java-classpath = ["lib/host-api.jar"]
 ```
 
 `project.entry` and at least one `project.source-roots` directory are required; `project.output`
-defaults to `dist`, and the standard-library mode defaults to `source`. Dependency paths are local class directories or JARs and are available for compile-time resolution;
-they are not embedded into generated output. `zeron run` builds the manifest project and launches its
-entry class from the configured output directory. Its child JVM classpath includes the compiler
-runtime, that output directory, and every declared Zeron library and Java classpath root. Compiled
-standard-library mode requires a compatible standard-library artifact in `zeron-libraries`. Unknown
-keys and incorrect value types are rejected. Dependency fetching, lockfiles, incremental compilation,
-and configurable artifact packaging remain open. When the entry source unit declares
+defaults to `dist`. When `[platform].stdlib` is omitted, compilation prefers the compiled standard
+library bundled in the installation's `lib/` directory and falls back to bundled sources when no
+artifact is available. `source` selects the bundled sources explicitly; `compiled` requires a
+compatible artifact, either the bundled `lib/zeron-stdlib-*.jar` or one listed in
+`zeron-libraries`, and reports an error otherwise. An explicitly listed standard-library artifact
+takes precedence over the bundled one. Dependency paths are local class directories or JARs and are
+available for compile-time resolution; they are not embedded into generated output. `zeron run`
+builds the manifest project and launches its entry class from the configured output directory. Its
+child JVM classpath includes the compiler runtime, that output directory, and every declared Zeron
+library and Java classpath root. Unknown keys and incorrect value types are rejected. Dependency
+fetching, lockfiles, incremental compilation, and configurable artifact packaging remain open. When
+the entry source unit declares
 zero-argument `fn main(): Unit` or `fn main(args: Array<String>): Unit`, the generated entry class
 also includes the standard `public static void main(String[] args)` launcher method. The
 argument-taking form receives the Java launcher arguments in order; when both Zeron forms are
@@ -172,8 +177,9 @@ with `--build-stdlib`, the requested class directory is preserved and also packa
 Archives contain the compiled classes and the versioned API-index sidecar, with entries in
 deterministic order. The JAR is published only after packaging succeeds.
 
-Consumers may select a Zeron library class directory or JAR with `--library`; compiled standard
-library mode uses `--stdlib compiled --library <artifact>`. JAR contents are used both for compile-time
+Consumers may select a Zeron library class directory or JAR with `--library`. `--stdlib compiled`
+auto-discovers the bundled `lib/zeron-stdlib-*.jar` when present; an explicitly listed
+standard-library artifact takes precedence. JAR contents are used both for compile-time
 API-index loading and, when needed, as a normal runtime classpath entry. A consumer rejects an index
 whose schema version is unsupported or whose required standard-library API version does not exactly
 match its compiler. Update the corresponding value in `ZeronVersions` when the bundled source

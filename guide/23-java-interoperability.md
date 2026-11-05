@@ -21,7 +21,7 @@ resolution. Passing a prebuilt Java array as a varargs argument is not generally
 
 Interop is not Java reflection or a general Java type system. Generic Java types, inherited-member
 search, Java fields beyond the implemented subset, arbitrary Java arrays, and callback/SAM
-conversions are unsupported. The bundled source standard library also supplies an allowlisted
+conversions are unsupported. The standard library also supplies an allowlisted
 `java.io.File` facade:
 
 ```zeron

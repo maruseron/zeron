@@ -15,6 +15,8 @@ public final class ProjectInitTest {
     public void createsBuildableProjectManifestAndEntry() throws Exception {
         final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-init-")
                 .toAbsolutePath().normalize();
+        final var previousHome = System.getProperty("zeron.home");
+        System.clearProperty("zeron.home");
         try {
             assertEquals(0, Zeron.initializeProject(projectRoot));
 
@@ -29,11 +31,36 @@ public final class ProjectInitTest {
             assertEquals(sourcePath, manifest.entry());
             assertEquals(java.util.List.of(projectRoot.resolve("src")), manifest.sourceRoots());
             assertEquals(projectRoot.resolve("dist"), manifest.outputDirectory());
-            assertTrue(manifest.bundleStandardLibrarySources());
+            assertEquals(StandardLibraryMode.SOURCE, manifest.standardLibraryMode());
             assertEquals(0, Zeron.runCli("build", "--manifest", manifestPath.toString()));
             assertTrue(Files.isRegularFile(projectRoot.resolve("dist/main.class")));
         } finally {
+            if (previousHome == null) System.clearProperty("zeron.home");
+            else System.setProperty("zeron.home", previousHome);
             deleteTree(projectRoot);
+        }
+    }
+
+    @Test
+    public void initSelectsCompiledModeWhenTheDistributionBundlesIt() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-init-compiled-")
+                .toAbsolutePath().normalize();
+        final var distribution = Files.createTempDirectory(Path.of("target"), "zeron-init-home-")
+                .toAbsolutePath().normalize();
+        final var libraryDirectory = distribution.resolve("lib");
+        Files.createDirectories(libraryDirectory);
+        Files.createFile(libraryDirectory.resolve("zeron-stdlib-index-v1-api-v1.jar"));
+        final var previousHome = System.getProperty("zeron.home");
+        try {
+            System.setProperty("zeron.home", distribution.toString());
+            assertEquals(0, Zeron.initializeProject(projectRoot));
+            final var manifest = ProjectManifest.load(projectRoot.resolve("zeron.toml"));
+            assertEquals(StandardLibraryMode.COMPILED, manifest.standardLibraryMode());
+        } finally {
+            if (previousHome == null) System.clearProperty("zeron.home");
+            else System.setProperty("zeron.home", previousHome);
+            deleteTree(projectRoot);
+            deleteTree(distribution);
         }
     }
 

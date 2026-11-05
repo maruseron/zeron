@@ -109,22 +109,28 @@ public final class ProjectAnalysisWorkspace {
                 throw new IllegalArgumentException("Project source root is not a directory: " + root);
             }
         }
-        final var libraries = Zeron.loadLibraries(project.libraryRoots());
+        final var standardLibrary = Zeron.resolveStandardLibrary(
+                project.standardLibraryMode(), project.libraryRoots());
         Zeron.validateJavaClassPathRoots(project.javaClassPathRoots());
-        Zeron.validateStandardLibraryMode(libraries, project.bundleStandardLibrarySources());
         return new ProjectAnalysisWorkspace(project.sourceRoots(), Optional.of(project.entry()),
-                project.bundleStandardLibrarySources(), libraries, project.javaClassPathRoots());
+                standardLibrary.bundleStandardLibrarySources(), standardLibrary.libraries(),
+                project.javaClassPathRoots());
     }
 
-    public static ProjectAnalysisWorkspace openSourceWorkspace(final Path workspaceRoot) {
+    public static ProjectAnalysisWorkspace openSourceWorkspace(final Path workspaceRoot) throws IOException {
         final var root = workspaceRoot.toAbsolutePath().normalize();
         if (!Files.isDirectory(root)) {
             throw new IllegalArgumentException("Language-server workspace is not a directory: " + root);
         }
         final var standardLibraryRoot = standardLibrarySourceRoot(root);
-        final var sourceRoot = standardLibraryRoot.orElse(root);
-        return new ProjectAnalysisWorkspace(List.of(sourceRoot), Optional.empty(),
-                standardLibraryRoot.isEmpty(), List.of(), List.of());
+        if (standardLibraryRoot.isPresent()) {
+            return new ProjectAnalysisWorkspace(List.of(standardLibraryRoot.get()), Optional.empty(),
+                    false, List.of(), List.of());
+        }
+        final var standardLibrary = Zeron.resolveStandardLibrary(
+                StandardLibraryMode.DEFAULT, List.of());
+        return new ProjectAnalysisWorkspace(List.of(root), Optional.empty(),
+                standardLibrary.bundleStandardLibrarySources(), standardLibrary.libraries(), List.of());
     }
 
     public List<Path> sourceRoots() {

@@ -35,16 +35,42 @@ public final class ProjectManifestTest {
                 [platform]
                 stdlib = "source"
                 """);
+        Files.createDirectories(output.resolve("app"));
+        Files.writeString(output.resolve("app").resolve("Stale.class"), "stale");
+        Files.writeString(output.resolve("obsolete.txt"), "stale");
 
         try {
             assertEquals(0, Zeron.runCli("build", "--manifest", manifest.toString()));
             final var generatedClass = output.resolve("app").resolve("Main.class");
             assertTrue(Files.exists(generatedClass));
+            assertFalse(Files.exists(output.resolve("app").resolve("Stale.class")));
+            assertFalse(Files.exists(output.resolve("obsolete.txt")));
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
                 assertEquals(42, loader.loadClass("app.Main").getMethod("answer").invoke(null));
             }
             assertFalse(Files.exists(projectRoot.resolve("dist")));
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
+    @Test
+    public void refusesToCleanAProjectDirectoryAsAnOutputDirectory() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-output-guard-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        try {
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+                    output = "."
+                    """);
+            final var error = assertThrows(IllegalArgumentException.class,
+                    () -> Zeron.cleanOutputDirectory(projectRoot, List.of()));
+            assertTrue(error.getMessage().contains("project or repository"));
+            assertTrue(Files.exists(manifest));
         } finally {
             deleteTree(projectRoot);
         }
@@ -74,7 +100,33 @@ public final class ProjectManifestTest {
             assertEquals(List.of(projectRoot.resolve("host/classes"),
                             projectRoot.resolve("../external/host.jar").normalize()),
                     configuration.javaClassPathRoots());
-            assertTrue(configuration.bundleStandardLibrarySources());
+            assertEquals(StandardLibraryMode.DEFAULT, configuration.standardLibraryMode());
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
+    @Test
+    public void parsesExplicitStandardLibraryModes() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-manifest-modes-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        final var header = """
+                [project]
+                entry = "src/Main.zn"
+                source-roots = ["src"]
+
+                [platform]
+                stdlib = "%s"
+                """;
+        try {
+            Files.writeString(manifest, header.formatted("source"));
+            assertEquals(StandardLibraryMode.SOURCE,
+                    ProjectManifest.load(manifest).standardLibraryMode());
+
+            Files.writeString(manifest, header.formatted("compiled"));
+            assertEquals(StandardLibraryMode.COMPILED,
+                    ProjectManifest.load(manifest).standardLibraryMode());
         } finally {
             deleteTree(projectRoot);
         }

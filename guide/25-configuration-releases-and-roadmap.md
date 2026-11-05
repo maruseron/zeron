@@ -12,17 +12,22 @@ source-roots = ["src"]
 output = "dist"
 
 [platform]
-stdlib = "source"
+stdlib = "compiled"
 
 [dependencies]
 zeron-libraries = ["lib/shared.jar"]
 java-classpath = ["lib/host-api.jar"]
 ```
 
-`project.entry` and at least one source root are required. The output defaults to `dist`, and
-standard-library mode defaults to bundled source. `source` is convenient for development;
-`compiled` requires a compatible standard-library library artifact. Dependency roots are local
-directories or JARs; Zeron does not fetch or lock them.
+`project.entry` and at least one source root are required. The output defaults to `dist`. When
+`[platform].stdlib` is omitted, compilation prefers the compiled standard library bundled in the
+Zeron installation's `lib/` directory and falls back to bundled sources when no artifact is
+available. `zeron init` writes `compiled` in an installed distribution and `source` in a source
+checkout, where no compiled artifact exists. `source` remains the explicit choice for
+standard-library development; `compiled` requires a compatible standard-library artifact and
+reports a clear error if none can be found. An artifact listed in `zeron-libraries` takes precedence
+over the bundled one. Dependency roots are local directories or JARs; Zeron does not fetch or lock
+them.
 
 Manifest paths are resolved relative to the manifest file, not to an assumed repository layout.
 `source-roots` selects the source files included in the project, `entry` identifies the source

@@ -86,9 +86,9 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0073](./ZEP-0073.md) | Documentation Comments for Declarations | Implemented | Candidate | 0.6.0 |
 | [ZEP-0074](./ZEP-0074.md) | Numeric Literal Suffixes for Newtypes | Draft | Unscheduled | — |
 | [ZEP-0075](./ZEP-0075.md) | General Contextual Numeric Literal Construction | Draft | Unscheduled | — |
-| [ZEP-0076](./ZEP-0076.md) | Delegating Witness Implementations | Implemented | Unscheduled | 0.6.0 |
-| [ZEP-0077](./ZEP-0077.md) | Delegating Higher-Kinded Implementations | Implemented | Unscheduled | 0.6.0 |
-| [ZEP-0078](./ZEP-0078.md) | Default Method Implementations in Higher-Kinded Contracts | Implemented | Unscheduled | 0.6.0 |
+| [ZEP-0076](./ZEP-0076.md) | Delegating Witness Implementations | Implemented | Unscheduled | — |
+| [ZEP-0077](./ZEP-0077.md) | Delegating Higher-Kinded Implementations | Implemented | Unscheduled | — |
+| [ZEP-0078](./ZEP-0078.md) | Default Method Implementations in Higher-Kinded Contracts | Implemented | Unscheduled | — |
 | [ZEP-0079](./ZEP-0079.md) | Model Declarations | Draft | Unscheduled | — |
 | [ZEP-0080](./ZEP-0080.md) | Typed Code Models for Selected Expressions | Implemented | Unscheduled | — |
 | [ZEP-0081](./ZEP-0081.md) | Type-Safe Embedded DSL Support | Draft | Unscheduled | — |
@@ -105,3 +105,5 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0092](./ZEP-0092.md) | Generated Serialization Operations | Draft | Unscheduled | — |
 | [ZEP-0093](./ZEP-0093.md) | Unified Property Identity and a Typed Code-Model API | Implemented | Unscheduled | — |
 | [ZEP-0094](./ZEP-0094.md) | Collection Contracts | Implemented | Unscheduled | — |
+| [ZEP-0095](./ZEP-0095.md) | Bytecode Quality and Evidence Inlining | Draft | Unscheduled | — |
+| [ZEP-0096](./ZEP-0096.md) | Primitive Specialization for Generic Code | Draft | Unscheduled | — |

@@ -26,17 +26,6 @@ final class BytecodeEmitter {
 
     static void emit(final CompilationContext context) throws IOException {
         Files.createDirectories(context.outputDirectory);
-        RuntimeSupportEmitter.emitUnitClass(context.outputDirectory);
-        RuntimeSupportEmitter.emitRaisedEffectClass(context.outputDirectory);
-        RuntimeSupportEmitter.emitEffectSupportClasses(context.outputDirectory);
-        RuntimeSupportEmitter.emitResourceSupportClass(context.outputDirectory);
-        RuntimeSupportEmitter.emitEqualitySupportClass(context.outputDirectory);
-        RuntimeSupportEmitter.emitHashSupportClass(context.outputDirectory);
-        RuntimeSupportEmitter.emitStringUnicodeSupportClass(context.outputDirectory);
-        RuntimeSupportEmitter.emitBigIntegerSupportClass(context.outputDirectory);
-        RuntimeSupportEmitter.emitNumericSupportClasses(context.outputDirectory);
-        RuntimeSupportEmitter.emitJavaArraySupportClass(context.outputDirectory);
-        RuntimeSupportEmitter.emitHttpSupportClasses(context.outputDirectory);
         final var signatureDeclarations = context.compilationUnits.stream()
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
                 .map(NamespaceMembers.Member::declaration).toList();
@@ -49,8 +38,6 @@ final class BytecodeEmitter {
             context.registerGeneratedInterface(FunctionShapeNames.interfaceName(shape.getKey()));
             RuntimeSupportEmitter.emitFunctionShape(context.outputDirectory, shape.getKey(), shape.getValue());
         }
-        RuntimeSupportEmitter.emitArrayIterableSupportClass(context);
-
         final var hasNamespaceValues = context.compilationUnits.stream().filter(unit -> !unit.metadataOnly())
                 .flatMap(unit -> NamespaceMembers.flatten(unit.declarations()).stream())
                 .anyMatch(member -> member.namespaceName() != null
@@ -109,6 +96,7 @@ final class BytecodeEmitter {
             });
         }
         NominalTypeEmitter.emit(context);
+        RuntimeSupportEmitter.emitReferencedRuntimeSupport(context);
         final var libraryIndex = ZeronLibraryIndex.fromCompilation(context.compilationUnits,
                 context.metadata::functionOwner,
                 function -> function.typeDescriptor().returnType() instanceof InferDescriptor

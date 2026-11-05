@@ -10,7 +10,7 @@ fn main(): Unit {
 ```
 
 `Unit` is the type for a function that has no useful result. The standard output functions are
-available to the bundled source standard library. Build the project and then run it:
+provided by the standard library. Build the project and then run it:
 
 ```text
 zeron build
@@ -27,8 +27,9 @@ small and delegate useful behavior to named functions. As the program gets bigge
 easier to test individual operations and keeps the command-line entry predictable.
 
 If the compiler reports that `println` is unknown, check the import: standard-library names are
-not all automatically in scope. If the import itself fails, confirm that the project uses the
-source standard library or has a compatible compiled standard-library library configured.
+not all automatically in scope. If the import itself fails, confirm that the project can resolve a
+standard library: an installed distribution supplies the bundled compiled artifact, while a source
+checkout uses the bundled sources. An explicit `stdlib = "compiled"` requires a compatible artifact.
 
 Try changing the message and running `zeron run` again. A compile error is reported during the
 build phase and prevents the program from launching; a runtime failure happens after compilation,

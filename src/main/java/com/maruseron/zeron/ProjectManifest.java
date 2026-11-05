@@ -14,7 +14,7 @@ import java.util.Set;
 record ProjectManifest(List<Path> sourceRoots,
                        Path entry,
                        Path outputDirectory,
-                       boolean bundleStandardLibrarySources,
+                       StandardLibraryMode standardLibraryMode,
                        List<Path> libraryRoots,
                        List<Path> javaClassPathRoots) {
     private static final Set<String> TOP_LEVEL_KEYS = Set.of("project", "platform", "dependencies");
@@ -48,11 +48,18 @@ record ProjectManifest(List<Path> sourceRoots,
 
         final var platform = optionalTable(document, "platform");
         if (platform != null) requireKeys(platform, PLATFORM_KEYS, "[platform]");
-        final var stdlib = platform == null ? "source" : optionalString(platform, "stdlib", "source", "[platform]");
-        final boolean bundleStandardLibrarySources;
-        if (stdlib.equals("source")) bundleStandardLibrarySources = true;
-        else if (stdlib.equals("compiled")) bundleStandardLibrarySources = false;
-        else throw new IllegalArgumentException("[platform].stdlib must be 'source' or 'compiled'.");
+        final StandardLibraryMode standardLibraryMode;
+        if (platform == null || !platform.contains("stdlib")) {
+            standardLibraryMode = StandardLibraryMode.DEFAULT;
+        } else {
+            final var stdlib = requireString(platform, "stdlib", "[platform]");
+            standardLibraryMode = switch (stdlib) {
+                case "source" -> StandardLibraryMode.SOURCE;
+                case "compiled" -> StandardLibraryMode.COMPILED;
+                default -> throw new IllegalArgumentException(
+                        "[platform].stdlib must be 'source' or 'compiled'.");
+            };
+        }
 
         final var dependencies = optionalTable(document, "dependencies");
         if (dependencies != null) requireKeys(dependencies, DEPENDENCY_KEYS, "[dependencies]");
@@ -62,7 +69,7 @@ record ProjectManifest(List<Path> sourceRoots,
                 ? List.of() : optionalStringArray(dependencies, "java-classpath", "[dependencies]"));
 
         return new ProjectManifest(sourceRoots, entry, outputDirectory,
-                bundleStandardLibrarySources, libraryRoots, javaClassPathRoots);
+                standardLibraryMode, libraryRoots, javaClassPathRoots);
     }
 
     private static Path resolvePath(final Path baseDirectory, final String value) {

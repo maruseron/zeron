@@ -50,11 +50,14 @@ source-roots = ["src"]
 output = "dist"
 
 [platform]
-stdlib = "source"
+stdlib = "compiled"
 ```
 
-Paths are relative to the manifest file. The source-bundled standard library is the recommended
-mode for new projects. Dependencies, when needed, can be listed as local class directories or JARs:
+Paths are relative to the manifest file. `zeron init` writes `compiled` in an installed
+distribution and `source` in a source checkout. When `stdlib` is omitted, compilation prefers the
+compiled standard library bundled in the installation's `lib/` directory and falls back to bundled
+sources when no artifact is available; use `source` when developing the standard library itself.
+Dependencies, when needed, can be listed as local class directories or JARs:
 
 ```toml
 [dependencies]

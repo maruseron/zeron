@@ -27,7 +27,7 @@ external fn bigIntegerToFloat(value: &JavaBigInteger): Float;
 external fn bigIntegerToString(value: &JavaBigInteger): String;
 external fn bigIntegerEquals(left: &JavaBigInteger, right: &JavaBigInteger): Boolean;
 external fn bigIntegerCompare(left: &JavaBigInteger, right: &JavaBigInteger): Int;
-external fn bigIntegerHash(value: &JavaBigInteger): Int;
+external fn bigIntegerHash(value: &JavaBigInteger): Long;
 
 /// Immutable arbitrary-precision integer type.
 ///
@@ -108,7 +108,7 @@ public class Integer {
     public toFloat(): Float = bigIntegerToFloat(this.value);
 
     /// Returns a hash consistent with `eq`.
-    public hash(): Int = bigIntegerHash(this.value);
+    public hash(): Long = bigIntegerHash(this.value);
 
     /// Whether this integer and `other` have the same value.
     public eq(other: Integer): Boolean = bigIntegerEquals(this.value, other.value);

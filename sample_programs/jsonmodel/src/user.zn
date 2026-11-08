@@ -1,0 +1,12 @@
+public data class User(
+    id: Int,
+    name: String, 
+    email: String?,
+    createdAt: String
+) {}
+
+public model UserWire is Model<User> {
+    id    -> "user_id";
+    name  -> "name";
+    email -> "email";
+}

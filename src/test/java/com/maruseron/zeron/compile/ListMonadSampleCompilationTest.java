@@ -1,5 +1,6 @@
 package com.maruseron.zeron.compile;
 
+import com.maruseron.zeron.TestPaths;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.scan.Scanner;
@@ -14,7 +15,7 @@ import java.util.UUID;
 public final class ListMonadSampleCompilationTest {
     @Test
     public void compilesListMonadSampleWithHigherOrderWitnessCallbacks() throws Exception {
-        final var sampleRoot = Path.of("sample_programs", "list_monad");
+        final var sampleRoot = TestPaths.projectFile("sample_programs", "list_monad");
         final var units = List.of(
                 parseUnit(sampleRoot.resolve("src").resolve("main.zn"), "src/main.zn"),
                 parseUnit(sampleRoot.resolve("src").resolve("list.zn"), "src/list.zn"));

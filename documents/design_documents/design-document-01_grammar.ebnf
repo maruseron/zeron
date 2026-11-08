@@ -1,0 +1,713 @@
+(* Notation: ISO/IEC 14977 EBNF.
+     =  definition     ,  concatenation     |  alternation     ;  end of rule
+     [ x ] optional    { x } zero or more   ( x ) grouping      x, { x } one or more
+   Terminals: "text" is a hard keyword or punctuation token; 'text' is a SOFT keyword, i.e. scanned
+   as IDENTIFIER and recognized by exact spelling only at that grammatical position. UPPERCASE
+   names are scanner token kinds. In the lexical section a literal quote character is written with
+   the other quote style ('"' and "'").
+   Caveat: EBNF alternation is unordered. Productions that rely on the parser trying alternatives in
+   order (for example `primary`: INT before `range`, or `patternAlternative`: IDENTIFIER before
+   `type`) are ambiguous when read as a pure context-free grammar and need the lookahead or ordering
+   rules of the actual parser.
+   
+   This is the canonical implemented source grammar, validated against Scanner.java and
+   Parser.java. [CHANGED] and [NEW] mark productions that were added or revised while reconciling
+   it with ZEP-0056, 0058, 0069, 0079, 0086 and 0090. *)
+
+(* Grammar module: ZeronGrammar
+   IDENTIFIER, INT, LONG, DOUBLE, SUFFIXABLE_NUMBER, STRING, and CHAR denote scanner token kinds;
+   LONG is an integer literal with an `L` suffix. SUFFIXABLE_NUMBER preserves a raw numeric spelling
+   when an adjacent identifier may be a custom suffix. Decimal digits may use `_` separators only between digits. Integer literals may
+   use case-insensitive `0b`, `0o`, and `0x` prefixes for binary, octal, and hexadecimal values.
+   Radix-prefixed literals use INT by default and LONG with an `L` suffix; decimal leading zeroes remain
+   decimal, and radix prefixes do not support floating-point literals.
+   CHAR is a single-quoted Unicode scalar literal; its escapes are `\\`, `\'`, `\n`, `\r`, `\t`, and
+   braced hexadecimal `\u{...}`.
+   // and /* */ comments are retained as ranged scanner tokens and exposed by ParseResult,
+   but are excluded from the grammar and the compilation unit.
+   `type` below is source syntax; design-document-02 describes encoded descriptors.
+   soft("word") denotes a soft keyword: it is scanned as IDENTIFIER and recognized by exact spelling
+   only at the indicated grammatical position. Other quoted words are hard keywords. *)
+
+program = [ packageDeclaration ], { importDeclaration }, { topLevelDeclaration }, EOF ;
+packageDeclaration = "package", qualifiedName, ";" ;
+qualifiedName = IDENTIFIER, { ".", IDENTIFIER } ;
+importDeclaration = "import", [ 'suffix' ],
+                      ( qualifiedName, [ "as", IDENTIFIER ] | qualifiedName, ".", "*" ), ";" ;
+
+(* [CHANGED] Annotations: every annotation target accepts an optional application. design-document-14: newtype declarations are reachable. *)
+
+topLevelDeclaration = { annotationApplication }, topLevelItem ;
+
+(* [NEW] The declaration alternatives, now including newtypes. *)
+
+topLevelItem = varDecl
+             | publicVarDecl
+             | funDecl
+             | classDecl
+             | dataClassDecl
+             | contractDecl
+             | sealedContractDecl
+             | typeDecl
+             | newtypeDecl
+             | publicNewtypeDecl
+             | externalFunctionDecl
+             | publicFunDecl
+             | publicExternalFunctionDecl
+             | handlerDecl
+             | publicHandlerDecl
+             | modelDecl
+             | publicModelDecl
+             | namespaceDecl
+             | annotationDecl
+             | publicAnnotationDecl
+             | externalClassDecl
+             | publicExternalClassDecl
+             | effectDecl
+             | publicEffectDecl
+             | extensionDecl
+             | publicExtensionDecl
+             | publicClassDecl
+             | publicDataClassDecl
+             | publicContractDecl
+             | publicSealedContractDecl
+             | publicTypeDecl
+             | witnessDecl ;
+publicVarDecl = "public", varDecl ;
+publicFunDecl = "public", funDecl ;
+publicExternalFunctionDecl = "public", externalFunctionDecl ;
+publicEffectDecl = "public", effectDecl ;
+publicExtensionDecl = "public", extensionDecl ;
+publicExternalClassDecl = "public", externalClassDecl ;
+publicClassDecl = "public", classDecl ;
+publicContractDecl = "public", contractDecl ;
+publicSealedContractDecl = "public", sealedContractDecl ;
+publicTypeDecl = "public", typeDecl ;
+
+(* [NEW] design-document-14: public newtype, e.g. `public newtype UserId = String where value != "";`. *)
+
+publicNewtypeDecl = "public", newtypeDecl ;
+publicHandlerDecl = "public", handlerDecl ;
+handlerDecl = 'handler', IDENTIFIER, handlerBody ;
+publicModelDecl = "public", modelDecl ;
+modelDecl = 'model', IDENTIFIER, "is", contractUse, "{", { modelClause }, "}" ;
+modelClause = IDENTIFIER, "->", STRING, [ ";" ] | IDENTIFIER, "=", expression, ";" ;
+namespaceDecl = "namespace", IDENTIFIER, "{", { namespaceMember }, "}" ;
+
+(* [CHANGED] ZEP-0056 and design-document-13: a named handler is an immutable top-level or namespace value. *)
+
+namespaceMember = { annotationApplication },
+                    ( funDecl | publicFunDecl | varDecl | publicVarDecl
+                    | handlerDecl | publicHandlerDecl ) ;
+annotationDecl = "annotation", IDENTIFIER,
+                   [ "(", [ annotationParameter, { ",", annotationParameter } ], ")" ], 'on',
+                   annotationTarget, { ",", annotationTarget }, ";" ;
+publicAnnotationDecl = "public", annotationDecl ;
+annotationParameter = IDENTIFIER, ":", type, [ "=", expression ] ;
+annotationTarget = IDENTIFIER ;
+annotationApplication = "@", qualifiedName,
+                          [ "(", [ annotationArgument, { ",", annotationArgument } ], ")" ] ;
+annotationArgument = [ IDENTIFIER, "=" ], expression ;
+
+(* [CHANGED] ZEP-0069: a data class has a component header instead of reusing classDecl; no constructors, no inheritance. *)
+
+dataClassDecl = 'data', "class", IDENTIFIER, [ typeParameters ], "(", dataComponent,
+                  { ",", dataComponent }, ")", [ "is", contractUse, { ",", contractUse } ],
+                  [ derivingClause ], "{", { dataClassMember }, "}" ;
+
+(* [NEW] ZEP-0069: canonical components; no defaults, no per-component visibility. *)
+
+dataComponent = { annotationApplication }, IDENTIFIER, ":", type ;
+
+(* [NEW] ZEP-0069: members of a data class. Auxiliary fields, computed properties and methods.
+   Constructors and named constructors are rejected; pattern, suffix and HKT implementation
+   members are accepted by the parser and checked by resolution. *)
+
+dataClassMember = { annotationApplication },
+                    ( initializerBlock | fieldDecl | propertyDecl | methodDecl
+                    | patternDecl | suffixDeclaration | hktImplementationDecl ) ;
+
+(* [NEW] ZEP-0069: constructor-style initializer block; the IDENTIFIER must be the enclosing data class name (semantic check). Its raises set contributes to the canonical constructor. *)
+
+initializerBlock = IDENTIFIER, [ raisesClause ], block ;
+publicDataClassDecl = "public", dataClassDecl ;
+sealedContractDecl = "sealed", contractDecl ;
+typeDecl = "type", IDENTIFIER, [ typeParameters ], [ derivingClause ], "=",
+             ( productComponents | sumCase, { "|", sumCase } ), ";" ;
+derivingClause = 'deriving', IDENTIFIER, { ",", IDENTIFIER } ;
+productComponents = "(", productComponent, ",", productComponent, { ",", productComponent }, ")" ;
+productComponent = IDENTIFIER, ":", type ;
+newtypeDecl = 'newtype', IDENTIFIER, [ derivingClause ], "=", type, [ 'where', expression ],
+                ";" ;
+
+(* [CHANGED] The parser accepts any source `type` after `=`, then requires the representation to
+   resolve to Int, Float, Boolean or String; Long, Byte, ByteArray, arrays and other nominal
+   types are rejected with a declaration-structure diagnostic. `deriving` on a newtype is valid
+   grammar and is rejected semantically for now. *)
+sumCase = IDENTIFIER, [ "(", [ sumPayload, { ",", sumPayload } ], ")" ] ;
+sumPayload = IDENTIFIER, ":", type ;
+declaration = varDecl | funDecl | handlerDecl | statement ;
+varDecl = "let", [ "mut" ], IDENTIFIER, [ ":", type ], [ "=", expression ], ";" ;
+funDecl = "fn", IDENTIFIER, [ typeParameters ], "(", parameters, ")", [ ":", type ],
+            [ raisesClause ], ( "=", expression, ";" | block ) ;
+raisesClause = "raises", type, { ",", type } ;
+
+(* [CHANGED] design-document-13: checked Java exceptions are mapped to effects with throws clauses. *)
+
+externalFunctionDecl = "external", "fn", IDENTIFIER, "(", parameters, ")", ":", type,
+                         [ throwsClause ], ";" ;
+
+(* [NEW] design-document-13: a single `throws` clause maps one or more checked Java exception
+   types to public effect constructors, e.g.
+   `throws java.io.IOException -> FileFailure::fromIOException,
+           java.lang.Exception -> BroadFailure::fromException`.
+   `throws` is a hard keyword and mappings are comma-separated. The parser accepts a general
+   type on either side of `->`; resolution requires a checked Java `Throwable` subtype on the
+   left and an effect with a matching public named constructor on the right. *)
+
+throwsClause = "throws", exceptionMapping, { ",", exceptionMapping } ;
+exceptionMapping = qualifiedName, "->", qualifiedName, "::", IDENTIFIER ;
+externalClassDecl = "external", "class", IDENTIFIER, "=", STRING, "{", { externalClassMember }, "}" ;
+
+(* [CHANGED] design-documents 12 and 13: external classes expose constructors
+   (`constructor new(...)`), instance methods, and static properties/methods, each with optional
+   throws mappings. Constructors cannot be `mut` or `static`; static members cannot be `mut`. *)
+
+externalClassMember = { annotationApplication }, [ "public" ], [ "mut" ],
+                        ( "constructor", "new", "(", plainParameters, ")", [ throwsClause ], ";"
+                        | memberName, "(", plainParameters, ")", ":", type, [ throwsClause ], ";" )
+                    | { annotationApplication }, [ "public" ], "static",
+                        ( "property", IDENTIFIER, ":", type, ";"
+                        | memberName, "(", plainParameters, ")", ":", type, [ throwsClause ], ";" ) ;
+typeParameters = "<", typeParameter, { ",", typeParameter }, ">" ;
+typeParameter = [ 'out' ], IDENTIFIER, [ "<", '_', ">" ],
+                  [ ":", typeParameterConstraint, { "+", typeParameterConstraint } ] ;
+typeParameterConstraint = type | 'nullable' | "mut" | "effect", [ "..." ] ;
+parameters = [ parameter, { ",", parameter } ] ;
+
+(* [CHANGED] Annotations: parameters are annotation targets (e.g. @Entity in ZEP-0031).
+   Annotations may be stacked. *)
+
+parameter = { annotationApplication }, IDENTIFIER, ":", type, [ "..." ], [ "=", expression ] ;
+plainParameters = [ plainParameter, { ",", plainParameter } ] ;
+plainParameter = { annotationApplication }, IDENTIFIER, ":", type ;
+classDecl = "class", IDENTIFIER, [ typeParameters ], [ "is", contractUse, { ",", contractUse } ],
+              [ derivingClause ], "{", { classMember }, "}" ;
+effectDecl = "effect", IDENTIFIER, "{", { classMember }, "}" ;
+extensionDecl = "extension", [ typeParameters ], type, "{", { extensionMember }, "}" ;
+
+(* [CHANGED] Annotations: optional, stackable applications on extension members. An extension
+   property must declare a getter and cannot declare an initializer, setter or `mut`. *)
+
+extensionMember = extensionProperty | extensionMethod ;
+extensionProperty = { annotationApplication }, [ "public" ], "property", IDENTIFIER, ":", type,
+                      "{", propertyAccessor, { propertyAccessor }, "}" ;
+extensionMethod = { annotationApplication }, [ "public" ], [ "mut" ], "fn", memberName,
+                    [ typeParameters ], "(", methodParameters, ")", ":", type, [ raisesClause ],
+                    ( "=", expression, ";" | block ) ;
+contractUse = qualifiedName, [ typeArguments ] ;
+
+(* [CHANGED] Annotations: optional, stackable applications on every class member. *)
+
+classMember = { annotationApplication },
+                ( fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl | suffixDeclaration | hktImplementationDecl | methodDecl | patternDecl ) ;
+hktImplementationDecl = [ 'delegating' ], 'implementation', contractUse, "{",
+                          { hktImplementationMethod }, "}" ;
+hktImplementationMethod = "fn", memberName, [ typeParameters ], "(", methodParameters, ")",
+                            ":", type, [ raisesClause ], ( "=", expression, ";" | block ) ;
+
+(* [NEW] Methods may declare an explicit receiver parameter, used by HKT contract/implementation
+   methods and witnesses. The receiver must be the first parameter and cannot be variadic or
+   have a default. *)
+
+methodParameters = [ receiverParameter, { ",", parameter } ]
+                 | [ parameter, { ",", parameter } ] ;
+receiverParameter = { annotationApplication }, "this", ":", type ;
+suffixDeclaration = 'suffix', IDENTIFIER, "{", suffixFactory, { suffixFactory }, "}" ;
+suffixFactory = ( 'integer' | 'decimal' ), ":", [ 'string' ], IDENTIFIER, ";" ;
+
+(* [CHANGED] ZEP-0069: direct field initializers (already described in the semantic notes; the production lacked them). *)
+
+fieldDecl = IDENTIFIER, ":", type, [ "=", expression ], ";" ;
+propertyDecl = [ visibility ], [ "mut" ], "property", IDENTIFIER, ":", type, [ "=", expression ],
+                 ( ";" | "{", propertyAccessor, { propertyAccessor }, "}" ) ;
+propertyAccessor = 'get', ( "=", expression, ";" | block )
+                 | 'set', "(", IDENTIFIER, ")", ( "=", expression, ";" | block ) ;
+constructorDecl = visibility, "constructor", "new", ";" ;
+namedConstructorDecl = visibility, "constructor", IDENTIFIER, "(", namedConstructorParameters, ")",
+                         [ raisesClause ], ( "=", expression, ";" | block ) ;
+namedConstructorParameters = [ namedConstructorParameter, { ",", namedConstructorParameter } ] ;
+
+(* [CHANGED] Annotations: parameters are annotation targets. *)
+
+namedConstructorParameter = { annotationApplication }, IDENTIFIER, ":", type, [ "..." ] ;
+methodDecl = [ visibility ], [ "mut" ], memberName, [ typeParameters ], "(", methodParameters, ")",
+               ":", type, [ raisesClause ], ( "=", expression, ";" | block ) ;
+patternDecl = visibility, "pattern", IDENTIFIER, "(", [ patternOutput, { ",", patternOutput } ],
+                ")", [ 'when', expression ], block ;
+patternOutput = IDENTIFIER, ":", type ;
+contractDecl = "contract", IDENTIFIER, [ typeParameters ],
+                 [ 'requires', contractUse, { "+", contractUse } ],
+                 [ 'permits', permittedClass, { ",", permittedClass } ], "{", { contractMember }, "}" ;
+permittedClass = qualifiedName, [ typeArguments ] ;
+witnessDecl = [ 'delegating' ], "witness", [ typeParameters ], type, "for", type, "{",
+                { witnessMethod }, "}" ;
+witnessMethod = [ "static" ], "fn", memberName, [ typeParameters ], "(", methodParameters, ")",
+                  ":", type, [ raisesClause ], ( "=", expression, ";" | block ) ;
+
+(* [CHANGED] Annotations: optional, stackable applications on every contract member. *)
+
+contractMember = { annotationApplication }, ( contractProperty | contractMethod ) ;
+contractProperty = [ "mut" ], "property", IDENTIFIER, ":", type, ";" ;
+contractMethod = [ "default" ], [ "mut" ], [ "static" ], memberName, [ typeParameters ],
+                   "(", methodParameters, ")", ":", type, [ raisesClause ],
+                   ( ";" | "=", expression, ";" | block ) ;
+(* A static contract method cannot be mutating, and only `default` methods declare a body. *)
+visibility = "public" | "private" ;
+memberName = IDENTIFIER ;
+statement = exprStmt
+          | breakStmt
+          | continueStmt
+          | forStmt
+          | ifStmt
+          | returnStmt
+          | usingStmt
+          | loopStmt
+          | whileStmt
+          | untilStmt
+          | block ;
+exprStmt = expression, ";" ;
+breakStmt = "break", ";" ;
+continueStmt = "continue", ";" ;
+forStmt = "for", "(", "let", IDENTIFIER, "in", expression, ")", statement ;
+usingStmt = "using", "(", usingBinding, { ",", usingBinding }, ")", block ;
+usingBinding = "let", IDENTIFIER, [ ":", type ], "=", expression ;
+ifStmt = "if", "(", expression, ")", statement, [ "else", statement ] ;
+returnStmt = "return", [ expression ], ";" ;
+loopStmt = "loop", statement ;
+whileStmt = "while", "(", expression, ")", statement ;
+untilStmt = "until", "(", expression, ")", statement ;
+block = "{", { declaration }, "}" ;
+(* [CHANGED] `..` is the lowest-precedence, right-associative range operator: both endpoints are
+   ordinary expressions, so `0 .. n - 1` groups as `0 .. (n - 1)`. *)
+expression = assignment, [ "..", expression ] ;
+assignment = coalesce, [ assignmentOperator, assignment ] ;
+assignmentOperator = "="
+                   | "+="
+                   | "-="
+                   | "*="
+                   | "/="
+                   | "%="
+                   | "&="
+                   | "|="
+                   | "^="
+                   | "<<="
+                   | ">>="
+                   | ">>>="
+                   | "??=" ;
+coalesce = logicOr, [ "??", coalesce ] ;
+logicOr = logicAnd, { "or", logicAnd } ;
+logicAnd = bitwiseOr, { "and", bitwiseOr } ;
+bitwiseOr = bitwiseXor, { "|", bitwiseXor } ;
+bitwiseXor = bitwiseAnd, { "^", bitwiseAnd } ;
+bitwiseAnd = equality, { "&", equality } ;
+equality = typeTest, { ( "!=" | "==" | "===" ), typeTest } ;
+typeTest = comparison, [ "is", [ "not" ], ( type | "null" ) | 'matches', matchPattern ] ;
+comparison = shift, { ( ">" | ">=" | "<" | "<=" ), shift } ;
+shift = term, { ( "<<" | ">>" | ">>>" ), term } ;
+term = factor, { ( "-" | "+" ), factor } ;
+factor = unary, { ( "/" | "*" | "%" ), unary } ;
+unary = "raise", unary | ( "not" | "-" | "+" | "~" | "typeof" ), unary | postfix ;
+postfix = call, { "as", [ "?" ], type | "!!" } ;
+
+(* [CHANGED] ZEP-0090: property references T::p. *)
+
+call = ( genericFunctionCall | genericClassFactoryCall | functionValueReference | propertyReference | primary ),
+         { callSuffix } ;
+callSuffix = arguments | "[", expression, "]" | ( "." | "?." ), memberName,
+              [ typeArguments, arguments ] | trailingLambda ;
+
+(* [CHANGED] ZEP-0082/0083 and design-document-00: the trailing lambda body is a statement
+   sequence (`configure { host = "x"; }`), with an optional final expression (`{ it + 1 }`). *)
+
+trailingLambda = "{", [ trailingLambdaParameter, { ",", trailingLambdaParameter }, "->" ],
+                   { declaration }, [ expression ], "}" ;
+trailingLambdaParameter = IDENTIFIER, [ ":", type ] ;
+genericFunctionCall = IDENTIFIER, typeArguments, arguments ;
+functionValueReference = IDENTIFIER, "::", typeArguments ;
+
+(* [NEW] ZEP-0090: `::` followed by `<` is function specialization (above); followed by an identifier it is a property reference. The left operand names a type, never an expression. *)
+
+propertyReference = qualifiedName, [ typeArguments ], "::", IDENTIFIER ;
+genericClassFactoryCall = IDENTIFIER, [ typeArguments ], ".", IDENTIFIER,
+                          [ typeArguments ], arguments ;
+arguments = "(", [ expression, { ",", expression } ], ")" ;
+typeArguments = "<", typeArgument, { ",", typeArgument }, ">" ;
+
+(* [CHANGED] ZEP-0086: an explicit type argument for an effect-row parameter is written as a set
+   ({}, {NotFound}). Variance projections are accepted only inside a `type` application, not in
+   call, contract-use or factory type arguments. *)
+
+typeArgument = type | '_' ;
+
+(* [CHANGED] ZEP-0083: unary function types may omit the parentheses around the single input
+   type. A bare effect-row type (for example a row-variable type argument) is also a `type`,
+   but it cannot be prefixed with `&`. The parser does not require the two GREATER tokens of
+   `~>` to be adjacent. A handler, nullable or parenthesized type can also be the input of the
+   unary shorthand; the shorthand itself declares no raised effects. *)
+
+type = effectSet | [ "&" ], compoundType ;
+compoundType = receiverFunctionType
+             | typeAtom,
+               [ "~>", effectSet, [ "raises", effectSet ] ],
+               [ "?" ],
+               [ "->", type ] ;
+
+(* [CHANGED] ZEP-0082: a generic receiver such as Validator<T>.(T) -> Validation<T> needs type arguments. *)
+
+receiverFunctionType = typeAtom, ".", "(", [ type, { ",", type } ], ")", "->", type,
+                        [ raisesClause ] ;
+effectSet = "{", [ type, { ",", type } ], "}" ;
+typeAtom = qualifiedName, [ "<", typeArgumentsBody, ">" ]
+         | "(", ")", "->", type, [ raisesClause ]
+         | "(", type, ")", [ "->", type, [ raisesClause ] ]
+         | "(", type, ",", type, { ",", type }, ")", "->", type, [ raisesClause ] ;
+typeArgumentsBody = projectedTypeArgument, { ",", projectedTypeArgument } ;
+projectedTypeArgument = [ 'out' | "in" ], ( type | '_' ) ;
+primary = INT
+        | LONG
+        | DOUBLE
+        | suffixedNumericLiteral
+        | STRING
+        | CHAR
+        | IDENTIFIER
+        | handleExpr
+        | handlerLiteral
+        | arrayLiteral
+        | lambda
+        | qualifiedName, ".", "this"
+        | "true"
+        | "false"
+        | "null"
+        | "this"
+        | ifExpr
+        | matchExpr
+        | forExpr
+        | anonymousObjectExpr
+        | "(", ")"
+        | "(", expression, ")" ;
+suffixedNumericLiteral = SUFFIXABLE_NUMBER, IDENTIFIER ;
+handleExpr = "handle", "(", expression, ")", 'with', ( handlerBody | expression ) ;
+handlerLiteral = 'handler', handlerBody ;
+handlerBody = "{", handleArm, { handleArm }, "}" ;
+handleArm = "case", matchPattern, [ "as", IDENTIFIER ], [ "if", expression ],
+              [ 'with', 'suppressed', "as", IDENTIFIER ], "->", expression, ";" ;
+arrayLiteral = "[", [ expression, { ",", expression } ], "]" ;
+ifExpr = "if", "(", expression, ")", "then", expression, "else", expression ;
+matchExpr = "match", "(", expression, ")", "{", matchArm, { matchArm }, "}" ;
+matchArm = "case", matchCasePattern, [ "as", IDENTIFIER ], [ "if", expression ],
+             "->", expression, ";" ;
+matchCasePattern = matchCaseAlternative, { "|", matchCaseAlternative } ;
+
+(* [CHANGED] Literal and product patterns are supported only by match expressions. The bare
+   sum-case form below (IDENTIFIER followed by `(`) is recognized only at the root of an arm;
+   nested alternatives use the type form, optionally with a product-payload pattern. Nested
+   literal and type alternatives may carry their own `as` alias; a root alias is written after
+   the whole pattern and is valid only for a single non-wildcard alternative (see matchArm). *)
+
+matchCaseAlternative = literalPattern, [ "as", IDENTIFIER ]
+                     | '_'
+                     | IDENTIFIER, "(", [ matchPatternArgument, { ",", matchPatternArgument } ], ")"
+                     | type,
+                         [ ".", IDENTIFIER, "(", [ matchPatternArgument, { ",", matchPatternArgument } ], ")"
+                         | "(", [ matchPatternArgument, { ",", matchPatternArgument } ], ")" ],
+                         [ "as", IDENTIFIER ] ;
+matchPatternArgument = '_' | IDENTIFIER | matchCasePattern ;
+matchPattern = patternAlternative, { "|", patternAlternative } ;
+patternAlternative = '_'
+                   | IDENTIFIER
+                   | type,
+                       [ ".", IDENTIFIER, "(", [ patternArgument, { ",", patternArgument } ], ")" ],
+                       [ "as", IDENTIFIER ] ;
+patternArgument = '_' | IDENTIFIER | matchPattern ;
+literalPattern = [ "-" ], ( INT | LONG )
+               | DOUBLE
+               | STRING
+               | CHAR
+               | "true"
+               | "false" ;
+forExpr = "for", IDENTIFIER, "in", expression, { forClause }, forResult ;
+forClause = "for", IDENTIFIER, "in", expression
+          | "let", IDENTIFIER, "=", expression
+          | "if", expression ;
+forResult = 'yield', expression | 'collect', expression, 'into', expression ;
+lambda = IDENTIFIER, "->", lambdaBody
+       | "(", [ lambdaParameter, { ",", lambdaParameter } ], ")", "->", lambdaBody ;
+lambdaParameter = IDENTIFIER, [ ":", type ] ;
+lambdaBody = expression | block ;
+anonymousObjectExpr = "object", ":", contractUse, { "+", contractUse }, "{",
+                        { anonymousObjectMember }, "}" ;
+anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIFIER, ":", type,
+                          [ "=", expression ],
+                          ( ";" | "{", propertyAccessor, { propertyAccessor }, "}" )
+                      | methodDecl
+                      | IDENTIFIER, ":", type, "=", expression, ";" ;
+
+(* Semantic/parser constraints:
+   - An annotation application (`@Name` or `@Name(args)`) is a prefix on every annotation target:
+   top-level declarations, class, data class, contract and external-class members, data-class
+   components, extension members, namespace members and parameters. Applications may be stacked.
+   Each application must name a declaration whose target matches one of `CLASS`, `CONTRACT`,
+   `FUNCTION`, `METHOD`, `CONSTRUCTOR`, `FIELD`, `PROPERTY`, `DATA_COMPONENT` or `PARAMETER`.
+   Target names are canonically uppercase; the parser matches them case-insensitively.
+   Annotations cannot target namespaces, product components, sum cases or sum payloads.
+   - A wildcard import ends in `.*`, cannot have an alias, and cannot be a suffix import.
+   - Namespace members are functions and immutable values; public mutable values remain unsupported.
+   - `model` and `data` are soft keywords.
+   - A type parameter may use `nullable`, `mut`, or `effect` (or `effect...`) as admissibility
+   markers instead of ordinary contract bounds. `effect...` denotes an effect-row parameter.
+   - The `out` prefix is allowed only on class and contract type parameters. A higher-kinded
+   parameter is written `F<_>` and cannot be covariant; class/contract covariance is checked for
+   unsafe positions rather than trusted from the annotation.
+   - Postfix `!!` asserts that an expression is non-null and produces its non-null type.
+   - A trailing lambda may follow a callable name or call expression. An arrowless block with an
+   expected one-parameter function type receives the implicit binding `it`.
+   - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
+   - Each package/namespace callable name and each class/contract method name identifies one
+   declaration. Ordinary Zeron functions and methods do not overload. Extension methods may share
+   a name only for non-equivalent receiver types; calls select by receiver applicability alone,
+   and multiple applicable extensions are ambiguous.
+   - A for-expression has ordered generator, local-binding, and guard clauses, followed by exactly one
+   final result clause. The result clause is either `yield expression` for a lazy Stream<T> or
+   `collect expression into sink` for eager collection into a mutable Sink<T>.
+   - Generator expressions are evaluated for each path that reaches them and are traversed in lexical,
+   depth-first order. Bindings introduced by `for` and `let` clauses are visible to later clauses.
+   Guards skip the remainder of the current path when false.
+   - A lazy comprehension evaluates its outer source expression once at construction and defers
+   traversal and per-element clause expressions until values are requested. It does not guarantee
+   source replayability. Eager collection evaluates the outer source and sink once before traversal;
+   projected values are added in traversal order, and the expression returns the sink.
+   - The words `yield`, `collect`, and `into` are contextual identifiers used in for-expression result
+   clauses, not globally reserved keywords.
+   - Contracts describe instance behavior and do not declare class-side constructor requirements.
+   - `delegating` is a soft keyword permitted only before a witness declaration or a class HKT
+   implementation block; elsewhere it remains an ordinary identifier.
+   - A class HKT implementation block must match one class-header constructor conformance. Prefixing
+   it with `delegating` forwards compatible receiver-based operations to public methods on that
+   class; explicit block methods take precedence and receiverless operations remain explicit.
+   - Contract bounds and admissibility markers are permitted on type parameters of generic
+   classes, contracts, data classes, functions, methods, extensions and witnesses. Multiple
+   ordinary contract bounds use `+`.
+   - Sealed contracts require a non-empty permits list. Permitted classes must be in the contract's
+   package; public sealed contracts permit only public classes. Generic arity and type parameters
+   correspond by position. Permitted implementation classes are final.
+   - A product type requires at least two components; the parser accepts a parenthesized list
+   with fewer than two components (including an empty list) and resolution rejects it.
+   - Nominal sums use `type Name<T> = Case(value: T) | Empty;`. Cases are closed, share the sum's
+   visibility, have immutable positional payloads, and are constructed as `Name.Case(args)` (including
+   `Name.Empty()`). Generic arguments infer from payloads and expected type; underconstrained cases
+   require explicit arguments. Each zero-payload case is a singleton by identity. Sum matches use
+   `case Name.Case(binding, _)`, require exact payload arity, and are exhaustive over unguarded cases
+   or a final unguarded wildcard. Nullable sums, nested/OR sum patterns, named args, defaults,
+   methods, and contract conformance are not part of the MVP.
+   - `value is Name.Case` refines the value to that case on the true path; generic case arguments
+   come from the sum value. Named payloads can be read only while that case refinement is active.
+   `value matches Name.Case(binding, _)` is supported as a direct `if` or `while` condition and
+   binds immutable payload locals only in the successful branch. Composing `matches` with logical
+   operators, negation, or other expressions is not supported yet. Payloads are read-only.
+   - Extensions may target the nominal sum type and remain statically dispatched. A witness may target
+   a sum once for its complete generic pattern; its methods receive the sum value and may inspect it
+   with `match`. This does not make generated case classes conform to the witnessed contract.
+   Sum-target witnesses cannot map class named constructors.
+   - Match expressions require a non-null sealed-contract value. Every permitted class must be covered
+   by an unguarded case, unless a final unguarded `_` covers remaining values. Case generic arguments
+   must match the scrutinee's contract arguments. Cases may invoke declared class patterns with
+   positional nested/bound/ignored outputs, literal patterns, product patterns, OR alternatives
+   with identical binding environments, an immutable whole-value alias with `as`, and an optional
+   Boolean guard. Guard- or refutation-failing cases do not count toward exhaustiveness. Nullable
+   matches are unsupported.
+   - For expressions require a non-null valid iterable as per Resolver.resolveIterable semantics.
+   - The name `_` is reserved for types: a type-name position may not be spelled exactly `_`. In any type, type argument or pattern position a bare `_` is the wildcard, never a nominal type, so `qualifiedName` inside `type` cannot be `_`. Declarations are rejected when they would declare a type named `_`: `class`, `contract`, `effect`, `type` (sum or product), `newtype`, `data class`, `external class`, `annotation`, sum cases, and type parameters (a parameter named `_` would also collide with the higher-kinded marker in `F<_>`). Elsewhere `_` stays a legal name: variables, parameters, functions, properties and fields. In pattern positions `_` is always the wildcard, so a pattern cannot bind a variable named `_`. These are resolution/parser checks, not scanner rules.
+   - Scanner alignment: the scanner has no tokens for `>>`, `>>>` or `~>`. It emits `>` (GREATER)
+   and `~` (TILDE) separately, and only `>=`, `>>=` and `>>>=` as combined forms. The parser joins
+   consecutive GREATER tokens into `>>`/`>>>` and TILDE followed by GREATER into `~>`. The current
+   implementation does not require strict adjacency for the joined expression operators, so `> >`
+   and `~ >` are also accepted even though the productions show single terminals. Type-argument
+   lists consume GREATER tokens individually, so `List<List<Int>>` needs no joined token.
+   - `_` is an ordinary, legal IDENTIFIER and is not reserved. Where a rule writes `'_'` (type-parameter placeholders, type-argument wildcards, patterns) the spelling is recognized by exact lexeme at that position, like a soft word; elsewhere `_` can be used as any other name.
+   - Scanner alignment: a numeric suffix is not part of the number token. SUFFIXABLE_NUMBER holds only the digits and the suffix is the next IDENTIFIER token; the parser must require that the two are adjacent. A suffix spelled like a hard keyword (e.g. `5in`) is scanned as that keyword and is not a valid suffix.
+   - ZEP-0083 ambiguity: the unary shorthand `A -> B` must not be recognized where a type is followed by the `->` of a `case` arm (patternAlternative, handleArm, matchArm) or of a trailing lambda with typed parameters (`{ v: Int -> v + 1 }`). In those positions the `->` belongs to the arm or lambda.
+   - An effect constructor named in a `throws` mapping (`Effect::factory`) must be a public named constructor of an effect that accepts one payload able to receive the mapped exception.
+   - A data class declares its canonical components in a tuple-like header and is final and nominal. It has no explicit or named constructors; the canonical constructor takes every component and has no defaults. Components are immutable and exposed as read-only properties with the class's visibility. Initialization order: components, then direct field initializers in declaration order, then initializer blocks in source order. A direct initializer may call only functions with an empty raised-effect set; initializer blocks may raise effects, and their union is raised by construction. An auxiliary field set by a block must not also have a direct initializer. Blocks cannot assign components.
+   - A property reference `T::p` requires an accessible getter for `p` on type T (or a contract property of contract T). It is read-only, its identity is `declaringQualifiedName#propertyName`, and it converts one-way to the function `(T) -> V`. Bound references (`value::p`) do not exist.
+   - A row variable `E: effect...` expands in `raises` lists by its declared kind; at most one row variable per list. A type argument for a row parameter is an effect set `{...}`; a single effect type is read as a singleton row.
+   - The canonical `new` declaration may be omitted, which synthesizes a public canonical constructor.
+   An explicit `private constructor new;` makes canonical construction private.
+   - Fields and auto-properties may have initializers. Initialized members are omitted from canonical
+   constructor parameters. Uninitialized fields are parameters first, followed by uninitialized
+   auto-properties, each in declaration order within its group.
+   - A visibility-marked class `property` has a generated getter; `mut` adds a generated setter which
+   requires a mutable receiver. A custom accessor block replaces generated accessors. Custom
+   properties require a getter and use explicitly declared fields for backing storage.
+   - Contracts may require read-only properties (`property name: Type;`) or writable properties
+   (`mut property name: Type;`). Implementations may use auto or custom accessors.
+   - Named constructors are static factories with explicit visibility and either expression or block
+   bodies. Their result type is implicitly `&Class`, they have no `this`, and every reachable normal
+   path in a block must return an `&Class` value. Allocation still uses the canonical `Class.new`.
+   - Anonymous objects list one or more contracts. Auto-properties and private fields require
+   initializers; constructors and patterns are not valid object members. Initializers, methods, and
+   property accessors use the existing immutable-capture restrictions.
+   - Generic functions and methods must have explicit return types. Method type parameters are
+   scoped to that method and cannot shadow enclosing class or contract parameters. Function and
+   method type parameters may each have multiple contract bounds joined by `+`.
+   Calls infer type arguments from arguments or accept explicit arguments before the argument list.
+   - Generic function values use `name::<Type, ...>` for explicit specialization, or a bare name
+   when an expected function type determines every type parameter. These values are monomorphic.
+   - Type parameters of classes, contracts, data classes, functions, methods, extensions and
+   witnesses may name contracts or use the admissibility markers above. Only non-mutating contract
+   methods are available through a bounded type parameter. Operator constraints remain unsupported.
+   - Generic function calls use a bare identifier; generic class factories use Type<Args>.name(...).
+   - Generic type applications on Zeron classes/contracts and imported Java generic types may
+   project an argument as `out Type` or `in Type`. Projections are type-only views; they do not
+   apply to arrays, generic type constructors, sums, products, or raw Java generic types.
+   - Project compilation uses explicit source roots and an entry file. Cross-package source units may
+   declare classes, contracts, functions, and immutable top-level values. Selective imports may use
+   `as` aliases and require public declarations. Compiled libraries export public immutable
+   top-level and namespace values; public mutable values remain unsupported.
+   - Non-entry functions require explicit return annotations so signatures are available up front.
+   - External functions are top-level signature-only declarations. Their implementation is selected
+   by a compiler-side typed binding registry keyed by the source-qualified function name.
+   - Parameters may have defaults only as a trailing suffix. Calls supply a positional prefix;
+   defaults run once per call, left to right, in declaration scope and may refer to earlier
+   parameters. Full function types retain full arity. Defaults are supported on functions,
+   class methods, contract methods, and external functions; constructors and external-class
+   methods do not support defaults.
+   - Contract method defaults belong to the contract and are available through contract- and
+   implementing-class-typed calls. Implementations provide only the full-arity method. Compiled
+   libraries export minimum arity and generate shorter-arity JVM wrappers.
+   - Functions, methods, external functions, and named constructors allow at most one variadic
+   parameter, and it must be last. Its declared element type is
+   exposed as Array<T>; direct calls pack positional arguments after fixed parameters, while
+   function values retain the full Array<T> parameter. Defaults may precede it but cannot apply to
+   it. Named constructors do not support defaults. Spread calls, canonical constructors, and
+   external-class methods do not support variadics.
+   - `..` takes any two `Int` expressions and constructs an inclusive `zeron.ranges.IntRange`,
+   evaluating each endpoint once. It is the lowest-precedence, right-associative operator, so
+   `0 .. n - 1` groups as `0 .. (n - 1)`; parenthesize a range before applying an operator to it.
+   `for` accepts arrays and values conforming to the bundled Iterable<T> contract.
+   - Class patterns declare typed outputs and may be refutable with `when`. Output names are assigned
+   exactly once on every completing path. Pattern bodies cannot call `mut` methods.
+   - Match patterns support named class patterns, nested patterns, ignored/bound outputs, and OR
+   alternatives. OR alternatives must bind the same names with compatible types. Legacy
+   one-public-property match patterns remain supported when no class pattern has that name.
+   - Output uses ordinary imported calls to `zeron.io.print` and `zeron.io.println`; `print` is not a
+   statement keyword.
+   - Assignment targets are variables, properties, or array indices. Compound assignment is supported
+   for variables and writable properties; property receivers are evaluated once, then the getter,
+   operator, and setter run in that order. Indexed assignment accepts '=' only.
+   - `%` accepts matching `Int`, `Long`, or `Float` operands and follows JVM remainder semantics.
+   Bitwise `&`, `|`, `^`, `~` and shifts require `Int` or `Long`; `>>>` is zero-filling. Shift
+   distances are `Int` and follow JVM behavior (only the low five bits for Int and low six for Long).
+   - An array literal may be empty only where an expected `Array<T>` type is available; otherwise
+   it requires at least one element. A valueless `return` has type Unit and is rejected in non-Unit
+   functions.
+   - Effects are nominal non-generic payload classes. They cannot implement contracts or declare
+   methods, and payload properties must be public. Effects are supported in callable signatures,
+   function types, and entry-point `main`, but not in external Java signatures or top-level
+   initializers. Named `handler` declarations are immutable top-level or namespace values; anonymous
+   `handler { ... }` expressions may capture immutable locals. Handler types use
+   `R ~> {HandledEffect, ...} [raises {HandlerEffect, ...}]` with finite concrete effect sets.
+   The optional raised-effect set defaults to empty.
+   Applying a handler subtracts only completely handled effects and adds effects from its cases.
+   Handler cases reuse nested and OR `matchPattern` syntax, allow Boolean guards, and require their
+   OR alternatives to name the same effect type. Only an unguarded, irrefutable pattern establishes
+   effect coverage; unmatched effects propagate at runtime. Java checked exceptions can be mapped
+   only by explicit external-class method declarations; there is no automatic translation. There
+   are no catch-all cases or effect subtyping in this slice.
+   `Result` remains an ordinary value type.
+   - Sum declarations introduce closed nominal types. Cases are constructed and matched through
+   qualified calls/patterns; payload positions are positional, and generic case patterns inherit
+   type arguments from the scrutinee unless arguments are explicitly supplied. Nullary cases are
+   singletons. Public compiled-library metadata preserves the sum declaration and ordered payloads.
+   Type argument arity is checked by resolution.
+   Parser productions describe syntax; declaration, type-argument, and return-flow constraints are
+   enforced by resolution. *)
+
+(* ======================================================================================
+   LEXICAL GRAMMAR (derived from Scanner.java)
+   Special sequences ? ... ? describe conditions that plain EBNF cannot express.
+   Whitespace is ' ', TAB, CR and LF only; any other character outside a literal or a
+   comment is an UNEXPECTED_CHARACTER error. Input is read as UTF-16 code units.
+   ====================================================================================== *)
+
+digit        = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+binDigit     = "0" | "1" ;
+octDigit     = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" ;
+hexDigit     = digit | "a" | "b" | "c" | "d" | "e" | "f" | "A" | "B" | "C" | "D" | "E" | "F" ;
+letter       = ? ASCII letter, A-Z or a-z ? ;
+
+(* IDENTIFIER: ASCII only. `_` alone is an ordinary, legal identifier; it is not reserved. *)
+IDENTIFIER   = ( ( letter | "_" ), { letter | digit | "_" } ) - hardKeyword ;
+hardKeyword  = "as" | "and" | "annotation" | "break" | "case" | "class" | "constructor"
+             | "contract" | "continue" | "default" | "effect" | "else" | "extension"
+             | "external" | "false" | "fn" | "for" | "handle" | "if" | "implement" | "import"
+             | "in" | "is" | "let" | "loop" | "match" | "mut" | "namespace" | "not" | "null"
+             | "object" | "or" | "package" | "pattern" | "private" | "property" | "public"
+             | "raise" | "raises" | "return" | "sealed" | "static" | "then" | "this"
+             | "throws" | "true" | "type" | "typeof" | "until" | "using" | "while"
+             | "witness" ;
+(* `implement` is reserved but no production uses it. *)
+
+(* Digit groups: `_` is allowed only between two digits of the literal's radix. *)
+decDigits    = digit, { [ "_" ], digit } ;
+binDigits    = binDigit, { [ "_" ], binDigit } ;
+octDigits    = octDigit, { [ "_" ], octDigit } ;
+hexDigits    = hexDigit, { [ "_" ], hexDigit } ;
+
+integerText  = decDigits
+             | "0", ( "b" | "B" ), binDigits
+             | "0", ( "o" | "O" ), octDigits
+             | "0", ( "x" | "X" ), hexDigits ;
+decimalText  = decDigits, ".", decDigits ;
+(* The "." must be followed by a digit, so `1..5` is INT, "..", INT and `1.foo()` is
+   INT, ".", IDENTIFIER. There is no exponent notation. *)
+
+INT          = integerText ;
+(* ? not immediately followed by "L" or by a letter or "_" ? *)
+LONG         = integerText, "L" ;
+(* only an uppercase L; the scanner stores a value up to 2^63 inclusive so that
+   -9223372036854775808L can be written; larger values are an out-of-range error. INT carries
+   an unbounded integer; its range is not checked by the scanner. Decimal literals never take L:
+   `1.5L` is a SUFFIXABLE_NUMBER followed by the suffix L. *)
+DOUBLE       = decimalText ;
+(* ? not immediately followed by a letter or "_" ? *)
+
+(* SUFFIXABLE_NUMBER is only the digits (integerText or decimalText) when it is immediately
+   followed by a letter or "_" that does not form the L of a LONG. The suffix is NOT part of
+   the token: it is scanned as the next IDENTIFIER token and the parser requires adjacency. *)
+SUFFIXABLE_NUMBER = integerText | decimalText ;
+
+(* STRING: by design the language has no string escape sequences (for now), so a string cannot
+   contain a double quote. It may span lines. The token value is the raw text between the quotes. *)
+STRING       = '"', { ? any UTF-16 code unit except '"' ? }, '"' ;
+
+(* CHAR: exactly one Unicode scalar value; its value is its code point. *)
+CHAR         = "'", ( charScalar | charEscape ), "'" ;
+charScalar   = ? any Unicode scalar value except "'", "\", CR and LF; a surrogate pair is one scalar, a lone surrogate is an error ? ;
+
+(* The \u{...} value must be at most 10FFFF and not a surrogate (D800 to DFFF). `\"` is not an
+   escape. EBNF terminal strings do not use backslash escapes, so the backslash itself is named
+   by the `backslash` production. *)
+backslash    = ? the reverse solidus character U+005C ? ;
+charEscape   = backslash, ( backslash | "'" | "n" | "r" | "t" | "u", "{", hexDigit, { hexDigit }, "}" ) ;
+
+(* Comments are scanner tokens excluded from the grammar. *)
+LINE_COMMENT  = "//", { ? any character except CR and LF ? } ;
+
+(* any "//" line that starts with "///" (so "////" too) is a DOC_COMMENT *)
+DOC_COMMENT   = "///", { ? any character except CR and LF ? } ;
+
+(* block comments do not nest and there is no doc form; an unterminated one is an error *)
+BLOCK_COMMENT = "/*", { ? any character ? }, "*/" ;
+
+EOF = ? the EOF signal ? ;

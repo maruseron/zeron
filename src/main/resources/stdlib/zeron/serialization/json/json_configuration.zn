@@ -1,0 +1,102 @@
+package zeron.serialization.json;
+
+import com.maruseron.zeron.runtime.json.JsonSupport;
+import com.maruseron.zeron.runtime.json.JsonValue;
+
+import zeron.serialization.Decode;
+import zeron.serialization.DecodeError;
+import zeron.serialization.Encode;
+import zeron.serialization.EncodeError;
+
+/// Configuration for writing JSON text.
+///
+/// `indent` is the number of spaces written for each nesting level. Zero (or a negative value)
+/// writes compact JSON; a positive value writes one value per line with that indentation.
+public data class Json(indent: Int) {
+    /// Whether this configuration writes compact JSON without indentation.
+    public isCompact(): Boolean = this.indent <= 0;
+
+    /// Encodes `value` as a JSON value using its `Encode` evidence.
+    public encodeToValue<T: nullable + mut + Encode<T, {}>>(
+        value: T
+    ): Result<&JsonValue, EncodeError> = encodeValue<T>(value);
+
+    /// Encodes `value` and writes it as JSON text using this configuration.
+    public encodeToString<T: nullable + mut + Encode<T, {}>>(
+        value: T
+    ): Result<String, EncodeError> =
+        match (encodeValue<T>(value)) {
+            case Ok(json) -> match (this.stringifyValue(json)) {
+                case Ok(text) -> Result<String, EncodeError>.Ok(text);
+                case Err(error) -> Result<String, EncodeError>.Err(
+                    EncodeError.new(getErrorMessage(error), []));
+            };
+            case Err(error) -> Result<String, EncodeError>.Err(error);
+        };
+
+    /// Decodes a value of `T` from JSON text.
+    ///
+    /// Parsing does not depend on this configuration.
+    public decodeFromString<T: nullable + mut + Decode<T, {}>>(
+        text: String
+    ): Result<T, DecodeError> = parseAs<T>(text);
+
+    /// Encodes the fields that `block` selects through `model`.
+    ///
+    /// A model records field identity and external names but erases value types, so the block
+    /// supplies the typed reads, as it does for `jsonModel`.
+    public encodeToValueWith<T: nullable + mut>(
+        model: Model<T>,
+        value: T,
+        block: &JsonModelObjectBuilder<T>.() -> Unit
+    ): Result<&JsonValue, JsonError> = jsonModel<T>(model, value, block);
+
+    /// Encodes the fields that `block` selects through `model` and writes them using this
+    /// configuration.
+    public encodeToStringWith<T: nullable + mut>(
+        model: Model<T>,
+        value: T,
+        block: &JsonModelObjectBuilder<T>.() -> Unit
+    ): Result<String, JsonError> =
+        match (jsonModel<T>(model, value, block)) {
+            case Ok(json) -> this.stringifyValue(json);
+            case Err(error) -> Result<String, JsonError>.Err(error);
+        };
+
+    /// Writes a JSON value using this configuration.
+    public stringifyValue(value: &JsonValue): Result<String, JsonError> {
+        let result = JsonSupport.stringifyIndented(value, this.indent);
+        if (result.isSuccess()) return Result.Ok(result.text());
+        let error = result.error();
+        return Result.Err(JsonError.Parse(
+            error.message(),
+            error.offset(),
+            error.line(),
+            error.column()
+        ));
+    }
+
+    /// Parses JSON text into a JSON value.
+    ///
+    /// Parsing does not depend on this configuration; use it to feed `stringifyValue`.
+    public parseValue(text: String): Result<&JsonValue, JsonError> = parse(text);
+}
+
+/// JSON operations that delegate to the default compact configuration.
+namespace Json {
+    /// The default configuration, which writes compact JSON.
+    public fn compact(): Json = Json.new(0);
+
+    /// A configuration that indents each nesting level by `indent` spaces.
+    public fn pretty(indent: Int): Json = Json.new(indent);
+
+    /// Encodes `value` and writes compact JSON text using the default configuration.
+    public fn encodeToString<T: nullable + mut + Encode<T, {}>>(
+        value: T
+    ): Result<String, EncodeError> = Json.new(0).encodeToString<T>(value);
+
+    /// Decodes a value of `T` from JSON text using the default configuration.
+    public fn decodeFromString<T: nullable + mut + Decode<T, {}>>(
+        text: String
+    ): Result<T, DecodeError> = Json.new(0).decodeFromString<T>(text);
+}

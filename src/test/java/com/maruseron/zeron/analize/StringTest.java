@@ -122,9 +122,9 @@ public final class StringTest {
                         fn identity(value: Char): Char = value;
                         fn displayChar<T: Display>(value: T): String = value.toString();
                         fn equalChar<T: Eq<T>>(left: T, right: T): Boolean = left.eq(right);
-                        fn hashChar<T: Hashable<T>>(value: T): Int = value.hash();
+                        fn hashChar<T: Hashable<T>>(value: T): Long = value.hash();
                         fn genericCharOperations(): Boolean =
-                            displayChar('😀') == "😀" and equalChar('x', 'x') and hashChar('x') == 120;
+                            displayChar('😀') == "😀" and equalChar('x', 'x') and hashChar('x') == 120L;
                         fn rejectsInvalidConversion(): Boolean =
                             not 55296.toChar().isSome() and not 1114112.toChar().isSome()
                             and not (-1).toChar().isSome();

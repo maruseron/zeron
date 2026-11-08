@@ -122,6 +122,15 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
         return nullableArguments;
     }
 
+    /// Returns this parameter with the `nullable` admissibility marker cleared, modelling a value
+    /// that flow analysis has proved non-null. Equality ignores the marker, so the copy denotes the
+    /// same type parameter and can be used wherever the declared descriptor is expected.
+    public TypeParameterDescriptor asNonNull() {
+        if (!nullableArguments) return this;
+        return new TypeParameterDescriptor(scopeId, name, bounds, higherKinded, variance,
+                false, effectKind, effectRowKind, mutableArguments);
+    }
+
     public boolean isEffectKind() {
         return effectKind;
     }

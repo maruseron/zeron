@@ -22,7 +22,7 @@ external fn rationalDenominator(value: &RationalValue): String;
 external fn rationalToFloat(value: &RationalValue): Float;
 external fn rationalEquals(left: &RationalValue, right: &RationalValue): Boolean;
 external fn rationalCompare(left: &RationalValue, right: &RationalValue): Int;
-external fn rationalHash(value: &RationalValue): Int;
+external fn rationalHash(value: &RationalValue): Long;
 external fn rationalToString(value: &RationalValue): String;
 
 /// Immutable arbitrary-precision rational type.
@@ -86,7 +86,7 @@ public class Rational is Ratio<Integer>, Hashable<Rational>, Comparable<Rational
         rationalEquals(this.value, other.value);
 
     /// Returns a hash consistent with `eq`.
-    public hash(): Int = rationalHash(this.value);
+    public hash(): Long = rationalHash(this.value);
 
     /// Compares this rational with `other` by value.
     public compareTo(other: Rational): Ordering {

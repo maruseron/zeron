@@ -78,6 +78,7 @@ final class NominalTypeEmitter {
                         if (sumDeclaration != null && derives(sumDeclaration.derivedContracts(), "Hashable")) {
                             emitSumHashMethod(builder, sumDeclaration);
                         }
+                        SerializationEmitter.emitIfRequested(context, builder, sumDeclaration);
                         for (final var method : contract.methods()) {
                             final var hktDefault = contract.higherKinded() && method.isDefault();
                             final var jvmDefault = method.isDefault() && !hktDefault;
@@ -178,7 +179,7 @@ final class NominalTypeEmitter {
             parameters.add(ClassDesc.of("java.lang.invoke.MethodHandle"));
         }
         final var methodType = MethodTypeDesc.of(ConstantDescs.CD_boolean, parameters);
-        builder.withMethodBody("$zeron$eq", methodType,
+        builder.withMethodBody(IntrinsicDescriptors.DERIVED_EQ, methodType,
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 code -> {
                     final var unequal = code.newLabel();
@@ -240,7 +241,7 @@ final class NominalTypeEmitter {
                                 for (int handleIndex = 0; handleIndex < evidenceCount; handleIndex++) {
                                     code.aload(2 + handleIndex);
                                 }
-                                code.invokestatic(root, "$zeron$eq", methodType, true);
+                                code.invokestatic(root, IntrinsicDescriptors.DERIVED_EQ, methodType, true);
                                 if (payloadType instanceof NullableDescriptor) {
                                     code.ifeq(unequal);
                                     code.labelBinding(payloadDone);
@@ -274,18 +275,15 @@ final class NominalTypeEmitter {
     private static void emitSumHashMethod(final ClassBuilder builder, final Stmt.SumDecl sum) {
         final var root = ClassDesc.of(sum.name().lexeme());
         final var appliedRoot = appliedType(sum.name().lexeme(), sum.typeParameters());
-        final var evidenceCount = sum.cases().stream().flatMap(sumCase -> sumCase.payloads().stream())
+        final var evidenceCount = (int) sum.cases().stream()
+                .flatMap(sumCase -> sumCase.payloads().stream())
                 .filter(payload -> !isRecursiveSumPayload(payload.type(), appliedRoot)).count();
-        final var parameters = new ArrayList<ClassDesc>();
-        parameters.add(root);
-        for (long index = 0; index < evidenceCount; index++) {
-            parameters.add(ClassDesc.of("java.lang.invoke.MethodHandle"));
-        }
-        final var methodType = MethodTypeDesc.of(ConstantDescs.CD_int, parameters);
-        builder.withMethodBody("$zeron$hash", methodType,
+        final var methodType = IntrinsicDescriptors.derivedHashType(root, evidenceCount);
+        builder.withMethodBody(IntrinsicDescriptors.DERIVED_HASH, methodType,
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 code -> {
-                    final var accumulator = 1 + (int) evidenceCount;
+                    final var accumulator = 1 + evidenceCount;
+                    final var temp = accumulator + 2;
                     var evidenceIndex = 0;
                     for (int caseIndex = 0; caseIndex < sum.cases().size(); caseIndex++) {
                         final var sumCase = sum.cases().get(caseIndex);
@@ -295,17 +293,17 @@ final class NominalTypeEmitter {
                         code.instanceOf(caseClass);
                         code.ifeq(nextCase);
                         code.ldc(caseIndex + 1);
-                        code.istore(accumulator);
+                        code.invokestatic(IntrinsicDescriptors.HASH_SUPPORT,
+                                IntrinsicDescriptors.HASH_CASE_SEED,
+                                IntrinsicDescriptors.hashCaseSeedType());
+                        code.lstore(accumulator);
                         for (int payloadIndex = 0; payloadIndex < sumCase.payloads().size(); payloadIndex++) {
                             final var payloadType = sumCase.payloads().get(payloadIndex).type();
                             final var payloadClass = TypeDescriptor.toJavaClassDesc(
                                     TypeSubstitution.erase(payloadType));
                             final var recursive = isRecursiveSumPayload(payloadType, appliedRoot);
-                            code.iload(accumulator);
-                            code.ldc(31);
-                            code.imul();
+                            code.lload(accumulator);
                             if (recursive) {
-                                final var payloadValue = accumulator + 1;
                                 code.aload(0);
                                 code.checkcast(caseClass);
                                 code.invokevirtual(caseClass, "$zeron$payload$" + payloadIndex,
@@ -313,25 +311,27 @@ final class NominalTypeEmitter {
                                 if (payloadType instanceof NullableDescriptor) {
                                     final var nonNull = code.newLabel();
                                     final var done = code.newLabel();
-                                    code.astore(payloadValue);
-                                    code.aload(payloadValue);
+                                    code.astore(temp);
+                                    code.aload(temp);
                                     code.ifnonnull(nonNull);
-                                    code.iconst_0();
+                                    code.lconst_0();
                                     code.goto_(done);
                                     code.labelBinding(nonNull);
-                                    code.aload(payloadValue);
+                                    code.aload(temp);
                                     code.checkcast(root);
                                     for (int handleIndex = 0; handleIndex < evidenceCount; handleIndex++) {
                                         code.aload(1 + handleIndex);
                                     }
-                                    code.invokestatic(root, "$zeron$hash", methodType, true);
+                                    code.invokestatic(root, IntrinsicDescriptors.DERIVED_HASH,
+                                            methodType, true);
                                     code.labelBinding(done);
                                 } else {
                                     code.checkcast(root);
                                     for (int handleIndex = 0; handleIndex < evidenceCount; handleIndex++) {
                                         code.aload(1 + handleIndex);
                                     }
-                                    code.invokestatic(root, "$zeron$hash", methodType, true);
+                                    code.invokestatic(root, IntrinsicDescriptors.DERIVED_HASH,
+                                            methodType, true);
                                 }
                             } else {
                                 code.aload(1 + evidenceIndex++);
@@ -339,18 +339,23 @@ final class NominalTypeEmitter {
                                 code.checkcast(caseClass);
                                 code.invokevirtual(caseClass, "$zeron$payload$" + payloadIndex,
                                         MethodTypeDesc.of(payloadClass));
-                                code.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
-                                        MethodTypeDesc.of(ConstantDescs.CD_int, payloadClass));
+                                code.invokevirtual(IntrinsicDescriptors.METHOD_HANDLE, "invoke",
+                                        MethodTypeDesc.of(ConstantDescs.CD_long, payloadClass));
                             }
-                            code.iadd();
-                            code.istore(accumulator);
+                            code.invokestatic(IntrinsicDescriptors.HASH_SUPPORT,
+                                    IntrinsicDescriptors.HASH_COMBINE,
+                                    IntrinsicDescriptors.hashCombineType());
+                            code.lstore(accumulator);
                         }
-                        code.iload(accumulator);
-                        code.ireturn();
+                        code.lload(accumulator);
+                        code.invokestatic(IntrinsicDescriptors.HASH_SUPPORT,
+                                IntrinsicDescriptors.HASH_FINALIZE,
+                                IntrinsicDescriptors.hashFinalizeType());
+                        code.lreturn();
                         code.labelBinding(nextCase);
                     }
-                    code.iconst_0();
-                    code.ireturn();
+                    code.lconst_0();
+                    code.lreturn();
                 });
     }
 
@@ -519,6 +524,7 @@ final class NominalTypeEmitter {
                         if (derives(product.derivedContracts(), "Hashable")) {
                             emitProductHashMethod(builder, product);
                         }
+                        SerializationEmitter.emitIfRequested(context, builder, product);
                     } else {
                         final var sourceDeclaration = sourceTypeDeclaration(context, className);
                         if (sourceDeclaration != null
@@ -531,6 +537,7 @@ final class NominalTypeEmitter {
                                 && derives(derivedContracts(sourceDeclaration), "Hashable")) {
                             emitClassHashMethod(builder, declaration);
                         }
+                        SerializationEmitter.emitIfRequested(context, builder, sourceDeclaration);
                     }
 
                     for (final var constructor : declaration.namedConstructors()) {
@@ -620,10 +627,15 @@ final class NominalTypeEmitter {
                 .findFirst()
                 .map(property -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(property.type())))
                 .orElse(ConstantDescs.CD_Object);
+        final var writerType = declaration.properties().stream()
+                .filter(property -> property.name().lexeme().equals("writer"))
+                .findFirst()
+                .map(property -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(property.type())))
+                .orElse(ConstantDescs.CD_Object);
         builder.withMethodBody(SyntheticNames.PROPERTY_REF_FACTORY,
                 MethodTypeDesc.of(classDesc, readerType, ConstantDescs.CD_String,
                         ConstantDescs.CD_String,
-                        ClassDesc.of(SyntheticNames.PROPERTY_ID_TYPE)),
+                        ClassDesc.of(SyntheticNames.PROPERTY_ID_TYPE), writerType),
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 code -> {
                     code.new_(classDesc);
@@ -632,6 +644,7 @@ final class NominalTypeEmitter {
                     code.aload(1);
                     code.aload(2);
                     code.aload(3);
+                    code.aload(4);
                     code.invokespecial(classDesc, "<init>", constructorType);
                     code.areturn();
                 });
@@ -706,7 +719,7 @@ final class NominalTypeEmitter {
             parameters.add(ClassDesc.of("java.lang.invoke.MethodHandle"));
         }
         final var methodType = MethodTypeDesc.of(ConstantDescs.CD_boolean, parameters);
-        builder.withMethodBody("$zeron$eq", methodType,
+        builder.withMethodBody(IntrinsicDescriptors.DERIVED_EQ, methodType,
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 code -> {
                     final var unequal = code.newLabel();
@@ -754,7 +767,7 @@ final class NominalTypeEmitter {
                             for (int handleIndex = 0; handleIndex < evidenceCount; handleIndex++) {
                                 code.aload(2 + handleIndex);
                             }
-                            code.invokestatic(owner, "$zeron$eq", methodType);
+                            code.invokestatic(owner, IntrinsicDescriptors.DERIVED_EQ, methodType);
                             if (compared != null) {
                                 code.ifeq(unequal);
                                 code.labelBinding(compared);
@@ -790,28 +803,24 @@ final class NominalTypeEmitter {
         final var components = product.components().stream()
                 .filter(component -> !isRecursiveProductComponent(component.type(), appliedProduct))
                 .toList();
-        final var parameters = new ArrayList<ClassDesc>();
-        parameters.add(owner);
-        components.forEach(_ -> parameters.add(ClassDesc.of("java.lang.invoke.MethodHandle")));
-        final var methodType = MethodTypeDesc.of(ConstantDescs.CD_int, parameters);
-        builder.withMethodBody("$zeron$hash", methodType,
+        final var methodType = IntrinsicDescriptors.derivedHashType(owner, components.size());
+        builder.withMethodBody(IntrinsicDescriptors.DERIVED_HASH, methodType,
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 code -> {
                     final var accumulator = 1 + components.size();
-                    code.iconst_1();
-                    code.istore(accumulator);
+                    final var temp = accumulator + 2;
+                    code.lconst_1();
+                    code.lstore(accumulator);
                     var handleIndex = 0;
                     for (final var component : product.components()) {
                         final var componentType = component.type();
-                        code.iload(accumulator);
-                        code.ldc(31);
-                        code.imul();
+                        code.lload(accumulator);
                         if (isRecursiveProductComponent(componentType, appliedProduct)) {
                             emitRecursiveHash(code, owner, appliedProduct, componentType,
                                     Stmt.propertyGetterName(component.name().lexeme()),
                                     true,
                                     componentType instanceof NullableDescriptor,
-                                    components.size(), 0, accumulator);
+                                    components.size(), 0, temp);
                         } else {
                             final var componentClass = TypeDescriptor.toJavaClassDesc(
                                     TypeSubstitution.erase(componentType));
@@ -819,14 +828,19 @@ final class NominalTypeEmitter {
                             code.aload(0);
                             code.invokevirtual(owner, Stmt.propertyGetterName(component.name().lexeme()),
                                     MethodTypeDesc.of(componentClass));
-                            code.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
-                                    MethodTypeDesc.of(ConstantDescs.CD_int, componentClass));
+                            code.invokevirtual(IntrinsicDescriptors.METHOD_HANDLE, "invoke",
+                                    MethodTypeDesc.of(ConstantDescs.CD_long, componentClass));
                         }
-                        code.iadd();
-                        code.istore(accumulator);
+                        code.invokestatic(IntrinsicDescriptors.HASH_SUPPORT,
+                                IntrinsicDescriptors.HASH_COMBINE,
+                                IntrinsicDescriptors.hashCombineType());
+                        code.lstore(accumulator);
                     }
-                    code.iload(accumulator);
-                    code.ireturn();
+                    code.lload(accumulator);
+                    code.invokestatic(IntrinsicDescriptors.HASH_SUPPORT,
+                            IntrinsicDescriptors.HASH_FINALIZE,
+                            IntrinsicDescriptors.hashFinalizeType());
+                    code.lreturn();
                 });
     }
 
@@ -846,7 +860,7 @@ final class NominalTypeEmitter {
             parameters.add(ClassDesc.of("java.lang.invoke.MethodHandle"));
         }
         final var methodType = MethodTypeDesc.of(ConstantDescs.CD_boolean, parameters);
-        builder.withMethodBody("$zeron$eq", methodType,
+        builder.withMethodBody(IntrinsicDescriptors.DERIVED_EQ, methodType,
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 code -> {
                     final var unequal = code.newLabel();
@@ -886,43 +900,42 @@ final class NominalTypeEmitter {
         final var components = storedComponents(declaration);
         final var evidenceCount = (int) components.stream()
                 .filter(component -> !isRecursiveProductComponent(component.type(), appliedType)).count();
-        final var parameters = new ArrayList<ClassDesc>();
-        parameters.add(owner);
-        for (int index = 0; index < evidenceCount; index++) {
-            parameters.add(ClassDesc.of("java.lang.invoke.MethodHandle"));
-        }
-        final var methodType = MethodTypeDesc.of(ConstantDescs.CD_int, parameters);
-        builder.withMethodBody("$zeron$hash", methodType,
+        final var methodType = IntrinsicDescriptors.derivedHashType(owner, evidenceCount);
+        builder.withMethodBody(IntrinsicDescriptors.DERIVED_HASH, methodType,
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 code -> {
                     final var accumulator = 1 + evidenceCount;
-                    code.iconst_1();
-                    code.istore(accumulator);
+                    final var temp = accumulator + 2;
+                    code.lconst_1();
+                    code.lstore(accumulator);
                     var handleIndex = 0;
                     for (final var component : components) {
                         final var componentType = component.type();
-                        code.iload(accumulator);
-                        code.ldc(31);
-                        code.imul();
+                        code.lload(accumulator);
                         if (isRecursiveProductComponent(componentType, appliedType)) {
                             emitRecursiveHash(code, owner, appliedType, componentType,
                                     component.name(), component.property(),
                                     componentType instanceof NullableDescriptor,
-                                    evidenceCount, 0, accumulator);
+                                    evidenceCount, 0, temp);
                         } else {
                             final var componentClass = TypeDescriptor.toJavaClassDesc(
                                     TypeSubstitution.erase(componentType));
                             code.aload(1 + handleIndex++);
                             code.aload(0);
                             emitLoadStoredComponent(code, owner, component, componentClass);
-                            code.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
-                                    MethodTypeDesc.of(ConstantDescs.CD_int, componentClass));
+                            code.invokevirtual(IntrinsicDescriptors.METHOD_HANDLE, "invoke",
+                                    MethodTypeDesc.of(ConstantDescs.CD_long, componentClass));
                         }
-                        code.iadd();
-                        code.istore(accumulator);
+                        code.invokestatic(IntrinsicDescriptors.HASH_SUPPORT,
+                                IntrinsicDescriptors.HASH_COMBINE,
+                                IntrinsicDescriptors.hashCombineType());
+                        code.lstore(accumulator);
                     }
-                    code.iload(accumulator);
-                    code.ireturn();
+                    code.lload(accumulator);
+                    code.invokestatic(IntrinsicDescriptors.HASH_SUPPORT,
+                            IntrinsicDescriptors.HASH_FINALIZE,
+                            IntrinsicDescriptors.hashFinalizeType());
+                    code.lreturn();
                 });
     }
 
@@ -969,7 +982,7 @@ final class NominalTypeEmitter {
         final var recursiveType = MethodTypeDesc.of(
                 ConstantDescs.CD_boolean, recursiveParameters.toArray(ClassDesc[]::new));
         for (int index = 0; index < evidenceCount; index++) code.aload(2 + index);
-        code.invokestatic(owner, "$zeron$eq", recursiveType);
+        code.invokestatic(owner, IntrinsicDescriptors.DERIVED_EQ, recursiveType);
         if (compared != null) {
             code.ifeq(unequal);
             code.labelBinding(compared);
@@ -982,37 +995,31 @@ final class NominalTypeEmitter {
             final CodeBuilder code, final ClassDesc owner, final TypeDescriptor appliedType,
             final TypeDescriptor componentType, final String componentName, final boolean property,
             final boolean nullable, final int evidenceCount, final int receiverSlot,
-            final int accumulator) {
+            final int tempSlot) {
         final var componentClass = TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(componentType));
-        final var hashParameters = new ArrayList<ClassDesc>();
-        hashParameters.add(owner);
-        for (int index = 0; index < evidenceCount; index++) {
-            hashParameters.add(ClassDesc.of("java.lang.invoke.MethodHandle"));
-        }
-        final var hashType = MethodTypeDesc.of(
-                ConstantDescs.CD_int, hashParameters.toArray(ClassDesc[]::new));
+        final var hashType = IntrinsicDescriptors.derivedHashType(owner, evidenceCount);
         if (nullable) {
             final var nonNull = code.newLabel();
             final var done = code.newLabel();
             code.aload(receiverSlot);
             emitGetStoredComponent(code, owner, componentName, property, componentClass);
-            code.astore(accumulator + 1);
-            code.aload(accumulator + 1);
+            code.astore(tempSlot);
+            code.aload(tempSlot);
             code.ifnonnull(nonNull);
-            code.iconst_0();
+            code.lconst_0();
             code.goto_(done);
             code.labelBinding(nonNull);
-            code.aload(accumulator + 1);
+            code.aload(tempSlot);
             code.checkcast(owner);
             for (int index = 0; index < evidenceCount; index++) code.aload(1 + index);
-            code.invokestatic(owner, "$zeron$hash", hashType);
+            code.invokestatic(owner, IntrinsicDescriptors.DERIVED_HASH, hashType);
             code.labelBinding(done);
         } else {
             code.aload(receiverSlot);
             emitGetStoredComponent(code, owner, componentName, property, componentClass);
             code.checkcast(owner);
             for (int index = 0; index < evidenceCount; index++) code.aload(1 + index);
-            code.invokestatic(owner, "$zeron$hash", hashType);
+            code.invokestatic(owner, IntrinsicDescriptors.DERIVED_HASH, hashType);
         }
     }
 

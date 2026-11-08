@@ -40,7 +40,7 @@ public final class MathApiTest {
 
                 fn display<T: mut + Display>(value: T): String = value.toString();
                 fn equal<T: mut + Eq<T>>(left: T, right: T): Boolean = left.eq(right);
-                fn hash<T: mut + Hashable<T>>(value: T): Int = value.hash();
+                fn hash<T: mut + Hashable<T>>(value: T): Long = value.hash();
                 fn compare<T: mut + Comparable<T>>(left: T, right: T): Ordering =
                     left.compareTo(right);
                 fn rationalThird(): Rational = 1 / 3;
@@ -66,8 +66,8 @@ public final class MathApiTest {
                     hash<Rational>(rationalHalf()) == hash<Rational>(rationalTwoFourths());
                 fn integerDisplay(): String = display<Integer>(12345678901234567890n);
                 fn rationalDisplay(): String = display<Rational>(rationalThreeTenths());
-                fn integerHash(): Int = hash<Integer>(12345678901234567890n);
-                fn rationalHash(): Int = hash<Rational>(rationalThreeTenths());
+                fn integerHash(): Long = hash<Integer>(12345678901234567890n);
+                fn rationalHash(): Long = hash<Rational>(rationalThreeTenths());
                 fn largeInteger(): Integer = 123456789012345678901234567890;
                 fn integerAdd(): Integer = 5n + 2n;
                 fn rationalLiteral(): Rational = 0.125;

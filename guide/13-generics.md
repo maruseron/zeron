@@ -100,7 +100,8 @@ its own:
 class Box<T> {
     item: T;
 
-    public apply<R>(transform: (T) -> R): R = transform(this.item);
+    public apply<R>(converter: Converter<T, R>): R = 
+        converter.convert(this.item);
 }
 ```
 
@@ -114,9 +115,9 @@ type and introduce `R` for a result type:
 
 ```zeron
 public extension<T> Array<T> {
-    public fn fold<R>(initial: R, combine: (R, T) -> R): R {
-        let mut result = initial;
-        for (let item in this) result = combine(result, item);
+    public fn fold<R>(initial: R, combiner: Combiner<T, R>): R {
+        let mut result = combiner.start(initial);
+        for (let item in this) result = combiner.combine(item);
         return result;
     }
 }

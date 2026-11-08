@@ -34,10 +34,17 @@ public final class JsonSupport {
     }
 
     public static JsonTextResult stringify(final JsonValue value) {
+        return stringifyIndented(value, 0);
+    }
+
+    /// Writes `value` with each nesting level indented by `indent` spaces.
+    ///
+    /// An `indent` of zero or less writes compact JSON.
+    public static JsonTextResult stringifyIndented(final JsonValue value, final int indent) {
         if (value == null) {
             return JsonTextResult.failure(new JsonErrorInfo("JSON value is null", 0, 1, 1));
         }
-        final var writer = new Writer();
+        final var writer = new Writer(Math.max(indent, 0));
         try {
             writer.writeValue(value, 0);
             return JsonTextResult.success(writer.output.toString());
@@ -45,6 +52,41 @@ public final class JsonSupport {
             return JsonTextResult.failure(new JsonErrorInfo(failure.getMessage(),
                     writer.output.length(), 1, writer.output.length() + 1));
         }
+    }
+
+    /// Whether `value` is a JSON value of `kind`.
+    ///
+    /// The kind is one of `null`, `boolean`, `number`, `string`, `array`, or `object`.
+    public static boolean isKind(final JsonValue value, final String kind) {
+        return value != null && kind != null && kind.equals(value.kind());
+    }
+
+    /// Whether `lexeme` is a validated JSON number without a fraction or exponent.
+    ///
+    /// The typed adapter reports such values as `IntegerKind`; JSON itself has a single number
+    /// type, so this classification only helps a decoder that inspects the kind first.
+    public static boolean isIntegralNumber(final String lexeme) {
+        if (!isNumberLexeme(lexeme)) return false;
+        for (var index = 0; index < lexeme.length(); index++) {
+            final var character = lexeme.charAt(index);
+            if (character == '.' || character == 'e' || character == 'E') return false;
+        }
+        return true;
+    }
+
+    /// Whether `lexeme` is a validated JSON number that a JVM `double` can represent finitely.
+    public static boolean isFiniteNumber(final String lexeme) {
+        if (!isNumberLexeme(lexeme)) return false;
+        try {
+            return Double.isFinite(Double.parseDouble(lexeme));
+        } catch (final NumberFormatException exception) {
+            return false;
+        }
+    }
+
+    /// Converts a JSON number lexeme that `isFiniteNumber` accepted to a `Float` value.
+    public static double doubleValue(final String lexeme) {
+        return Double.parseDouble(lexeme);
     }
 
     static boolean isNumberLexeme(final String lexeme) {
@@ -329,6 +371,17 @@ public final class JsonSupport {
     private static final class Writer {
         private final StringBuilder output = new StringBuilder();
         private final IdentityHashMap<Object, Boolean> activeContainers = new IdentityHashMap<>();
+        private final int indent;
+
+        private Writer(final int indent) { this.indent = indent; }
+
+        private boolean indented() { return this.indent > 0; }
+
+        private void newline(final int depth) {
+            if (!indented()) return;
+            output.append('\n');
+            output.append(" ".repeat(depth * this.indent));
+        }
 
         private void writeValue(final JsonValue value, final int depth) {
             switch (value.kind()) {
@@ -360,8 +413,10 @@ public final class JsonSupport {
             final var values = array.values();
             for (int index = 0; index < values.size(); index++) {
                 if (index > 0) output.append(',');
+                newline(depth + 1);
                 writeValue(values.get(index), depth + 1);
             }
+            if (!values.isEmpty()) newline(depth);
             output.append(']');
             activeContainers.remove(array);
         }
@@ -373,10 +428,12 @@ public final class JsonSupport {
             for (final Map.Entry<String, JsonValue> field : object.fields().entrySet()) {
                 if (!first) output.append(',');
                 first = false;
+                newline(depth + 1);
                 writeString(field.getKey());
-                output.append(':');
+                output.append(indented() ? ": " : ":");
                 writeValue(field.getValue(), depth + 1);
             }
+            if (!first) newline(depth);
             output.append('}');
             activeContainers.remove(object);
         }

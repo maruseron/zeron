@@ -29,6 +29,7 @@ final class ExpressionFlowResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
                     operator, "Nullable operands require a null check before using this operator."));
         }
+        requireNullCheckForTypeParameter(context, receiver, targetType, operator);
         final var requiredContract = operatorContractType(context, contractName, targetType, operator);
         if (!TypeClassEvidence.hasEvidence(context, requiredContract, targetType, operator)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
@@ -541,6 +542,7 @@ final class ExpressionFlowResolver {
             }
             case Expr.Index index -> {
                 final var receiverType = resolve(context, index.array);
+                requireNullCheckForTypeParameter(context, index.array, receiverType, SYNTHETIC_IDENTIFIER);
                 final var indexType = resolve(context, index.index);
                 final var arrayType = receiverType instanceof ReferenceDescriptor reference
                         ? reference.baseType() : receiverType;
@@ -723,6 +725,16 @@ final class ExpressionFlowResolver {
                     + binary.operator.lexeme() + " " + refinedRightType);
                 final var equalityOperator = binary.operator.type() == TokenType.EQUAL_EQUAL
                         || binary.operator.type() == TokenType.BANG_EQUAL;
+                if (!equalityOperator) {
+                    final var nullableOperandType = isNullableOperandType(refinedLeftType)
+                            ? refinedLeftType
+                            : isNullableOperandType(refinedRightType) ? refinedRightType : null;
+                    if (nullableOperandType != null) {
+                        requireNullCheckForTypeParameter(context,
+                                nullableOperandType == refinedLeftType ? binary.left : binary.right,
+                                nullableOperandType, binary.operator);
+                    }
+                }
                 if (!equalityOperator && !isRelationalOperator(binary.operator.type())
                         && (TypeSubstitution.containsTypeParameter(refinedLeftType)
                         || TypeSubstitution.containsTypeParameter(refinedRightType))) {
@@ -942,6 +954,11 @@ final class ExpressionFlowResolver {
                         unary.setType(nullable.baseType());
                         yield nullable.baseType();
                     }
+                    if (operandType.isNullableTypeParameter()) {
+                        final var nonNull = ((TypeParameterDescriptor) operandType).asNonNull();
+                        unary.setType(nonNull);
+                        yield nonNull;
+                    }
                     if (operandType instanceof NullDescriptor) {
                         Zeron.resolutionError(new ResolutionError(
                                 DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
@@ -958,6 +975,7 @@ final class ExpressionFlowResolver {
                     unary.setType(resultType.type());
                     yield resultType.type();
                 }
+                requireNullCheckForTypeParameter(context, unary.right, operandType, unary.operator);
                 if (TypeSubstitution.containsTypeParameter(operandType)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                             unary.operator,
@@ -1585,7 +1603,11 @@ final class ExpressionFlowResolver {
         final var className = new Token(TokenType.IDENTIFIER, generatedName, null, model.name.span());
         final var declaration = new Stmt.ClassDecl(className, List.of(), List.of(contract),
                 List.of(), List.copyOf(properties), new Stmt.Constructor(
-                        new Token(TokenType.IDENTIFIER, "new", null, model.name.span()), false),
+                        // The singleton is constructed by the compiled top-level value initializer in
+                        // another class, so the constructor must not be private. The class name is
+                        // unlexable and its index export hides the constructor, so this is not a
+                        // source-level construction API.
+                        new Token(TokenType.IDENTIFIER, "new", null, model.name.span()), true),
                 // The implementation class is public in bytecode: a consumer in another package
                 // calls its getter and inherited contract methods. Its name is unlexable in source
                 // (`$`), so exporting it does not make the model name a type.
@@ -1703,6 +1725,9 @@ final class ExpressionFlowResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
                     pipeline.keyword,
                     "For-expressions cannot take nullable values as a source; prove the value non-null first."));
+        }
+        if (sourceType.isNullableTypeParameter()) {
+            requireNullCheckForTypeParameter(context, pipeline.source, sourceType, pipeline.keyword);
         }
         var elementType = Resolver.ensureIterable(context, sourceType, pipeline.keyword);
         pipeline.setSourceElementType(elementType);
@@ -1822,6 +1847,9 @@ final class ExpressionFlowResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
                     match.keyword,
                     "Matching nullable values is not supported; prove the value non-null first."));
+        }
+        if (scrutineeType.isNullableTypeParameter()) {
+            requireNullCheckForTypeParameter(context, match.scrutinee, scrutineeType, match.keyword);
         }
         final var sealedBound = scrutineeType instanceof TypeParameterDescriptor parameter
                 ? parameter.bounds().stream()
@@ -2177,6 +2205,7 @@ final class ExpressionFlowResolver {
                     : TypeDescriptor.genericOf(TypeDescriptor.ofName(caseName), expectedSumArguments);
             pattern.resolve(null, caseType, false);
             pattern.markSumCase();
+            context.recordReference(pattern.extractor(), sumCase.name(), caseType);
             return new MatchPatternResolution(bindings, root && !refutable ? Set.of(caseName) : Set.of(),
                     Set.of(), !refutable, caseType);
         }
@@ -2665,7 +2694,8 @@ final class ExpressionFlowResolver {
                 if (test.nullTest) {
                     final var testedType = test.value.getType();
                     final var mayBeNull = testedType instanceof NullableDescriptor
-                            || testedType instanceof NullDescriptor;
+                            || testedType instanceof NullDescriptor
+                            || testedType.isNullableTypeParameter();
                     final var mayBeNonNull = !(testedType instanceof NullDescriptor);
                     if (!mayBeNull) whenTrue.markUnreachable();
                     if (!mayBeNonNull) whenFalse.markUnreachable();
@@ -2841,6 +2871,9 @@ final class ExpressionFlowResolver {
             if (!fact.mayBeNull() && binding.type() instanceof NullableDescriptor nullable) {
                 return nullable.baseType();
             }
+            if (!fact.mayBeNull() && binding.type().isNullableTypeParameter()) {
+                return ((TypeParameterDescriptor) binding.type()).asNonNull();
+            }
             return binding.type();
         }
         if (fact.nonNullAlternatives().isEmpty()) return TypeDescriptor.ofNever();
@@ -2852,6 +2885,10 @@ final class ExpressionFlowResolver {
         final var effectiveBase = declaredBase instanceof ReferenceDescriptor
             ? new ReferenceDescriptor(commonType)
             : commonType;
+        if (effectiveBase instanceof TypeParameterDescriptor parameter) {
+            return parameter.admitsNullableArguments() && !fact.mayBeNull()
+                    ? parameter.asNonNull() : parameter;
+        }
         return fact.mayBeNull() ? effectiveBase.toNullable() : effectiveBase;
     }
 
@@ -2912,6 +2949,39 @@ final class ExpressionFlowResolver {
         if (type instanceof NullableDescriptor nullable) return identityViewType(context, nullable.baseType());
         if (type instanceof ReferenceDescriptor reference) return identityViewType(context, reference.baseType());
         return type;
+    }
+
+    /// Reports the type-checking diagnostic when `type` is a `T: nullable` type parameter that flow
+    /// analysis has not proved non-null. The diagnostic points at the use, not at the declaration.
+    static void requireNullCheckForTypeParameter(final ResolutionContext context,
+                                                 final Expr expression,
+                                                 final TypeDescriptor type,
+                                                 final Token where) {
+        final var baseType = type instanceof ReferenceDescriptor reference
+                ? reference.baseType() : type;
+        if (!(baseType instanceof TypeParameterDescriptor parameter)
+                || !parameter.admitsNullableArguments()) return;
+        Zeron.resolutionError(new ResolutionError(
+                DiagnosticCatalog.NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK, where,
+                "`" + expressionName(expression) + "` has type `" + parameter.name()
+                        + "`, which may be null. Check it against `null` before using it."));
+    }
+
+    static String expressionName(final Expr expression) {
+        return switch (expression) {
+            case Expr.Variable variable -> variable.name.lexeme();
+            case Expr.Property property -> property.name.lexeme();
+            case Expr.MemberCall call -> expressionName(call.receiver);
+            case Expr.Index index -> expressionName(index.array);
+            case Expr.Grouping grouping -> expressionName(grouping.expression);
+            default -> "value";
+        };
+    }
+
+    private static boolean isNullableOperandType(final TypeDescriptor type) {
+        final var baseType = type instanceof ReferenceDescriptor reference
+                ? reference.baseType() : type;
+        return baseType.isNullableTypeParameter();
     }
 
     private static boolean isPrimitive(final ResolutionContext context, final TypeDescriptor type) {

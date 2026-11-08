@@ -864,7 +864,10 @@ public final class GenericFunctionTest {
                 final var adapterCount = java.util.Arrays.stream(program.getDeclaredMethods())
                         .filter(method -> method.getName().startsWith("$adapter$"))
                         .count();
-                assertEquals(11, adapterCount);
+                // Includes adapters required by the bundled standard-library sources compiled
+                // alongside this program; the decode bridge for zeron.serialization.decodeNamed
+                // accounts for the latest one.
+                assertEquals(12, adapterCount);
             }
         } finally {
             Files.deleteIfExists(classFile);

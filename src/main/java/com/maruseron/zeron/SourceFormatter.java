@@ -983,7 +983,7 @@ final class SourceFormatter {
             if (after == TokenType.LEFT_PAREN) {
                 return before == TokenType.IF || before == TokenType.FOR || before == TokenType.WHILE
                         || before == TokenType.UNTIL || before == TokenType.MATCH || before == TokenType.USING
-                        || before == TokenType.HANDLE || before == TokenType.NOT;
+                        || before == TokenType.HANDLE || before == TokenType.NOT || before == TokenType.IN;
             }
             if (after == TokenType.LEFT_BRACE) return true;
             if (before == TokenType.COLON) return true;

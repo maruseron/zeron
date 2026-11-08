@@ -87,6 +87,19 @@ for (let number in 3..1) {
 }
 ```
 
+Both endpoints are ordinary `Int` expressions, evaluated once when the range is created, so a
+range can be sized from the data it walks:
+
+```zeron
+let values: Array<Int> = [4, 7, 9];
+for (let index in 0..values.length - 1) {
+    println(values[index].toString());
+}
+```
+
+`..` binds more loosely than arithmetic and groups to the right, so `0..values.length - 1` is
+`0..(values.length - 1)`. Parenthesize a range before applying an operator to it.
+
 Ranges are iterable, so they use the same `for` loop behavior without needing to create an array
 of all the numbers first. The `IntRange` type is provided in `zeron.ranges`.
 

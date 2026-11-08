@@ -1,5 +1,6 @@
 package zeron.io;
 
+import java.lang.IO;
 import java.lang.System;
 
 public fn print(value: Any?): Unit {
@@ -8,4 +9,12 @@ public fn print(value: Any?): Unit {
 
 public fn println(value: Any?): Unit {
     System.out?.println(value);
+}
+
+public fn readln(): String? {
+    return IO.readln();
+}
+
+public fn prompt(prompt: String): String? {
+    return IO.readln(prompt);
 }

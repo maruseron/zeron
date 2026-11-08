@@ -111,6 +111,10 @@ public final class DiagnosticCatalog {
             entry("ZR2023", "Type inference failed");
     public static final Entry UNSUPPORTED_JAVA_INTEROP_FEATURE =
             entry("ZR2024", "Unsupported Java interop feature");
+    public static final Entry NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK =
+            entry("ZR2025", "Nullable type-parameter value requires a null check");
+    public static final Entry HASHABLE_HASH_RETURN_TYPE =
+            entry("ZR2026", "Hashable.hash must return Long");
 
     public static final Entry GENERATED_PROGRAM_NAME_CONFLICT =
             entry("ZR3001", "Generated program name conflicts with a declared type");
@@ -155,6 +159,7 @@ public final class DiagnosticCatalog {
             NULLABLE_VALUE_REQUIRES_HANDLING,
             TYPE_MISMATCH_OR_FAILED_INFERENCE,
             INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+            HASHABLE_HASH_RETURN_TYPE,
             TOP_LEVEL_INITIALIZATION_CYCLE,
             INVALID_INITIALIZER,
             INVALID_PATTERN_OUTPUT_ASSIGNMENT,
@@ -164,6 +169,7 @@ public final class DiagnosticCatalog {
             GENERIC_INFERENCE_FAILURE,
             TYPE_INFERENCE_FAILURE,
             UNSUPPORTED_JAVA_INTEROP_FEATURE,
+            NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK,
             GENERATED_PROGRAM_NAME_CONFLICT,
             PACKAGE_SOURCE_DIRECTORY_MISMATCH);
 

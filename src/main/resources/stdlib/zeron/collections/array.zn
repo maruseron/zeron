@@ -1,10 +1,16 @@
 package zeron.collections;
 
 import zeron.control.Foldable;
+import zeron.internal.generateArray;
 import zeron.lang.Eq;
 
 /// Folding and streaming over intrinsic arrays.
 public extension<T: nullable + mut> Array<T> {
+    public fn append(element: T): Array<T> = 
+        generateArray(
+            this.length + 1, 
+            i -> if (i < this.length) then this[i] else element);
+
     /// Combines the elements from left to right into a single value.
     ///
     /// `combine` receives the accumulated value and the next element, starting from `initial`.

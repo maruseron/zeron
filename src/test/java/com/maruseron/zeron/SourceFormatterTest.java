@@ -355,7 +355,7 @@ public final class SourceFormatterTest {
         final var style = CanonicalStyle.load();
         final var source = """
                 public contract Hashable<T> requires Eq<T> {
-                    hash(): Int;
+                    hash(): Long;
                 }
                 public contract Monad<F<_>> requires Applicative<F> {
                     flatMap<A, B>(this: F<A>, transform: (A) -> F<B>): F<B>;
@@ -525,19 +525,19 @@ public final class SourceFormatterTest {
     public void formatsRepresentativeSourcesAsParseableIdempotentSource() throws Exception {
         final var style = CanonicalStyle.load();
         final var paths = List.of(
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "java", "io", "BufferedWriter.zn"),
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "zeron", "math", "math.zn"),
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "zeron", "collections", "array.zn"),
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "zeron", "collections",
-                        "arrayiterator.zn"),
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "zeron", "collections",
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "java", "io", "BufferedWriter.zn"),
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "zeron", "math", "math.zn"),
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "zeron", "collections", "array.zn"),
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "zeron", "collections",
+                        "array_iterator.zn"),
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "zeron", "collections",
                         "iterable.zn"),
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "zeron", "collections",
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "zeron", "collections",
                         "list.zn"),
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "zeron", "collections", "map.zn"),
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "zeron", "lang", "option.zn"),
-                java.nio.file.Path.of("src", "main", "resources", "stdlib", "zeron", "lang", "result.zn"),
-                java.nio.file.Path.of("sample_programs", "query_engine", "src", "query", "value", "value.zn"));
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "zeron", "collections", "map.zn"),
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "zeron", "lang", "option.zn"),
+                TestPaths.projectFile("src", "main", "resources", "stdlib", "zeron", "lang", "result.zn"),
+                TestPaths.projectFile("sample_programs", "query_engine", "src", "query", "value", "value.zn"));
         for (final var path : paths) {
             final var source = Files.readString(path, StandardCharsets.UTF_8);
             final var formatted = SourceFormatter.format(source, path.toString(), style);
@@ -601,6 +601,29 @@ public final class SourceFormatterTest {
 
         assertTrue(Files.readString(valid, StandardCharsets.UTF_8).contains("fn main() {"));
         assertEquals(invalidSource, Files.readString(invalid, StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void formatsIntegerRangesWithExpressionEndpointsWithoutSpaces() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = """
+                fn visits(values:Array<Int>,start:Int,end:Int){
+                    for(let index in 0 .. values.length-1){println(values[index].toString());}
+                    let range=start..end;
+                    consume(-1 .. end + 1);
+                    for(let value in (start .. end)){println(value.toString());}
+                }
+                """;
+
+        final var formatted = SourceFormatter.format(source, "RangeFormatting.zn", style)
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains("for (let index in 0..values.length - 1) {"));
+        assertTrue(formatted, formatted.contains("let range = start..end;"));
+        assertTrue(formatted, formatted.contains("consume(-1..end + 1);"));
+        assertTrue(formatted, formatted.contains("for (let value in (start..end)) {"));
+        assertEquals(formatted, SourceFormatter.format(formatted, "RangeFormatting.zn", style)
+                .formattedSource().orElseThrow());
     }
 
 }

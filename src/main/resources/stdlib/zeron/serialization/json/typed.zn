@@ -1,0 +1,562 @@
+package zeron.serialization.json;
+
+import zeron.lang.Option;
+import zeron.lang.Result;
+import zeron.serialization.Decode;
+import zeron.serialization.DecodeError;
+import zeron.serialization.Decoder;
+import zeron.serialization.Encode;
+import zeron.serialization.EncodeError;
+import zeron.serialization.Encoder;
+import zeron.serialization.ValueKind;
+import zeron.serialization.decode;
+import zeron.serialization.encode;
+import com.maruseron.zeron.runtime.json.JsonArray;
+import com.maruseron.zeron.runtime.json.JsonObject;
+import com.maruseron.zeron.runtime.json.JsonSupport;
+import com.maruseron.zeron.runtime.json.JsonValue;
+
+/// Typed JSON integration over the streaming serialization contracts.
+///
+/// The adapter drives the derived or hand-written `Encode` and `Decode` operations of a type
+/// directly against the JSON value model, so a codec never materializes an intermediate
+/// representation. JSON is a tree format, so the encoder builds a `JsonValue` and the decoder
+/// walks a parsed one; the streaming contract still determines the operation order.
+///
+/// JSON represents tagged alternatives as a single-member object whose key is the case tag, and a
+/// payload-less case uses JSON null. Maps are not supported: the canonical `Encoder` and `Decoder`
+/// contracts have no operation for naming a map key, and JSON object keys are strings only.
+
+/// One open container on the encoder's stack.
+///
+/// A record or alternative holds an object, a sequence holds an array. `key` is the field name
+/// written by the last `writeField`, and `tag` is the pending alternative tag: the next written
+/// value becomes that member's value.
+class EncodeFrame {
+    container: &JsonObject?;
+    array: &JsonArray?;
+    parent: &EncodeFrame?;
+    key: String?;
+    tag: String?;
+
+    private constructor new;
+
+    public constructor record(container: &JsonObject, parent: &EncodeFrame?) =
+        EncodeFrame.new(container, null, parent, null, null);
+
+    public constructor alternative(container: &JsonObject, tag: String, parent: &EncodeFrame?) =
+        EncodeFrame.new(container, null, parent, null, tag);
+
+    public constructor sequence(array: &JsonArray, parent: &EncodeFrame?) =
+        EncodeFrame.new(null, array, parent, null, null);
+
+    public parentFrame(): &EncodeFrame? = this.parent;
+
+    /// The container as a JSON value, or `null` when the frame holds no container.
+    public asValue(): &JsonValue? {
+        let container = this.container;
+        if (container != null) return JsonValue.objectValue(container);
+        let array = this.array;
+        if (array != null) return JsonValue.arrayValue(array);
+        return null;
+    }
+
+    /// Records the member name the next value belongs to.
+    public mut writeField(name: String): Result<Unit, EncodeError> {
+        if (this.container == null) {
+            return Result.Err(EncodeError.new("A field name needs an open JSON object.", []));
+        }
+        if (this.tag != null) {
+            return Result.Err(EncodeError.new(
+                "A tagged alternative holds one value and cannot name fields.", []));
+        }
+        this.key = name;
+        return Result.Ok(());
+    }
+
+    /// Places a finished value in this container, returning false when no slot is available.
+    public mut place(value: &JsonValue): Boolean {
+        let container = this.container;
+        if (container != null) {
+            let tag = this.tag;
+            if (tag != null) {
+                this.tag = null;
+                return container.add(tag, value);
+            }
+            let key = this.key;
+            if (key != null) {
+                this.key = null;
+                return container.add(key, value);
+            }
+            return false;
+        }
+        let array = this.array;
+        if (array != null) {
+            array.add(value);
+            return true;
+        }
+        return false;
+    }
+
+    /// Completes a payload-less alternative by writing JSON null for its tag.
+    public mut completeAlternative(): Unit {
+        let tag = this.tag;
+        if (tag != null) {
+            this.tag = null;
+            let container = this.container;
+            if (container != null) container.add(tag, JsonValue.nullValue());
+        }
+    }
+}
+
+/// A streaming `Encoder` that writes into a JSON value.
+public class JsonTreeEncoder is Encoder {
+    root: &JsonValue?;
+    frame: &EncodeFrame?;
+
+    private constructor new;
+
+    /// Creates an encoder with no open container.
+    public constructor empty() = JsonTreeEncoder.new(null, null);
+
+    /// The value written so far, or `None` when nothing complete was written.
+    public result(): Option<&JsonValue> {
+        let root = this.root;
+        if (root == null) return Option.None();
+        return Option.Some(root);
+    }
+
+    private mut push(frame: &EncodeFrame): Unit {
+        this.frame = frame;
+    }
+
+    private mut pop(): &EncodeFrame? {
+        let frame = this.frame;
+        if (frame == null) return null;
+        this.frame = frame.parentFrame();
+        return frame;
+    }
+
+    private mut emit(value: &JsonValue): Result<Unit, EncodeError> {
+        let frame = this.frame;
+        if (frame == null) {
+            this.root = value;
+            return Result.Ok(());
+        }
+        if (not frame.place(value)) {
+            return Result.Err(EncodeError.new(
+                "A JSON value could not be placed in its container.", []));
+        }
+        return Result.Ok(());
+    }
+
+    public mut writeNull(): Result<Unit, EncodeError> = this.emit(JsonValue.nullValue());
+
+    public mut writeBoolean(value: Boolean): Result<Unit, EncodeError> =
+        this.emit(JsonValue.booleanValue(value));
+
+    public mut writeString(value: String): Result<Unit, EncodeError> =
+        this.emit(JsonValue.stringValue(value));
+
+    public mut writeInteger(decimalText: String): Result<Unit, EncodeError> {
+        let value = JsonValue.numberValue(decimalText);
+        if (value == null) {
+            return Result.Err(EncodeError.new(
+                "'" + decimalText + "' is not a JSON number.", []));
+        }
+        return this.emit(value);
+    }
+
+    public mut writeDecimal(decimalText: String): Result<Unit, EncodeError> =
+        this.writeInteger(decimalText);
+
+    public mut writeFloat(value: Float): Result<Unit, EncodeError> {
+        let text = "" + value;
+        let json = JsonValue.numberValue(text);
+        if (json == null) {
+            return Result.Err(EncodeError.new(
+                "The float " + text + " has no JSON number representation.", []));
+        }
+        return this.emit(json);
+    }
+
+    public mut writeBytes(value: ByteArray): Result<Unit, EncodeError> =
+        Result.Err(EncodeError.new("JSON has no byte-sequence representation.", []));
+
+    public mut beginRecord(): Result<Unit, EncodeError> {
+        this.push(EncodeFrame.record(JsonObject.new(), this.frame));
+        return Result.Ok(());
+    }
+
+    public mut writeField(name: String): Result<Unit, EncodeError> {
+        let frame = this.frame;
+        if (frame == null) {
+            return Result.Err(EncodeError.new("A field name needs an open JSON object.", []));
+        }
+        return frame.writeField(name);
+    }
+
+    public mut endRecord(): Result<Unit, EncodeError> {
+        let frame = this.pop();
+        if (frame == null) {
+            return Result.Err(EncodeError.new("No JSON object is open.", []));
+        }
+        let value = frame.asValue();
+        if (value == null) {
+            return Result.Err(EncodeError.new("No JSON object is open.", []));
+        }
+        return this.emit(value);
+    }
+
+    public mut beginAlternative(tag: String): Result<Unit, EncodeError> {
+        this.push(EncodeFrame.alternative(JsonObject.new(), tag, this.frame));
+        return Result.Ok(());
+    }
+
+    public mut endAlternative(): Result<Unit, EncodeError> {
+        let frame = this.pop();
+        if (frame == null) {
+            return Result.Err(EncodeError.new("No JSON alternative is open.", []));
+        }
+        frame.completeAlternative();
+        let value = frame.asValue();
+        if (value == null) {
+            return Result.Err(EncodeError.new("No JSON alternative is open.", []));
+        }
+        return this.emit(value);
+    }
+
+    public mut beginSequence(): Result<Unit, EncodeError> {
+        this.push(EncodeFrame.sequence(JsonArray.new(), this.frame));
+        return Result.Ok(());
+    }
+
+    public mut endSequence(): Result<Unit, EncodeError> {
+        let frame = this.pop();
+        if (frame == null) {
+            return Result.Err(EncodeError.new("No JSON array is open.", []));
+        }
+        let value = frame.asValue();
+        if (value == null) {
+            return Result.Err(EncodeError.new("No JSON array is open.", []));
+        }
+        return this.emit(value);
+    }
+
+    public mut beginMap(): Result<Unit, EncodeError> =
+        Result.Err(EncodeError.new(
+            "JSON object keys are strings, and the encoder has no map-key operation.", []));
+
+    public mut endMap(): Result<Unit, EncodeError> =
+        Result.Err(EncodeError.new("Map encoding is not supported by JSON.", []));
+}
+
+/// One open container on the decoder's stack.
+class DecodeFrame {
+    value: &JsonValue?;
+    fields: &JsonObject?;
+    array: &JsonArray?;
+    index: Int;
+    parent: &DecodeFrame?;
+
+    private constructor new;
+
+    public constructor onRecord(value: &JsonValue, fields: &JsonObject, parent: &DecodeFrame?) =
+        DecodeFrame.new(value, fields, null, 0, parent);
+
+    public constructor onSequence(value: &JsonValue, array: &JsonArray, parent: &DecodeFrame?) =
+        DecodeFrame.new(value, null, array, 0, parent);
+
+    public parentFrame(): &DecodeFrame? = this.parent;
+
+    /// The container value this frame belongs to, restored when the frame closes.
+    public container(): &JsonValue? = this.value;
+
+    /// Returns the next field name, or `None` when every field was visited.
+    public mut nextFieldName(): Option<String> {
+        let fields = this.fields;
+        if (fields == null) return Option.None();
+        let index = this.index;
+        if (index >= fields.size()) return Option.None();
+        let name = fields.keyAt(index);
+        if (name == null) return Option.None();
+        this.index = index + 1;
+        return Option.Some(name);
+    }
+
+    /// The value of the field `nextFieldName` returned most recently.
+    public mut fieldValue(): &JsonValue? {
+        let fields = this.fields;
+        if (fields == null) return null;
+        return fields.valueAt(this.index - 1);
+    }
+
+    /// Advances to the next array element, returning false at the end.
+    public mut nextElement(): Boolean {
+        let array = this.array;
+        if (array == null) return false;
+        let index = this.index;
+        if (index >= array.size()) return false;
+        this.index = index + 1;
+        return true;
+    }
+
+    /// The value of the element `nextElement` advanced to most recently.
+    public mut elementValue(): &JsonValue? {
+        let array = this.array;
+        if (array == null) return null;
+        return array.at(this.index - 1);
+    }
+}
+
+/// A streaming `Decoder` that reads a parsed JSON value.
+public class JsonTreeDecoder is Decoder {
+    current: &JsonValue?;
+    frame: &DecodeFrame?;
+    alternative: &JsonValue?;
+
+    private constructor new;
+
+    /// Creates a decoder positioned at `value`.
+    public constructor from(value: &JsonValue) = JsonTreeDecoder.new(value, null, null);
+
+    public mut readKind(): Result<ValueKind, DecodeError> {
+        let current = this.current;
+        if (current == null) {
+            return Result.Err(DecodeError.new("Expected a JSON value.", [], Option.None()));
+        }
+        if (JsonSupport.isKind(current, "null")) return Result.Ok(ValueKind.NullKind());
+        if (JsonSupport.isKind(current, "boolean")) return Result.Ok(ValueKind.BooleanKind());
+        if (JsonSupport.isKind(current, "string")) return Result.Ok(ValueKind.StringKind());
+        if (JsonSupport.isKind(current, "array")) return Result.Ok(ValueKind.SequenceKind());
+        if (JsonSupport.isKind(current, "object")) return Result.Ok(ValueKind.RecordKind());
+        let lexeme = current.numberLexeme();
+        if (lexeme == null) {
+            return Result.Err(DecodeError.new("Unknown JSON value kind.", [], Option.None()));
+        }
+        if (JsonSupport.isIntegralNumber(lexeme)) return Result.Ok(ValueKind.IntegerKind());
+        return Result.Ok(ValueKind.DecimalKind());
+    }
+
+    public mut readBoolean(): Result<Boolean, DecodeError> {
+        let current = this.current;
+        if (current == null) {
+            return Result.Err(DecodeError.new("Expected a JSON value.", [], Option.None()));
+        }
+        let value = current.booleanValue();
+        if (value == null) {
+            return Result.Err(DecodeError.new("Expected a JSON boolean.", [], Option.None()));
+        }
+        return Result.Ok(value);
+    }
+
+    public mut readString(): Result<String, DecodeError> {
+        let current = this.current;
+        if (current == null) {
+            return Result.Err(DecodeError.new("Expected a JSON value.", [], Option.None()));
+        }
+        let value = current.stringValue();
+        if (value == null) {
+            return Result.Err(DecodeError.new("Expected a JSON string.", [], Option.None()));
+        }
+        return Result.Ok(value);
+    }
+
+    public mut readInteger(): Result<String, DecodeError> = this.readNumberText();
+
+    public mut readDecimal(): Result<String, DecodeError> = this.readNumberText();
+
+    private mut readNumberText(): Result<String, DecodeError> {
+        let current = this.current;
+        if (current == null) {
+            return Result.Err(DecodeError.new("Expected a JSON value.", [], Option.None()));
+        }
+        let lexeme = current.numberLexeme();
+        if (lexeme == null) {
+            return Result.Err(DecodeError.new("Expected a JSON number.", [], Option.None()));
+        }
+        return Result.Ok(lexeme);
+    }
+
+    public mut readFloat(): Result<Float, DecodeError> {
+        let current = this.current;
+        if (current == null) {
+            return Result.Err(DecodeError.new("Expected a JSON value.", [], Option.None()));
+        }
+        let lexeme = current.numberLexeme();
+        if (lexeme == null) {
+            return Result.Err(DecodeError.new("Expected a JSON number.", [], Option.None()));
+        }
+        if (not JsonSupport.isFiniteNumber(lexeme)) {
+            return Result.Err(DecodeError.new(
+                "The JSON number is outside the range of Float.", [], Option.None()));
+        }
+        return Result.Ok(JsonSupport.doubleValue(lexeme));
+    }
+
+    public mut readBytes(): Result<ByteArray, DecodeError> =
+        Result.Err(DecodeError.new("JSON has no byte-sequence representation.", [], Option.None()));
+
+    public mut beginRecord(): Result<Unit, DecodeError> {
+        let current = this.current;
+        if (current == null) {
+            return Result.Err(DecodeError.new("Expected a JSON object.", [], Option.None()));
+        }
+        let fields = current.objectValue();
+        if (fields == null) {
+            return Result.Err(DecodeError.new("Expected a JSON object.", [], Option.None()));
+        }
+        this.frame = DecodeFrame.onRecord(current, fields, this.frame);
+        return Result.Ok(());
+    }
+
+    public mut nextField(): Result<Option<String>, DecodeError> {
+        let frame = this.frame;
+        if (frame == null) {
+            return Result.Err(DecodeError.new("No JSON object is open.", [], Option.None()));
+        }
+        let selected = frame.nextFieldName();
+        if (not selected.isSome()) return Result.Ok(Option.None());
+        let name = selected.getOrElse("");
+        this.current = frame.fieldValue();
+        return Result.Ok(Option.Some(name));
+    }
+
+    public mut endRecord(): Result<Unit, DecodeError> = this.closeFrame();
+
+    public mut readAlternative(): Result<String, DecodeError> {
+        let current = this.current;
+        if (current == null) {
+            return Result.Err(DecodeError.new(
+                "Expected a JSON object for a tagged alternative.", [], Option.None()));
+        }
+        let fields = current.objectValue();
+        if (fields == null) {
+            return Result.Err(DecodeError.new(
+                "Expected a JSON object for a tagged alternative.", [], Option.None()));
+        }
+        if (fields.size() != 1) {
+            return Result.Err(DecodeError.new(
+                "A tagged alternative is a single-member JSON object.", [], Option.None()));
+        }
+        let tag = fields.keyAt(0);
+        if (tag == null) {
+            return Result.Err(DecodeError.new(
+                "A tagged alternative is a single-member JSON object.", [], Option.None()));
+        }
+        this.alternative = current;
+        this.current = fields.valueAt(0);
+        return Result.Ok(tag);
+    }
+
+    public mut endAlternative(): Result<Unit, DecodeError> {
+        this.current = this.alternative;
+        this.alternative = null;
+        return Result.Ok(());
+    }
+
+    public mut beginSequence(): Result<Unit, DecodeError> {
+        let current = this.current;
+        if (current == null) {
+            return Result.Err(DecodeError.new("Expected a JSON array.", [], Option.None()));
+        }
+        let array = current.arrayValue();
+        if (array == null) {
+            return Result.Err(DecodeError.new("Expected a JSON array.", [], Option.None()));
+        }
+        this.frame = DecodeFrame.onSequence(current, array, this.frame);
+        return Result.Ok(());
+    }
+
+    public mut nextSequenceElement(): Result<Boolean, DecodeError> {
+        let frame = this.frame;
+        if (frame == null) {
+            return Result.Err(DecodeError.new("No JSON array is open.", [], Option.None()));
+        }
+        if (not frame.nextElement()) return Result.Ok(false);
+        this.current = frame.elementValue();
+        return Result.Ok(true);
+    }
+
+    public mut endSequence(): Result<Unit, DecodeError> = this.closeFrame();
+
+    private mut closeFrame(): Result<Unit, DecodeError> {
+        let frame = this.frame;
+        if (frame == null) {
+            return Result.Err(DecodeError.new("No JSON container is open.", [], Option.None()));
+        }
+        this.current = frame.container();
+        this.frame = frame.parentFrame();
+        return Result.Ok(());
+    }
+
+    public mut beginMap(): Result<Unit, DecodeError> =
+        Result.Err(DecodeError.new(
+            "JSON object keys are strings, and the decoder has no map-key operation.",
+            [], Option.None()));
+
+    public mut nextMapEntry(): Result<Boolean, DecodeError> =
+        Result.Err(DecodeError.new("Map decoding is not supported by JSON.", [], Option.None()));
+
+    public mut endMap(): Result<Unit, DecodeError> =
+        Result.Err(DecodeError.new("Map decoding is not supported by JSON.", [], Option.None()));
+
+    public mut skipValue(): Result<Unit, DecodeError> {
+        this.current = null;
+        return Result.Ok(());
+    }
+}
+
+/// Decodes a `T` from a parsed JSON value using its `Decode` evidence.
+///
+/// The evidence comes from derivation or an explicit witness; this helper does not inspect the
+/// value's runtime class.
+public fn decodeValue<T: mut + nullable + Decode<T, {}>>(value: &JsonValue): Result<T, DecodeError> {
+    let decoder = JsonTreeDecoder.from(value);
+    return decode<{}, T>(decoder);
+}
+
+/// Encodes `value` as a JSON value using its `Encode` evidence.
+public fn encodeValue<T: nullable + mut + Encode<T, {}>>(value: T): Result<&JsonValue, EncodeError> {
+    let encoder = JsonTreeEncoder.empty();
+    return match (encode<{}, T>(value, encoder)) {
+        case Result.Ok(_) -> match (encoder.result()) {
+            case Option.Some(json) -> Result<&JsonValue, EncodeError>.Ok(json);
+            case Option.None() -> Result<&JsonValue, EncodeError>.Err(
+                EncodeError.new("The JSON encoder produced no value.", []));
+        };
+        case Result.Err(error) -> Result<&JsonValue, EncodeError>.Err(error);
+    };
+}
+
+public fn getErrorMessage(error: JsonError): String = match (error) {
+        case Encode(message) -> message;
+        case Parse(message, _, _, _) -> message;
+    };
+
+public fn getErrorOffset(error: JsonError): Option<Int> = match (error) {
+        case Encode(message) -> Option<Int>.None();
+        case Parse(_, offset, _, _) -> Option.Some(offset);
+    };
+
+/// Parses JSON text and decodes a `T` from it.
+///
+/// A syntax error becomes a `DecodeError` whose `position` is the source offset reported by the
+/// parser.
+public fn parseAs<T: nullable + mut + Decode<T, {}>>(text: String): Result<T, DecodeError> =
+    match (parse(text)) {
+        case Ok(value) -> decodeValue<T>(value);
+        case Err(error) -> Result<T, DecodeError>.Err(DecodeError.new(
+            getErrorMessage(error), [], getErrorOffset(error)));
+    };
+
+/// Encodes `value` and writes the result as compact JSON text.
+public fn stringifyAs<T: nullable + mut + Encode<T, {}>>(value: T): Result<String, EncodeError> =
+    match (encodeValue<T>(value)) {
+        case Ok(json) -> match (stringify(json)) {
+            case Ok(text) -> Result<String, EncodeError>.Ok(text);
+            case Err(error) -> Result<String, EncodeError>.Err(
+                EncodeError.new(getErrorMessage(error), []));
+        };
+        case Err(error) -> Result<String, EncodeError>.Err(error);
+    };

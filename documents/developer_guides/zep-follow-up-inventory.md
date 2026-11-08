@@ -2,7 +2,7 @@
 
 | Field | Value |
 | ----- | ----- |
-| Date | 2026-11-05 |
+| Date | 2026-11-08 |
 | Scope | Follow-up work found in already implemented or shipped ZEPs |
 | Purpose | Identify candidates for new ZEPs and separate them from work already covered by an existing draft |
 
@@ -12,6 +12,12 @@ are explicitly deferred or excluded by the ZEP text. Items marked `[I]` are infe
 or from a partial implementation.
 
 It is a planning aid, not a proposal. It does not change any ZEP status or release state.
+
+> Update 2026-11-08: the model and callable follow-ups below were drafted as
+> [ZEP-0100](../zeps/ZEP-0100.md) through [ZEP-0104](../zeps/ZEP-0104.md). They remain Draft and unscheduled.
+> Deviations from the initial [ZEP-0079](../zeps/ZEP-0079.md) model surface would still gate any
+> implementation, but that surface is now validated and [ZEP-0079](../zeps/ZEP-0079.md) and
+> [ZEP-0081](../zeps/ZEP-0081.md) are `Implemented`.
 
 ## 1. Work already covered by an existing draft
 
@@ -25,10 +31,10 @@ These are confirmed gaps, but they should extend an existing proposal rather tha
 | Numeric literals, newtypes, widening, heterogeneous operators | 0036, 0043, 0071 | ZEP-0041, 0042, 0044, 0045, 0046, 0070, 0074, 0075 |
 | Remaining Java interop (SAM, inherited members, JPMS, extensible bindings) | 0047-0049 | ZEP-0050 (Draft) |
 | Standard-library testing/logging/TOML/XML | 0011, 0065 | ZEP-0063, 0064, 0066, 0067 |
-| Model declarations and DSL support | 0080, 0082, 0090, 0093 | ZEP-0079, 0081 |
+| Model and callable follow-ups | 0079, 0081, 0090, 0093 | ZEP-0100–0104 (Draft) |
 | 64-bit hashing, mutable projections, unchecked casts | 0008, 0085, 0089 | ZEP-0084, 0085, 0089 |
 | Annotation consumption | 0031 | ZEP-0091 (Draft) |
-| Generated serialization operations | 0068, 0069, 0094 | ZEP-0092 (Draft) |
+| Generated serialization operations | 0068, 0069, 0094, 0099 | ZEP-0092 (Implemented) |
 
 **Important overlap:** ZEP-0092 is the missing link for the already-implemented serialization
 contracts (ZEP-0068/0069). Finishing it should come before a broader serialization API ZEP.
@@ -121,11 +127,15 @@ Source: ZEP-0010, ZEP-0024.
 Source: ZEP-0090, ZEP-0093.
 
 - Bound references (`value::property`) `[E]`.
-- Method and constructor references `[E]`.
+- Method and constructor references `[E]` — drafted as [ZEP-0100](../zeps/ZEP-0100.md).
 - Writable references / `MutPropertyRef` `[E]`.
-- Inherited and statically dispatched member references `[E]`.
+- Inherited and statically dispatched member references `[E]` — policy recorded in
+  [ZEP-0100](../zeps/ZEP-0100.md).
 - Selector-based collection APIs such as `sortedBy` `[E]`.
 - Public `PropertyId` construction, property paths, and further model nodes `[E]`.
+- Model field representation adapters — [ZEP-0101](../zeps/ZEP-0101.md).
+- Generic and polymorphic models — [ZEP-0102](../zeps/ZEP-0102.md), [ZEP-0103](../zeps/ZEP-0103.md).
+- Existential types exploration — [ZEP-0104](../zeps/ZEP-0104.md).
 
 #### J. Class-side and static HKT operations
 
@@ -225,6 +235,9 @@ These inconsistencies were corrected on 2026-11-05 and are recorded here for tra
 - Several implemented ZEPs (`0031`, `0060`, `0080`, `0082`, `0083`, `0086`, `0087`, `0088`,
   `0090`, `0093`, `0094`) are correctly unscheduled but still have no bundle decision. A single
   release-planning pass would resolve them.
+
+Update 2026-11-08: ZEP-0079 and ZEP-0081 completed validation against their declared scope, and
+both the file and tracker statuses now read `Implemented`.
 
 ## 5. Suggested drafting order
 

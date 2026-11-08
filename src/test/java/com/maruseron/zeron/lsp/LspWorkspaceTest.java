@@ -1,13 +1,16 @@
 package com.maruseron.zeron.lsp;
 
 import com.maruseron.zeron.ProjectAnalysisWorkspace;
+import com.maruseron.zeron.TestPaths;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.scan.Scanner;
 import org.eclipse.lsp4j.CodeActionContext;
 import org.eclipse.lsp4j.CodeActionParams;
+import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.DefinitionParams;
 import org.eclipse.lsp4j.HoverParams;
+import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
@@ -15,13 +18,17 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 
 import static org.junit.Assert.*;
+import static org.junit.Assume.assumeTrue;
 
 public class LspWorkspaceTest {
     @Rule
@@ -63,44 +70,144 @@ public class LspWorkspaceTest {
     }
 
     @Test
-    public void completesAndHoversCodeModelAnnotationsAndTypes() throws Exception {
+    public void hoversModelsAsTheirDeclaredContract() throws Exception {
+        final var source = """
+                package app;
+
+                import zeron.lang.Model;
+
+                public class User {
+                    public property name: String;
+                    public mut property age: Int;
+                    public constructor new;
+                }
+
+                public contract SqlModel<T: nullable + mut> requires Model<T> {
+                    property tableName: String;
+                }
+
+                public model UserWire is SqlModel<User> {
+                    tableName = "users";
+                    name -> "user_name";
+                    age -> "user_age";
+                }
+
+                fn consume(model: Model<User>): Unit {}
+                fn use(): Unit { consume(UserWire); }
+                """;
+        final var project = project("app/Main.zn", source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var declarationHover = hoverAt(snapshot, project.entry(), source,
+                "model UserWire", "model ".length());
+        final var referenceHover = hoverAt(snapshot, project.entry(), source,
+                "consume(UserWire)", "consume(".length());
+
+        assertTrue("Unexpected declaration hover: " + declarationHover
+                        + " diagnostics=" + snapshot.diagnostics(),
+                declarationHover.contains("model UserWire: SqlModel<User>"));
+        assertTrue("Missing contract assignment: " + declarationHover,
+                declarationHover.contains("tableName = \"users\""));
+        assertTrue("Missing mapped properties: " + declarationHover,
+                declarationHover.contains("name -> \"user_name\"")
+                        && declarationHover.contains("age -> \"user_age\""));
+        assertFalse("Synthetic model type leaked: " + declarationHover,
+                declarationHover.contains("$model"));
+        assertTrue("Unexpected reference hover: " + referenceHover,
+                referenceHover.contains("model UserWire: SqlModel<User>"));
+        assertFalse("Synthetic model type leaked: " + referenceHover,
+                referenceHover.contains("$model"));
+    }
+
+    @Test
+    public void wrapsAndUnqualifiesLongHoverSignatures() throws Exception {
+        final var source = """
+                import zeron.lang.Option;
+
+                fn longSignature(first: Option<Int>, second: Option<Int>, third: Option<Int>,
+                                 fourth: Option<Int>, fifth: Option<Int>, sixth: Option<Int>,
+                                 seventh: Option<Int>, eighth: Option<Int>): Unit {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "longSignature");
+
+        assertTrue("Unexpected signature hover: " + hover,
+                hover.contains("fn longSignature(\n    first: Option<Int>,"));
+        assertFalse("Qualified names remained in signature: " + hover,
+                hover.contains("zeron.lang.Option"));
+    }
+
+    @Test
+    public void unqualifiesTypesInTheJsonModelSampleHover() throws Exception {
+        final var manifest = TestPaths.projectFile("sample_programs", "jsonmodel", "zeron.toml");
+        final var snapshot = ProjectAnalysisWorkspace.open(manifest).analyze(Map.of());
+        final var entry = manifest.getParent().resolve(Path.of("src", "main.zn"));
+        final var source = Files.readString(entry);
+        final var hover = hoverAt(snapshot, entry, source, "let obj", "let ".length());
+
+        assertTrue("Unexpected sample hover: " + hover,
+                hover.contains("value obj: Result<&JsonValue, JsonError>"));
+        assertFalse("Qualified names remained: " + hover,
+                hover.contains("com.maruseron") || hover.contains("zeron.lang"));
+    }
+
+    @Test
+    public void wrapsAndUnqualifiesLongTypeDisplaysInHover() throws Exception {
+        final var source = """
+                import zeron.lang.Option;
+                import zeron.lang.Result;
+
+                fn longType(obj: (Option<Int>, Option<Int>, Option<Int>, Option<Int>,
+                                   Option<Int>, Option<Int>, Option<Int>) -> Unit): Unit {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "obj:");
+
+        assertTrue("Unexpected type hover: " + hover,
+                hover.contains("value obj: (\n    Option<Int>,"));
+        assertFalse("Qualified names remained in a type: " + hover,
+                hover.contains("zeron.lang."));
+    }
+
+    @Test
+    public void formatsLongStandardLibrarySignaturesInHover() throws Exception {
+        final var source = """
+                import zeron.serialization.json.jsonModel;
+
+                fn main(): Unit {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "jsonModel");
+
+        assertTrue("Unexpected jsonModel hover: " + hover,
+                hover.contains("fn jsonModel<T: nullable + mut>(\n    model: Model<T>,"));
+        assertTrue("Missing owner parameter: " + hover,
+                hover.contains("owner: T,"));
+        assertTrue("Missing block parameter: " + hover,
+                hover.contains("block: &JsonModelObjectBuilder<T>.() -> Unit"));
+        assertTrue("Missing return type: " + hover,
+                hover.contains(") -> Result<&JsonValue, JsonError>"));
+        assertFalse("Qualified names remained: " + hover,
+                hover.contains("zeron.lang.Model") || hover.contains("com.maruseron"));
+    }
+
+    @Test
+    public void hoversCodeModelTypes() throws Exception {
         final var source = """
                 import zeron.compiler.CodeModel;
                 import zeron.compiler.CodeNode;
-                fn consume(@CodeModel model: CodeModel<(Int) -> Boolean>): Unit {}
+                fn consume(model: CodeModel<(Int) -> Boolean>): Unit {}
                 fn root(value: CodeNode): CodeNode = value;
                 """;
         final var project = project(source);
         final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
-        final var completionOffset = source.indexOf("@CodeModel") + "@CodeM".length();
-        final var completion = LspFeatures.completion(snapshot, project.entry(),
-                DocumentCoordinates.positionAt(source, completionOffset));
-        final var annotationHover = hoverAt(snapshot, project.entry(), source, "@CodeModel", 1);
         final var modelHover = hoverAt(snapshot, project.entry(), source, "CodeModel<");
         final var nodeHover = hoverAt(snapshot, project.entry(), source, "CodeNode):");
 
-        assertTrue(completion.getItems().toString(), completion.getItems().stream()
-                .anyMatch(item -> item.getLabel().equals("CodeModel")));
-        assertTrue(annotationHover, annotationHover.contains("annotation @CodeModel on PARAMETER"));
         assertTrue(modelHover, modelHover.contains("CodeModel"));
         assertTrue(nodeHover, nodeHover.contains("CodeNode"));
-    }
-
-    @Test
-    public void reportsMisTypedCodeModelParametersInDiagnostics() throws Exception {
-        final var source = """
-                import zeron.compiler.CodeModel;
-                fn where<T>(@CodeModel predicate: T? -> Boolean): Unit {
-                    predicate(null);
-                }
-                """;
-        final var project = project(source);
-        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
-
-        assertTrue(snapshot.diagnostics().toString(), snapshot.diagnostics().values().stream()
-                .flatMap(List::stream)
-                .anyMatch(diagnostic -> diagnostic.message()
-                        .contains("@CodeModel parameters must use CodeModel<F>")));
     }
 
     @Test
@@ -137,9 +244,46 @@ public class LspWorkspaceTest {
         assertTrue(snapshot.diagnostics().toString(),
                 snapshot.diagnostics().values().stream().allMatch(List::isEmpty));
         assertTrue("Unexpected hover: " + hover,
-                hover.contains("fn compareTo(T) -> String"));
+                hover.contains("fn compareTo(other: T) -> String"));
         assertTrue(hover, hover.contains("Evaluates the current instance against `other`"));
         assertFalse(hover, hover.contains("extension on zeron.numeric.Integer via"));
+    }
+
+    @Test
+    public void compiledLibraryHoverUsesDeclarationParameterNames() throws Exception {
+        final var packageName = "hoverparams" + java.util.UUID.randomUUID().toString().replace("-", "");
+        final var project = project("""
+                import %s.jsonModel;
+                fn main(): String = jsonModel("name", 1, "block");
+                """.formatted(packageName));
+        final var libraryRoot = Files.createDirectories(project.root().resolve("lib"));
+        final var libraryUnit = Parser.of(Scanner.from("""
+                package %s;
+                public fn jsonModel<T: nullable + mut>(model: String, owner: T, block: String): String = model;
+                """.formatted(packageName)).scanTokens()).parseCompilationUnit("Library.zn");
+        final var compiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
+                packageName + ".Library", packageName, List.of(), true, List.of(), libraryRoot);
+        compiler.resolve();
+        compiler.compile();
+        Files.writeString(project.manifest(), Files.readString(project.manifest()) + """
+
+                [dependencies]
+                zeron-libraries = ["lib"]
+                """);
+
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var source = Files.readString(project.entry());
+        final var importHover = hoverAt(snapshot, project.entry(), source, "jsonModel");
+        final var callHover = hoverAt(snapshot, project.entry(), source, "jsonModel",
+                source.lastIndexOf("jsonModel") - source.indexOf("jsonModel"));
+
+        assertTrue("Unexpected import hover: " + importHover,
+                importHover.contains("fn jsonModel<T: nullable + mut>("
+                        + "model: String, owner: T, block: String) -> String"));
+        assertTrue("Unexpected call hover: " + callHover, callHover.contains(
+                "fn jsonModel(model: String, owner: Int, block: String) -> String"));
+        assertFalse(importHover, importHover.contains("arg0"));
+        assertFalse(callHover, callHover.contains("arg0"));
     }
 
     @Test
@@ -178,6 +322,67 @@ public class LspWorkspaceTest {
         assertTrue(hover.getContents().getRight().getValue()
                 .contains("Documentation loaded from the compiled library."));
     }
+
+    /*
+    @Test
+    public void compiledStandardLibraryImportCompletionHoverAndDefinitionIncludeDeclarations()
+            throws Exception {
+        final var root = temporaryFolder.newFolder().toPath();
+        final var sourceRoot = Files.createDirectories(root.resolve("src"));
+        final var entry = sourceRoot.resolve("main.zn");
+        final var source = """
+                import zeron.serialization.DecodeError;
+                fn main() {}
+                """;
+        Files.writeString(entry, source);
+        final var manifest = root.resolve("zeron.toml");
+        Files.writeString(manifest, """
+                [project]
+                entry = "src/main.zn"
+                source-roots = ["src"]
+                output = "dist"
+
+                [platform]
+                stdlib = "compiled"
+                """);
+
+        final var snapshot = ProjectAnalysisWorkspace.open(manifest).analyze(Map.of());
+        assertFalse(snapshot.units().toString(), snapshot.units().stream()
+                .anyMatch(unit -> unit.packageName().equals("zeron.serialization")));
+
+        final var hover = hoverAt(snapshot, entry, source, "DecodeError");
+        assertTrue(hover, hover.contains("type DecodeError = (message: String, path: Array<String>, position: Option<Int>)"));
+
+        final var definition = LspFeatures.definition(snapshot, entry, new DefinitionParams(
+                new TextDocumentIdentifier(entry.toUri().toString()),
+                DocumentCoordinates.positionAt(source, source.indexOf("DecodeError"))));
+        assertTrue(definition.toString(), definition.isLeft());
+        final var locations = definition.getLeft();
+        assertEquals(1, locations.size());
+        final var location = locations.getFirst();
+        assertTrue(location.getUri(), location.getUri().endsWith("serialization.zn"));
+        final var definitionText = Files.readString(Path.of(java.net.URI.create(location.getUri())));
+        final var definitionOffset = DocumentCoordinates.offsetAt(
+                definitionText, location.getRange().getStart());
+        assertTrue(definitionText, definitionText.startsWith("DecodeError", definitionOffset));
+
+        final var incompleteImport = source.replace(
+                "import zeron.serialization.DecodeError;", "import zeron.serialization.");
+        final var importSnapshot = ProjectAnalysisWorkspace.open(manifest).analyze(Map.of(
+                entry, new ProjectAnalysisWorkspace.Overlay(1, incompleteImport)));
+        final var importOffset = incompleteImport.indexOf("zeron.serialization.")
+                + "zeron.serialization.".length();
+        final var completion = LspFeatures.completion(importSnapshot, entry,
+                DocumentCoordinates.positionAt(incompleteImport, importOffset));
+        assertTrue(completion.getItems().toString(), completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("*")));
+        final var decodeError = completion.getItems().stream()
+                .filter(item -> item.getLabel().equals("DecodeError"))
+                .findFirst().orElseThrow(() -> new AssertionError(completion.getItems().toString()));
+        assertEquals("type DecodeError = (message: String, path: Array<String>, position: Option<Int>)",
+                decodeError.getDetail());
+    }
+    */
 
     @Test
     public void overlaysProduceDiagnosticsWithoutWritingBuildOutput() throws Exception {
@@ -533,6 +738,51 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void hoverShowsTypeParameterConstraintsAtDeclarationsAndOnValues() throws Exception {
+        final var source = """
+                contract Tagged<T> {}
+                public class Box<T: Tagged<T>> {
+                    public constructor new;
+                }
+                extension<T: Tagged<T>> Box<T> {
+                    fn marker(): Int = 1;
+                }
+                fn keep<T: Tagged<T>>(value: T, box: Box<T>): T = value;
+                fn borrow<T: nullable + mut>(value: T): T = value;
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var classParameterHover = hoverAt(snapshot, project.entry(), source,
+                "class Box<T", "class Box<".length());
+        final var extensionParameterHover = hoverAt(snapshot, project.entry(), source,
+                "extension<T", "extension<".length());
+        final var functionParameterHover = hoverAt(snapshot, project.entry(), source,
+                "fn keep<T", "fn keep<".length());
+        final var parameterUseHover = hoverAt(snapshot, project.entry(), source,
+                "value: T", "value: ".length());
+        final var markerParameterHover = hoverAt(snapshot, project.entry(), source,
+                "fn borrow<T", "fn borrow<".length());
+        final var valueHover = hoverAt(snapshot, project.entry(), source, "value: T");
+        final var genericValueHover = hoverAt(snapshot, project.entry(), source, "box: Box");
+
+        assertTrue("class=" + classParameterHover + " diagnostics=" + snapshot.diagnostics(),
+                classParameterHover.contains("type parameter T: Tagged<T>"));
+        assertTrue(extensionParameterHover,
+                extensionParameterHover.contains("type parameter T: Tagged<T>"));
+        assertTrue(functionParameterHover,
+                functionParameterHover.contains("type parameter T: Tagged<T>"));
+        assertTrue(markerParameterHover,
+                markerParameterHover.contains("type parameter T: nullable + mut"));
+        assertTrue(parameterUseHover,
+                parameterUseHover.contains("type parameter T: Tagged<T>"));
+        assertTrue(valueHover, valueHover.contains("value value: T"));
+        assertTrue(valueHover, valueHover.contains("type parameter T: Tagged<T>"));
+        assertTrue(genericValueHover, genericValueHover.contains("value box: Box<T>"));
+        assertTrue(genericValueHover,
+                genericValueHover.contains("type parameter T: Tagged<T>"));
+    }
+
+    @Test
     public void hoverDescribesContractsClassesEffectsAndNamedHandlers() throws Exception {
         final var source = """
                 contract Marker<T> {}
@@ -627,9 +877,9 @@ public class LspWorkspaceTest {
         final var clientHover = hoverAt(snapshot, outOfScope, clientSource, "Widget):");
 
         assertTrue(appHover, appHover.contains("class Widget is Display"));
-        assertTrue(appHover, appHover.contains("zeron.lang.Eq<Widget>"));
+        assertTrue(appHover, appHover.contains("Eq<Widget>"));
         assertTrue(appHover, appHover.contains("Tag<Widget>"));
-        assertTrue(clientHover, clientHover.contains("zeron.lang.Eq<Widget>"));
+        assertTrue(clientHover, clientHover.contains("Eq<Widget>"));
         assertFalse(clientHover, clientHover.contains("Tag<Widget>"));
     }
 
@@ -777,7 +1027,8 @@ public class LspWorkspaceTest {
                 DocumentCoordinates.positionAt(source, source.lastIndexOf("identity"))));
 
         assertNotNull(hover);
-        assertTrue(hover.getContents().getRight().getValue().contains("fn identity(Int) -> Int"));
+        assertTrue("Unexpected identity hover: " + hover.getContents().getRight().getValue(),
+                hover.getContents().getRight().getValue().contains("fn identity(value: Int) -> Int"));
     }
 
     @Test
@@ -963,7 +1214,7 @@ public class LspWorkspaceTest {
         assertTrue(functionHover.getContents().getRight().getValue().contains("external fn native"));
         assertNotNull(externalClassHover);
         assertTrue(externalClassHover.getContents().getRight().getValue()
-                .contains("external class JavaThing = java.lang.String"));
+                .contains("external class JavaThing = String"));
         assertTrue(externalClassDefinition.isLeft());
         assertEquals(DocumentCoordinates.positionAt(source, source.lastIndexOf("JavaThing ="))
                         .getLine(),
@@ -999,7 +1250,7 @@ public class LspWorkspaceTest {
                     default count<A: mut>(this: F<A>): Int =
                         this.foldLeft(0, (count, _) -> count + 1);
                 }
-                fn hashKey<T: Hashable<T>>(key: T): Int = key.hash();
+                fn hashKey<T: Hashable<T>>(key: T): Long = key.hash();
                 """;
         final var project = project(source);
         final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
@@ -1007,13 +1258,13 @@ public class LspWorkspaceTest {
         final var foldableHover = hoverAt(snapshot, project.entry(), source,
                 "this.foldLeft", "this.".length());
 
-        assertTrue("Unexpected hash hover: " + hashHover, hashHover.contains("fn hash() -> Int"));
+        assertTrue("Unexpected hash hover: " + hashHover, hashHover.contains("fn hash() -> Long"));
         assertTrue("Unexpected foldLeft hover: " + foldableHover, foldableHover.contains("fn foldLeft"));
     }
 
     @Test
     public void witnessMethodHoverUsesSourceNamesInListMonadSample() throws Exception {
-        final var manifest = Path.of("sample_programs", "list_monad", "zeron.toml")
+        final var manifest = TestPaths.projectFile("sample_programs", "list_monad", "zeron.toml")
                 .toAbsolutePath().normalize();
         final var path = manifest.getParent().resolve("src").resolve("main.zn");
         final var source = Files.readString(path);
@@ -1192,7 +1443,8 @@ public class LspWorkspaceTest {
                 DocumentCoordinates.positionAt(source, source.lastIndexOf("echo"))));
 
         assertNotNull(hover);
-        assertTrue(hover.getContents().getRight().getValue().contains("fn echo<T>(Int) -> Int"));
+        assertTrue("Unexpected echo hover: " + hover.getContents().getRight().getValue(),
+                hover.getContents().getRight().getValue().contains("fn echo<T>(value: Int) -> Int"));
     }
 
     @Test
@@ -1525,6 +1777,380 @@ public class LspWorkspaceTest {
                 + ", diagnostics=" + snapshot.diagnostics(),
                 completion.getItems().stream()
                 .anyMatch(item -> item.getLabel().startsWith("test(")));
+    }
+
+    @Test
+    public void hoversQualifiedJavaTypesAndExternalMembers() throws Exception {
+        final var source = """
+                package app;
+
+                import java.io.File;
+                import java.io.PrintStream;
+                import java.lang.System;
+
+                fn pathOf(file: File): String? = file.getPath();
+                fn stream(): &PrintStream? = System.out;
+                fn elapsed(): Long = System.nanoTime();
+                fn sizeOf(values: &java.util.List<String>): Int = values.size();
+                """;
+        final var project = project("app/Main.zn", source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var listHover = hoverAt(snapshot, project.entry(), source,
+                "java.util.List<String>", "java.util.".length());
+        assertTrue("Unexpected Java type hover: " + listHover,
+                listHover.contains("java interface java.util.List"));
+        final var memberHover = hoverAt(snapshot, project.entry(), source,
+                "file.getPath", "file.".length());
+        assertTrue("Unexpected Java member hover: " + memberHover,
+                memberHover.contains("java method java.io.File.getPath() -> java.lang.String"));
+        assertTrue("Missing facade binding in hover: " + memberHover,
+                memberHover.contains("external fn getPath() -> String?"));
+        final var fieldHover = hoverAt(snapshot, project.entry(), source,
+                "System.out", "System.".length());
+        assertTrue("Unexpected Java field hover: " + fieldHover,
+                fieldHover.contains("java static field java.lang.System.out: java.io.PrintStream"));
+        assertTrue("Missing facade property in hover: " + fieldHover,
+                fieldHover.contains("external static property out"));
+        final var methodHover = hoverAt(snapshot, project.entry(), source,
+                "System.nanoTime", "System.".length());
+        assertTrue("Unexpected Java static method hover: " + methodHover,
+                methodHover.contains("java static method java.lang.System.nanoTime() -> long"));
+        assertTrue("Missing facade method in hover: " + methodHover,
+                methodHover.contains("external fn nanoTime() -> Long"));
+        assertTrue("Missing definition link in hover: " + memberHover,
+                memberHover.contains("[Go to definition]("));
+    }
+
+    @Test
+    public void includesDefinitionLinkInHover() throws Exception {
+        final var source = """
+                fn add(left: Int, right: Int): Int = left + right;
+                fn use(): Int = add(1, 2);
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var referenceHover = hoverAt(snapshot, project.entry(), source, "add(1");
+        assertTrue(referenceHover, referenceHover.contains("[Go to definition]("
+                + project.entry().toUri() + "#L1)"));
+
+        final var declarationHover = hoverAt(snapshot, project.entry(), source,
+                "fn add", "fn ".length());
+        assertFalse(declarationHover, declarationHover.contains("[Go to definition]("));
+    }
+
+    @Test
+    public void completesFacadeAndJavaMembers() throws Exception {
+        final var source = """
+                package app;
+
+                import java.io.File;
+                import java.lang.System;
+
+                fn open(path: String): Boolean = File.new(path).exists();
+                fn nameOf(file: File): String? = file.getName();
+                fn stream(): &java.io.PrintStream? = System.out;
+                fn sizeOf(values: &java.util.List<String>): Int = values.size();
+                """;
+        final var project = project("app/Main.zn", source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var constructorCompletion = completionAt(snapshot, project.entry(), source,
+                "File.new", "File.".length());
+        assertTrue("file=" + constructorCompletion.getItems(), constructorCompletion.getItems()
+                .stream().anyMatch(item -> item.getLabel().equals("new(path: String)")));
+        assertFalse("file=" + constructorCompletion.getItems(), constructorCompletion.getItems()
+                .stream().anyMatch(item -> item.getLabel().startsWith("exists(")));
+
+        final var instanceCompletion = completionAt(snapshot, project.entry(), source,
+                "file.getName", "file.".length());
+        assertTrue("file=" + instanceCompletion.getItems(), instanceCompletion.getItems()
+                .stream().anyMatch(item -> item.getLabel().equals("getName()")));
+        assertTrue("file=" + instanceCompletion.getItems(), instanceCompletion.getItems()
+                .stream().anyMatch(item -> item.getLabel().equals("exists()")));
+
+        final var staticCompletion = completionAt(snapshot, project.entry(), source,
+                "System.out", "System.".length());
+        assertTrue("system=" + staticCompletion.getItems(), staticCompletion.getItems()
+                .stream().anyMatch(item -> item.getLabel().equals("out")));
+        assertTrue("system=" + staticCompletion.getItems(), staticCompletion.getItems()
+                .stream().anyMatch(item -> item.getLabel().equals("getenv(name: String?)")));
+
+        final var javaCompletion = completionAt(snapshot, project.entry(), source,
+                "values.size", "values.".length());
+        final var sizeItem = javaCompletion.getItems().stream()
+                .filter(item -> item.getLabel().equals("size()")).findFirst()
+                .orElseThrow(() -> new AssertionError(javaCompletion.getItems().toString()));
+        assertEquals("Int", sizeItem.getDetail());
+    }
+
+    @Test
+    public void definesFacadeMembersAndUsesJdkSourcesWhenInstalled() throws Exception {
+        final var source = """
+                package app;
+
+                import java.io.File;
+
+                fn pathOf(file: File): String? = file.getPath();
+                fn sizeOf(values: &java.util.List<String>): Int = values.size();
+                """;
+        final var project = project("app/Main.zn", source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var facadeDefinition = definitionAt(snapshot, project.entry(), source,
+                "file.getPath", "file.".length());
+        assertEquals(1, facadeDefinition.size());
+        assertTrue(facadeDefinition.getFirst().getUri(),
+                facadeDefinition.getFirst().getUri().endsWith("File.zn"));
+        final var jdkSources = Files.isRegularFile(
+                Path.of(System.getProperty("java.home"), "lib", "src.zip"));
+        assertEquals(jdkSources ? 1 : 0, definitionAt(snapshot, project.entry(), source,
+                "java.util.List<String>", "java.util.".length()).size());
+        assertEquals(jdkSources ? 1 : 0, definitionAt(snapshot, project.entry(), source,
+                "values.size", "values.".length()).size());
+    }
+
+    @Test
+    public void definesJavaTypesAndMembersInAttachedSources() throws Exception {
+        final var source = """
+                package app;
+
+                import java.io.File;
+
+                fn pathOf(file: File): String? = file.getPath();
+                fn sizeOf(values: &java.util.List<String>): Int = values.size();
+                """;
+        final var project = projectWithJavaSources(source, Map.of(
+                "java/io/File.java", """
+                        package java.io;
+
+                        public class File {
+                            public String getPath() { return null; }
+                        }
+                        """,
+                "java/util/List.java", """
+                        package java.util;
+
+                        public interface List<E> {
+                            int size();
+                        }
+                        """));
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var typeDefinition = definitionAt(snapshot, project.entry(), source,
+                "java.util.List<String>", "java.util.".length());
+        assertEquals(1, typeDefinition.size());
+        assertTrue(typeDefinition.getFirst().getUri(),
+                typeDefinition.getFirst().getUri().endsWith("List.java"));
+        assertEquals(2, typeDefinition.getFirst().getRange().getStart().getLine());
+
+        final var memberDefinition = definitionAt(snapshot, project.entry(), source,
+                "values.size", "values.".length());
+        assertEquals(1, memberDefinition.size());
+        assertTrue(memberDefinition.getFirst().getUri(),
+                memberDefinition.getFirst().getUri().endsWith("List.java"));
+        assertEquals(3, memberDefinition.getFirst().getRange().getStart().getLine());
+
+        final var facadeDefinition = definitionAt(snapshot, project.entry(), source,
+                "file.getPath", "file.".length());
+        assertEquals(1, facadeDefinition.size());
+        assertTrue(facadeDefinition.getFirst().getUri(),
+                facadeDefinition.getFirst().getUri().endsWith("File.zn"));
+    }
+
+    @Test
+    public void definesJdkTypesAndMembersInInstalledSources() throws Exception {
+        final var srcZip = Path.of(System.getProperty("java.home"), "lib", "src.zip");
+        assumeTrue("JDK sources are not installed: " + srcZip, Files.isRegularFile(srcZip));
+        final var source = """
+                package app;
+
+                fn sizeOf(values: &java.util.List<String>): Int = values.size();
+                """;
+        final var project = project("app/Main.zn", source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var typeDefinition = definitionAt(snapshot, project.entry(), source,
+                "java.util.List<String>", "java.util.".length());
+        assertEquals(1, typeDefinition.size());
+        assertTrue(typeDefinition.getFirst().getUri(),
+                typeDefinition.getFirst().getUri().endsWith("/List.java"));
+        assertEquals("List", textAtRange(typeDefinition.getFirst(),
+                Files.readString(Path.of(URI.create(typeDefinition.getFirst().getUri())))));
+
+        final var memberDefinition = definitionAt(snapshot, project.entry(), source,
+                "values.size", "values.".length());
+        assertEquals(1, memberDefinition.size());
+        assertTrue(memberDefinition.getFirst().getUri(),
+                memberDefinition.getFirst().getUri().endsWith("/List.java"));
+    }
+
+    @Test
+    public void definesJavaMembersInSidecarSourceArchives() throws Exception {
+        final var source = """
+                package app;
+
+                import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
+
+                fn result(): Int = Fixture.add(19, 23);
+                """;
+        final var project = project("app/Main.zn", source);
+        final var library = Files.createDirectories(project.root().resolve("lib"));
+        writeFixtureJar(library.resolve("fixture.jar"));
+        final var sources = library.resolve("fixture-sources.jar");
+        try (final var out = new JarOutputStream(Files.newOutputStream(sources))) {
+            out.putNextEntry(new JarEntry(
+                    "com/maruseron/zeron/fixtures/JavaInteropFixture.java"));
+            out.write(Files.readAllBytes(TestPaths.projectFile(
+                    "src", "test", "java", "com", "maruseron", "zeron", "fixtures",
+                    "JavaInteropFixture.java")));
+            out.closeEntry();
+        }
+        Files.writeString(project.manifest(), Files.readString(project.manifest())
+                + "\n[dependencies]\njava-classpath = [\"lib/fixture.jar\"]\n");
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var definition = definitionAt(snapshot, project.entry(), source,
+                "Fixture.add", "Fixture.".length());
+        assertEquals(1, definition.size());
+        assertTrue(definition.getFirst().getUri(),
+                definition.getFirst().getUri().endsWith("/JavaInteropFixture.java"));
+        assertEquals("add", textAtRange(definition.getFirst(),
+                Files.readString(Path.of(URI.create(definition.getFirst().getUri())))));
+    }
+
+    @Test
+    public void leavesJavaReferencesWithoutSourceOrFacadeUndefined() throws Exception {
+        final var source = """
+                package app;
+
+                import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
+
+                fn result(): Int = Fixture.add(19, 23);
+                """;
+        final var project = project("app/Main.zn", source);
+        final var library = Files.createDirectories(project.root().resolve("lib"));
+        writeFixtureJar(library.resolve("fixture.jar"));
+        Files.writeString(project.manifest(), Files.readString(project.manifest())
+                + "\n[dependencies]\njava-classpath = [\"lib/fixture.jar\"]\n");
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        assertTrue(definitionAt(snapshot, project.entry(), source,
+                "Fixture.add", "Fixture.".length()).isEmpty());
+    }
+
+    @Test
+    public void hoversAndDefinesSumCaseNamesInMatches() throws Exception {
+        final var source = """
+                package app;
+
+                public type JsonError = Encode(message: String) | Parse(message: String);
+
+                public contract Encode {}
+
+                fn getErrorMessage(error: JsonError): String = match (error) {
+                    case Encode(message) -> message;
+                    case JsonError.Parse(message) -> message;
+                };
+                """;
+        final var project = project("app/Main.zn", source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var bareHover = hoverAt(snapshot, project.entry(), source,
+                "case Encode", "case ".length());
+        assertTrue(bareHover, bareHover.contains("constructor Encode"));
+        assertFalse("hover=" + bareHover + " diagnostics=" + snapshot.diagnostics()
+                        + " resolution=" + snapshot.resolution()
+                        .map(result -> result.errors().toString()).orElse("none"),
+                bareHover.contains("contract Encode"));
+
+        final var qualifiedHover = hoverAt(snapshot, project.entry(), source,
+                "JsonError.Parse", "JsonError.".length());
+        assertTrue(qualifiedHover, qualifiedHover.contains("constructor Parse"));
+
+        final var definition = definitionAt(snapshot, project.entry(), source,
+                "case Encode", "case ".length());
+        assertEquals(1, definition.size());
+        assertEquals(project.entry().toUri().toString(), definition.getFirst().getUri());
+        assertEquals("Encode", textAtRange(definition.getFirst(), source));
+    }
+
+    @Test
+    public void hoversStdlibJsonErrorCaseWithoutMatchingTheEncodeContract() throws Exception {
+        final var stdlib = TestPaths.projectFile("src", "main", "resources", "stdlib");
+        final var path = stdlib.resolve(Path.of("zeron", "serialization", "json", "typed.zn"));
+        final var source = Files.readString(path);
+        final var snapshot = ProjectAnalysisWorkspace.openSourceWorkspace(stdlib).analyze(Map.of());
+        final var offset = source.indexOf("case Encode(message)") + "case ".length();
+
+        final var hover = LspFeatures.hover(snapshot, path, new HoverParams(
+                new TextDocumentIdentifier(path.toUri().toString()),
+                DocumentCoordinates.positionAt(source, offset)));
+        assertNotNull(hover);
+        final var contents = hover.getContents().getRight().getValue();
+        assertTrue(contents, contents.contains("constructor Encode"));
+        assertFalse(contents, contents.contains("contract Encode"));
+
+        final var definition = LspFeatures.definition(snapshot, path, new DefinitionParams(
+                new TextDocumentIdentifier(path.toUri().toString()),
+                DocumentCoordinates.positionAt(source, offset)));
+        assertEquals(1, definition.getLeft().size());
+        final var location = definition.getLeft().getFirst();
+        assertTrue(location.getUri(), location.getUri().endsWith("/json.zn"));
+        assertEquals("Encode", textAtRange(location,
+                Files.readString(Path.of(URI.create(location.getUri())))));
+    }
+
+    private static String textAtRange(final Location location, final String text) {
+        final var range = location.getRange();
+        final var line = text.lines().toList().get(range.getStart().getLine());
+        return line.substring(range.getStart().getCharacter(), range.getEnd().getCharacter());
+    }
+
+    private static void writeFixtureJar(final Path jar) throws Exception {
+        final var resource = "/com/maruseron/zeron/fixtures/JavaInteropFixture.class";
+        try (final var input = LspWorkspaceTest.class.getResourceAsStream(resource);
+             final var out = new JarOutputStream(Files.newOutputStream(jar))) {
+            if (input == null) {
+                throw new IllegalStateException("Java interop fixture class is missing.");
+            }
+            out.putNextEntry(new JarEntry(resource.substring(1)));
+            out.write(input.readAllBytes());
+            out.closeEntry();
+        }
+    }
+
+    private ProjectFiles projectWithJavaSources(final String source,
+                                                final Map<String, String> javaSources) throws Exception {
+        final var project = project("app/Main.zn", source);
+        final var sourceRoot = Files.createDirectories(project.root().resolve("java-src"));
+        for (final var entry : javaSources.entrySet()) {
+            final var file = sourceRoot.resolve(entry.getKey());
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, entry.getValue());
+        }
+        Files.writeString(project.manifest(), Files.readString(project.manifest())
+                + "\n[dependencies]\njava-sources = [\"java-src\"]\n");
+        return project;
+    }
+
+    private static CompletionList completionAt(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                               final Path path, final String source,
+                                               final String searchedText, final int relativeOffset) {
+        final var offset = source.indexOf(searchedText);
+        return LspFeatures.completion(snapshot, path,
+                DocumentCoordinates.positionAt(source, offset + relativeOffset));
+    }
+
+    private static List<? extends Location> definitionAt(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final Path path,
+            final String source, final String searchedText, final int relativeOffset) {
+        final var offset = source.indexOf(searchedText);
+        final var definition = LspFeatures.definition(snapshot, path, new DefinitionParams(
+                new TextDocumentIdentifier(path.toUri().toString()),
+                DocumentCoordinates.positionAt(source, offset + relativeOffset)));
+        return definition.isLeft() ? definition.getLeft() : List.of();
     }
 
     private ProjectFiles project(final String source) throws Exception {

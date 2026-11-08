@@ -128,6 +128,43 @@ public final class ControlFlowTest {
                     }
                     return total;
                 }
+                fn variableEndpointSum(start: Int, end: Int): Int {
+                    let mut total = 0;
+                    for (let value in start..end) {
+                        total += value;
+                    }
+                    return total;
+                }
+                fn valuesRangeSum(values: Array<Int>): Int {
+                    let mut total = 0;
+                    for (let index in 0..values.length - 1) {
+                        total += values[index];
+                    }
+                    return total;
+                }
+                fn computedEndpointSum(offset: Int, count: Int): Int {
+                    let mut total = 0;
+                    for (let value in offset..offset + count - 1) {
+                        total += value;
+                    }
+                    return total;
+                }
+                fn parenthesizedRangeSum(start: Int, end: Int): Int {
+                    let mut total = 0;
+                    for (let value in (start .. end)) {
+                        total += value;
+                    }
+                    return total;
+                }
+                fn reassignedRangeSum(limit: Int): Int {
+                    let mut range = 1..limit;
+                    range = 0..limit;
+                    let mut total = 0;
+                    for (let value in range) {
+                        total += value;
+                    }
+                    return total;
+                }
                 fn maxEndpointCount(): Int {
                     let mut count = 0;
                     for (let value in 2147483646..2147483647) {
@@ -159,6 +196,22 @@ public final class ControlFlowTest {
                 assertEquals(6, generated.getMethod("descendingSum").invoke(null));
                 assertEquals(7, generated.getMethod("singletonSum").invoke(null));
                 assertEquals(6, generated.getMethod("storedRangeSum").invoke(null));
+                assertEquals(6, generated.getMethod("variableEndpointSum", int.class, int.class).invoke(null, 1, 3));
+                assertEquals(14, generated.getMethod("variableEndpointSum", int.class, int.class).invoke(null, 2, 5));
+                assertEquals(9, generated.getMethod("computedEndpointSum", int.class, int.class).invoke(null, 2, 3));
+                assertEquals(10, generated.getMethod("parenthesizedRangeSum", int.class, int.class).invoke(null, 1, 4));
+                assertEquals(6, generated.getMethod("reassignedRangeSum", int.class).invoke(null, 3));
+                final var valuesRangeSum = java.util.Arrays.stream(generated.getMethods())
+                        .filter(method -> method.getName().equals("valuesRangeSum"))
+                        .filter(method -> method.getParameterCount() == 1)
+                        .findFirst()
+                        .orElseThrow();
+                final var rangeValues = java.lang.reflect.Array.newInstance(
+                        valuesRangeSum.getParameterTypes()[0].getComponentType(), 3);
+                java.lang.reflect.Array.set(rangeValues, 0, 2);
+                java.lang.reflect.Array.set(rangeValues, 1, 3);
+                java.lang.reflect.Array.set(rangeValues, 2, 5);
+                assertEquals(10, valuesRangeSum.invoke(null, rangeValues));
                 assertEquals(2, generated.getMethod("maxEndpointCount").invoke(null));
                 assertEquals(3, generated.getMethod("breaksFor").invoke(null));
             }

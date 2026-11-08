@@ -5,8 +5,7 @@ import zeron.lang.Hashable;
 import zeron.lang.Option;
 import zeron.lang.Pair;
 
-// TODO: no hover on `key.hash`. work on this!
-fn hashKey<T: Hashable<T>>(key: T): Int = key.hash();
+fn hashKey<T: Hashable<T>>(key: T): Long = key.hash();
 
 fn equalKeys<T: Eq<T>>(left: T, right: T): Boolean = left == right;
 
@@ -31,7 +30,7 @@ public class HashMap<K: Hashable<K>, V: mut>
     /// The two functions must agree: keys that `equalityFunction` considers equal must produce the
     /// same hash from `hashFunction`.
     public constructor withOperations(
-        hashFunction: (K) -> Int,
+        hashFunction: (K) -> Long,
         equalityFunction: (K, K) -> Boolean
     ) =
         HashMap<K, V>.new(

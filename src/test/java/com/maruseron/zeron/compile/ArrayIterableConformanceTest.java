@@ -12,9 +12,11 @@ import org.junit.Test;
 
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.instruction.InvokeInstruction;
+import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,6 +27,19 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public final class ArrayIterableConformanceTest {
+    private URLClassLoader makeStandardLoader(final Path outputDirectory,
+                                              final List<Path> additionalLibraries) throws Exception {
+        final var urls = new ArrayList<URL>();
+        urls.add(outputDirectory.toUri().toURL());
+        urls.add(Zeron.bundledStandardLibraryJar().orElseThrow().toUri().toURL());
+
+        for (final var library : additionalLibraries) {
+            urls.add(library.toUri().toURL());
+        }
+
+        return new URLClassLoader(urls.toArray(URL[]::new), getClass().getClassLoader());
+    }
+
     @Test
     public void convertsArraysToFreshIterableAdaptersAndSupportsBoundEvidence() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
@@ -98,8 +113,7 @@ public final class ArrayIterableConformanceTest {
                     .anyMatch(invoke -> invoke.owner().asInternalName()
                             .equals("zeron/runtime/ArrayIterable")
                             && invoke.name().equalsString("wrap")));
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+            try (final var loader = makeStandardLoader(Path.of("dist"), List.of())) {
                 final var main = loader.loadClass(packageName + ".Main");
                 final var iterableType = loader.loadClass("zeron.collections.Iterable");
                 final var values = new Object[]{1, 2, 3};

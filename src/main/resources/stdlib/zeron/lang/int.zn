@@ -33,7 +33,7 @@ witness Integral<Int> for Int {
     fn toInteger(): Integer = Integer.fromInt(this);
     fn toRational(): Rational = Rational.fromInteger(this.toInteger());
 
-    fn hash(): Int = this;
+    fn hash(): Long = this.toLong();
     fn eq(other: Int): Boolean = this == other;
 
     fn compareTo(other: Int): Ordering {

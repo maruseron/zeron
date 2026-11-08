@@ -4,6 +4,33 @@
 
 ### Standard library
 
+- `Hashable.hash` now returns a 64-bit `Long`, and built-in, nullable, and derived hashing all use
+  full-width algorithms. `String` uses a 64-bit FNV-1a pass with final avalanche, `Long` retains all
+  bits, and `Float` canonicalizes NaNs while distinguishing signed zero. Derived products, sums,
+  classes, and newtypes use a shared order-sensitive combiner seeded by sum case; `HashMap` and
+  `HashSet` mix the full hash with the Fibonacci constant before reducing it to a bucket index.
+  This is a pre-1.0 breaking change to `Hashable.hash`, `Integer.hash`, `Rational.hash`, and
+  `HashMap.withOperations`; the API-index and standard-library API versions are now 11. Int
+  implementations receive the new `ZR2026` diagnostic.
+- `Result<T, E>` now admits nullable type arguments for both parameters, as `Option<T>` already
+  did, so a capability whose result mentions a nullable type can declare it directly.
+- Added the effect-aware `Encode<T, E>`, `Decode<T, E>`, `Codec<T, E>`, and `Shape<T>` contracts to
+  `zeron.serialization`, with the free `encode` and `decode` entry points and built-in codecs for
+  `Int`, `Boolean`, `String`, and `Float` in `zeron.lang`. A codec declares the effects its
+  operation raises, so streaming through a format that raises is tracked by the type system.
+- Added the typed JSON adapter in `zeron.serialization.json.typed`: `parseAs<T>`, `stringifyAs<T>`,
+  `decodeValue<T>`, and `encodeValue<T>` drive derived or hand-written `Encode` and `Decode`
+  operations directly over the JSON value model. A tagged alternative is a single-member object (a
+  payload-less case is JSON null), and maps report an error because JSON object keys are strings
+  and the protocol has no map-key operation.
+- Added the `Json` configuration value to `zeron.serialization.json` with its companion namespace.
+  A configuration holds the number of spaces per indentation level and provides `encodeToString`,
+  `encodeToStringWith` for model-selected fields, `encodeToValue`, `encodeToValueWith`,
+  `decodeFromString`, `parseValue`, and `stringifyValue`. `Json.compact()` is the default,
+  `Json.pretty(indent)` indents each nesting level, and the namespace functions
+  `Json.encodeToString` and `Json.decodeFromString` delegate to the default.
+- Added `PropertyRef.writer` and `Field.writer`, optional `(&T, V) -> Unit` functions that are
+  present when the referenced or mapped property has an accessible setter.
 - Renamed the collection classes to `ArrayList`, `HashSet`, and `HashMap`, and turned `List`, `Set`,
   and `Map` into contracts, so a function can accept any implementation. Added the `Sized`,
   `PositionalEditor`, `Removable`, `KeyedSink`, and `Clearable` capability contracts and split
@@ -21,9 +48,57 @@
   capability contract and `System.identityHashCode` for identity-based hashing, and extracted the
   shared `HashTable` internals used by `HashMap` and `IdentityHashMap`.
 
+### Language server
+
+- Hover, completion, and go-to-definition now cover Java interop and external bindings. Hover
+  identifies the resolved Java binary type, constructor, method, or field with its supported
+  signature and checked exceptions, together with the external facade binding when one exists.
+  Each hover ends with a `Go to definition` link to the same location definition navigation uses,
+  so the readable signature remains discoverable. Match case names hover and navigate as the sum
+  case resolved for the scrutinee, instead of falling back to a same-named type elsewhere in scope.
+  Completion offers only facade-declared members when a facade restricts the API, and otherwise the
+  Java members that the interop resolver supports, keeping static and instance context and
+  constructors distinct. Definition keeps Zeron external uses on their Zeron declarations and
+  attaches direct Java references to a matching Java source file, discovering the running JDK's
+  `lib/src.zip` and `<name>-sources.jar` sidecars beside `java-classpath` JARs and reading the new
+  optional `[dependencies].java-sources` directories. Archived sources open from a temporary cache
+  at their original line positions; without source, definition falls back to the external
+  declaration or no target.
+
 ### Compiler and language work
 
+- Integer ranges now accept arbitrary `Int` expressions as endpoints instead of only integer
+  literals, so `0..values.length - 1` and `start..end` compile. `..` is the lowest-precedence,
+  right-associative operator and still constructs an inclusive `zeron.ranges.IntRange`; each
+  endpoint is evaluated once when the range is created.
+- Model declarations now track writable properties. Mapping a property with an accessible setter
+  fills `Field.writer`, so a consumer can update an existing value through the model; `Model.field`
+  forwards the writer that `PropertyRef` carries. Model tests cover writable and read-only mappings,
+  writer use across separate compilation, and SQL-style and document-style consumers of one type.
+- A model value can now be passed to a function expecting `Model<T>`, including through an
+  intermediate contract such as `SqlModel<User>`; generic inference projects a class's contract
+  arguments when matching a generic contract parameter. This fixes `jsonModel(UserWire, user)`
+  rejecting the synthesized model implementation. The generated singleton's constructor is now
+  public in bytecode so the compiled top-level value initializer can create it, fixing an
+  `IllegalAccessError` when running a model program.
+- A value whose type is a type parameter declared `T: nullable` is now treated as possibly null
+  inside the generic body. Member access, contract-bound operations, operators, iteration, indexing,
+  and passing the value where a non-null type is required are rejected until flow analysis proves it
+  non-null; a branch or early exit on `null` refines it, an assignment invalidates that refinement,
+  and safe navigation (`?.`) and the assertion `!!` remain available. The new diagnostic is `ZR2025`.
+  `Sortable.sorted` and `InPlaceSortable.sort` no longer admit nullable elements, because
+  `Comparable` defines no order for `null`.
+- Derivation now generates streaming encode and decode operations for native products, native sums,
+  and transparent data classes that derive `Encode`, `Decode`, or `Codec`, together with `Shape`
+  metadata. Encoding writes fields and alternatives straight to the encoder, decoding reads fields
+  by name and constructs the value through its canonical constructor, and a failure carries the
+  component path that produced it. Unknown sum cases are decode errors, and a missing required
+  field is reported rather than silently defaulted.
 - Made the bundled compiled standard library the default for project and direct compilations.
+  When the installed compiled library is incompatible with the compiler's API index, the default
+  falls back to the bundled sources; explicit `compiled` mode still reports the mismatch. The
+  installation location now honors the `zeron.home` property.
+
   `zeron` resolves `lib/zeron-stdlib-*.jar` from the installation, prefers an explicitly listed
   standard-library library, and falls back to bundled sources only when no artifact is available.
   `zeron init` selects `compiled` in installed distributions and `source` in source checkouts.
@@ -45,8 +120,10 @@
 - Added `PropertyId` to the standard library and a read-only `PropertyRef.id` whose `text()` equals
   `identity`. Replaced the `zeron.compiler` code-model API with sealed `CodeShape`, `CodeType`,
   `CodeLiteral`, and `ComparisonOperator` types, typed parameters and capture values, source
-  locations, structural equality and hashing, and `selectedProperty`. A `@CodeModel` argument may
-  now be written as a property-reference literal such as `User::name` as well as an inline lambda.
+  locations, structural equality and hashing, and `selectedProperty`. A parameter of type
+  `CodeModel<F>` selects model mode, and an argument may be written as a property-reference literal
+  such as `User::name` as well as an inline lambda; an ordinary function type keeps the function
+  value. The marker annotation originally proposed for this feature was retired.
 - Added receiver-based and receiverless default operations to higher-kinded contracts, including
   compiled-library support and derived `Applicative.map2`, `Monad.flatten`, `Foldable.count`, `Foldable.isEmpty`,
   `Traversable.sequence`, and `Comonad.duplicate`.
@@ -79,6 +156,11 @@
 - Refined stable closed-sum values on the negative path of direct `matches` tests, including
   grouped and negated conditions.
 - Fixed adapter discovery for witness helper calls.
+- Registered function adapters for conversions in `return` statements and explicitly typed local
+  initializers. A function or lambda returned where the declared type differs only by a reference
+  wrapper on the result (such as `(&Decoder) -> &Result<T, E>` returned where
+  `(&Decoder) -> Result<T, E>` is expected) now gets its bridge instead of failing at emission.
+  Restores compilation of the bundled `zeron.serialization.decodeNamed`.
 - Rejected function, method, extension-method, and default-contract-method bodies that can fall off
   the end without returning a value when the return type is not `Unit`, reporting `ZR2011` instead
   of emitting bytecode that fails verification. Bodies ending in `raise` or another expression of
@@ -146,6 +228,17 @@
 - Fixed a bug that would override a contract method's signature with that of any available
   conformance witness for it.
 - Expanded hints for LSP hovers.
+- LSP hover now describes a model by its declared contract (`model UserWire: Model<User>`) instead
+  of exposing the synthetic `$model` class, followed by its contract assignments and property
+  mappings. Signatures include source parameter names, including for functions imported from
+  compiled libraries, type parameters show their constraints at declarations and uses, and a value
+  whose type mentions type parameters lists those constraints. Nominal types use simple names
+  throughout hover, and long type and signature lines break at their first generic argument list or
+  parameter list, one item per line. Function parameter names are preserved in API-index schema 10.
+- Import completion after `import` now lists public declarations from compiled libraries, including
+  the compiled standard library, instead of only source-project packages. Hover and completion use
+  the public catalog's type kind and generic constraints, and definition opens the bundled source
+  declaration for bundled standard-library types compiled from an artifact.
 
 ## [0.5.0] - 2026, 21 OCT
 

@@ -5,6 +5,7 @@ import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.compile.CompilationService;
 import com.maruseron.zeron.analize.ResolutionResult;
+import com.maruseron.zeron.domain.JavaClassPath;
 import com.maruseron.zeron.diagnostic.Diagnostic;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.diagnostic.Severity;
@@ -46,6 +47,10 @@ public final class ProjectAnalysisWorkspace {
         private final Optional<ResolutionResult> resolution;
         private final Optional<PublicMemberCatalog> memberCatalog;
         private final Map<String, String> libraryDocumentation;
+        private final List<CompilationUnit> compilerUnits;
+        private final JavaClassPath javaClassPath;
+        private final List<Path> javaSourceRoots;
+        private final List<Path> javaSourceArchives;
 
         private Snapshot(final Map<Path, List<Diagnostic>> diagnostics,
                          final Map<Path, List<Token>> tokens,
@@ -55,7 +60,11 @@ public final class ProjectAnalysisWorkspace {
                          final List<Diagnostic> unassociatedDiagnostics,
                          final Optional<ResolutionResult> resolution,
                          final Optional<PublicMemberCatalog> memberCatalog,
-                         final Map<String, String> libraryDocumentation) {
+                         final Map<String, String> libraryDocumentation,
+                         final List<CompilationUnit> compilerUnits,
+                         final JavaClassPath javaClassPath,
+                         final List<Path> javaSourceRoots,
+                         final List<Path> javaSourceArchives) {
             this.diagnostics = immutableLists(diagnostics);
             this.tokens = immutableLists(tokens);
             this.sourceText = Map.copyOf(sourceText);
@@ -65,6 +74,10 @@ public final class ProjectAnalysisWorkspace {
             this.resolution = resolution;
             this.memberCatalog = memberCatalog;
             this.libraryDocumentation = Map.copyOf(libraryDocumentation);
+            this.compilerUnits = List.copyOf(compilerUnits);
+            this.javaClassPath = javaClassPath;
+            this.javaSourceRoots = List.copyOf(javaSourceRoots);
+            this.javaSourceArchives = List.copyOf(javaSourceArchives);
         }
 
         public Map<Path, List<Diagnostic>> diagnostics() { return diagnostics; }
@@ -76,6 +89,10 @@ public final class ProjectAnalysisWorkspace {
         public Optional<ResolutionResult> resolution() { return resolution; }
         public Optional<PublicMemberCatalog> memberCatalog() { return memberCatalog; }
         public Map<String, String> libraryDocumentation() { return libraryDocumentation; }
+        public List<CompilationUnit> compilerUnits() { return compilerUnits; }
+        public JavaClassPath javaClassPath() { return javaClassPath; }
+        public List<Path> javaSourceRoots() { return javaSourceRoots; }
+        public List<Path> javaSourceArchives() { return javaSourceArchives; }
 
         private static <T> Map<Path, List<T>> immutableLists(final Map<Path, List<T>> source) {
             final var copy = new LinkedHashMap<Path, List<T>>();
@@ -89,17 +106,47 @@ public final class ProjectAnalysisWorkspace {
     private final Optional<Path> entry;
     private final boolean bundleStandardLibrarySources;
     private final List<Path> javaClassPathRoots;
+    private final List<Path> javaSourceRoots;
+    private final List<Path> javaSourceArchives;
 
     private ProjectAnalysisWorkspace(final List<Path> sourceRoots,
                                      final Optional<Path> entry,
                                      final boolean bundleStandardLibrarySources,
                                      final List<com.maruseron.zeron.domain.ZeronLibraryIndex> libraries,
-                                     final List<Path> javaClassPathRoots) {
+                                     final List<Path> javaClassPathRoots,
+                                     final List<Path> javaSourceRoots) {
         roots = sourceRoots.stream().map(path -> path.toAbsolutePath().normalize()).toList();
         this.libraries = List.copyOf(libraries);
         this.entry = entry;
         this.bundleStandardLibrarySources = bundleStandardLibrarySources;
         this.javaClassPathRoots = List.copyOf(javaClassPathRoots);
+        this.javaSourceRoots = javaSourceRoots.stream()
+                .map(path -> path.toAbsolutePath().normalize()).toList();
+        this.javaSourceArchives = discoverJavaSourceArchives(this.javaClassPathRoots);
+    }
+
+    private static List<Path> discoverJavaSourceArchives(final List<Path> javaClassPathRoots) {
+        final var archives = new ArrayList<Path>();
+        final var javaHome = System.getProperty("java.home");
+        if (javaHome != null) {
+            final var srcZip = Path.of(javaHome, "lib", "src.zip");
+            if (Files.isRegularFile(srcZip)) {
+                archives.add(srcZip.toAbsolutePath().normalize());
+            }
+        }
+        for (final var root : javaClassPathRoots) {
+            if (!Files.isRegularFile(root)) continue;
+            final var fileName = root.getFileName();
+            if (fileName == null) continue;
+            final var name = fileName.toString();
+            final var dot = name.lastIndexOf('.');
+            final var base = dot > 0 ? name.substring(0, dot) : name;
+            final var sidecar = root.resolveSibling(base + "-sources.jar");
+            if (!Files.isRegularFile(sidecar)) continue;
+            final var normalized = sidecar.toAbsolutePath().normalize();
+            if (!archives.contains(normalized)) archives.add(normalized);
+        }
+        return List.copyOf(archives);
     }
 
     public static ProjectAnalysisWorkspace open(final Path manifest) throws IOException {
@@ -112,9 +159,15 @@ public final class ProjectAnalysisWorkspace {
         final var standardLibrary = Zeron.resolveStandardLibrary(
                 project.standardLibraryMode(), project.libraryRoots());
         Zeron.validateJavaClassPathRoots(project.javaClassPathRoots());
+        for (final var root : project.javaSourceRoots()) {
+            if (!Files.isDirectory(root)) {
+                throw new IllegalArgumentException(
+                        "Java source attachment is not a directory: " + root);
+            }
+        }
         return new ProjectAnalysisWorkspace(project.sourceRoots(), Optional.of(project.entry()),
                 standardLibrary.bundleStandardLibrarySources(), standardLibrary.libraries(),
-                project.javaClassPathRoots());
+                project.javaClassPathRoots(), project.javaSourceRoots());
     }
 
     public static ProjectAnalysisWorkspace openSourceWorkspace(final Path workspaceRoot) throws IOException {
@@ -125,12 +178,13 @@ public final class ProjectAnalysisWorkspace {
         final var standardLibraryRoot = standardLibrarySourceRoot(root);
         if (standardLibraryRoot.isPresent()) {
             return new ProjectAnalysisWorkspace(List.of(standardLibraryRoot.get()), Optional.empty(),
-                    false, List.of(), List.of());
+                    false, List.of(), List.of(), List.of());
         }
         final var standardLibrary = Zeron.resolveStandardLibrary(
-                StandardLibraryMode.DEFAULT, List.of());
+                StandardLibraryMode.SOURCE, List.of());
         return new ProjectAnalysisWorkspace(List.of(root), Optional.empty(),
-                standardLibrary.bundleStandardLibrarySources(), standardLibrary.libraries(), List.of());
+                standardLibrary.bundleStandardLibrarySources(), standardLibrary.libraries(),
+                List.of(), List.of());
     }
 
     public List<Path> sourceRoots() {
@@ -149,6 +203,7 @@ public final class ProjectAnalysisWorkspace {
             }
         }
 
+        final var javaClassPath = new JavaClassPath(javaClassPathRoots);
         final var paths = new TreeSet<Path>();
         for (final var root : roots) {
             checkCancellation();
@@ -233,7 +288,8 @@ public final class ProjectAnalysisWorkspace {
         if (analysisUnit == null) {
             return new Snapshot(diagnostics, tokenLists, sourceText, filesByCompilerPath,
                     units, unassociatedDiagnostics, Optional.empty(), Optional.empty(),
-                    libraryDocumentation());
+                    libraryDocumentation(), units, javaClassPath, javaSourceRoots,
+                    javaSourceArchives);
         }
 
         final List<CompilationUnit> compilerUnits;
@@ -259,7 +315,8 @@ public final class ProjectAnalysisWorkspace {
         final var catalog = PublicMemberCatalog.fromSource(resolution);
         return new Snapshot(diagnostics, tokenLists, sourceText, filesByCompilerPath,
                 units, unassociatedDiagnostics, Optional.of(resolution), Optional.of(catalog),
-                libraryDocumentation());
+                libraryDocumentation(), compilerUnits, javaClassPath, javaSourceRoots,
+                javaSourceArchives);
     }
 
     private Map<String, String> libraryDocumentation() {

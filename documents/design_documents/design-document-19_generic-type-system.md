@@ -53,7 +53,18 @@ with both and restricts a parameter to effect types for exact propagation throug
 propagated as part of the effect type. Generic raise sites perform a runtime marker check because
 type arguments erase on the JVM.
 Mutable admissibility is checked at each generic argument boundary; nested generic applications
-enforce their own parameter policies. Imported Java generic parameters retain their existing
+enforce their own parameter policies.
+
+Inside a generic body a value of type `T: nullable` is possibly null and opaque, because the
+declaration admits arguments such as `String?` and substitution is erased. Member access,
+contract-bound operations, operators, iteration, indexing, and passing it to a parameter whose type
+does not admit `null` (including `Any`) require a non-null region established by a `null` check,
+including the early-exit form. Safe navigation yields a nullable result, `!!` asserts non-nullness,
+and an assignment ends the refinement. Call-site substitution is unaffected: `T` is replaced by the
+argument the caller supplies, so `T = String` keeps a non-null result. The diagnostic is `ZR2025`,
+and no run-time null check is inserted.
+
+Imported Java generic parameters retain their existing
 nullable- and mutable-admitting behavior because Java declarations do not provide reliable
 nullability or capability metadata.
 
@@ -70,7 +81,7 @@ nullability or capability metadata.
 | Generic function values | Generic named functions can be explicitly specialized or specialized from a fully constraining expected function type. A constrained rank-1 scheme is implemented for supported immutable `let` lambda initializers. | General polymorphic values, nested schemes, mutable polymorphic bindings, explicit `forall`, partial function specialization, and arbitrary lambda-valued expressions remain unsupported. |
 | Type inference | Bounded structural inference is implemented for functions, methods, constructors, arrays, function types, and supported variance/projection contexts. Conflicts and unresolved variables are diagnosed. | Inference is not a general-purpose constraint solver. Inference from result types alone and common-supertype inference are not general features. Exact variance/projection inference boundaries should be maintained by tests as the implementation evolves. |
 | Java generic interoperability | Supported class/member signatures, generic methods and constructors, supported bounds, wildcard projections, explicit/inferred method arguments, and erased invocation are implemented by ZEP-0048. | Raw types, generic arrays, unsupported bounds/signatures, generic `throws` variables, inherited-member discovery, and Java callback/SAM conversion remain unsupported. |
-| Generic admissibility markers | Implemented in ZEP-0010, ZEP-0055, and ZEP-0062. Nullable and mutable-reference arguments are rejected by default; `nullable` and `mut` opt in independently, while `effect` is exclusive. The API index preserves these markers. | Unresolved generic handler cases and generic effect declarations remain unsupported. Numeric operations use explicit `Numeric<T>` and `Fractional<T>` bounds; a closed-set `numeric` marker is not part of the design. |
+| Generic admissibility markers | Implemented in ZEP-0010, ZEP-0055, and ZEP-0062. Nullable and mutable-reference arguments are rejected by default; `nullable` and `mut` opt in independently, while `effect` is exclusive. The API index preserves these markers. Values of a `nullable` parameter are checked as possibly null inside the generic body, where a `null` check must refine them before member, bound, operator, iteration, or non-null argument use. | Unresolved generic handler cases and generic effect declarations remain unsupported. Numeric operations use explicit `Numeric<T>` and `Fractional<T>` bounds; a closed-set `numeric` marker is not part of the design. |
 | Generic runtime tests | Statically justified `is` and `as?` targets for Zeron generic classes/contracts are implemented without reification. Safe `out Any?` views from `Any`/`Any?` retain their projection. | Ambiguous covariant applications, checked `as`, and Java generic relationship proofs remain unsupported. |
 | Runtime representation | Generic methods use erased JVM descriptors. The compiler inserts boundary casts and boxing/unboxing, emits callback adapters, and passes hidden contract evidence where needed. Source-level generic signatures remain in class metadata and the versioned Zeron API index. | Applied type arguments are not generally reified. JVM class identity alone cannot distinguish `C<A>` from `C<B>`. |
 | Runtime type identity | No general runtime reification model is implemented. | ZEP-0015 remains Draft. Reification has ABI, runtime-cost, and separate-compilation consequences and should be justified by concrete runtime features. |

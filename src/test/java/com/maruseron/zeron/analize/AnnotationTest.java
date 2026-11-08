@@ -96,35 +96,17 @@ public final class AnnotationTest {
     }
 
     @Test
-    public void resolvesTheBundledCodeModelAnnotation() {
+    public void resolvesCodeModelParametersWithoutADeclarationAnnotation() {
         final var usage = Parser.of(Scanner.from("""
                 package codeModelUser;
                 import zeron.compiler.CodeModel;
-                public fn where(@CodeModel predicate: CodeModel<(Int) -> Boolean>): Unit {}
+                public fn where(predicate: CodeModel<(Int) -> Boolean>): Unit {}
                 """).scanTokens()).parseCompilationUnit("src/query.zn");
 
         final var units = StandardLibrary.withBundledUnits(List.of(usage));
         final var result = new ResolutionService().resolveUnitsWithDiagnostics(units);
 
         assertTrue(result.errors().toString(), result.errors().isEmpty());
-    }
-
-    @Test
-    public void requiresCodeModelAnnotationParametersToUseCodeModelFunctionTypes() {
-        final var usage = Parser.of(Scanner.from("""
-                package codeModelUser;
-                import zeron.compiler.CodeModel;
-                public fn where<T>(@CodeModel predicate: T? -> Boolean): Unit {
-                    predicate(null);
-                }
-                """).scanTokens()).parseCompilationUnit("src/query.zn");
-
-        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
-                StandardLibrary.withBundledUnits(List.of(usage)));
-
-        assertTrue(result.errors().toString(), result.errors().stream()
-                .anyMatch(error -> error.message().contains(
-                        "@CodeModel parameters must use CodeModel<F>")));
     }
 
     @Test

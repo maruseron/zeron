@@ -69,11 +69,98 @@ functions. An initializer block can declare its raised effects on the data class
 handled or propagated by the caller. See [Raised effects](./22-raised-effects.md) for the effect
 model.
 
-The standard library defines streaming `Encoder`/`Decoder` protocols and `Encode`/`Decode` capability
-contracts. Products, sums, and data classes can derive capability evidence when their components
-support it. The `zeron.serialization.json` package provides JSON parsing, a JSON value model, and
-stringification; generated value operations and the typed JSON adapter are not implemented yet, so
-values cannot yet be encoded or decoded through a generic codec API.
+The standard library defines streaming `Encoder`/`Decoder` protocols and the effect-aware
+`Encode<T, E>`, `Decode<T, E>`, `Codec<T, E>`, and `Shape<T>` contracts. Products, sums, and
+transparent data classes derive the capability when their components support it, and derivation
+also generates the streaming operations (see [Contract derivation](./38-contract-derivation.md)
+for the derivation rules): a type that derives `Encode, Decode` round-trips through
+the free `encode(value, encoder)` and `decode<{}, T>(decoder)` entry points without building an
+intermediate value tree. A failure names the path of components that led to it, unknown fields are
+skipped, and an unknown sum case is a decode error. The `zeron.serialization.json` package provides
+JSON parsing, a JSON value model, and stringification. `Json` is a configuration value whose
+`indent` component sets the number of spaces per nesting level: `Json.compact()` and the companion
+functions `Json.encodeToString` and `Json.decodeFromString` use the default compact form, while
+`Json.pretty(2).encodeToString(value)` indents each level by two spaces.
+`encodeToStringWith(model, value) { field(User::name); }` encodes the fields that a model maps and
+the block selects, because a model erases the mapped value types. `zeron.serialization.json.typed`
+adds `parseAs<T>`, `stringifyAs<T>`, `decodeValue<T>`, and `encodeValue<T>`, which drive the derived
+or hand-written `Encode`/`Decode` operations directly over a JSON value. A tagged alternative is a
+single-member object whose member value is the payload, and a payload-less case is JSON null. Maps
+are not supported, because JSON object keys are strings and the protocol has no map-key operation.
+
+## Two serialization entry points
+
+Zeron exposes two related but distinct ways to turn values into an external representation:
+
+- **Streaming codecs** use the `Encoder` and `Decoder` protocols and `Encode<T, E>`,
+  `Decode<T, E>`, or `Codec<T, E>` evidence, either derived or hand-written. The entry points
+  (`encode`, `decode`, and the JSON helpers `encodeValue`, `decodeValue`, `parseAs`, and
+  `stringifyAs`) read and write the type's declared shape: product components, sum cases, and
+  data-class components under their declared names. Derivation covers products, sums, and
+  transparent data classes; ordinary classes cannot derive, and no model is involved.
+- **Models** use a `Model<T>` value that maps a nominal type's properties to external names and
+  carries format metadata declared by the model's contract. A consumer such as the JSON model
+  builder reads those mappings and encodes the fields it selects. Models also describe ordinary
+  classes, partial mappings, and non-JSON formats such as SQL tables, and they never change the
+  type or construct it.
+
+The two are layered rather than interchangeable. A model supplies names and field selection, but
+each selected value is still written with its `Encode` evidence; conversely, derived codecs never
+consult a model. The JSON API reflects this: `Json.encodeToString(value)` needs only `Encode`,
+while `Json.encodeToStringWith(model, value) { field(User::name); }` needs `Encode` for the selected
+fields' values and a block that supplies the typed reads, because `AnyField` erases the mapped
+value type.
+
+| | Streaming codecs | Models |
+| --- | --- | --- |
+| Capability | `Encode<T, E>`, `Decode<T, E>`, or `Codec<T, E>` | A `Model<T>` mapping value |
+| Names | Declared component and case names | External names from the model |
+| Shape | The whole declared value | Only the mapped fields a consumer selects |
+| Types | Products, sums, and transparent data classes | Any nominal type with readable properties, including ordinary classes |
+| Use when | A canonical, derivable representation is enough | External names, a partial view, or a non-codec format are needed |
+
+Model-based decoding is not part of the current JSON API: `jsonModel` and
+`Json.encodeToStringWith` encode only. A consumer can read a mapped property with `Field.get`, or
+write it through `Field.writer` when the model exposes one.
+
+## Model declarations
+
+A model maps a nominal type's properties to names in an external representation without changing the
+type. Declare a contract that requires `zeron.lang.Model<T>` and adds its own properties, then
+declare a `model` for a target type:
+
+```zeron
+import zeron.lang.Model;
+
+public contract SqlModel<T: nullable + mut> requires Model<T> {
+    property tableName: String;
+}
+
+public model UserSql is SqlModel<User> {
+    tableName = "users";
+
+    name -> "user_name";
+    age  -> "user_age";
+}
+```
+
+The left side of `->` names a property of `User`, resolved as `User::name` would be; the right side
+is the external name. `property = value` assigns a property required by the parent contract, and the
+initializer must be a constant. A model is a named singleton value, not a type, so it can be passed
+where `SqlModel<User>` is expected while the target type stays independent of the mapping.
+
+`model.fields` enumerates every mapping as an `AnyField<T>`, `model.field(User::age)` returns the
+typed `Field<User, Int>`, and `model.fieldOf(id)` finds a mapping by property identity. `Field.get`
+reads the property, and `Field.writer` is present when the property has an accessible setter: it is
+an `Option<(&T, V) -> Unit>` that writes the property. Read-only properties have no writer.
+
+A model can be passed where its contract or the core `Model<T>` is expected, including through an
+intermediate contract such as `SqlModel<User>`; a generic consumer infers `T` from the model's
+contract. One type may have several models, and a model may map only some properties; unknown or
+inaccessible properties, duplicate mappings, and missing or non-constant contract assignments are
+compile errors.
+Models do not construct the target type, change its representation, or enable reflection over
+unmapped types; meaning specific to a format belongs to the consumer.
 
 ## Sum types
 

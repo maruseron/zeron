@@ -17,17 +17,32 @@ stdlib = "compiled"
 [dependencies]
 zeron-libraries = ["lib/shared.jar"]
 java-classpath = ["lib/host-api.jar"]
+java-sources = ["java-src"]
 ```
 
 `project.entry` and at least one source root are required. The output defaults to `dist`. When
 `[platform].stdlib` is omitted, compilation prefers the compiled standard library bundled in the
-Zeron installation's `lib/` directory and falls back to bundled sources when no artifact is
-available. `zeron init` writes `compiled` in an installed distribution and `source` in a source
-checkout, where no compiled artifact exists. `source` remains the explicit choice for
-standard-library development; `compiled` requires a compatible standard-library artifact and
-reports a clear error if none can be found. An artifact listed in `zeron-libraries` takes precedence
-over the bundled one. Dependency roots are local directories or JARs; Zeron does not fetch or lock
-them.
+Zeron installation's `lib/` directory when its API index matches the compiler. If the artifact is
+missing or incompatible, the default falls back to the bundled standard-library sources. A complete
+standard library listed in `zeron-libraries` takes precedence over the bundled one. Dependency
+roots are local directories or JARs; Zeron does not fetch or lock them. `java-classpath` roots
+supply Java metadata for compilation and execution. The language server additionally discovers the
+running JDK's `lib/src.zip` and a `<name>-sources.jar` beside each `java-classpath` JAR for
+go-to-definition. `java-sources` lists optional directories of attached Java sources as an explicit
+supplement. These source attachments do not affect compilation, and each class is located by binary
+name without scanning packages.
+
+`zeron init` writes `compiled` in an installed distribution and `source` in a source checkout,
+where no compiled artifact exists. `source` remains the explicit choice for standard-library
+development. An explicit `compiled` setting never falls back silently: if no compatible artifact
+is available, compilation reports the mismatch and suggests installing a matching Zeron release,
+adding a library to `zeron-libraries`, or selecting `source`.
+
+The compiler normally derives the installation home from the `zeron` executable found on `PATH`.
+Set the JVM system property `zeron.home` to override that location, for example
+`-Dzeron.home=/opt/zeron`; the value must be the installation root that contains `lib/` and
+`share/zeron/stdlib/`. This is useful for source checkouts, test harnesses, and custom launchers
+that do not place `zeron` on `PATH`.
 
 Manifest paths are resolved relative to the manifest file, not to an assumed repository layout.
 `source-roots` selects the source files included in the project, `entry` identifies the source

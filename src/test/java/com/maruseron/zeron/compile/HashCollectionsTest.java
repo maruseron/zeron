@@ -99,6 +99,36 @@ public final class HashCollectionsTest {
                         collect item into HashSet.empty<Int>();
                     return collected.size == 2 and collected.contains(1) and collected.contains(2);
                 }
+
+                fn longKeyBehavior(): Boolean {
+                    let high = 0x0000000100000002L;
+                    let low = 0x0000000200000001L;
+                    let mut values = HashMap.empty<Long, String>();
+                    values.put(high, "high");
+                    values.put(low, "low");
+                    if (values.size != 2) return false;
+                    if (values.get(high).getOrElse("") != "high") return false;
+                    if (values.get(low).getOrElse("") != "low") return false;
+                    values.remove(high);
+                    return values.size == 1 and values.containsKey(low)
+                        and not values.containsKey(high);
+                }
+
+                fn smallIntKeyBehavior(): Boolean {
+                    let mut values = HashMap.empty<Int, Int>();
+                    let mut key = -32;
+                    while (key < 32) {
+                        values.put(key, key);
+                        key = key + 1;
+                    }
+                    if (values.size != 64) return false;
+                    key = -32;
+                    while (key < 32) {
+                        if (values.get(key).getOrElse(9999) != key) return false;
+                        key = key + 1;
+                    }
+                    return true;
+                }
                 """;
 
         try {
@@ -114,6 +144,8 @@ public final class HashCollectionsTest {
                 assertTrue((Boolean) generated.getMethod("hashableBoundsEntailEquality").invoke(null));
                 assertTrue((Boolean) generated.getMethod("setBehavior").invoke(null));
                 assertTrue((Boolean) generated.getMethod("collectedSetBehavior").invoke(null));
+                assertTrue((Boolean) generated.getMethod("longKeyBehavior").invoke(null));
+                assertTrue((Boolean) generated.getMethod("smallIntKeyBehavior").invoke(null));
             }
         } finally {
             Files.deleteIfExists(classFile);

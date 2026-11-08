@@ -77,17 +77,10 @@ public final class RationalValue {
         return value;
     }
 
-    /*
     public long hashValue() {
         final var numeratorHash = NumericSupport.bigIntegerHash(numerator);
         final var denominatorHash = NumericSupport.bigIntegerHash(denominator);
-
         return mix64(numeratorHash ^ Long.rotateLeft(denominatorHash, 32));
-    }
-    */
-
-    public int hashValue() {
-        return 31 * numerator().hashCode() + denominator().hashCode();
     }
 
     public String displayText() {

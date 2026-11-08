@@ -70,7 +70,7 @@ sink immediately:
 import zeron.collections.ArrayList;
 
 let evens = for number in [1, 2, 3, 4, 5, 6]
-    if number %% 2 == 0
+    if number % 2 == 0
     collect number * 10 into ArrayList<Int>.empty();
 ```
 

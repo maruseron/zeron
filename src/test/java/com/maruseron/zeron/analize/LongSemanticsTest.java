@@ -51,10 +51,10 @@ public final class LongSemanticsTest {
                 fn unbox(value: Any): Long = value as Long;
                 fn display<T: Display>(value: T): String = value.toString();
                 fn equalEvidence<T: Eq<T>>(left: T, right: T): Boolean = left.eq(right);
-                fn hashEvidence<T: Hashable<T>>(value: T): Int = value.hash();
+                fn hashEvidence<T: Hashable<T>>(value: T): Long = value.hash();
                 fn displayLong(value: Long): String = display(value);
                 fn equalLong(left: Long, right: Long): Boolean = equalEvidence(left, right);
-                fn hashLong(value: Long): Int = hashEvidence(value);
+                fn hashLong(value: Long): Long = hashEvidence(value);
                 """);
 
         try {
@@ -94,7 +94,7 @@ public final class LongSemanticsTest {
                 assertEquals("42", generated.getMethod("displayLong", long.class).invoke(null, 42L));
                 assertTrue((Boolean) generated.getMethod("equalLong", long.class, long.class)
                         .invoke(null, 42L, 42L));
-                assertEquals(Long.hashCode(42L),
+                assertEquals(42L,
                         generated.getMethod("hashLong", long.class).invoke(null, 42L));
             }
         } finally {

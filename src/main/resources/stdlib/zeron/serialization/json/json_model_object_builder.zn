@@ -1,0 +1,40 @@
+package zeron.serialization.json;
+
+import com.maruseron.zeron.runtime.json.JsonValue;
+
+import zeron.serialization.unmapped;
+import zeron.serialization.Encode;
+import zeron.serialization.EncodeError;
+import zeron.serialization.Decode;
+import zeron.serialization.DecodeError;
+
+public class JsonModelObjectBuilder<T: nullable + mut> {
+    model: Model<T>;
+    owner: T;
+    inner: &JsonObjectBuilder;
+
+    private constructor new;
+    public constructor of(model: Model<T>, owner: T) =
+        JsonModelObjectBuilder<T>.new(model, owner, JsonObjectBuilder.empty());
+
+    public mut field<V: Encode<V, {}>>(ref: PropertyRef<T, V>): Unit {
+        let step = match (this.model.field(ref)) {
+            case Option.None() -> this.inner.fail(JsonError.Encode(unmapped(ref.id)));
+            case Option.Some(mapped) ->
+                this.inner.put(mapped.externalName, mapped.source.get(this.owner));
+        };
+    }
+
+    public mut optionalField<V: Encode<V, {}>>(ref: PropertyRef<T, V?>): Unit =
+        match (this.model.field(ref)) {
+            case Option.None() -> this.inner.fail(JsonError.Encode(unmapped(ref.id)));
+            case Option.Some(mapped) ->
+                this.inner.putIfPresent(mapped.externalName, mapped.source.get(this.owner));
+        };
+
+    public mut extra(fill: &JsonObjectBuilder.() -> JsonObjectBuilder): Unit {
+        this.inner.fill();
+    }
+
+    public build(): Result<&JsonValue, JsonError> = this.inner.build();
+}

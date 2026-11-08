@@ -1,0 +1,35 @@
+import zeron.serialization.json.stringify;
+import zeron.serialization.json.json;
+import zeron.serialization.json.jsonModel;
+
+import zeron.collections.ArrayList;
+
+fn main(): Unit {
+    let obj = json {
+        put("a", 5);
+        put("b", 1.5);
+        putObject("address") {
+            put("c", 7);
+            put("d", 9.4);
+        };
+    };
+
+    let user = User.new(1, "Marcelo", "marcelorodfu@gmail.com", "dummy-date");
+
+    let obj2 = jsonModel(UserWire, user) {
+        field(User::id);
+        field(User::name);
+    };
+
+    match (obj) {
+        case Ok(data) -> match (stringify(data)) {
+            case Ok(string) -> println(string);
+            case Err(_) -> ();
+        };
+        case Err(_) -> ();
+    };
+}
+
+fn f<T: Display>(): Unit {
+    let t: T? = null;
+}

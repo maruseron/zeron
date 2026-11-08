@@ -53,7 +53,7 @@ public final class CliParserTest {
 
     @Test
     public void parsesManifestlessLspCommandWhenNoDefaultManifestExists() {
-        assertFalse(Files.exists(Path.of("zeron.toml")));
+        assertFalse(Files.exists(TestPaths.projectFile("zeron.toml")));
 
         final var command = (CliParser.LspCommand) parse("lsp", "--stdio");
         assertEquals(Optional.empty(), command.manifest());
@@ -142,7 +142,7 @@ public final class CliParserTest {
             System.setOut(originalOut);
         }
 
-        final var projectPom = Files.readString(Path.of("pom.xml"), StandardCharsets.UTF_8);
+        final var projectPom = Files.readString(TestPaths.projectFile("pom.xml"), StandardCharsets.UTF_8);
         final var versionMatcher = Pattern.compile(
                 "<artifactId>zeron</artifactId>\\s*<version>([^<]+)</version>").matcher(projectPom);
         assertTrue("Could not find the Maven project version in pom.xml.", versionMatcher.find());

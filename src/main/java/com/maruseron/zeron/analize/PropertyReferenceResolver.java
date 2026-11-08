@@ -37,7 +37,7 @@ final class PropertyReferenceResolver {
         return reference.getType();
     }
 
-    /// Resolves a property-reference literal used as a `@CodeModel` argument. The reader lambda the
+    /// Resolves a property-reference literal used as a `CodeModel<F>` argument. The reader lambda the
     /// reference already carries is the equivalent of the explicit selector lambda, so it becomes the
     /// model's source and is validated against the code-model expression subset.
     static TypeDescriptor resolveCodeModel(final ResolutionContext context,
@@ -138,6 +138,28 @@ final class PropertyReferenceResolver {
         LambdaResolver.resolveLambda(context, reader, readerType);
         context.trackLambda(reader);
         reference.setReader(reader);
+        if (property.isMutating() && (property.isPublic()
+                || Objects.equals(context.frame.currentClassName, ownerName))) {
+            final var writerOwner = new ReferenceDescriptor(owner);
+            final var ownerParameter = new Token(TokenType.IDENTIFIER,
+                    "$zeron$propertyRef$owner", null, reference.propertyName.span());
+            final var valueParameter = new Token(TokenType.IDENTIFIER,
+                    "$zeron$propertyRef$value", null, reference.propertyName.span());
+            final var target = new Expr.Property(
+                    new Expr.Variable(ownerParameter, writerOwner),
+                    reference.propertyName, TypeDescriptor.ofInfer());
+            final var assignment = new Expr.PropertyAssignment(target,
+                    new Expr.Variable(valueParameter, propertyType), TypeDescriptor.ofInfer());
+            final var writer = new Expr.Lambda(reference.operator,
+                    List.of(ownerParameter, valueParameter),
+                    List.of(writerOwner, propertyType),
+                    List.of(new Stmt.Expression(assignment)), TypeDescriptor.ofInfer());
+            LambdaResolver.resolveLambda(context, writer,
+                    TypeDescriptor.functionOf("", TypeDescriptor.ofUnit(),
+                            writerOwner, propertyType));
+            context.trackLambda(writer);
+            reference.setWriter(writer);
+        }
         reference.setType(TypeDescriptor.genericOf(
                 TypeDescriptor.ofName(SyntheticNames.PROPERTY_REF_TYPE), owner, propertyType));
         reference.markResolved();

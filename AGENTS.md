@@ -44,9 +44,9 @@ and
 
 ## Validation
 
-- For compiler or resolver changes, run `mvn test` (or compile all Java sources using the command above when Maven is unavailable).
-- For function-shape identity changes, run the canonical key tests and compile `src/main/resources/test.zn`; inspect generated interface names and method descriptors with `javap` when bytecode identity matters.
-- For lambda-lowering changes, compile `src/main/resources/test.zn`, invoke the generated program, and inspect `test` plus generated shape interfaces with `javap -classpath dist` when bytecode shape matters.
+- For compiler or resolver changes, run `mvn test` (or compile all Java sources using the command above when Maven is unavailable). Keep in mind `mvn test` takes around 9 minutes for the current build, so the full test suite should be ran sparingly.
+- For function-shape identity changes, run the canonical key tests; inspect generated interface names and method descriptors with `javap` when bytecode identity matters.
+- For lambda-lowering changes, and inspect generated shape interfaces with `javap -classpath dist` when bytecode shape matters.
 - Keep changes scoped to the behavior being changed. Maintain the stable Java 25 target and do not change generated outputs as incidental cleanup.
 
 ## Design References
@@ -63,7 +63,7 @@ and
 - `documents/zeps/ZEP-0000.md`: ZEP scope, numbering, lifecycle, and decision process.
 - `documents/zeps/ZEP-0001.md`: ZEP authoring template.
 - `documents/zeps/ZEP-0012.md`: canonical artifact and public release-series versioning policy.
-- `documents/design_documents/design-document-01_grammar.cfgr`: implemented source grammar.
+- `documents/design_documents/design-document-01_grammar.ebnf`: implemented source grammar in ISO/IEC 14977 EBNF.
 - Retired, archive only: `documents/design_documents/design-document-02_type-grammar.cfgr`. Its encoded descriptor grammar is not authoritative for current source syntax or type representation.
 - `documents/design_documents/design-document-00.md`: language overview and intended features.
 - `documents/design_documents/design-document-03_lambda-lowering.md`: current lambda lowering, known gaps, and roadmap.

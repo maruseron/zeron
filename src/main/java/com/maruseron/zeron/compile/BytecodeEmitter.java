@@ -776,11 +776,23 @@ final class BytecodeEmitter {
                 composer.ldc(reference.identity());
                 emitPropertyId(composer, reference.declaringTypeName(),
                         reference.propertyName.lexeme());
+                final var optionSome = ClassDesc.of("zeron.lang.Option$$sum$Some");
+                final var optionNone = ClassDesc.of("zeron.lang.Option$$sum$None");
+                if (reference.writer() == null) {
+                    composer.getstatic(optionNone, "$zeron$singleton", optionNone);
+                } else {
+                    composer.new_(optionSome);
+                    composer.dup();
+                    emitExpr(context, composer, reference.writer());
+                    composer.invokespecial(optionSome, "<init>",
+                            MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
+                }
                 composer.invokestatic(propertyRefClass, SyntheticNames.PROPERTY_REF_FACTORY,
                         MethodTypeDesc.of(propertyRefClass,
                                 TypeDescriptor.toJavaClassDesc(readerType),
                                 ConstantDescs.CD_String, ConstantDescs.CD_String,
-                                ClassDesc.of(SyntheticNames.PROPERTY_ID_TYPE)));
+                                ClassDesc.of(SyntheticNames.PROPERTY_ID_TYPE),
+                                ClassDesc.of("zeron.lang.Option")));
                 context.lastEmittedType = reference.getType();
             }
             case Expr.PropertyIdReference identity -> {

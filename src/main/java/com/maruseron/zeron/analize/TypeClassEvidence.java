@@ -516,6 +516,7 @@ final class TypeClassEvidence {
                 case "Encode" -> "zeron.serialization.Encode";
                 case "Decode" -> "zeron.serialization.Decode";
                 case "Codec" -> "zeron.serialization.Codec";
+                case "Shape" -> "zeron.serialization.Shape";
                 default -> null;
             };
             if (contractName == null) {
@@ -558,8 +559,20 @@ final class TypeClassEvidence {
                         derived, "Hashable cannot be derived for a type with custom Eq."));
                 continue;
             }
+            final var emptyRow = com.maruseron.zeron.domain.EffectRows.of(List.<TypeDescriptor>of());
+            final var decodeRow = declaration instanceof Stmt.ClassDecl dataClassDecl
+                    && dataClassDecl.dataClass()
+                    ? com.maruseron.zeron.domain.EffectRows.of(
+                            dataClassDecl.declaredConstructorEffects())
+                    : emptyRow;
+            final var contractArguments = switch (contractName) {
+                case "zeron.serialization.Encode" -> List.<TypeDescriptor>of(target, emptyRow);
+                case "zeron.serialization.Decode" -> List.<TypeDescriptor>of(target, decodeRow);
+                case "zeron.serialization.Codec" -> List.<TypeDescriptor>of(target, emptyRow);
+                default -> List.<TypeDescriptor>of(target);
+            };
             final var requiredContract = TypeDescriptor.genericOf(TypeDescriptor.ofName(contractName),
-                    List.of(target));
+                    contractArguments);
             final var requirements = new ArrayList<Stmt.WitnessRequirement>();
             if (contractName.equals("zeron.lang.Eq")) {
                 for (final var componentType : componentTypes) {
@@ -580,21 +593,21 @@ final class TypeClassEvidence {
             }
             if (contractName.equals("zeron.serialization.Encode")
                     || contractName.equals("zeron.serialization.Decode")) {
-                final var componentContract = contractName;
                 for (final var componentType : componentTypes) {
-                    if (!isDirectlyRecursive(componentType, target)) {
-                        requirements.add(new Stmt.WitnessRequirement(
-                                TypeDescriptor.genericOf(TypeDescriptor.ofName(componentContract),
-                                        List.of(componentType)), componentType));
-                    }
+                    if (isDirectlyRecursive(componentType, target)) continue;
+                    final var valueType = componentType instanceof NullableDescriptor nullable
+                            ? nullable.baseType() : componentType;
+                    requirements.add(new Stmt.WitnessRequirement(
+                            TypeDescriptor.genericOf(TypeDescriptor.ofName(contractName),
+                                    List.of(valueType, emptyRow)), valueType));
                 }
             } else if (contractName.equals("zeron.serialization.Codec")) {
-                for (final var capability : List.of("Encode", "Decode")) {
-                    requirements.add(new Stmt.WitnessRequirement(
-                            TypeDescriptor.genericOf(
-                                    TypeDescriptor.ofName("zeron.serialization." + capability),
-                                    List.of(target)), target));
-                }
+                requirements.add(new Stmt.WitnessRequirement(
+                        TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.serialization.Encode"),
+                                List.of(target, emptyRow)), target));
+                requirements.add(new Stmt.WitnessRequirement(
+                        TypeDescriptor.genericOf(TypeDescriptor.ofName("zeron.serialization.Decode"),
+                                List.of(target, decodeRow)), target));
             }
             final var syntheticName = new Token(TokenType.IDENTIFIER,
                     "$zeron$derived$" + name.lexeme() + "$" + derived.lexeme(), null, derived.span());
@@ -849,6 +862,14 @@ final class TypeClassEvidence {
             if (requiredSlot == null) {
                 errors.add(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                         method.requirementName(), "Unknown contract method requirement."));
+                continue;
+            }
+            if (contract.name().lexeme().equals("zeron.lang.Hashable")
+                    && method.requirementName().lexeme().equals(IntrinsicDescriptors.HASH)
+                    && method.methodSignature().typeDescriptor().returnType() instanceof IntDescriptor) {
+                errors.add(new ResolutionError(DiagnosticCatalog.HASHABLE_HASH_RETURN_TYPE,
+                        method.requirementName(),
+                        "Hashable.hash returns Long in this release; implement hash(): Long."));
                 continue;
             }
             final var required = requiredSlot.method();
@@ -1175,6 +1196,10 @@ final class TypeClassEvidence {
                 if (entry.declaration().derived()
                         && isEqContract(contractType)
                         && isHashableContract(entry.declaration().contractType())) continue;
+                if (entry.declaration().derived()
+                        && (isSerializationContract(contractType, "Encode")
+                                || isSerializationContract(contractType, "Decode"))
+                        && isSerializationContract(entry.declaration().contractType(), "Codec")) continue;
                 final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
                 if (matchPattern(entry.declaration().targetType(), actual,
                         entry.declaration().typeParameters(), substitutions)
@@ -1188,36 +1213,14 @@ final class TypeClassEvidence {
                         "Ambiguous witness for contract '" + contractType + "' and type '" + actualType + "'."));
             }
             return matchingWitnesses == 1 || isBuiltInDisplay(contractType, actual)
-                    || isBuiltInEq(contractType, actual) || isBuiltInHashable(contractType, actual)
-                    || isBuiltInSerialization(context, contractType, actual, where, resolving);
+                    || isBuiltInEq(contractType, actual) || isBuiltInHashable(contractType, actual);
         } finally {
             resolving.remove(evidenceKey);
         }
     }
 
-    private static boolean isBuiltInSerialization(
-            final ResolutionContext context, final TypeDescriptor contractType,
-            final TypeDescriptor actualType,
-            final com.maruseron.zeron.scan.Token where, final Set<String> resolving) {
-        final var contractName = nominalName(contractType);
-        if (!"zeron.serialization.Encode".equals(contractName)
-                && !"zeron.serialization.Decode".equals(contractName)) return false;
-        final var arguments = typeArguments(contractType);
-        if (arguments.size() != 1 || !sameAppliedType(arguments.getFirst(), actualType)) return false;
-        if (actualType instanceof NullableDescriptor nullable) {
-            final var innerContract = TypeDescriptor.genericOf(
-                    TypeDescriptor.ofName(contractName), List.of(nullable.baseType()));
-            return hasEvidence(context, innerContract, nullable.baseType(), where, resolving);
-        }
-        return actualType instanceof BooleanDescriptor
-                || actualType instanceof ByteDescriptor
-                || actualType instanceof CharDescriptor
-                || actualType instanceof IntDescriptor
-                || actualType instanceof LongDescriptor
-                || actualType instanceof FloatDescriptor
-                || actualType instanceof StringDescriptor
-                || actualType instanceof ArrayDescriptor array
-                        && array.elementType() instanceof ByteDescriptor;
+    private static boolean isSerializationContract(final TypeDescriptor type, final String simpleName) {
+        return nominalName(type).equals("zeron.serialization." + simpleName);
     }
 
     private static TypeDescriptor applyHigherKindedBound(final ResolutionContext context,
@@ -1363,21 +1366,20 @@ final class TypeClassEvidence {
             final var baseEvidence = selectMethodEvidence(context, targetParameter, targetBoundIndex,
                     targetMethodIndex, eqType(context, nullable.baseType()), nullable.baseType(),
                     eqMethod(context), where);
-            final var signature = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(),
-                    TypeDescriptor.ofAny(), TypeDescriptor.ofAny());
+            final var signature = IntrinsicDescriptors.nullableEqSignature();
             return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
-                    "zeron.runtime.EqSupport", "eqNullableWithHandle", signature, null, true,
-                    Expr.EvidenceHandleKind.STATIC, List.of(baseEvidence));
+                    IntrinsicDescriptors.EQ_SUPPORT_OWNER, IntrinsicDescriptors.EQ_NULLABLE_WITH_HANDLE,
+                    signature, null, true, Expr.EvidenceHandleKind.STATIC, List.of(baseEvidence));
         }
         if (isHashableContract(requiredBound) && actualType instanceof NullableDescriptor nullable
                 && !isBuiltInHashable(requiredBound, actualType)) {
             final var baseEvidence = selectMethodEvidence(context, targetParameter, targetBoundIndex,
                     targetMethodIndex, hashableType(context, nullable.baseType()), nullable.baseType(),
                     hashMethod(context), where);
-            final var signature = TypeDescriptor.functionOf("hash", TypeDescriptor.ofInt(),
-                    TypeDescriptor.ofAny());
             return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
-                    "zeron.runtime.HashSupport", "hashNullableWithHandle", signature, null, true,
+                    com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_SUPPORT_OWNER,
+                    com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_NULLABLE_WITH_HANDLE,
+                    com.maruseron.zeron.domain.IntrinsicDescriptors.nullableHashSignature(), null, true,
                     Expr.EvidenceHandleKind.STATIC, List.of(baseEvidence));
         }
         if (actualType instanceof TypeParameterDescriptor actualParameter) {
@@ -1471,6 +1473,9 @@ final class TypeClassEvidence {
             final var witness = entry.declaration();
             if (!witness.derived()) continue;
             if (isEqContract(requiredBound) && isHashableContract(witness.contractType())) continue;
+            if ((isSerializationContract(requiredBound, "Encode")
+                    || isSerializationContract(requiredBound, "Decode"))
+                    && isSerializationContract(witness.contractType(), "Codec")) continue;
             final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
             if (matchPattern(witness.targetType(), concrete, witness.typeParameters(), substitutions)
                     && witnessEntails(context, witness, substitutions, requiredBound)
@@ -1498,10 +1503,45 @@ final class TypeClassEvidence {
                     childContract.methods().getFirst(), where));
         }
         final var owner = nominalName(witness.targetType());
-        final var helperName = isEqContract(requiredBound) ? "$zeron$eq" : "$zeron$hash";
-        final var helperType = isEqContract(requiredBound)
-                ? TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(), concrete, concrete)
-                : TypeDescriptor.functionOf("hash", TypeDescriptor.ofInt(), concrete);
+        final var helperName = switch (nominalName(requiredBound)) {
+            case "zeron.serialization.Encode" ->
+                    com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_ENCODE;
+            case "zeron.serialization.Decode" ->
+                    com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_DECODE;
+            case "zeron.serialization.Shape" -> requirement.name().lexeme().equals("nullable")
+                    ? com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_NULLABLE_SHAPE
+                    : com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_SHAPE;
+            default -> isEqContract(requiredBound)
+                    ? com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_EQ
+                    : com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_HASH;
+        };
+        final FunctionDescriptor helperType;
+        if (helperName.equals(com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_ENCODE)
+                || helperName.equals(com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_DECODE)
+                || helperName.equals(com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_SHAPE)
+                || helperName.equals(com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_NULLABLE_SHAPE)) {
+            final var serializationContract = context.contracts.get(nominalName(requiredBound));
+            final var requirementSubstitutions =
+                    new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            if (serializationContract != null) {
+                final var boundArguments = typeArguments(requiredBound);
+                for (int index = 0; index < serializationContract.typeParameters().size()
+                        && index < boundArguments.size(); index++) {
+                    requirementSubstitutions.put(
+                            serializationContract.typeParameters().get(index),
+                            boundArguments.get(index));
+                }
+            }
+            final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                    requirement.typeDescriptor(), requirementSubstitutions);
+            helperType = TypeDescriptor.functionWithEffectsOf(helperName, descriptor.returnType(),
+                    descriptor.parameters(), descriptor.typeParameters(), descriptor.raisedEffects());
+        } else if (isEqContract(requiredBound)) {
+            helperType = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(),
+                    concrete, concrete);
+        } else {
+            helperType = com.maruseron.zeron.domain.IntrinsicDescriptors.hashSignature(concrete);
+        }
         return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
                 owner, helperName, helperType, null, true,
                 context.sums.containsKey(owner)
@@ -1628,9 +1668,9 @@ final class TypeClassEvidence {
                 || !requirement.name().lexeme().equals("eq")
                 || !(requirement.typeDescriptor().returnType() instanceof BooleanDescriptor)
                 || requirement.typeDescriptor().parameters().size() != 1) return null;
-        final var signature = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(), concrete, concrete);
+        final var signature = IntrinsicDescriptors.eqSignature(concrete);
         return new Expr.EvidenceArgument(parameter, boundIndex, methodIndex,
-                "zeron.runtime.EqSupport", builtinEqualityMethod(concrete), signature, null,
+                IntrinsicDescriptors.EQ_SUPPORT_OWNER, builtinEqualityMethod(concrete), signature, null,
                 true, Expr.EvidenceHandleKind.STATIC);
     }
 
@@ -1640,14 +1680,14 @@ final class TypeClassEvidence {
             if (base instanceof IntDescriptor || base instanceof CharDescriptor
                     || base instanceof LongDescriptor || base instanceof FloatDescriptor
                     || base instanceof BooleanDescriptor || base instanceof StringDescriptor
-                    || base instanceof UnitDescriptor) return "eqNullable";
+                    || base instanceof UnitDescriptor) return IntrinsicDescriptors.EQ_NULLABLE;
         }
-        if (concrete instanceof IntDescriptor || concrete instanceof CharDescriptor) return "eqInt";
-        if (concrete instanceof LongDescriptor) return "eqLong";
-        if (concrete instanceof FloatDescriptor) return "eqFloat";
-        if (concrete instanceof BooleanDescriptor) return "eqBoolean";
-        if (concrete instanceof StringDescriptor) return "eqString";
-        if (concrete instanceof UnitDescriptor) return "eqUnit";
+        if (concrete instanceof IntDescriptor || concrete instanceof CharDescriptor) return IntrinsicDescriptors.EQ_INT;
+        if (concrete instanceof LongDescriptor) return IntrinsicDescriptors.EQ_LONG;
+        if (concrete instanceof FloatDescriptor) return IntrinsicDescriptors.EQ_FLOAT;
+        if (concrete instanceof BooleanDescriptor) return IntrinsicDescriptors.EQ_BOOLEAN;
+        if (concrete instanceof StringDescriptor) return IntrinsicDescriptors.EQ_STRING;
+        if (concrete instanceof UnitDescriptor) return IntrinsicDescriptors.EQ_UNIT;
         throw new IllegalArgumentException("Unsupported built-in Eq type: " + concrete);
     }
 
@@ -1680,18 +1720,24 @@ final class TypeClassEvidence {
             final Stmt.ContractMethod requirement, final TypeParameterDescriptor parameter,
             final int boundIndex, final int methodIndex) {
         if (!isBuiltInHashable(requiredBound, concrete)
-                || !requirement.name().lexeme().equals("hash")
-                || !(requirement.typeDescriptor().returnType() instanceof IntDescriptor)
+                || !requirement.name().lexeme().equals(
+                        com.maruseron.zeron.domain.IntrinsicDescriptors.HASH)
+                || !(requirement.typeDescriptor().returnType() instanceof LongDescriptor)
                 || !requirement.typeDescriptor().parameters().isEmpty()) return null;
-        final var method = concrete instanceof IntDescriptor || concrete instanceof CharDescriptor ? "hashInt"
-                : concrete instanceof LongDescriptor ? "hashLong"
-                : concrete instanceof FloatDescriptor ? "hashFloat"
-                : concrete instanceof BooleanDescriptor ? "hashBoolean"
-                : concrete instanceof StringDescriptor ? "hashString"
-                : "hashUnit";
-        final var signature = TypeDescriptor.functionOf("hash", TypeDescriptor.ofInt(), concrete);
+        final var method = concrete instanceof IntDescriptor || concrete instanceof CharDescriptor
+                ? com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_INT
+                : concrete instanceof LongDescriptor
+                        ? com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_LONG
+                : concrete instanceof FloatDescriptor
+                        ? com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_FLOAT
+                : concrete instanceof BooleanDescriptor
+                        ? com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_BOOLEAN
+                : concrete instanceof StringDescriptor
+                        ? com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_STRING
+                : com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_UNIT;
+        final var signature = com.maruseron.zeron.domain.IntrinsicDescriptors.hashSignature(concrete);
         return new Expr.EvidenceArgument(parameter, boundIndex, methodIndex,
-                "zeron.runtime.HashSupport", method, signature, null,
+                com.maruseron.zeron.domain.IntrinsicDescriptors.HASH_SUPPORT_OWNER, method, signature, null,
                 true, Expr.EvidenceHandleKind.STATIC);
     }
 
@@ -1721,7 +1767,8 @@ final class TypeClassEvidence {
     private static Stmt.ContractMethod hashMethod(final ResolutionContext context) {
         final var contract = context.contracts.get("zeron.lang.Hashable");
         if (contract == null) throw new IllegalStateException("Hashable<T> contract is unavailable.");
-        return contract.methods().stream().filter(method -> method.name().lexeme().equals("hash"))
+        return contract.methods().stream().filter(method -> method.name().lexeme().equals(
+                com.maruseron.zeron.domain.IntrinsicDescriptors.HASH))
                 .findFirst().orElseThrow(() -> new IllegalStateException("Hashable.hash method is unavailable."));
     }
 
@@ -1768,8 +1815,8 @@ final class TypeClassEvidence {
         final var signature = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(),
                 concrete, concrete);
         return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
-                sum.name().lexeme(), "$zeron$eq", signature, null, true,
-                Expr.EvidenceHandleKind.INTERFACE_STATIC, prerequisites);
+                sum.name().lexeme(), com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_EQ,
+                signature, null, true, Expr.EvidenceHandleKind.INTERFACE_STATIC, prerequisites);
     }
 
     private static Expr.EvidenceArgument structuralProductEqualityHandle(
@@ -1800,8 +1847,8 @@ final class TypeClassEvidence {
         }
         final var signature = TypeDescriptor.functionOf("eq", TypeDescriptor.ofBoolean(), concrete, concrete);
         return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
-                product.name().lexeme(), "$zeron$eq", signature, null, true,
-                Expr.EvidenceHandleKind.STATIC, prerequisites);
+                product.name().lexeme(), com.maruseron.zeron.domain.IntrinsicDescriptors.DERIVED_EQ,
+                signature, null, true, Expr.EvidenceHandleKind.STATIC, prerequisites);
     }
 
     private static boolean hasStructuralProductEquality(

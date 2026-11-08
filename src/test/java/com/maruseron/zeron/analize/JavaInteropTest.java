@@ -3,6 +3,7 @@ package com.maruseron.zeron.analize;
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.ZeronLibraryIndexDump;
 import com.maruseron.zeron.StandardLibrary;
+import com.maruseron.zeron.TestPaths;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.compile.CompilationService;
@@ -36,7 +37,7 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public final class JavaInteropTest {
-    private static final Path JAVA_FIXTURE_ROOT = Path.of("target", "test-classes");
+    private static final Path JAVA_FIXTURE_ROOT = TestPaths.projectFile("target", "test-classes");
 
     @Test
     public void mapsJavaGenericOwnerSignaturesAndWildcards() {

@@ -222,18 +222,21 @@ the object; capturing a reference does not grant extra permission.
 ## Inspecting a predicate with `CodeModel`
 
 Some APIs need to inspect a predicate instead of executing it. For example, a database library
-can translate a predicate into a parameterized SQL condition. Import `CodeModel` and annotate the
-parameter that should receive the model:
+can translate a predicate into a parameterized SQL condition. Give the parameter the
+`CodeModel<F>` type and the call site supplies a model instead of a function value:
 
 ```zeron
 import zeron.compiler.CodeModel;
 
 fn where(
-    @CodeModel predicate: CodeModel<(User) -> Boolean>
+    predicate: CodeModel<(User) -> Boolean>
 ): Query<User> { ... }
 
 query.where(user -> user.age >= minimumAge);
 ```
+
+The wrapper type selects model mode. The same lambda with a plain `(User) -> Boolean` parameter
+remains an ordinary function value.
 
 The argument is an inline lambda or a property reference such as `User::name`. Both spellings
 produce the same model, so a selector can be written either way:

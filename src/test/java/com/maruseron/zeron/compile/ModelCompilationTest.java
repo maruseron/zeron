@@ -22,13 +22,39 @@ public final class ModelCompilationTest {
     private static final String SOURCE = """
             package modeltest;
 
+            import zeron.compiler.CodeModel;
+            import zeron.compiler.selectedProperty;
+            import zeron.lang.Field;
             import zeron.lang.Model;
             import zeron.lang.Option;
 
             public class User {
                 public property name: String;
-                public property age: Int;
+                public mut property age: Int;
                 public constructor new;
+            }
+
+            public contract Named {
+                property name: String;
+            }
+
+            public class Hidden {
+                property secret: String;
+                public constructor new;
+            }
+
+            public class Box<T: nullable + mut> {
+                public property value: T;
+                public constructor new;
+            }
+
+            public class Counter {
+                valueBacking: Int;
+                public constructor new;
+                public mut property value: Int {
+                    get = this.valueBacking;
+                    set(next) { this.valueBacking = next; }
+                }
             }
 
             public contract SqlModel<T: nullable + mut> requires Model<T> {
@@ -40,6 +66,140 @@ public final class ModelCompilationTest {
 
                 name -> "user_name";
                 age -> "user_age";
+            }
+
+            public contract DocumentModel<T: nullable + mut> requires Model<T> {
+                property collection: String;
+            }
+
+            public model UserDoc is DocumentModel<User> {
+                collection = "people";
+
+                name -> "displayName";
+            }
+
+            public model EmptySql is SqlModel<User> {
+                tableName = "empty";
+            }
+
+            public model BoxIntSql is SqlModel<Box<Int>> {
+                tableName = "boxes";
+
+                value -> "value";
+            }
+
+            public model CounterSql is SqlModel<Counter> {
+                tableName = "counters";
+
+                value -> "value";
+            }
+
+            fn selectName(model: CodeModel<(User) -> String>)
+                : CodeModel<(User) -> String> = model;
+
+            public fn codeModelPropertyLookup(): String {
+                let model = selectName(user -> user.name);
+                let selected = selectedProperty(model);
+                if (selected == null) return "none";
+                return match (UserSql.fieldOf(selected!!)) {
+                    case Option.Some(field) -> field.externalName;
+                    case Option.None() -> "missing";
+                };
+            }
+
+            public fn contractPropertyDoesNotFindClassMapping(): Boolean =
+                match (UserSql.fieldOf((Named::name).id)) {
+                    case Option.Some(_) -> false;
+                    case Option.None() -> true;
+                };
+
+            public fn contractTypedLookup(): String {
+                let model: SqlModel<User> = UserSql;
+                return match (model.field(User::name)) {
+                    case Option.Some(field) -> field.get(User.new("Ada", 36));
+                    case Option.None() -> "missing";
+                };
+            }
+
+            public fn emptyModelHasNoFields(): Int = EmptySql.fields.length;
+
+            public fn fieldOrder(): String {
+                let fields = UserSql.fields;
+                if (fields.length != 2) return "wrong";
+                return fields[0].externalName + "," + fields[1].externalName;
+            }
+
+            public fn genericTargetReads(): Int {
+                let box = Box<Int>.new(7);
+                return match (BoxIntSql.field(Box<Int>::value)) {
+                    case Option.Some(field) -> field.get(box);
+                    case Option.None() -> -1;
+                };
+            }
+
+            public fn sourceIdMatchesReference(): Boolean =
+                match (UserSql.field(User::name)) {
+                    case Option.Some(field) -> field.sourceId == (User::name).id;
+                    case Option.None() -> false;
+                };
+
+            public fn unmappedTypedLookupFindsNothing(): Boolean =
+                match (UserDoc.field(User::age)) {
+                    case Option.Some(_) -> false;
+                    case Option.None() -> true;
+                };
+
+            public fn writesThroughCustomSetter(): Int {
+                let counter = Counter.new(0);
+                return match (CounterSql.field(Counter::value)) {
+                    case Option.Some(field) -> match (field.writer) {
+                        case Option.Some(write) -> applyCounterWriter(counter, field, write);
+                        case Option.None() -> -1;
+                    };
+                    case Option.None() -> -2;
+                };
+            }
+
+            fn applyCounterWriter(counter: &Counter, field: Field<Counter, Int>,
+                                  write: (&Counter, Int) -> Unit): Int {
+                write(counter, 9);
+                return field.get(counter);
+            }
+
+            public fn documentExternalName(): String {
+                return match (UserDoc.fieldOf((User::name).id)) {
+                    case Option.Some(field) -> field.externalName;
+                    case Option.None() -> "missing";
+                };
+            }
+
+            public fn documentCollection(): String = UserDoc.collection;
+
+            public fn writesAge(): Int {
+                let user = User.new("Ada", 36);
+                return match (UserSql.field(User::age)) {
+                    case Option.Some(field) -> match (field.writer) {
+                        case Option.Some(write) -> applyWriter(user, field, write);
+                        case Option.None() -> -1;
+                    };
+                    case Option.None() -> -2;
+                };
+            }
+
+            fn applyWriter(user: &User, field: Field<User, Int>,
+                           write: (&User, Int) -> Unit): Int {
+                write(user, 41);
+                return field.get(user);
+            }
+
+            public fn readOnlyNameHasNoWriter(): Boolean {
+                return match (UserSql.field(User::name)) {
+                    case Option.Some(field) -> match (field.writer) {
+                        case Option.Some(_) -> false;
+                        case Option.None() -> true;
+                    };
+                    case Option.None() -> false;
+                };
             }
 
             public fn externalNameOfName(): String {
@@ -81,6 +241,19 @@ public final class ModelCompilationTest {
                 let model: SqlModel<User> = UserSql;
                 return model.tableName;
             }
+
+            public fn acceptsAnyModel<T: nullable + mut>(model: Model<T>): Int {
+                return model.fields.length;
+            }
+
+            public fn genericModelFieldCount(): Int = acceptsAnyModel(UserSql);
+
+            public fn genericDocumentFieldCount(): Int = acceptsAnyModel(UserDoc);
+
+            public fn bindsModelToCoreContract(): Int {
+                let model: Model<User> = UserDoc;
+                return model.fields.length;
+            }
             """;
 
     private static final String LIBRARY_SOURCE = """
@@ -90,7 +263,7 @@ public final class ModelCompilationTest {
 
             public class User {
                 public property name: String;
-                public property age: Int;
+                public mut property age: Int;
                 public constructor new;
             }
 
@@ -112,6 +285,8 @@ public final class ModelCompilationTest {
             import modellib.SqlModel;
             import modellib.User;
             import modellib.UserSql;
+            import zeron.lang.Field;
+            import zeron.lang.Model;
             import zeron.lang.Option;
 
             public fn externalNameOfName(): String {
@@ -129,9 +304,80 @@ public final class ModelCompilationTest {
                 };
             }
 
+            public fn writesAge(): Int {
+                let user = User.new("Ada", 36);
+                return match (UserSql.field(User::age)) {
+                    case Option.Some(field) -> match (field.writer) {
+                        case Option.Some(write) -> applyWriter(user, field, write);
+                        case Option.None() -> -1;
+                    };
+                    case Option.None() -> -2;
+                };
+            }
+
+            fn applyWriter(user: &User, field: Field<User, Int>,
+                           write: (&User, Int) -> Unit): Int {
+                write(user, 44);
+                return field.get(user);
+            }
+
             public fn tableNameOf(model: SqlModel<User>): String = model.tableName;
 
             public fn passesModelAsContractValue(): String = tableNameOf(UserSql);
+
+            public fn acceptsAnyModel<T: nullable + mut>(model: Model<T>): Int {
+                return model.fields.length;
+            }
+
+            public fn genericModelFieldCount(): Int = acceptsAnyModel(UserSql);
+            """;
+
+    private static final String FOREIGN_TARGET_SOURCE = """
+            package forgeintarget;
+
+            public class Person {
+                public property name: String;
+                public constructor new;
+            }
+            """;
+
+    private static final String FOREIGN_MODEL_SOURCE = """
+            package foreignmodel;
+
+            import forgeintarget.Person;
+            import zeron.lang.Model;
+
+            public contract PersonModel<T: nullable + mut> requires Model<T> {
+                property tableName: String;
+            }
+
+            public model PersonSql is PersonModel<Person> {
+                tableName = "people";
+
+                name -> "person_name";
+            }
+            """;
+
+    private static final String FOREIGN_CLIENT_SOURCE = """
+            package foreignclient;
+
+            import foreignmodel.PersonSql;
+            import forgeintarget.Person;
+            import zeron.lang.Option;
+
+            public fn externalName(): String =
+                match (PersonSql.field(Person::name)) {
+                    case Option.Some(field) -> field.externalName;
+                    case Option.None() -> "missing";
+                };
+
+            public fn reads(): String {
+                let person = Person.new("Ada");
+                return match (PersonSql.field(Person::name)) {
+                    case Option.Some(field) -> field.get(person);
+                    case Option.None() -> "missing";
+                };
+            }
             """;
 
     @Test
@@ -148,10 +394,31 @@ public final class ModelCompilationTest {
                 final var main = loader.loadClass("modeltest.Main");
                 assertEquals("user_name", main.getMethod("externalNameOfName").invoke(null));
                 assertEquals("Ada", main.getMethod("readsName").invoke(null));
+                assertEquals(41, main.getMethod("writesAge").invoke(null));
+                assertTrue((Boolean) main.getMethod("readOnlyNameHasNoWriter").invoke(null));
+                assertEquals("displayName", main.getMethod("documentExternalName").invoke(null));
+                assertEquals("people", main.getMethod("documentCollection").invoke(null));
                 assertTrue((Boolean) main.getMethod("mapsAge").invoke(null));
                 assertTrue((Boolean) main.getMethod("ignoresUnmappedProperty").invoke(null));
                 assertEquals("users", main.getMethod("passesModelAsContractValue").invoke(null));
                 assertEquals("users", main.getMethod("bindsModelToContract").invoke(null));
+                assertEquals(2, main.getMethod("genericModelFieldCount").invoke(null));
+                assertEquals(1, main.getMethod("genericDocumentFieldCount").invoke(null));
+                assertEquals(1, main.getMethod("bindsModelToCoreContract").invoke(null));
+                assertTrue((Boolean) main.getMethod("contractPropertyDoesNotFindClassMapping")
+                        .invoke(null));
+                assertEquals("Ada", main.getMethod("contractTypedLookup").invoke(null));
+                assertEquals(0, main.getMethod("emptyModelHasNoFields").invoke(null));
+                assertEquals("user_name,user_age", main.getMethod("fieldOrder").invoke(null));
+                assertEquals("user_name", main.getMethod("codeModelPropertyLookup").invoke(null));
+                assertEquals(7, main.getMethod("genericTargetReads").invoke(null));
+                assertTrue((Boolean) main.getMethod("sourceIdMatchesReference").invoke(null));
+                assertTrue((Boolean) main.getMethod("unmappedTypedLookupFindsNothing").invoke(null));
+                assertEquals(9, main.getMethod("writesThroughCustomSetter").invoke(null));
+                final var modelClass = loader.loadClass("modeltest.UserSql$model");
+                assertTrue(java.util.Arrays.stream(modelClass.getDeclaredConstructors())
+                        .allMatch(constructor -> java.lang.reflect.Modifier.isPublic(
+                                constructor.getModifiers())));
             }
         } finally {
             deleteTree(output);
@@ -198,10 +465,60 @@ public final class ModelCompilationTest {
                 final var main = loader.loadClass("modelapp.Main");
                 assertEquals("user_name", main.getMethod("externalNameOfName").invoke(null));
                 assertEquals("Ada", main.getMethod("readsName").invoke(null));
+                assertEquals(44, main.getMethod("writesAge").invoke(null));
                 assertEquals("users", main.getMethod("passesModelAsContractValue").invoke(null));
+                assertEquals(2, main.getMethod("genericModelFieldCount").invoke(null));
             }
         } finally {
             deleteTree(libraryOutput);
+            deleteTree(clientOutput);
+        }
+    }
+
+    @Test
+    public void modelsCanTargetTypesFromAnotherLibrary() throws Exception {
+        final var targetOutput = Files.createTempDirectory(Path.of("target"), "zeron-foreign-target-");
+        final var modelOutput = Files.createTempDirectory(Path.of("target"), "zeron-foreign-model-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-foreign-client-");
+        try {
+            final var target = CompilationService.forCompilationUnits(
+                    StandardLibrary.withBundledUnits(List.of(parse("Target.zn", FOREIGN_TARGET_SOURCE))),
+                    "forgeintarget.Target", "forgeintarget",
+                    List.of(), true, List.of(), targetOutput);
+            target.resolve();
+            target.compile();
+            final var targetIndex = ZeronLibraryIndex.readFromDirectory(targetOutput);
+
+            final var model = CompilationService.forCompilationUnits(
+                    StandardLibrary.withBundledUnits(List.of(parse("Model.zn", FOREIGN_MODEL_SOURCE))),
+                    "foreignmodel.Model", "foreignmodel",
+                    List.of(targetIndex), true, List.of(), modelOutput);
+            model.resolve();
+            model.compile();
+            final var modelIndex = ZeronLibraryIndex.readFromDirectory(modelOutput);
+            final var export = modelIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.ModelExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ModelExport.class::cast)
+                    .findFirst().orElseThrow();
+            assertEquals("foreignmodel.PersonSql", export.qualifiedName());
+            assertEquals("forgeintarget.Person", export.targetType().name());
+
+            final var client = CompilationService.forCompilationUnits(
+                    StandardLibrary.withBundledUnits(List.of(parse("Client.zn", FOREIGN_CLIENT_SOURCE))),
+                    "foreignclient.Main", "foreignclient",
+                    List.of(targetIndex, modelIndex), false, List.of(), clientOutput);
+            client.resolve();
+            client.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    clientOutput.toUri().toURL(), modelOutput.toUri().toURL(),
+                    targetOutput.toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass("foreignclient.Main");
+                assertEquals("person_name", main.getMethod("externalName").invoke(null));
+                assertEquals("Ada", main.getMethod("reads").invoke(null));
+            }
+        } finally {
+            deleteTree(targetOutput);
+            deleteTree(modelOutput);
             deleteTree(clientOutput);
         }
     }
@@ -215,6 +532,34 @@ public final class ModelCompilationTest {
     @Test
     public void rejectsUnknownPropertyMappings() throws Exception {
         assertRejected(SOURCE.replace("name -> \"user_name\";", "missing -> \"user_name\";"));
+    }
+
+    @Test
+    public void rejectsInaccessiblePropertyMappings() throws Exception {
+        assertRejected(SOURCE.replace("public model UserDoc", """
+                public model HiddenSql is SqlModel<Hidden> {
+                    tableName = "hidden";
+
+                    secret -> "secret";
+                }
+
+                public model UserDoc"""));
+    }
+
+    @Test
+    public void rejectsDuplicateContractPropertyAssignments() throws Exception {
+        assertRejected(SOURCE.replace("tableName = \"users\";",
+                "tableName = \"users\";\n    tableName = \"users_again\";"));
+    }
+
+    @Test
+    public void rejectsUnknownContractPropertyAssignments() throws Exception {
+        assertRejected(SOURCE.replace("tableName = \"users\";", "missing = \"users\";"));
+    }
+
+    @Test
+    public void rejectsTypeMismatchedContractPropertyAssignments() throws Exception {
+        assertRejected(SOURCE.replace("tableName = \"users\";", "tableName = 42;"));
     }
 
     @Test
@@ -246,8 +591,12 @@ public final class ModelCompilationTest {
     }
 
     private static CompilationUnit parse(final String source) {
-        final var result = Parser.of(Scanner.from(source, "ModelTest.zn").scanTokens())
-                .parseCompilationUnitWithDiagnostics("ModelTest.zn");
+        return parse("ModelTest.zn", source);
+    }
+
+    private static CompilationUnit parse(final String sourcePath, final String source) {
+        final var result = Parser.of(Scanner.from(source, sourcePath).scanTokens())
+                .parseCompilationUnitWithDiagnostics(sourcePath);
         if (!result.diagnostics().isEmpty()) {
             throw new AssertionError(result.diagnostics().toString());
         }

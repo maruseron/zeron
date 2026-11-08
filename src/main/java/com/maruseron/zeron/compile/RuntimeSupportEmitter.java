@@ -3,6 +3,7 @@ package com.maruseron.zeron.compile;
 import com.maruseron.zeron.analize.ContractComposition;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.FunctionDescriptor;
+import com.maruseron.zeron.domain.IntrinsicDescriptors;
 import com.maruseron.zeron.domain.FunctionShapeKey;
 import com.maruseron.zeron.domain.FunctionShapeNames;
 import com.maruseron.zeron.domain.NeverDescriptor;
@@ -32,8 +33,8 @@ final class RuntimeSupportEmitter {
     private static final ClassDesc UNIT_CLASS = ClassDesc.of("zeron.lang.Unit");
     private static final ClassDesc RAISED_EFFECT_CLASS = ClassDesc.of("zeron.runtime.RaisedEffect");
     private static final ClassDesc RESOURCE_SUPPORT_CLASS = ClassDesc.of("zeron.runtime.ResourceSupport");
-    private static final ClassDesc EQ_SUPPORT_CLASS = ClassDesc.of("zeron.runtime.EqSupport");
-    private static final ClassDesc HASH_SUPPORT_CLASS = ClassDesc.of("zeron.runtime.HashSupport");
+    private static final ClassDesc EQ_SUPPORT_CLASS = IntrinsicDescriptors.EQ_SUPPORT;
+    private static final ClassDesc HASH_SUPPORT_CLASS = IntrinsicDescriptors.HASH_SUPPORT;
     private static final ClassDesc RUNTIME_EXCEPTION_CLASS = ClassDesc.of("java.lang.RuntimeException");
     private static final ClassDesc THROWABLE_CLASS = ClassDesc.of("java.lang.Throwable");
     private static final ClassDesc ARRAY_LIST_CLASS = ClassDesc.of("java.util.ArrayList");
@@ -61,8 +62,11 @@ final class RuntimeSupportEmitter {
                     Set.of("zeron/lang/Unit"),
                     context -> emitEqualitySupportClass(context.outputDirectory)),
             new SupportUnit("zeron/runtime/HashSupport", List.of("zeron/runtime/HashSupport"),
-                    Set.of("zeron/lang/Unit"),
+                    Set.of(IntrinsicDescriptors.HASH_SUPPORT_IMPL_OWNER.replace('.', '/')),
                     context -> emitHashSupportClass(context.outputDirectory)),
+            new SupportUnit("com/maruseron/zeron/runtime/HashSupport",
+                    List.of("com/maruseron/zeron/runtime/HashSupport"), Set.of(),
+                    context -> emitJavaRuntimeClass(context.outputDirectory, "HashSupport")),
             new SupportUnit("zeron/runtime/StringUnicode", List.of("zeron/runtime/StringUnicode"), Set.of(),
                     context -> emitStringUnicodeSupportClass(context.outputDirectory)),
             new SupportUnit("zeron/runtime/BigIntegerSupport",
@@ -670,7 +674,7 @@ final class RuntimeSupportEmitter {
         ClassFile.of().buildTo(output, EQ_SUPPORT_CLASS, builder -> {
             builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
-            builder.withMethodBody("eqInt", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+            builder.withMethodBody(IntrinsicDescriptors.EQ_INT, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_int, ConstantDescs.CD_int), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC,
                     code -> {
                         final var unequal = code.newLabel();
@@ -683,7 +687,7 @@ final class RuntimeSupportEmitter {
                         code.iconst_0();
                         code.ireturn();
                     });
-            builder.withMethodBody("eqBoolean", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+            builder.withMethodBody(IntrinsicDescriptors.EQ_BOOLEAN, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_boolean, ConstantDescs.CD_boolean),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                         final var unequal = code.newLabel();
@@ -696,7 +700,7 @@ final class RuntimeSupportEmitter {
                         code.iconst_0();
                         code.ireturn();
                     });
-            builder.withMethodBody("eqLong", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+            builder.withMethodBody(IntrinsicDescriptors.EQ_LONG, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_long, ConstantDescs.CD_long),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                         final var unequal = code.newLabel();
@@ -710,7 +714,7 @@ final class RuntimeSupportEmitter {
                         code.iconst_0();
                         code.ireturn();
                     });
-            builder.withMethodBody("eqFloat", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+            builder.withMethodBody(IntrinsicDescriptors.EQ_FLOAT, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_double, ConstantDescs.CD_double),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                         code.dload(0);
@@ -726,7 +730,7 @@ final class RuntimeSupportEmitter {
                         code.iconst_0();
                         code.ireturn();
                     });
-            builder.withMethodBody("eqString", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+            builder.withMethodBody(IntrinsicDescriptors.EQ_STRING, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_String, ConstantDescs.CD_String),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                         code.aload(0);
@@ -736,7 +740,7 @@ final class RuntimeSupportEmitter {
                                         ConstantDescs.CD_Object, ConstantDescs.CD_Object));
                         code.ireturn();
                     });
-            builder.withMethodBody("eqNullable", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+            builder.withMethodBody(IntrinsicDescriptors.EQ_NULLABLE, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_Object, ConstantDescs.CD_Object),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                         code.aload(0);
@@ -746,7 +750,7 @@ final class RuntimeSupportEmitter {
                                         ConstantDescs.CD_Object, ConstantDescs.CD_Object));
                         code.ireturn();
                     });
-            builder.withMethodBody("eqNullableWithHandle", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+            builder.withMethodBody(IntrinsicDescriptors.EQ_NULLABLE_WITH_HANDLE, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     ConstantDescs.CD_Object, ConstantDescs.CD_Object,
                     ClassDesc.of("java.lang.invoke.MethodHandle")),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
@@ -775,7 +779,7 @@ final class RuntimeSupportEmitter {
             for (final var wrapper : new ClassDesc[]{
                     ClassDesc.of("java.lang.Integer"), ClassDesc.of("java.lang.Double"),
                     ClassDesc.of("java.lang.Boolean"), ConstantDescs.CD_String, UNIT_CLASS}) {
-                builder.withMethodBody("eqNullable", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+                builder.withMethodBody(IntrinsicDescriptors.EQ_NULLABLE, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                         wrapper, wrapper), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                     code.aload(0);
                     code.aload(1);
@@ -786,7 +790,7 @@ final class RuntimeSupportEmitter {
                 });
             }
 
-            builder.withMethodBody("eqUnit", MethodTypeDesc.of(ConstantDescs.CD_boolean,
+            builder.withMethodBody(IntrinsicDescriptors.EQ_UNIT, MethodTypeDesc.of(ConstantDescs.CD_boolean,
                     UNIT_CLASS, UNIT_CLASS), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
                         code.iconst_1();
                         code.ireturn();
@@ -797,62 +801,84 @@ final class RuntimeSupportEmitter {
     static void emitHashSupportClass(final Path outputDirectory) throws IOException {
         final var output = outputDirectory.resolve(Path.of("zeron", "runtime", "HashSupport.class"));
         Files.createDirectories(output.getParent());
+        final var impl = IntrinsicDescriptors.HASH_SUPPORT_IMPL;
         ClassFile.of().buildTo(output, HASH_SUPPORT_CLASS, builder -> {
             builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
-            builder.withMethodBody("hashInt", MethodTypeDesc.of(ConstantDescs.CD_int,
-                    ConstantDescs.CD_int), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
-                code.iload(0);
-                code.ireturn();
-            });
-            builder.withMethodBody("hashLong", MethodTypeDesc.of(ConstantDescs.CD_int,
-                    ConstantDescs.CD_long), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
-                code.lload(0);
-                code.invokestatic(ClassDesc.of("java.lang.Long"), "hashCode",
-                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_long));
-                code.ireturn();
-            });
-            builder.withMethodBody("hashFloat", MethodTypeDesc.of(ConstantDescs.CD_int,
-                    ConstantDescs.CD_double), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
-                code.dload(0);
-                code.invokestatic(ClassDesc.of("java.lang.Double"), "hashCode",
-                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_double));
-                code.ireturn();
-            });
-            builder.withMethodBody("hashBoolean", MethodTypeDesc.of(ConstantDescs.CD_int,
-                    ConstantDescs.CD_boolean), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
-                code.iload(0);
-                code.invokestatic(ClassDesc.of("java.lang.Boolean"), "hashCode",
-                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_boolean));
-                code.ireturn();
-            });
-            builder.withMethodBody("hashString", MethodTypeDesc.of(ConstantDescs.CD_int,
-                    ConstantDescs.CD_String), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
-                code.aload(0);
-                code.invokevirtual(ConstantDescs.CD_String, "hashCode",
-                        MethodTypeDesc.of(ConstantDescs.CD_int));
-                code.ireturn();
-            });
-            builder.withMethodBody("hashUnit", MethodTypeDesc.of(ConstantDescs.CD_int,
-                    UNIT_CLASS), ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
-                code.iconst_0();
-                code.ireturn();
-            });
-            builder.withMethodBody("hashNullableWithHandle", MethodTypeDesc.of(ConstantDescs.CD_int,
-                    ConstantDescs.CD_Object, ClassDesc.of("java.lang.invoke.MethodHandle")),
+            builder.withMethodBody(IntrinsicDescriptors.HASH_INT, IntrinsicDescriptors.hashIntType(),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
-                final var present = code.newLabel();
-                code.aload(0);
-                code.ifnonnull(present);
-                code.iconst_0();
-                code.ireturn();
-                code.labelBinding(present);
-                code.aload(1);
-                code.aload(0);
-                code.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
-                        MethodTypeDesc.of(ConstantDescs.CD_int, ConstantDescs.CD_Object));
-                code.ireturn();
-            });
+                        code.iload(0);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_INT,
+                                IntrinsicDescriptors.hashIntType());
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_LONG, IntrinsicDescriptors.hashLongType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.lload(0);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_LONG,
+                                IntrinsicDescriptors.hashLongType());
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_FLOAT, IntrinsicDescriptors.hashFloatType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.dload(0);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_FLOAT,
+                                IntrinsicDescriptors.hashFloatType());
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_BOOLEAN, IntrinsicDescriptors.hashBooleanType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.iload(0);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_BOOLEAN,
+                                IntrinsicDescriptors.hashBooleanType());
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_STRING, IntrinsicDescriptors.hashStringType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.aload(0);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_STRING,
+                                IntrinsicDescriptors.hashStringType());
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_UNIT, IntrinsicDescriptors.hashUnitType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.lconst_0();
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_NULLABLE_WITH_HANDLE,
+                    IntrinsicDescriptors.hashNullableType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.aload(0);
+                        code.aload(1);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_NULLABLE_WITH_HANDLE,
+                                IntrinsicDescriptors.hashNullableType());
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_COMBINE,
+                    IntrinsicDescriptors.hashCombineType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.lload(0);
+                        code.lload(2);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_COMBINE,
+                                IntrinsicDescriptors.hashCombineType());
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_FINALIZE,
+                    IntrinsicDescriptors.hashFinalizeType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.lload(0);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_FINALIZE,
+                                IntrinsicDescriptors.hashFinalizeType());
+                        code.lreturn();
+                    });
+            builder.withMethodBody(IntrinsicDescriptors.HASH_CASE_SEED,
+                    IntrinsicDescriptors.hashCaseSeedType(),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.iload(0);
+                        code.invokestatic(impl, IntrinsicDescriptors.HASH_CASE_SEED,
+                                IntrinsicDescriptors.hashCaseSeedType());
+                        code.lreturn();
+                    });
         });
     }
 

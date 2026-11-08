@@ -4,6 +4,11 @@ A `model` describes how a nominal type maps to an external representation: a dat
 keys of a document, or any other format a library defines. The mapping lives beside the type
 instead of inside it, so one type can have several representations and the type stays untouched.
 
+Models are one of Zeron's two serialization entry points; the other is the streaming
+`Encoder`/`Decoder` codec path, which reads and writes a type's declared shape without a model.
+[Products, data classes, and sum types](./17-sum-types-and-products.md#two-serialization-entry-points)
+compares the two and shows how the JSON library uses both.
+
 ```zeron
 public class User {
     public property name: String;
@@ -84,7 +89,12 @@ Duplicate **external** names are not checked: the compiler does not know what th
 consumer may reject them. Models are partial — a model may map a subset of the target's properties,
 because a model never constructs the target type.
 
+## Writable mappings
+
+A mapped property with an accessible setter also exposes a writer, so a consumer can update an
+existing value through the model. `Field.writer` is `Option.Some` for such a property and
+`Option.None` for a read-only one.
+
 ## Current limits
 
-- Mapping setters and `Field.writer` are not available yet, so a model is read-only.
 - Annotations on clauses are not accepted, and a compiler-checked `total` modifier does not exist.

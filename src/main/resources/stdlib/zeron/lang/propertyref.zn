@@ -36,6 +36,8 @@ public class PropertyRef<T: nullable + mut, V: nullable + mut> is Eq<PropertyRef
     public property identity: String;
     /// The property declaration this reference denotes. `id.text()` equals `identity`.
     public property id: PropertyId;
+    /// Writes the property on an owner when the property has an accessible setter.
+    public property writer: Option<(&T, V) -> Unit>;
 
     private constructor new;
 

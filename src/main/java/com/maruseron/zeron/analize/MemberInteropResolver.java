@@ -183,6 +183,11 @@ final class MemberInteropResolver {
         final var baseType = memberReceiverType instanceof ReferenceDescriptor reference
                 ? reference.baseType()
                 : memberReceiverType;
+        if (!property.safeNavigation() && !allowMissing
+                && !isTypeParameterTypePath(property.receiver, baseType)) {
+            ExpressionFlowResolver.requireNullCheckForTypeParameter(
+                    context, property.receiver, baseType, property.name);
+        }
         final var propertyIntrinsic = context.intrinsics.property(property.name.lexeme());
         if (propertyIntrinsic != null && propertyIntrinsic.id() == IntrinsicId.ARRAY_LENGTH
             && baseType instanceof ArrayDescriptor arrayType) {
@@ -701,6 +706,10 @@ final class MemberInteropResolver {
                 ? reference.baseType() : receiverType;
         final var receiverFunctionResult = resolveReceiverFunctionPropertyCall(context, call, receiverType);
         if (receiverFunctionResult != null) return receiverFunctionResult;
+        if (!call.safeNavigation() && !isTypeParameterTypePath(call.receiver, receiverBaseType)) {
+            ExpressionFlowResolver.requireNullCheckForTypeParameter(
+                    context, call.receiver, receiverBaseType, call.name);
+        }
         if (receiverBaseType.isNullable() || receiverBaseType instanceof NullDescriptor) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
                     call.name, "Cannot call method '" + call.name.lexeme()
@@ -1391,7 +1400,8 @@ final class MemberInteropResolver {
                     "Safe navigation requires a receiver with a known non-null type."));
         }
         final var afterReceiver = context.frame.flowState.copy();
-        final var mayBeNull = receiverType instanceof NullableDescriptor;
+        final var mayBeNull = receiverType instanceof NullableDescriptor
+                || receiverType.isNullableTypeParameter();
         final var nonNullFlow = afterReceiver.copy();
         final var nullPath = mayBeNull ? afterReceiver.copy() : FlowState.unreachable();
         if (mayBeNull) {
@@ -1815,8 +1825,10 @@ final class MemberInteropResolver {
             if (defersUntilExpectedType(context, argument,
                     memberParameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
-            TypeUnifier.unifyForInference(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
-                    resolvedArguments[i], substitutions, call.name, rowInference, context.typeCompatibility);
+            final var formal = memberParameterType(genericType.parameters(), i, fixedArity, variadic);
+            TypeUnifier.unifyForInference(formal,
+                    context.typeCompatibility.inferenceView(formal, resolvedArguments[i]),
+                    substitutions, call.name, rowInference, context.typeCompatibility);
         }
 
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -1826,8 +1838,7 @@ final class MemberInteropResolver {
             final var expected = TypeSubstitution.substitute(
                     memberParameterType(genericType.parameters(), i, fixedArity, variadic), substitutions);
             if (LambdaResolver.functionType(context, expected) == null
-                    && !(argument instanceof Expr.PropertyReference
-                        && codeModelArgument(expected) != null)) {
+                    && codeModelArgument(expected) == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                         call.name,
                         "A function value argument requires a function parameter type."));
@@ -1838,8 +1849,10 @@ final class MemberInteropResolver {
                         memberParameterType(genericType.parameters(), i, fixedArity, variadic),
                         resolvedArguments[i], substitutions, call.name, context.typeCompatibility);
             } else {
-                TypeUnifier.unifyForInference(memberParameterType(genericType.parameters(), i, fixedArity, variadic),
-                        resolvedArguments[i], substitutions, call.name, rowInference, context.typeCompatibility);
+                final var formal = memberParameterType(genericType.parameters(), i, fixedArity, variadic);
+                TypeUnifier.unifyForInference(formal,
+                        context.typeCompatibility.inferenceView(formal, resolvedArguments[i]),
+                        substitutions, call.name, rowInference, context.typeCompatibility);
             }
         }
 
@@ -2869,6 +2882,56 @@ final class MemberInteropResolver {
     }
 
     static TypeDescriptor resolveArgument(final ResolutionContext context, final Expr argument,
+                                          final TypeDescriptor expectedType) {
+        final var resolvedType = resolveArgumentValue(context, argument, expectedType);
+        ensureNullableTypeParameterArgumentHandled(context, argument, resolvedType, expectedType);
+        return resolvedType;
+    }
+
+    private static void ensureNullableTypeParameterArgumentHandled(final ResolutionContext context,
+                                                                  final Expr argument,
+                                                                  final TypeDescriptor resolvedType,
+                                                                  final TypeDescriptor expectedType) {
+        final var baseType = resolvedType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : resolvedType;
+        if (!(baseType instanceof TypeParameterDescriptor parameter)
+                || !parameter.admitsNullableArguments()) return;
+        if (expectedType instanceof InferDescriptor) return;
+        final var expectedBase = expectedType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : expectedType;
+        final var admits = expectedBase instanceof NullableDescriptor nullable
+                ? nullable.baseType() instanceof AnyDescriptor
+                    || nullable.baseType() instanceof TypeParameterDescriptor candidate
+                        && candidate.equals(parameter)
+                : expectedBase instanceof TypeParameterDescriptor candidate
+                    && candidate.equals(parameter);
+        if (admits) return;
+        Zeron.resolutionError(new ResolutionError(
+                DiagnosticCatalog.NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK, argumentToken(argument),
+                "`" + ExpressionFlowResolver.expressionName(argument) + "` has type `"
+                        + parameter.name()
+                        + "`, which may be null. Check it against `null` before using it."));
+    }
+
+    private static Token argumentToken(final Expr argument) {
+        return switch (argument) {
+            case Expr.Variable variable -> variable.name;
+            case Expr.Property property -> property.name;
+            case Expr.MemberCall call -> call.name;
+            case Expr.Grouping grouping -> argumentToken(grouping.expression);
+            default -> SYNTHETIC_IDENTIFIER;
+        };
+    }
+
+    /// A static witness call such as `T.encode(...)` uses the type parameter as the receiver path,
+    /// not a value of that type, so it is not a null-sensitive dereference.
+    private static boolean isTypeParameterTypePath(final Expr receiver, final TypeDescriptor type) {
+        return type instanceof TypeParameterDescriptor parameter
+                && receiver instanceof Expr.Variable variable
+                && variable.name.lexeme().equals(parameter.name());
+    }
+
+    private static TypeDescriptor resolveArgumentValue(final ResolutionContext context, final Expr argument,
                                            final TypeDescriptor expectedType) {
         if (argument instanceof Expr.PropertyReference reference) {
             if (codeModelArgument(expectedType) != null) {
@@ -2881,8 +2944,14 @@ final class MemberInteropResolver {
             final var lambda = inlineLambda(argument);
             if (lambda != null) {
                 lambda.setCodeModelType(expectedType);
-                resolveLambda(context, lambda, wrappedCodeModel);
-                return expectedType;
+                final var resolvedLambda = resolveLambda(context, lambda, wrappedCodeModel);
+                // Record the resolved function shape, so a type parameter in the expected wrapper
+                // (as in `CodeModel<(T) -> V>`) is bound from the lambda's own parameter and
+                // return types instead of remaining unsolved at the call site.
+                final var modelType = TypeDescriptor.genericOf(
+                        TypeDescriptor.ofName("zeron.compiler.CodeModel"), resolvedLambda);
+                lambda.setCodeModelType(modelType);
+                return modelType;
             }
         }
         if (argument instanceof Expr.Literal literal

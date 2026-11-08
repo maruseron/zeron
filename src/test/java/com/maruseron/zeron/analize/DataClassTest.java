@@ -39,7 +39,7 @@ public final class DataClassTest {
                 }
                 fn sum(x: Int, y: Int): Int = x + y;
                 fn same<T: mut + Eq<T>>(left: T, right: T): Boolean = left == right;
-                fn hash<T: mut + Hashable<T>>(value: T): Int = value.hash();
+                fn hash<T: mut + Hashable<T>>(value: T): Long = value.hash();
                 fn components(): Int = %s.new(3, 4).squaredDistance();
                 fn auxiliaryInitializer(): Int = %s.new(3, 4).getTotal();
                 fn equal(): Boolean = same(%s.new(3, 4), %s.new(3, 4));
@@ -50,7 +50,7 @@ public final class DataClassTest {
                     left.setTotal(99);
                     return same(left, right);
                 }
-                fn hashed(): Int = hash(%s.new(3, 4));
+                fn hashed(): Long = hash(%s.new(3, 4));
                 """.formatted(className, className, className, className, className,
                 className, className, className, className, className);
         final var compiler = new CompilationService(parse(source), programName);
@@ -65,7 +65,7 @@ public final class DataClassTest {
                 assertTrue((Boolean) program.getMethod("equal").invoke(null));
                 assertFalse((Boolean) program.getMethod("unequal").invoke(null));
                 assertTrue((Boolean) program.getMethod("auxiliaryStateIgnored").invoke(null));
-                assertTrue((Integer) program.getMethod("hashed").invoke(null) != 0);
+                assertTrue((Long) program.getMethod("hashed").invoke(null) != 0L);
                 final var dataClass = loader.loadClass(className);
                 assertTrue(java.lang.reflect.Modifier.isFinal(dataClass.getDeclaredField("x").getModifiers()));
                 assertTrue(java.lang.reflect.Modifier.isFinal(dataClass.getDeclaredField("y").getModifiers()));

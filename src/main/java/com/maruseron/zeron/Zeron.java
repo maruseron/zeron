@@ -25,7 +25,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static java.lang.IO.println;
@@ -454,6 +456,12 @@ public class Zeron {
 
     static StandardLibrarySetup resolveStandardLibrary(final StandardLibraryMode mode,
                                                        final List<Path> libraryRoots) throws IOException {
+        return resolveStandardLibrary(mode, libraryRoots, getZeronCommandHome());
+    }
+
+    static StandardLibrarySetup resolveStandardLibrary(final StandardLibraryMode mode,
+                                                       final List<Path> libraryRoots,
+                                                       final Path home) throws IOException {
         final var libraries = loadLibraries(libraryRoots);
         if (mode == StandardLibraryMode.SOURCE) {
             return new StandardLibrarySetup(true, libraryRoots, libraries);
@@ -461,13 +469,24 @@ public class Zeron {
         if (exportsStandardLibrary(libraries)) {
             return new StandardLibrarySetup(false, libraryRoots, libraries);
         }
-        final var bundledJar = bundledStandardLibraryJar();
+        final var bundledJar = bundledStandardLibraryJar(home);
         if (bundledJar.isPresent()) {
-            final var resolvedRoots = new ArrayList<>(libraryRoots);
-            resolvedRoots.add(bundledJar.get());
-            final var resolvedLibraries = new ArrayList<>(libraries);
-            resolvedLibraries.add(ZeronLibraryIndex.readFromJar(bundledJar.get()));
-            return new StandardLibrarySetup(false, resolvedRoots, resolvedLibraries);
+            try {
+                final var resolvedRoots = new ArrayList<>(libraryRoots);
+                resolvedRoots.add(bundledJar.get());
+                final var resolvedLibraries = new ArrayList<>(libraries);
+                resolvedLibraries.add(ZeronLibraryIndex.readFromJar(bundledJar.get()));
+                return new StandardLibrarySetup(false, resolvedRoots, resolvedLibraries);
+            } catch (final IOException incompatible) {
+                if (mode == StandardLibraryMode.COMPILED) {
+                    throw new IllegalArgumentException("Compiled standard-library mode found an incompatible "
+                            + "library at " + bundledJar.get() + ": " + incompatible.getMessage()
+                            + " Install a matching Zeron release, add one to [dependencies].zeron-libraries, "
+                            + "or set [platform].stdlib = \"source\".", incompatible);
+                }
+                debug("Installed compiled standard library is incompatible; "
+                        + "using bundled standard-library sources: " + incompatible.getMessage());
+            }
         }
         if (mode == StandardLibraryMode.COMPILED) {
             throw new IllegalArgumentException("Compiled standard-library mode requires a standard-library "
@@ -486,10 +505,53 @@ public class Zeron {
         return availableTypes.containsAll(STANDARD_LIBRARY_TYPES);
     }
 
-    static Optional<Path> bundledStandardLibraryJar() throws IOException {
-        final var installationHome = System.getProperty("zeron.home");
-        if (installationHome == null || installationHome.isBlank()) return Optional.empty();
-        final var libraryDirectory = Path.of(installationHome).resolve("lib");
+    private static String getSystemPath() {
+        final var env = System.getenv();
+        if (env.containsKey("Path")) return env.get("Path");
+        if (env.containsKey("PATH")) return env.get("PATH");
+
+        // Fallback: Case-insensitive search just to be safe
+        return env.entrySet().stream()
+                .filter(e -> "PATH".equalsIgnoreCase(e.getKey()))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
+    }
+
+    static Path getZeronCommandHome() {
+        final var configuredHome = System.getProperty("zeron.home");
+        if (configuredHome != null && !configuredHome.isBlank()) {
+            return Path.of(configuredHome).toAbsolutePath().normalize();
+        }
+        return getCommandHome(getSystemPath(), "zeron").orElseThrow(() -> new IllegalArgumentException("No Zeron installation found."));
+    }
+
+    static Optional<Path> getCommandHome(final String pathEnvironment, final String comand) {
+        if (pathEnvironment == null) return Optional.empty();
+
+        // Windows expects extensions like .exe or .cmd, whereas Unix doesn't
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+        String[] extensions = isWindows ? new String[]{ ".exe", ".cmd", ".bat" } : new String[]{""};
+
+        // 2. Split by the OS-safe separator (';' on Windows)
+        return Arrays.stream(pathEnvironment.split(File.pathSeparator))
+            .map(Paths::get)
+            // 3. For each directory, check if the command file actually exists
+            .flatMap(dir -> Arrays.stream(extensions).map(ext -> dir.resolve(comand + ext)))
+            .filter(Files::isRegularFile)   // Ensures it's a file, not a directory
+            .filter(Files::isExecutable)    // Ensures we actually have rights to run it
+            .map(Path::getParent)           // Discard the command, so {installation.home}/bin
+            .map(Path::getParent)           // We don't need bin, we need the installation home
+            .findFirst();
+    }
+
+    public static Optional<Path> bundledStandardLibraryJar() throws IOException {
+        return bundledStandardLibraryJar(getZeronCommandHome());
+    }
+
+    static Optional<Path> bundledStandardLibraryJar(final Path installationHome) throws IOException {
+        if (installationHome == null) return Optional.empty();
+        final var libraryDirectory = installationHome.resolve("lib");
         if (!Files.isDirectory(libraryDirectory)) return Optional.empty();
         try (final var entries = Files.list(libraryDirectory)) {
             final var candidates = entries

@@ -51,6 +51,13 @@ final class TypeCompatibility implements TypeProjector {
                                     final Token where) {
         if (expectedType instanceof InferDescriptor) return resolvedType;
         if (canAssign(expectedType, resolvedType)) return expectedType;
+        if (resolvedType instanceof TypeParameterDescriptor nullableParameter
+                && nullableParameter.admitsNullableArguments()) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK, where,
+                    "`" + where.lexeme() + "` has type `" + nullableParameter.name()
+                            + "`, which may be null. Check it against `null` before using it."));
+        }
 
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, where,
                 "Expected " + TypeFormatter.format(expectedType)
@@ -69,6 +76,10 @@ final class TypeCompatibility implements TypeProjector {
         }
         if (resolvedType instanceof TypeProjectionDescriptor projection) {
             return canAssign(expectedType, projection.bound());
+        }
+        if (resolvedType instanceof TypeParameterDescriptor nullableParameter
+                && nullableParameter.admitsNullableArguments()) {
+            return admitsNullableTypeParameter(expectedType, nullableParameter);
         }
         if (expectedType instanceof NullableDescriptor expectedNullable
                 && resolvedType instanceof NullableDescriptor resolvedNullable
@@ -156,26 +167,51 @@ final class TypeCompatibility implements TypeProjector {
     }
 
     TypeDescriptor inferenceView(final TypeDescriptor expectedType, final TypeDescriptor actualType) {
-        if (!(expectedType instanceof GenericDescriptor expected)
-                || !(actualType instanceof GenericDescriptor actual)) return actualType;
-        final var declaration = classes.get(actual.baseType().name());
-        if (declaration == null || declaration.typeParameters().size() != actual.typeParameters().size()) {
-            return actualType;
+        if (!(expectedType instanceof GenericDescriptor expected)) return actualType;
+        final var actualBase = actualType instanceof ReferenceDescriptor reference
+                ? reference.baseType()
+                : actualType;
+        if (actualBase instanceof GenericDescriptor actual) {
+            final var declaration = classes.get(actual.baseType().name());
+            if (declaration != null
+                    && declaration.typeParameters().size() == actual.typeParameters().size()) {
+                final var projected = projectClassContracts(declaration, actual.typeParameters(), expected);
+                if (projected != null) return projected;
+            }
+            // A contract value can stand in for one of its parent contracts, including a generic
+            // model implementation standing in for `Model<T>`.
+            return projectTo(actualBase, expected.baseType()).orElse(actualType);
         }
-        final var substitutions = new java.util.LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        for (int index = 0; index < declaration.typeParameters().size(); index++) {
-            substitutions.put(declaration.typeParameters().get(index), actual.typeParameters().get(index));
-        }
-        for (final var applied : ContractComposition.forClass(contracts, declaration)) {
-            if (!applied.use().name().lexeme().equals(expected.baseType().name())) continue;
-            final var arguments = applied.use().typeArguments().stream()
-                    .map(argument -> TypeSubstitution.substitute(argument, substitutions))
-                    .toList();
-            if (arguments.size() == expected.typeParameters().size()) {
-                return TypeDescriptor.genericOf(expected.baseType(), arguments);
+        if (actualBase instanceof NominalDescriptor nominal) {
+            final var declaration = classes.get(nominal.name());
+            if (declaration != null) {
+                final var projected = projectClassContracts(declaration, List.of(), expected);
+                if (projected != null) return projected;
             }
         }
         return actualType;
+    }
+
+    /// Projects a class's contract uses to the expected contract, substituting the class's type
+    /// arguments into the declared parent arguments.
+    private TypeDescriptor projectClassContracts(final Stmt.ClassDecl declaration,
+                                                 final List<TypeDescriptor> arguments,
+                                                 final GenericDescriptor expected) {
+        if (declaration.typeParameters().size() != arguments.size()) return null;
+        final var substitutions = new java.util.LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int index = 0; index < declaration.typeParameters().size(); index++) {
+            substitutions.put(declaration.typeParameters().get(index), arguments.get(index));
+        }
+        for (final var applied : ContractComposition.forClass(contracts, declaration)) {
+            if (!applied.use().name().lexeme().equals(expected.baseType().name())) continue;
+            final var projectedArguments = applied.use().typeArguments().stream()
+                    .map(argument -> TypeSubstitution.substitute(argument, substitutions))
+                    .toList();
+            if (projectedArguments.size() == expected.typeParameters().size()) {
+                return TypeDescriptor.genericOf(expected.baseType(), projectedArguments);
+            }
+        }
+        return null;
     }
 
     private boolean functionParametersAccept(final FunctionDescriptor expectedFunction,
@@ -372,6 +408,21 @@ final class TypeCompatibility implements TypeProjector {
             }
         }
         return TypeDescriptor.ofAny();
+    }
+
+    /// Whether `expectedType` is one of the only targets a possibly-null type-parameter value may be
+    /// used for: the parameter itself, `T?`, or `Any?`.
+    boolean admitsNullableTypeParameter(final TypeDescriptor expectedType,
+                                        final TypeParameterDescriptor parameter) {
+        if (expectedType instanceof InferDescriptor) return true;
+        final var expected = expectedType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : expectedType;
+        if (expected instanceof NullableDescriptor nullable) {
+            return nullable.baseType() instanceof AnyDescriptor
+                    || nullable.baseType() instanceof TypeParameterDescriptor candidate
+                        && candidate.equals(parameter);
+        }
+        return expected instanceof TypeParameterDescriptor candidate && candidate.equals(parameter);
     }
 
     private boolean isNullableAny(final TypeDescriptor type) {

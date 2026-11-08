@@ -67,7 +67,7 @@ public contract Sortable<C<_>> {
     sortedBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): C<T>;
 
     /// Returns a copy sorted by the natural order of its elements.
-    default sorted<T: nullable + mut + Comparable<T>>(this: C<T>): C<T> =
+    default sorted<T: mut + Comparable<T>>(this: C<T>): C<T> =
         this.sortedBy((a, b) -> a.compareTo(b));
 }
 
@@ -79,7 +79,7 @@ public contract InPlaceSortable<C<_>> {
     mut sortBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): Unit;
 
     /// Sorts the collection in place using the natural order of its elements.
-    default mut sort<T: nullable + mut + Comparable<T>>(this: &C<T>): Unit =
+    default mut sort<T: mut + Comparable<T>>(this: &C<T>): Unit =
         this.sortBy((a, b) -> a.compareTo(b));
 }
 

@@ -2445,7 +2445,20 @@ public final class Parser {
     }
 
     private Expr expression() {
-        return assignment();
+        final var start = assignment();
+        if (match(DOT_DOT)) {
+            final var operator = previous();
+            return intRange(start, operator, expression());
+        }
+        return start;
+    }
+
+    private static Expr intRange(final Expr start, final Token operator, final Expr end) {
+        final var className = new Token(IDENTIFIER, "zeron.ranges.IntRange", null, operator.span());
+        final var factoryName = new Token(IDENTIFIER, "closed", null, operator.span());
+        final var receiver = new Expr.Variable(className, TypeDescriptor.ofInfer());
+        return new Expr.MemberCall(receiver, factoryName, operator,
+                List.of(start, end), List.of(), TypeDescriptor.ofInfer());
     }
 
     private Expr assignment() {
@@ -2453,7 +2466,7 @@ public final class Parser {
 
         if (match(HUH_HUH_EQUAL)) {
             final var operator = previous();
-            final var value = assignment();
+            final var value = expression();
             if (expr instanceof Expr.Variable variable) {
                 return new Expr.CoalesceAssignment(variable.name, value);
             }
@@ -2465,7 +2478,7 @@ public final class Parser {
             AMPERSAND_EQUAL, PIPE_EQUAL, CARET_EQUAL, SHIFT_LEFT_EQUAL,
             SHIFT_RIGHT_EQUAL, UNSIGNED_SHIFT_RIGHT_EQUAL, EQUAL)) {
             final var operator = previous();
-            final var value = assignment();
+            final var value = expression();
 
             if (expr instanceof Expr.Property property) {
                 if (operator.type() != EQUAL) {
@@ -3021,20 +3034,7 @@ public final class Parser {
         }
 
         if (match(INT)) {
-            final var number = previous();
-            if (match(DOT_DOT)) {
-            final var operator = previous();
-            final var end = consume(INT, "Expect Integer after range operator");
-            final var className = new Token(IDENTIFIER, "zeron.ranges.IntRange", null, number.span());
-            final var factoryName = new Token(IDENTIFIER, "closed", null, operator.span());
-            final var receiver = new Expr.Variable(className, TypeDescriptor.ofInfer());
-            final var arguments = List.<Expr>of(
-                integerLiteral(number),
-                integerLiteral(end));
-            return new Expr.MemberCall(receiver, factoryName, end, arguments,
-                List.of(), TypeDescriptor.ofInfer());
-            }
-            return integerLiteral(number);
+            return integerLiteral(previous());
         }
 
         if (match(LONG)) {

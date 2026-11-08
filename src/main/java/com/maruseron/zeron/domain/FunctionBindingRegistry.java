@@ -173,7 +173,7 @@ public final class FunctionBindingRegistry {
         final var bigIntegerCompare = TypeDescriptor.functionOf(
                 "bigIntegerCompare", TypeDescriptor.ofInt(), bigInteger, bigInteger);
         final var bigIntegerHash = TypeDescriptor.functionOf(
-                "bigIntegerHash", TypeDescriptor.ofInt(), bigInteger);
+                "bigIntegerHash", TypeDescriptor.ofLong(), bigInteger);
         final var rationalValue = new ReferenceDescriptor(
                 TypeDescriptor.ofName("com.maruseron.zeron.runtime.RationalValue"));
         final var rationalFromLiteralText = TypeDescriptor.functionOf(
@@ -203,7 +203,7 @@ public final class FunctionBindingRegistry {
         final var rationalCompare = TypeDescriptor.functionOf(
                 "rationalCompare", TypeDescriptor.ofInt(), rationalValue, rationalValue);
         final var rationalHash = TypeDescriptor.functionOf(
-                "rationalHash", TypeDescriptor.ofInt(), rationalValue);
+                "rationalHash", TypeDescriptor.ofLong(), rationalValue);
         final var rationalToString = TypeDescriptor.functionOf(
                 "rationalToString", TypeDescriptor.ofString(), rationalValue);
         final var string = TypeDescriptor.ofString().toNullable();
@@ -356,7 +356,7 @@ public final class FunctionBindingRegistry {
                 Map.entry("zeron.numeric.bigIntegerHash",
                         new Binding(bigIntegerHash, new StaticMethod(
                                 ClassDesc.of("com.maruseron.zeron.runtime.NumericSupport"),
-                                "bigIntegerHash", MethodTypeDesc.of(ConstantDescs.CD_int,
+                                "bigIntegerHash", MethodTypeDesc.of(ConstantDescs.CD_long,
                                         ClassDesc.of("java.math.BigInteger"))))),
                 Map.entry("zeron.numeric.rationalFromLiteralText",
                         new Binding(rationalFromLiteralText, new StaticMethod(
@@ -425,7 +425,7 @@ public final class FunctionBindingRegistry {
                 Map.entry("zeron.numeric.rationalHash",
                         new Binding(rationalHash, new InstanceMethod(
                                 ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "hashValue",
-                                MethodTypeDesc.of(ConstantDescs.CD_int)))),
+                                MethodTypeDesc.of(ConstantDescs.CD_long)))),
                 Map.entry("zeron.numeric.rationalToString",
                         new Binding(rationalToString, new InstanceMethod(
                                 ClassDesc.of("com.maruseron.zeron.runtime.RationalValue"), "displayText",

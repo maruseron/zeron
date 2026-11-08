@@ -1,0 +1,104 @@
+package zeron.lang;
+
+import zeron.serialization.Decode;
+import zeron.serialization.DecodeError;
+import zeron.serialization.Decoder;
+import zeron.serialization.Encode;
+import zeron.serialization.EncodeError;
+import zeron.serialization.Encoder;
+
+/// Built-in codecs for the primitive types.
+///
+/// The primitive types live in this package, and a witness must be declared in the package of its
+/// contract or of its target, so the primitive codecs belong here rather than beside the
+/// serialization model.
+
+/// Parses the decimal text the canonical model uses for integers.
+fn intFromText(text: String): Option<Int> {
+    let length = text.length();
+    if (length == 0) return Option<Int>.None();
+    let mut index = 0;
+    let mut negative = false;
+    let mut value = 0;
+    let sign = codePointAt(text, 0);
+    if (sign == 45) {
+        negative = true;
+        index = 1;
+    } else if (sign == 43) {
+        index = 1;
+    }
+    if (index >= length) return Option<Int>.None();
+    while (index < length) {
+        let code = codePointAt(text, index);
+        if (code < 48 or code > 57) return Option<Int>.None();
+        value = value * 10 + (code - 48);
+        index = index + 1;
+    }
+    if (negative) return Option.Some(-value);
+    return Option.Some(value);
+}
+
+/// Returns the code point at `index`, or `-1` when it is out of range.
+fn codePointAt(text: String, index: Int): Int =
+    match (text.codePointAt(index)) {
+        case Option.Some(value) -> value.toInt();
+        case Option.None() -> -1;
+    };
+
+witness Encode<Int, {}> for Int {
+    static fn encode(value: Int, encoder: &Encoder): Result<Unit, EncodeError> =
+        encoder.writeInteger("" + value);
+}
+
+/// Wraps a decoded integer in a successful result.
+fn okInt(value: Int): Result<Int, DecodeError> = Result.Ok(value);
+
+/// Reports that the decoded text is not an integer.
+fn errInt(text: String): Result<Int, DecodeError> =
+    Result.Err(DecodeError.new(
+        "Expected a decimal integer, found '" + text + "'.", [], Option.None()));
+
+/// Propagates a decoder failure while decoding an integer.
+fn failInt(error: DecodeError): Result<Int, DecodeError> = Result.Err(error);
+
+/// Converts decoded integer text into an integer, or reports why it is not one.
+fn intResult(text: String): Result<Int, DecodeError> =
+    match (intFromText(text)) {
+        case Option.Some(value) -> okInt(value);
+        case Option.None() -> errInt(text);
+    };
+
+witness Decode<Int, {}> for Int {
+    static fn decode(decoder: &Decoder): Result<Int, DecodeError> =
+        match (decoder.readInteger()) {
+            case Result.Ok(text) -> intResult(text);
+            case Result.Err(error) -> failInt(error);
+        };
+}
+
+witness Encode<Boolean, {}> for Boolean {
+    static fn encode(value: Boolean, encoder: &Encoder): Result<Unit, EncodeError> =
+        encoder.writeBoolean(value);
+}
+
+witness Decode<Boolean, {}> for Boolean {
+    static fn decode(decoder: &Decoder): Result<Boolean, DecodeError> = decoder.readBoolean();
+}
+
+witness Encode<String, {}> for String {
+    static fn encode(value: String, encoder: &Encoder): Result<Unit, EncodeError> =
+        encoder.writeString(value);
+}
+
+witness Decode<String, {}> for String {
+    static fn decode(decoder: &Decoder): Result<String, DecodeError> = decoder.readString();
+}
+
+witness Encode<Float, {}> for Float {
+    static fn encode(value: Float, encoder: &Encoder): Result<Unit, EncodeError> =
+        encoder.writeFloat(value);
+}
+
+witness Decode<Float, {}> for Float {
+    static fn decode(decoder: &Decoder): Result<Float, DecodeError> = decoder.readFloat();
+}

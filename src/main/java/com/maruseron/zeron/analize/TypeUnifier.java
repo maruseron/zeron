@@ -117,7 +117,7 @@ final class TypeUnifier {
                     && previous.equals(baseType))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.GENERIC_INFERENCE_FAILURE, where,
                         "Conflicting type inferences for '" + parameter.name() + "': "
-                                + previous + " and " + actual + "."));
+                                + previous.name() + " and " + actual.name() + "."));
             }
             return;
         }

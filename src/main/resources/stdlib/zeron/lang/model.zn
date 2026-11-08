@@ -20,8 +20,8 @@ public contract Model<T: nullable + mut> {
     default field<V: nullable + mut>(source: PropertyRef<T, V>): Option<Field<T, V>> {
         for (let candidate in this.fields) {
             if (candidate.sourceId == source.id) {
-                return Option<Field<T, V>>.Some(
-                        Field<T, V>.new(candidate.externalName, candidate.sourceId, source));
+                return Option<Field<T, V>>.Some(Field<T, V>.new(
+                        candidate.externalName, candidate.sourceId, source, source.writer));
             }
         }
         return Option<Field<T, V>>.None();
@@ -43,8 +43,8 @@ public contract Model<T: nullable + mut> {
 /// A mapped field with its property's value type erased.
 ///
 /// `Model.fields` enumerates mappings through this class, so a consumer can read every external
-/// name without knowing the value types. A typed view of one mapping is a `Field`. Model
-/// declarations create every instance.
+/// name without knowing the value types. A typed view of one mapping is a `Field`. A model
+/// declaration creates the `AnyField` instances it exposes.
 public class AnyField<T: nullable + mut> {
     /// The name this field has in the external representation.
     public property externalName: String;
@@ -68,6 +68,9 @@ public class Field<T: nullable + mut, V: nullable + mut> {
 
     /// The mapped property.
     public property source: PropertyRef<T, V>;
+
+    /// Writes the mapped property, present when the property has an accessible setter.
+    public property writer: Option<(&T, V) -> Unit>;
 
     public constructor new;
 

@@ -30,10 +30,12 @@ The work is staged:
 2. **Contract composition implemented.** `requires` composes applied contracts transitively,
    including members, declaration-site conformance, generic-bound evidence, constructors, and
    separate-compilation metadata.
-3. **Implemented: complete `Hashable<T>` requiring `Eq<T>`.** The hash operation returns `Int`;
-   compiler-provided evidence covers `Int`, `Float`, `Boolean`, `String`, and `Unit`, nullable
-   evidence lifts these semantics, and generic code must state a `Hashable<T>` bound. Equality-only
-   operations continue to require only `Eq<T>`.
+3. **Implemented: complete `Hashable<T>` requiring `Eq<T>`.** The hash operation returns a 64-bit
+   `Long`; compiler-provided evidence covers `Int`, `Long`, `Float`, `Boolean`, `String`, and `Unit`,
+   nullable evidence lifts these semantics, and generic code must state a `Hashable<T>` bound.
+   `String` uses a 64-bit FNV-1a pass with final avalanche, `Float` canonicalizes NaNs while keeping
+   signed zero distinct, and derived values use a shared order-sensitive combiner seeded by sum
+   case. Equality-only operations continue to require only `Eq<T>`.
 4. **Implemented: add hash-based `Map<K, V>` and `Set<T>`.** Their type parameters carry
    class-level `Hashable` bounds, and nullable keys/elements use the established nullable evidence.
    Keys must not change their equality- or hash-relevant state while stored.

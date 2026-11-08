@@ -6,6 +6,7 @@ public external class JsonValue = "com.maruseron.zeron.runtime.json.JsonValue" {
     public static stringValue(value: String): &JsonValue;
     public static arrayValue(value: &JsonArray): &JsonValue;
     public static objectValue(value: &JsonObject): &JsonValue;
+    public static numberValue(lexeme: String): &JsonValue?;
 
     public kind(): String;
     public booleanValue(): Boolean?;
@@ -57,4 +58,9 @@ public external class JsonSupport = "com.maruseron.zeron.runtime.json.JsonSuppor
     public static parse(text: String): &JsonParseResult;
     public static number(lexeme: String): &JsonParseResult;
     public static stringify(value: &JsonValue): &JsonTextResult;
+    public static stringifyIndented(value: &JsonValue, indent: Int): &JsonTextResult;
+    public static isKind(value: &JsonValue, kind: String): Boolean;
+    public static isIntegralNumber(lexeme: String): Boolean;
+    public static isFiniteNumber(lexeme: String): Boolean;
+    public static doubleValue(lexeme: String): Float;
 }

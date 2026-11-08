@@ -13,7 +13,10 @@ import zeron.control.Monad;
 ///
 /// `Result` implements the `Monad` and `Foldable` operations through its witnesses, so the
 /// generic control operations work on it as well as the members below.
-public type Result<T: mut, E: mut> =
+///
+/// Both type parameters admit nullable arguments, as `Option`'s does, so a result may carry
+/// `T?` or an optional error without an intervening wrapper.
+public type Result<T: nullable + mut, E: nullable + mut> =
       Ok(value: T)
     | Err(error: E);
 
@@ -64,7 +67,7 @@ public extension<T: mut, E: mut> Result<T, E> {
         };
 
     /// Chains another fallible operation on the successful value, leaving a failure unchanged.
-    public fn andThen<U: mut>(transform: (T) -> Result<U, E>): Result<U, E> =
+    public fn flatMap<U: mut>(transform: (T) -> Result<U, E>): Result<U, E> =
         match (this) {
             case Result.Ok(value) -> transform(value);
             case Result.Err(error) -> Result<U, E>.Err(error);
@@ -86,7 +89,7 @@ witness<E: mut> Monad<Result<_, E>> for Result<_, E> {
         };
 
     fn flatMap<A: mut, B: mut>(this: Result<A, E>, transform: (A) -> Result<B, E>): Result<B, E> =
-        this.andThen(transform);
+        this.flatMap(transform);
 }
 
 witness<E: mut> Foldable<Result<_, E>> for Result<_, E> {

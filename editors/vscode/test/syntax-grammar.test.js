@@ -111,6 +111,18 @@ test('highlights implementation only before HKT implementation blocks', () => {
   assert.equal(matcher.test('let implementation = 1;'), false);
 });
 
+test('highlights ranges as one operator token with expression endpoints', () => {
+  const operatorPattern = new RegExp(grammar.repository.operators.match, 'g');
+  const ranges = source => Array.from(source.matchAll(operatorPattern), match => match[0])
+    .filter(operator => operator === '..' || operator === '...');
+
+  assert.deepEqual(ranges('0..values.length - 1'), ['..']);
+  assert.deepEqual(ranges('(start .. end)'), ['..']);
+  assert.deepEqual(ranges('let range = start..end;'), ['..']);
+  // `...` stays a single ellipsis token rather than range plus dot.
+  assert.deepEqual(ranges('Pair<Int, String>...'), ['...']);
+});
+
 test('highlights delegating only before witness and HKT implementation declarations', () => {
   const delegatingPattern = grammar.repository['contextual-keywords'].patterns
     .find(pattern => pattern.match.includes('delegating'));

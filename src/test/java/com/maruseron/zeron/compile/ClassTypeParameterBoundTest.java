@@ -33,17 +33,17 @@ public final class ClassTypeParameterBoundTest {
                 public class HashBox<T: Hashable<T>> {
                     value: T;
                     public constructor new;
-                    public hash(): Int = this.value.hash();
+                    public hash(): Long = this.value.hash();
                 }
                 public class NamedHashBox<T: Hashable<T>> {
                     value: T;
                     public constructor new;
                     public constructor of(value: T) = NamedHashBox<T>.new(value);
-                    public hash(): Int = this.value.hash();
+                    public hash(): Long = this.value.hash();
                 }
                 public contract HashCarrier<K: Hashable<K>> {
                     key(): K;
-                    default keyHash(): Int = this.key().hash();
+                    default keyHash(): Long = this.key().hash();
                 }
                 public class IntHashCarrier is HashCarrier<Int> {
                     public constructor new;
@@ -89,16 +89,16 @@ public final class ClassTypeParameterBoundTest {
                     import %s.IntHashCarrier;
                     import %s.GenericHashCarrier;
                     public fn create(): &HashKey<Int> = HashKey<Int>.new();
-                    public fn hashBox(): Int = HashBox<Int>.new(17).hash();
+                    public fn hashBox(): Long = HashBox<Int>.new(17).hash();
                     public fn hashBoxObject(): &HashBox<Int> = HashBox<Int>.new(41);
-                    public fn namedHashBox(): Int = NamedHashBox<Int>.of(37).hash();
-                    public fn forwardedHash<T: Hashable<T>>(value: T): Int =
+                    public fn namedHashBox(): Long = NamedHashBox<Int>.of(37).hash();
+                    public fn forwardedHash<T: Hashable<T>>(value: T): Long =
                             HashBox<T>.new(value).hash();
-                    public fn forwardedHashResult(): Int = forwardedHash<Int>(23);
-                    public fn hashCarrier(): Int = IntHashCarrier.new().keyHash();
-                    public fn genericHashCarrier<K: Hashable<K>>(value: K): Int =
+                    public fn forwardedHashResult(): Long = forwardedHash<Int>(23);
+                    public fn hashCarrier(): Long = IntHashCarrier.new().keyHash();
+                    public fn genericHashCarrier<K: Hashable<K>>(value: K): Long =
                             GenericHashCarrier<K>.new(value).keyHash();
-                    public fn genericHashCarrierResult(): Int = genericHashCarrier<Int>(31);
+                    public fn genericHashCarrierResult(): Long = genericHashCarrier<Int>(31);
                     """.formatted(clientPackage, libraryPackage, libraryPackage, libraryPackage,
                             libraryPackage, libraryPackage, libraryPackage));
             final var validCompiler = CompilationService.forCompilationUnits(
@@ -111,13 +111,13 @@ public final class ClassTypeParameterBoundTest {
                     getClass().getClassLoader())) {
                 final var generated = loader.loadClass(clientPackage + ".Client");
                 assertTrue(generated.getMethod("create").invoke(null) != null);
-                assertEquals(17, generated.getMethod("hashBox").invoke(null));
+                assertEquals(17L, generated.getMethod("hashBox").invoke(null));
                 final var hashBox = generated.getMethod("hashBoxObject").invoke(null);
-                assertEquals(41, hashBox.getClass().getMethod("hash").invoke(hashBox));
-                assertEquals(37, generated.getMethod("namedHashBox").invoke(null));
-                assertEquals(23, generated.getMethod("forwardedHashResult").invoke(null));
-                assertEquals(29, generated.getMethod("hashCarrier").invoke(null));
-                assertEquals(31, generated.getMethod("genericHashCarrierResult").invoke(null));
+                assertEquals(41L, hashBox.getClass().getMethod("hash").invoke(hashBox));
+                assertEquals(37L, generated.getMethod("namedHashBox").invoke(null));
+                assertEquals(23L, generated.getMethod("forwardedHashResult").invoke(null));
+                assertEquals(29L, generated.getMethod("hashCarrier").invoke(null));
+                assertEquals(31L, generated.getMethod("genericHashCarrierResult").invoke(null));
                 final var boundedClass = loader.loadClass(libraryPackage + ".HashKey");
                 final var javaConstruction = assertThrows(java.lang.reflect.InvocationTargetException.class,
                         () -> boundedClass.getConstructor().newInstance());

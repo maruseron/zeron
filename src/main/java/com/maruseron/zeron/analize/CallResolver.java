@@ -245,8 +245,7 @@ final class CallResolver {
             final var expected = TypeSubstitution.substitute(
                     parameterType(genericType.parameters(), i, fixedArity, variadic), substitutions);
             if (functionType(expected) == null
-                    && !(argument instanceof Expr.PropertyReference
-                        && MemberInteropResolver.codeModelArgument(expected) != null)) {
+                    && MemberInteropResolver.codeModelArgument(expected) == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                         call.callee,
                         "A function value argument requires a function parameter type."));

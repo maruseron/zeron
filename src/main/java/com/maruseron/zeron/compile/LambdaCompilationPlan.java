@@ -132,32 +132,44 @@ final class LambdaCompilationPlan {
     }
 
     private void collectLambdaShapes(final List<Stmt> statements) {
+        collectLambdaShapes(statements, null);
+    }
+
+    private void collectLambdaShapes(final List<Stmt> statements, final TypeDescriptor returnType) {
         for (final var statement : statements) {
-            collectLambdaShapes(statement);
+            collectLambdaShapes(statement, returnType);
         }
     }
 
     private void collectLambdaShapes(final Stmt statement) {
+        collectLambdaShapes(statement, null);
+    }
+
+    private void collectLambdaShapes(final Stmt statement, final TypeDescriptor enclosingReturnType) {
         switch (statement) {
             case Stmt.ClassDecl declaration -> {
                 for (final var field : declaration.fields()) collectFunctionShapes(field.type());
                 for (final var property : declaration.properties()) {
                     collectFunctionShapes(property.type());
                     if (property.initializer() != null) collectLambdaShapes(property.initializer());
-                    if (property.getterBody() != null) collectLambdaShapes(property.getterBody());
-                    if (property.setterBody() != null) collectLambdaShapes(property.setterBody());
+                    if (property.getterBody() != null) {
+                        collectLambdaShapes(property.getterBody(), property.type());
+                    }
+                    if (property.setterBody() != null) {
+                        collectLambdaShapes(property.setterBody(), TypeDescriptor.ofUnit());
+                    }
                 }
                 for (final var method : declaration.methods()) {
                     for (final var parameter : method.typeDescriptor().parameters()) collectFunctionShapes(parameter);
                     collectFunctionShapes(method.typeDescriptor().returnType());
-                    collectLambdaShapes(method.body());
+                    collectLambdaShapes(method.body(), method.typeDescriptor().returnType());
                 }
                 for (final var constructor : declaration.namedConstructors()) {
                     for (final var parameter : constructor.typeDescriptor().parameters()) {
                         collectFunctionShapes(parameter);
                     }
                     collectFunctionShapes(constructor.typeDescriptor().returnType());
-                    collectLambdaShapes(constructor.body());
+                    collectLambdaShapes(constructor.body(), constructor.typeDescriptor().returnType());
                 }
                 declaration.higherKindedImplementations().forEach(this::collectWitnessAdapters);
                 collectContractBridgeAdapters(declaration);
@@ -166,7 +178,7 @@ final class LambdaCompilationPlan {
                 for (final var method : declaration.methods()) {
                     for (final var parameter : method.typeDescriptor().parameters()) collectFunctionShapes(parameter);
                     collectFunctionShapes(method.typeDescriptor().returnType());
-                    collectLambdaShapes(method.body());
+                    collectLambdaShapes(method.body(), method.typeDescriptor().returnType());
                 }
                 for (final var property : declaration.properties()) collectFunctionShapes(property.type());
             }
@@ -174,7 +186,7 @@ final class LambdaCompilationPlan {
                                boolean _, List<Expr> _, int _, boolean _) -> {
                 for (final var parameter : type.parameters()) collectFunctionShapes(parameter);
                 collectFunctionShapes(type.returnType());
-                collectLambdaShapes(body);
+                collectLambdaShapes(body, type.returnType());
             }
             case Stmt.Witness witness -> collectWitnessAdapters(witness);
             case Stmt.ExtensionMethod extension -> {
@@ -182,7 +194,7 @@ final class LambdaCompilationPlan {
                     collectFunctionShapes(parameter);
                 }
                 collectFunctionShapes(extension.typeDescriptor().returnType());
-                collectLambdaShapes(extension.body());
+                collectLambdaShapes(extension.body(), extension.typeDescriptor().returnType());
             }
             case Stmt.ExternalFunction external -> {
                 for (final var parameter : external.typeDescriptor().parameters()) {
@@ -190,33 +202,51 @@ final class LambdaCompilationPlan {
                 }
                 collectFunctionShapes(external.typeDescriptor().returnType());
             }
-            case Stmt.Block(List<Stmt> statements) -> collectLambdaShapes(statements);
+            case Stmt.Block(List<Stmt> statements) ->
+                    collectLambdaShapes(statements, enclosingReturnType);
             case Stmt.Using using -> {
                 for (final var resource : using.resources()) {
                     final var declaration = resource.declaration();
                     collectFunctionShapes(declaration.type());
-                    if (declaration.initializer() != null) collectLambdaShapes(declaration.initializer());
+                    if (declaration.initializer() != null) {
+                        collectLambdaShapes(declaration.initializer());
+                        if (!(declaration.type() instanceof InferDescriptor)) {
+                            collectFunctionAdapters(declaration.initializer().getType(), declaration.type());
+                        }
+                    }
                 }
-                collectLambdaShapes(using.body());
+                collectLambdaShapes(using.body(), enclosingReturnType);
             }
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 collectLambdaShapes(condition);
-                if (thenBranch != null) collectLambdaShapes(thenBranch);
-                if (elseBranch != null) collectLambdaShapes(elseBranch);
+                if (thenBranch != null) collectLambdaShapes(thenBranch, enclosingReturnType);
+                if (elseBranch != null) collectLambdaShapes(elseBranch, enclosingReturnType);
             }
-            case Stmt.Return(Expr value, Token _) -> { if (value != null) collectLambdaShapes(value); }
+            case Stmt.Return(Expr value, Token _) -> {
+                if (value != null) {
+                    collectLambdaShapes(value);
+                    if (enclosingReturnType != null) {
+                        collectFunctionAdapters(value.getType(), enclosingReturnType);
+                    }
+                }
+            }
             case Stmt.Expression(Expr expression) -> collectLambdaShapes(expression);
             case Stmt.Var(Token _, TypeDescriptor type, Expr initializer, BindingMutability _, _) -> {
                 collectFunctionShapes(type);
-                if (initializer != null) collectLambdaShapes(initializer);
+                if (initializer != null) {
+                    collectLambdaShapes(initializer);
+                    if (!(type instanceof InferDescriptor)) {
+                        collectFunctionAdapters(initializer.getType(), type);
+                    }
+                }
             }
             case Stmt.While(Token _, Expr condition, Stmt body) -> {
                 collectLambdaShapes(condition);
-                collectLambdaShapes(body);
+                collectLambdaShapes(body, enclosingReturnType);
             }
             case Stmt.For(Token _, Token _, Expr iterable, Stmt body) -> {
                 collectLambdaShapes(iterable);
-                collectLambdaShapes(body);
+                collectLambdaShapes(body, enclosingReturnType);
             }
             default -> {}
         }
@@ -275,7 +305,7 @@ final class LambdaCompilationPlan {
                 collectFunctionShapes(parameter);
             }
             collectFunctionShapes(implementation.typeDescriptor().returnType());
-            collectLambdaShapes(implementation.body());
+            collectLambdaShapes(implementation.body(), implementation.typeDescriptor().returnType());
         }
     }
 
@@ -351,7 +381,7 @@ final class LambdaCompilationPlan {
                         lambdaTemplateFactoryNames.putIfAbsent(lambda,
                                 "$lambdaTemplateFactory$" + lambdaTemplateFactoryNames.size());
                     }
-                    collectLambdaShapes(lambda.body);
+                    collectLambdaShapes(lambda.body, functionType.returnType());
                 }
             }
             case Expr.AnonymousObject object -> object.initializers().forEach(this::collectLambdaShapes);
@@ -454,6 +484,7 @@ final class LambdaCompilationPlan {
                     collectFunctionAdapters(reference.reader().getType(),
                             BytecodeEmitter.propertyReferenceReaderType());
                 }
+                collectLambdaShapes(reference.writer());
             }
             case Expr.Literal _ -> {}
             case null -> {}
@@ -668,19 +699,21 @@ final class LambdaCompilationPlan {
             }
             case Expr.Call call -> {
                 collectEvidenceCaptures(call.evidenceArguments(), localNames, captured, seen);
-                final var callee = call.resolvedSymbolToken();
-                final var calleeName = callee.lexeme();
-                if (!localNames.contains(calleeName)
-                        && (symbols.containsSymbol(callee) || symbols.containsAnySymbol(callee))) {
-                    final var binding = lookupCapture(callee);
-                    if (binding.lvt() != SymbolTable.GLOBAL
-                            && functionView(binding.type()) != null
-                            && seen.add(calleeName)) {
-                        captured.add(callee);
-                        final var captureType = call.genericFunctionType() == null
-                                ? binding.type()
-                                : call.genericFunctionType();
-                        activeCaptureTypes.putIfAbsent(calleeName, captureType);
+                if (call.implicitMemberCall() == null) {
+                    final var callee = call.resolvedSymbolToken();
+                    final var calleeName = callee.lexeme();
+                    if (!localNames.contains(calleeName)
+                            && (symbols.containsSymbol(callee) || symbols.containsAnySymbol(callee))) {
+                        final var binding = lookupCapture(callee);
+                        if (binding.lvt() != SymbolTable.GLOBAL
+                                && functionView(binding.type()) != null
+                                && seen.add(calleeName)) {
+                            captured.add(callee);
+                            final var captureType = call.genericFunctionType() == null
+                                    ? binding.type()
+                                    : call.genericFunctionType();
+                            activeCaptureTypes.putIfAbsent(calleeName, captureType);
+                        }
                     }
                 }
                 if (call.implicitMemberCall() != null) {
@@ -791,8 +824,8 @@ final class LambdaCompilationPlan {
                     return;
                 }
                 final var sourceName = variable.name.lexeme();
-                if (localNames.contains(sourceName)) return;
                 final var resolvedName = variable.resolvedSymbolToken();
+                if (localNames.contains(sourceName)) return;
                 if (localNames.contains(resolvedName.lexeme())) return;
                 if ((symbols.containsSymbol(resolvedName) || symbols.containsAnySymbol(resolvedName))
                         && lookupCapture(resolvedName).lvt() != SymbolTable.GLOBAL
@@ -1101,6 +1134,7 @@ final class LambdaCompilationPlan {
 
     private void collectFunctionAdapters(final TypeDescriptor sourceType,
                                          final TypeDescriptor targetType) {
+        if (sourceType == null || targetType == null) return;
         final var source = functionView(sourceType);
         final var target = functionView(targetType);
         if (source == null || target == null || !registerFunctionAdapter(source, target)) return;

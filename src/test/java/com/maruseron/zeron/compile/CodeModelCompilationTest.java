@@ -62,25 +62,25 @@ public final class CodeModelCompilationTest {
                 public property value: T;
             }
 
-            fn preserveIdentity(@CodeModel model: CodeModel<(User) -> User>)
+            fn preserveIdentity(model: CodeModel<(User) -> User>)
                 : CodeModel<(User) -> User> = model;
 
-            fn preserveNumber(@CodeModel model: CodeModel<(Int) -> Int>)
+            fn preserveNumber(model: CodeModel<(Int) -> Int>)
                 : CodeModel<(Int) -> Int> = model;
 
-            fn preserveInt(@CodeModel model: CodeModel<(Int) -> Boolean>)
+            fn preserveInt(model: CodeModel<(Int) -> Boolean>)
                 : CodeModel<(Int) -> Boolean> = model;
 
-            fn preserveLong(@CodeModel model: CodeModel<(Long) -> Boolean>)
+            fn preserveLong(model: CodeModel<(Long) -> Boolean>)
                 : CodeModel<(Long) -> Boolean> = model;
 
-            fn preserveFloat(@CodeModel model: CodeModel<(Float) -> Boolean>)
+            fn preserveFloat(model: CodeModel<(Float) -> Boolean>)
                 : CodeModel<(Float) -> Boolean> = model;
 
-            fn preserveUser(@CodeModel model: CodeModel<(User) -> Boolean>)
+            fn preserveUser(model: CodeModel<(User) -> Boolean>)
                 : CodeModel<(User) -> Boolean> = model;
 
-            fn preserveText(@CodeModel model: CodeModel<(User) -> String>)
+            fn preserveText(model: CodeModel<(User) -> String>)
                 : CodeModel<(User) -> String> = model;
 
             fn isParameter(shape: CodeShape, position: Int): Boolean = match (shape) {
@@ -397,7 +397,7 @@ public final class CodeModelCompilationTest {
             public fn genericModelIdentity(): String =
                 selectedText(preserveValue(Box<Int>::value));
 
-            fn preserveValue(@CodeModel model: CodeModel<(Box<Int>) -> Int>)
+            fn preserveValue(model: CodeModel<(Box<Int>) -> Int>)
                 : CodeModel<(Box<Int>) -> Int> = model;
             """;
 
@@ -519,18 +519,18 @@ public final class CodeModelCompilationTest {
     public void rejectsUnsupportedExpressionsAndFunctionValues() {
         assertResolutionFails("codemodelcall", """
                 import zeron.compiler.CodeModel;
-                fn consume(@CodeModel model: CodeModel<(Int) -> Boolean>): Unit {}
+                fn consume(model: CodeModel<(Int) -> Boolean>): Unit {}
                 fn invalid(): Unit = consume(value -> value + 1 > 0);
                 """);
         assertResolutionFails("codemodelstored", """
                 import zeron.compiler.CodeModel;
-                fn consume(@CodeModel model: CodeModel<(Int) -> Boolean>): Unit {}
+                fn consume(model: CodeModel<(Int) -> Boolean>): Unit {}
                 fn predicate(value: Int): Boolean = value > 0;
                 fn invalid(): Unit = consume(predicate);
                 """);
         assertResolutionFails("codemodelmutable", """
                 import zeron.compiler.CodeModel;
-                fn consume(@CodeModel model: CodeModel<(Int) -> Boolean>): Unit {}
+                fn consume(model: CodeModel<(Int) -> Boolean>): Unit {}
                 fn invalid(threshold: Int): Unit {
                     let mut bound = threshold;
                     consume(value -> value > bound);
@@ -543,7 +543,7 @@ public final class CodeModelCompilationTest {
                     public property name: String;
                     public constructor new;
                 }
-                fn consume(@CodeModel model: CodeModel<(User) -> String>): Unit {}
+                fn consume(model: CodeModel<(User) -> String>): Unit {}
                 fn invalid(reference: PropertyRef<User, String>): Unit = consume(reference);
                 """);
     }

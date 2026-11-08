@@ -58,8 +58,8 @@ public final class TimeApiTest {
                     let right: Duration = Duration.fromNanoseconds(42L);
                     return left == right;
                 }
-                fn hash<T: mut + Hashable<T>>(value: T): Int = value.hash();
-                fn durationHash(): Int = hash(Duration.fromNanoseconds(42L));
+                fn hash<T: mut + Hashable<T>>(value: T): Long = value.hash();
+                fn durationHash(): Long = hash(Duration.fromNanoseconds(42L));
                 fn durationHashIsStable(): Boolean =
                     durationHash() == hash(Duration.fromNanoseconds(42L));
                 fn instantOrdering(): Boolean {

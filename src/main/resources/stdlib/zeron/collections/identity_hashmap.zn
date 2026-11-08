@@ -5,7 +5,7 @@ import java.lang.System;
 import zeron.lang.Option;
 import zeron.lang.Pair;
 
-fn identityHash(value: Any?): Int = System.identityHashCode(value);
+fn identityHash(value: Any?): Long = System.identityHashCode(value).toLong();
 
 fn sameReference(left: Any?, right: Any?): Boolean = left === right;
 

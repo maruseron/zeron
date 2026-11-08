@@ -1,0 +1,60 @@
+package zeron.serialization.json;
+
+import com.maruseron.zeron.runtime.json.JsonArray;
+import com.maruseron.zeron.runtime.json.JsonErrorInfo;
+import com.maruseron.zeron.runtime.json.JsonObject;
+import com.maruseron.zeron.runtime.json.JsonParseResult;
+import com.maruseron.zeron.runtime.json.JsonSupport;
+import com.maruseron.zeron.runtime.json.JsonTextResult;
+import com.maruseron.zeron.runtime.json.JsonValue;
+import zeron.serialization.encodeErrorAt;
+import zeron.serialization.Encode;
+import zeron.serialization.EncodeError;
+import zeron.serialization.Decode;
+import zeron.serialization.DecodeError;
+
+public class JsonObjectBuilder {
+    target: &JsonObject;
+    firstError: JsonError?;
+
+    private constructor new;
+    public constructor empty() = JsonObjectBuilder.new(JsonObject.new(), null);
+
+    public mut fail(error: JsonError): Unit {
+        if (this.firstError == null) this.firstError = error;
+    }
+
+    private mut place(name: String, value: &JsonValue): Unit {
+        if (this.target.add(name, value)) return;
+        this.fail(JsonError.Encode("The key '" + name + "' could not be added."));
+    }
+
+    public mut put<V: Encode<V, {}>>(name: String, value: V): Unit =
+        match (encodeValue<V>(value)) {
+            case Result.Err(error) -> this.fail(JsonError.Encode(error.message));
+            case Result.Ok(json) -> this.place(name, json);
+        };
+
+    public mut putIfPresent<V: Encode<V, {}>>(name: String, value: V?): Unit {
+        if (value is not null) {
+            this.put(name, value);
+        }
+    }
+
+    public mut putObject(
+        name: String, block: &JsonObjectBuilder.() -> Unit
+    ): Unit {
+        let child = JsonObjectBuilder.empty();
+        child.block();
+        match (child.build()) {
+            case Result.Err(error) -> this.fail(error);
+            case Result.Ok(json) -> this.place(name, json);
+        };
+    }
+
+    public build(): Result<&JsonValue, JsonError> {
+        let failure = this.firstError;
+        if (failure != null) return Result.Err(failure);
+        return Result.Ok(JsonValue.objectValue(this.target));
+    }
+}

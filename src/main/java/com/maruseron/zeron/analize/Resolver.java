@@ -677,6 +677,12 @@ public final class Resolver {
         final var arrayType = type instanceof ReferenceDescriptor reference
                 ? reference.baseType()
                 : type;
+        if (arrayType.isNullableTypeParameter()) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK, where,
+                    "`" + where.lexeme() + "` has type `" + arrayType.name()
+                            + "`, which may be null. Check it against `null` before using it."));
+        }
         if (arrayType instanceof ArrayDescriptor array) return array.elementType();
         final var baseName = className(context, arrayType);
         final var iterableName = "zeron.collections.Iterable";

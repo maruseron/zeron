@@ -32,6 +32,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 List<ExportedDeclaration> declarations) {
     private static final int MAGIC = 0x5A415049;
     public static final int VERSION = ZeronVersions.API_INDEX_SCHEMA_VERSION;
+    private static final int LEGACY_VERSION_WITHOUT_FUNCTION_PARAMETER_NAMES = 9;
+    private static final String LEGACY_API_INDEX_FILE_NAME =
+            "api-v" + LEGACY_VERSION_WITHOUT_FUNCTION_PARAMETER_NAMES + ".bin";
+    private static final String LEGACY_API_INDEX_JAR_ENTRY =
+            "META-INF/zeron/" + LEGACY_API_INDEX_FILE_NAME;
+    private static final Path LEGACY_API_INDEX_RELATIVE_PATH =
+            Path.of("META-INF", "zeron", LEGACY_API_INDEX_FILE_NAME);
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
 
@@ -80,7 +87,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 case FunctionExport function -> {
                     final var functionName = token(simpleName(function.qualifiedName()));
                     final var declaration = new Stmt.Function(functionName,
-                        parameterNames(function.signature(), functionName.line()),
+                        namedParameters(function.parameterNames(), function.signature().arity(),
+                                functionName.line()),
                         function.signature(), List.of(), true, List.of(), function.minimumArity(),
                         function.variadic());
                     if (function.namespaceName() == null) {
@@ -125,7 +133,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                             .toList();
                     final var methods = externalClass.methods().stream()
                             .map(method -> new Stmt.ExternalMethod(token(method.signature().name()),
-                                    parameterNames(method.signature(), className.line()),
+                                    parameterNames(method.signature().arity(), className.line()),
                                     method.signature(), true, method.isStatic(), method.mutating(), List.of(),
                                     method.exceptionMappings().stream()
                                             .map(mapping -> new Stmt.ExternalExceptionMapping(
@@ -261,7 +269,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         final var helperParameters = new ArrayList<Token>();
                         if (!witness.higherKinded() && !method.isStatic()) {
                             helperParameters.add(new Token(TokenType.THIS, "this", null, -1));
-                            helperParameters.addAll(parameterNames(method.helperType(), 0).stream().skip(1).toList());
+                            helperParameters.addAll(parameterNames(method.helperType().arity(), 0)
+                                    .stream().skip(1).toList());
                         } else {
                             helperParameters.addAll(namedParameters(method.methodParameterNames(),
                                     method.helperType().arity(), 0));
@@ -540,22 +549,32 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                  String namespaceName,
                                  FunctionDescriptor signature,
                                  int minimumArity,
-                                 boolean variadic) implements NamespacedDeclaration {
+                                 boolean variadic,
+                                 List<String> parameterNames) implements NamespacedDeclaration {
         public FunctionExport {
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(jvmOwner);
             Objects.requireNonNull(signature);
+            parameterNames = List.copyOf(parameterNames);
+            if (!parameterNames.isEmpty() && parameterNames.size() != signature.arity()) {
+                throw new IllegalArgumentException("Function parameter names must match its signature.");
+            }
             validateMinimumArity(signature, minimumArity, variadic);
         }
 
         public FunctionExport(String qualifiedName, String jvmOwner, String namespaceName,
+                              FunctionDescriptor signature, int minimumArity, boolean variadic) {
+            this(qualifiedName, jvmOwner, namespaceName, signature, minimumArity, variadic, List.of());
+        }
+
+        public FunctionExport(String qualifiedName, String jvmOwner, String namespaceName,
                               FunctionDescriptor signature) {
-            this(qualifiedName, jvmOwner, namespaceName, signature, signature.arity(), false);
+            this(qualifiedName, jvmOwner, namespaceName, signature, signature.arity(), false, List.of());
         }
 
         public FunctionExport(String qualifiedName, String jvmOwner, String namespaceName,
                               FunctionDescriptor signature, int minimumArity) {
-            this(qualifiedName, jvmOwner, namespaceName, signature, minimumArity, false);
+            this(qualifiedName, jvmOwner, namespaceName, signature, minimumArity, false, List.of());
         }
     }
 
@@ -845,19 +864,45 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             final var contractName = switch (derived.lexeme()) {
                 case "Eq" -> "zeron.lang.Eq";
                 case "Hashable" -> "zeron.lang.Hashable";
+                case "Encode" -> "zeron.serialization.Encode";
+                case "Decode" -> "zeron.serialization.Decode";
+                case "Codec" -> "zeron.serialization.Codec";
+                case "Shape" -> "zeron.serialization.Shape";
                 default -> null;
             };
             if (contractName == null) continue;
+            final var emptyRow = EffectRows.of(List.<TypeDescriptor>of());
+            final var serialization = contractName.startsWith("zeron.serialization.");
+            final var contractArguments = contractName.equals("zeron.serialization.Encode")
+                    || contractName.equals("zeron.serialization.Decode")
+                    || contractName.equals("zeron.serialization.Codec")
+                    ? List.<TypeDescriptor>of(target, emptyRow)
+                    : List.<TypeDescriptor>of(target);
             final var requiredContract = TypeDescriptor.genericOf(TypeDescriptor.ofName(contractName),
-                    List.of(target));
-            final var componentContractName = contractName.equals("zeron.lang.Eq")
-                    ? "zeron.lang.Eq" : "zeron.lang.Hashable";
-            final var requirements = componentTypes.stream()
-                    .filter(componentType -> !isDirectlyRecursive(componentType, target))
-                    .map(componentType -> new WitnessRequirementExport(
-                            TypeDescriptor.genericOf(TypeDescriptor.ofName(componentContractName),
-                                    List.of(componentType)), componentType))
-                    .toList();
+                    contractArguments);
+            final var componentContractName = switch (contractName) {
+                case "zeron.lang.Eq" -> "zeron.lang.Eq";
+                case "zeron.lang.Hashable" -> "zeron.lang.Hashable";
+                case "zeron.serialization.Encode" -> "zeron.serialization.Encode";
+                case "zeron.serialization.Decode" -> "zeron.serialization.Decode";
+                default -> null;
+            };
+            final var requirements = componentContractName == null
+                    ? List.<WitnessRequirementExport>of()
+                    : componentTypes.stream()
+                        .filter(componentType -> !isDirectlyRecursive(componentType, target))
+                        .map(componentType -> {
+                            final var valueType = componentType instanceof NullableDescriptor nullable
+                                    ? nullable.baseType() : componentType;
+                            final var requirementArguments = serialization
+                                    ? List.<TypeDescriptor>of(valueType, emptyRow)
+                                    : List.<TypeDescriptor>of(valueType);
+                            return new WitnessRequirementExport(
+                                    TypeDescriptor.genericOf(
+                                            TypeDescriptor.ofName(componentContractName),
+                                            requirementArguments), valueType);
+                        })
+                        .toList();
             final var simpleName = typeName.lexeme().substring(typeName.lexeme().lastIndexOf('.') + 1);
             final var qualifiedName = qualify(packageName,
                     "$zeron$derived$" + simpleName + "$" + derived.lexeme());
@@ -1052,8 +1097,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         if (signature == null || owner == null) {
                             throw new IllegalStateException("Missing resolved signature or owner for " + name);
                         }
-                        exports.add(new FunctionExport(name, owner, member.namespaceName(),
-                                signature, function.minimumArity(), function.variadic()));
+                        exports.add(new FunctionExport(name, owner, member.namespaceName(), signature,
+                                function.minimumArity(), function.variadic(),
+                                function.parameters().stream().map(Token::lexeme).toList()));
                     }
                     case Stmt.Var variable when variable.isPublic() -> {
                         final var name = member.namespaceName() == null
@@ -1459,7 +1505,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
 
     private static ZeronLibraryIndex readJarIndex(final Path path) throws IOException {
         try (final var jar = new JarFile(path.toFile())) {
-            final var indexEntry = jar.getJarEntry(ZeronVersions.API_INDEX_JAR_ENTRY);
+            var indexEntry = jar.getJarEntry(ZeronVersions.API_INDEX_JAR_ENTRY);
+            if (indexEntry == null || indexEntry.isDirectory()) {
+                indexEntry = jar.getJarEntry(LEGACY_API_INDEX_JAR_ENTRY);
+            }
             if (indexEntry == null || indexEntry.isDirectory()) {
                 throw new IOException("Missing Zeron API index in library JAR: " + path);
             }
@@ -1472,11 +1521,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     private static ZeronLibraryIndex readFrom(final DataInputStream input) throws IOException {
         if (input.readInt() != MAGIC) throw new IOException("Not a Zeron library index.");
         final var version = input.readInt();
-        if (version != VERSION) throw new IOException("Unsupported Zeron library index version: " + version);
+        if (version != VERSION && version != LEGACY_VERSION_WITHOUT_FUNCTION_PARAMETER_NAMES) {
+            throw new IOException("Unsupported Zeron library index version: " + version);
+        }
         final var standardLibraryApiVersion = input.readInt();
         final var count = readCount(input);
         final var declarations = new ArrayList<ExportedDeclaration>(count);
-        for (int i = 0; i < count; i++) declarations.add(readDeclaration(input));
+        for (int i = 0; i < count; i++) declarations.add(readDeclaration(input, version));
         if (input.read() != -1) throw new IOException("Trailing data in Zeron library index.");
         return new ZeronLibraryIndex(standardLibraryApiVersion, declarations);
     }
@@ -1485,7 +1536,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         if (!Files.isDirectory(root)) {
             throw new IOException("Zeron library root is not a class directory: " + root);
         }
-        final var indexPath = root.resolve(ZeronVersions.API_INDEX_RELATIVE_PATH);
+        var indexPath = root.resolve(ZeronVersions.API_INDEX_RELATIVE_PATH);
+        if (!Files.isRegularFile(indexPath)) {
+            indexPath = root.resolve(LEGACY_API_INDEX_RELATIVE_PATH);
+        }
         if (!Files.isRegularFile(indexPath)) {
             throw new IOException("Missing Zeron API index: " + indexPath);
         }
@@ -1513,6 +1567,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 writeFunction(output, function.signature(), new WriteContext());
                 output.writeInt(function.minimumArity());
                 output.writeBoolean(function.variadic());
+                writeStrings(output, function.parameterNames());
             }
             case ExtensionExport extension -> {
                 output.writeByte(5);
@@ -1759,10 +1814,12 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
     }
 
-    private static ExportedDeclaration readDeclaration(final DataInputStream input) throws IOException {
+    private static ExportedDeclaration readDeclaration(final DataInputStream input, final int version)
+            throws IOException {
         return switch (input.readUnsignedByte()) {
             case 1 -> new FunctionExport(input.readUTF(), input.readUTF(), readOptionalString(input),
-                    readFunction(input, new ReadContext()), input.readInt(), input.readBoolean());
+                    readFunction(input, new ReadContext()), input.readInt(), input.readBoolean(),
+                    version >= ZeronVersions.API_INDEX_SCHEMA_VERSION ? readStrings(input) : List.of());
             case 15 -> new DocumentationExport(input.readUTF(), input.readUTF());
             case 16 -> {
                 final var name = input.readUTF();
@@ -2437,10 +2494,6 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
     private static String qualify(final String packageName, final String name) {
         return packageName == null || packageName.isEmpty() || name.contains(".")
                 ? name : packageName + "." + name;
-    }
-
-    private static List<Token> parameterNames(final FunctionDescriptor function, final int line) {
-        return parameterNames(function.arity(), line);
     }
 
     private static List<Token> parameterNames(final int arity, final int line) {

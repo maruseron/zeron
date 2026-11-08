@@ -129,6 +129,7 @@ public contract Comonad<W<_>> requires Functor<W> {
         this.extend(identity);
 }
 
+/*
 /// A category of composable arrows.
 ///
 /// `compose` chains the receiver with `other`, so the receiver is applied first, and the result is
@@ -140,3 +141,4 @@ public contract Category<Cat<_>> {
     /// Composes this arrow with `other` so the receiver runs first.
     compose<A: mut, B: mut, C: mut>(this: A -> B, other: B -> C): (A) -> C;
 }
+*/

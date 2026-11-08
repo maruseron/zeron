@@ -61,5 +61,22 @@ multiple types match, the most-specific mapping is selected. `RuntimeException` 
 `Error`s always propagate unchanged, and checked-exception constructors are not yet supported.
 Mappings and the derived raised-effect signatures are preserved in compiled-library API indexes.
 
+## Editor support
+
+The language server surfaces the same interop boundary the compiler resolves. Hover on a Java type
+or member shows its binary name and supported signature, plus the external facade binding when one
+exists. Completion after a qualified type offers its supported constructors, static methods, and
+static fields; completion after a value offers instance methods and fields. When a facade exists,
+only its declared members are suggested, because the resolver rejects the rest. Each hover ends
+with a `Go to definition` link to the same target as definition navigation.
+
+Go-to-definition on a Zeron external function or facade member navigates to that Zeron declaration.
+A direct Java reference navigates to Java source. The language server discovers the running JDK's
+`lib/src.zip` and a `<name>-sources.jar` next to each `java-classpath` JAR, and also reads explicit
+`[dependencies].java-sources` directories. Sources inside an archive are extracted once into a
+temporary cache so the editor can open them; the extracted file keeps the original line positions.
+Without any source it falls back to the external declaration, or returns no target. Lookup is by
+binary name and reads only the matching file, so no packages are scanned.
+
 The exact supported signatures and limitations are tracked in
 [design document 11](../documents/design_documents/design-document-11_compilation-libraries-and-host-integration.md).

@@ -32,6 +32,43 @@ source and for public declarations loaded from compiled libraries. Private docum
 available only while working from source; it is not included in compiled-library metadata. The
 formatter preserves documentation comments.
 
+## Hover presentation
+
+Hover shows a declaration's documentation, type, and signature. Signatures carry parameter names from
+the source declaration, including declarations loaded from compiled libraries. Type parameters show
+their constraints at their declaration and at uses, for
+example `type parameter T: nullable + Comparable<T>`; a value whose type mentions a type parameter
+lists the same information after its type. A model value is described by its declared contract, for
+example `model UserSql: SqlModel<User>`, followed by its contract assignments and property mappings;
+the compiler-generated implementation class is hidden because its name is not usable in source.
+Nominal types use simple names throughout hover. A type or signature that does not fit a comfortable
+line breaks at its first generic argument list or parameter list and lists one item per line. A
+hover over a reference ends with a `Go to definition` link to the declaration that definition
+navigation resolves, including Java and external declarations. Hovering a match case name describes
+the sum case selected for the scrutinee and navigates to its declaration, even when a type with the
+same name is visible in the project.
+
+## Java and external bindings
+
+Hover and completion follow the same Java interop boundary the compiler resolves. A qualified Java
+type shows its binary name and supported members; a member shows its Java signature and checked
+exceptions, plus the Zeron external facade binding when one exposes it. Completion after a facade
+type or value offers only the members that facade declares, since the resolver rejects the rest.
+
+Definition on a Zeron external function or facade member opens that Zeron declaration. A direct Java
+reference opens its Java source from the running JDK's `lib/src.zip`, from a `<name>-sources.jar`
+beside a `java-classpath` JAR, or from an explicit `[dependencies].java-sources` directory.
+Archived sources open from a temporary cache with their original line positions; without source it
+falls back to the external declaration, or reports no target. See
+[Java interoperability](23-java-interoperability.md).
+
+## Import completion and compiled libraries
+
+Completion after `import` lists the public declarations of project packages and compiled libraries,
+including the compiled standard library. Hover and completion describe catalog types with their
+declaration kind and generic constraints, and definition on a bundled standard-library type opens
+its bundled source declaration even when the project uses `stdlib = "compiled"`.
+
 ## Try the extension from a source checkout
 
 From the repository root, install the extension's dependency and open a sample project in an

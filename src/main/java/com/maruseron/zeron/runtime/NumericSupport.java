@@ -41,28 +41,14 @@ public final class NumericSupport {
         return left.compareTo(right);
     }
 
-    /*
-    // FNV-1a
+    // FNV-1a over the two's-complement bytes, finalized with fmix64.
     public static long bigIntegerHash(final BigInteger value) {
         final var bytes = value.toByteArray();
-        var hash = 0L;
-
-        for (var i = 0; i < bytes.length; i += 1) {
-            final var octet = bytes[i] & 0xff;
-            hash = hash ^ octet;
-            hash = hash * 1099511628211L;
+        var hash = 0xcbf29ce484222325L;
+        for (final var octet : bytes) {
+            hash ^= octet & 0xff;
+            hash *= 0x100000001b3L;
         }
-
-        hash = hash ^ (hash >>> 33);
-        hash = hash * 0xff51afd7ed558ccdL;
-        hash = hash ^ (hash >>> 33);
-        hash = hash * 0xc4ceb9fe1a85ec53L;
-        hash = hash ^ (hash >>> 33);
-
-        return hash;
-    }
-    */
-    public static int bigIntegerHash(final BigInteger value) {
-        return value.hashCode();
+        return HashSupport.mix64(hash);
     }
 }

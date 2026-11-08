@@ -20,6 +20,20 @@ public class AnsiSyntaxHighlighterTest {
     }
 
     @Test
+    public void highlightsRangeOperatorsWithExpressionEndpoints() {
+        final var highlighted = AnsiSyntaxHighlighter.highlight("""
+                for (let index in 0..values.length - 1) {
+                    consume(start .. end);
+                }
+                """);
+
+        assertEquals(2, occurrences(highlighted, AnsiColor.apply("..", "33")));
+        assertTrue(highlighted.contains(AnsiColor.apply("0", "36")));
+        assertTrue(highlighted.contains("values"));
+        assertTrue(highlighted.contains("length"));
+    }
+
+    @Test
     public void highlightsAnnotationDeclarationsApplicationsAndCodeModelTypes() {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 annotation Example on PARAMETER;

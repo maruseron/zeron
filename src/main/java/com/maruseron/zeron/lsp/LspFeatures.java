@@ -1,13 +1,17 @@
 package com.maruseron.zeron.lsp;
 
 import com.maruseron.zeron.ProjectAnalysisWorkspace;
+import com.maruseron.zeron.StandardLibrary;
 import com.maruseron.zeron.analize.ResolutionResult;
 import com.maruseron.zeron.api.PublicMemberCatalog;
 import com.maruseron.zeron.ast.CompilationUnit;
+import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.ImportDeclaration;
 import com.maruseron.zeron.ast.NamespaceMembers;
+import com.maruseron.zeron.ast.Parser;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
+import com.maruseron.zeron.scan.Scanner;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 import org.eclipse.lsp4j.CompletionItem;
@@ -20,8 +24,11 @@ import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
 import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 
+import java.lang.constant.ClassDesc;
+import java.lang.constant.MethodTypeDesc;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -36,6 +43,9 @@ import java.util.regex.Pattern;
 
 final class LspFeatures {
     private static final int TYPE_HOVER_CHARACTER_LIMIT = 180;
+    private static final int SIGNATURE_HOVER_LINE_LIMIT = 100;
+    private static final Pattern QUALIFIED_TYPE_NAME = Pattern.compile(
+            "(?<![A-Za-z0-9_$])(?:[a-z_][A-Za-z0-9_$]*\\.)+([A-Z][A-Za-z0-9_$]*)");
     private static final List<String> KEYWORDS = List.of(
             "as", "and", "break", "case", "class", "contract", "constructor", "continue",
             "default", "else", "effect", "extension", "external", "false", "fn", "for",
@@ -134,7 +144,7 @@ final class LspFeatures {
         if (resolution == null) return List.of();
         final var namespaceTarget = unit == null ? null
                 : resolveNamespaceTarget(qualifiedNamespace.toString(), unit, snapshot.units(), resolution);
-        final var packageTarget = isKnownPackage(qualifiedNamespace.toString(), snapshot.units())
+        final var packageTarget = isKnownPackage(qualifiedNamespace.toString(), snapshot)
                 ? qualifiedNamespace.toString() : null;
         final var items = new LinkedHashMap<String, CompletionItem>();
         if (namespaceTarget != null || packageTarget != null) {
@@ -159,6 +169,19 @@ final class LspFeatures {
                             && symbol.name().startsWith(prefix)) {
                         items.putIfAbsent(symbol.qualifiedName(), completionItem(symbol));
                     }
+                }
+            }
+        } else if (packageTarget != null) {
+            for (final var candidates : symbols.byName.values()) {
+                for (final var symbol : candidates) {
+                    if (!symbol.isPublic()
+                            || !symbol.packageName().equals(packageTarget)
+                            || symbol.namespaceName() != null
+                            || symbol.kind() == CompletionItemKind.Method
+                            || symbol.kind() == CompletionItemKind.Property
+                            || symbol.kind() == CompletionItemKind.Constructor
+                            || !symbol.name().startsWith(prefix)) continue;
+                    items.putIfAbsent(symbol.qualifiedName(), completionItem(symbol));
                 }
             }
         }
@@ -227,6 +250,20 @@ final class LspFeatures {
         if (type == null) {
             final var typeToken = typeReceiverToken(beforeCursor);
             final var sourceType = typeToken == null ? null : symbols.sourceType(path, typeToken.lexeme());
+            if (sourceType instanceof Stmt.ExternalClass externalClass) {
+                final var items = new LinkedHashMap<String, CompletionItem>();
+                for (final var item : externalClassCompletion(externalClass, true, prefix)) {
+                    items.putIfAbsent(item.getLabel(), item);
+                }
+                if (receiver.type() == TokenType.IDENTIFIER) {
+                    for (final var symbol : symbols.namespaceMembers(path, receiver.lexeme())) {
+                        if (symbol.name().startsWith(prefix)) {
+                            items.putIfAbsent(symbol.qualifiedName(), completionItem(symbol));
+                        }
+                    }
+                }
+                return List.copyOf(items.values());
+            }
             if (sourceType != null) {
                 final var items = new LinkedHashMap<String, CompletionItem>();
                 for (final var item : sourceTypeConstructors(sourceType)) {
@@ -241,6 +278,9 @@ final class LspFeatures {
                 }
                 return List.copyOf(items.values());
             }
+            final var javaClass = typeToken == null ? null
+                    : javaClassForTypeToken(snapshot, path, symbols, beforeCursor, typeToken);
+            if (javaClass != null) return javaMemberCompletion(snapshot, javaClass, true, prefix);
             final var typeSymbol = typeToken == null ? null : symbols.resolve(path, typeToken);
             if (typeSymbol != null && typeSymbol.kind() == CompletionItemKind.Class) {
                 final var view = catalog.findType(typeSymbol.qualifiedName()).orElse(null);
@@ -261,6 +301,15 @@ final class LspFeatures {
         }
         if (type == null) return List.of();
         final var generic = unwrap(type);
+        final var javaTypeName = switch (generic) {
+            case GenericDescriptor applied -> applied.baseType().name();
+            case NominalDescriptor nominal -> nominal.name();
+            default -> null;
+        };
+        final var javaClass = findJavaClass(snapshot, javaTypeName);
+        if (javaClass != null) {
+            return javaMemberCompletion(snapshot, javaClass, false, prefix);
+        }
         final var sourceTypeName = switch (generic) {
             case GenericDescriptor applied -> applied.baseType().name();
             case NominalDescriptor nominal -> nominal.name();
@@ -420,8 +469,18 @@ final class LspFeatures {
         return namespaces.contains(localNamespace) ? localNamespace : null;
     }
 
-    private static boolean isKnownPackage(final String name, final List<CompilationUnit> units) {
-        return units.stream().anyMatch(unit -> unit.packageName().equals(name));
+    private static boolean isKnownPackage(final String name,
+                                          final ProjectAnalysisWorkspace.Snapshot snapshot) {
+        if (snapshot.units().stream().anyMatch(unit -> unit.packageName().equals(name))) return true;
+        final var catalog = snapshot.memberCatalog().orElse(null);
+        if (catalog != null && catalog.typeNames().stream().anyMatch(typeName -> {
+            final var separator = typeName.lastIndexOf('.');
+            return separator > 0 && typeName.substring(0, separator).equals(name);
+        })) return true;
+        return snapshot.libraryDocumentation().keySet().stream().anyMatch(documentation -> {
+            if (!documentation.startsWith(name + ".")) return false;
+            return documentation.indexOf('.', name.length() + 1) < 0;
+        });
     }
 
     private static boolean sameTypeName(final TypeDescriptor receiverType, final String typeName) {
@@ -641,12 +700,21 @@ final class LspFeatures {
                 && token.type() != TokenType.THIS) return null;
         final var symbols = new SymbolIndex(snapshot);
         final var resolution = snapshot.resolution().orElse(null);
+        final var typeNamePosition = isTypeNamePosition(tokens, token);
+        final var typeParameter = symbols.typeParameterAt(path, token, offset, typeNamePosition);
+        if (typeParameter != null) {
+            final var contents = new MarkupContent(MarkupKind.MARKDOWN,
+                    "```zeron\n" + formatHoverText(typeParameterDetail(typeParameter), resolution)
+                            + "\n```");
+            final var hover = new Hover(contents);
+            hover.setRange(DocumentCoordinates.rangeOf(text, token));
+            return withDefinitionLink(hover, snapshot, path, params);
+        }
         final var type = resolution == null ? null : resolution.referenceType(token);
         final var callSiteType = resolution == null ? null : resolution.callSiteFunctionType(token);
         final var target = resolution == null ? null : resolution.referenceTarget(token);
         final var witnessMethod = target != null && target.lexeme().startsWith("$zeron$witness$");
         final var isDeclaration = type != null && resolution.referenceTarget(token) == null;
-        final var typeNamePosition = isTypeNamePosition(tokens, token);
         var symbol = isAnnotationName(tokens, token)
                 ? symbols.resolveAnnotation(path, token)
                 : !isDeclaration && typeNamePosition
@@ -657,10 +725,18 @@ final class LspFeatures {
         if (symbol == null && typeNamePosition) {
             symbol = symbols.resolveType(path, token);
         }
-        if (symbol == null && type == null && callSiteType == null) return null;
+        final var javaDetails = javaHoverDetails(snapshot, path, tokens, token, symbols);
+        final var javaFunctionDetail = symbol == null || !symbol.detail().startsWith("external fn")
+                ? null : javaExternalFunctionDetail(snapshot, symbol.token());
+        if (symbol == null && type == null && callSiteType == null && javaDetails.isEmpty()
+                && javaFunctionDetail == null) return null;
+        final var symbolModel = symbol != null && symbol.detail().startsWith("model ");
+        final var modelDetail = symbolModel ? symbol.detail()
+                : type == null ? null : symbols.modelDetail(type);
         final var details = new ArrayList<String>();
         if (callSiteType != null) {
-            final var rawSignature = SymbolIndex.signature(token.lexeme(), callSiteType);
+            final var parameterNames = symbol == null ? List.<String>of() : symbols.parameterNames(symbol);
+            final var rawSignature = SymbolIndex.signature(token.lexeme(), callSiteType, parameterNames);
             final var signature = symbol != null && symbol.kind() == CompletionItemKind.Constructor
                     ? rawSignature.replaceFirst("^fn ", "constructor ") : rawSignature;
             if (witnessMethod) {
@@ -693,27 +769,115 @@ final class LspFeatures {
             details.add(symbol.detail());
             details.addAll(typeEvidenceDetails(snapshot, path, symbol));
         }
-        if (type != null && callSiteType == null) {
+        if (modelDetail != null
+                && details.stream().noneMatch(detail -> detail.contains(modelDetail))) {
+            details.add(modelDetail);
+        }
+        if (type != null && callSiteType == null && modelDetail == null) {
             final var formatted = formatHoverType(type, resolution);
             if (details.stream().noneMatch(detail -> detail.contains(formatted))) {
                 details.add(isDeclaration
                         ? "value " + token.lexeme() + ": " + formatted
                         : "type: " + formatted);
             }
+            details.addAll(typeParameterDetails(type));
         }
         details.replaceAll(detail -> formatHoverText(
                 formatWitnessMethodName(detail, target, token), resolution));
+        for (final var javaDetail : javaDetails) {
+            if (details.stream().noneMatch(detail -> detail.contains(javaDetail))) {
+                details.add(javaDetail);
+            }
+        }
+        if (javaFunctionDetail != null
+                && details.stream().noneMatch(detail -> detail.contains(javaFunctionDetail))) {
+            details.add(javaFunctionDetail);
+        }
         final var contents = new MarkupContent(MarkupKind.MARKDOWN,
                 "```zeron\n" + String.join("\n", details) + "\n```"
                         + documentation(snapshot, symbol));
         final var hover = new Hover(contents);
         hover.setRange(DocumentCoordinates.rangeOf(text, token));
+        return withDefinitionLink(hover, snapshot, path, params);
+    }
+
+    private static Hover withDefinitionLink(final Hover hover,
+                                            final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                            final Path path,
+                                            final HoverParams params) {
+        final var contents = hover.getContents().getRight();
+        if (contents == null) return hover;
+        final var locations = definition(snapshot, path, new DefinitionParams(
+                new TextDocumentIdentifier(path.toUri().toString()), params.getPosition())).getLeft();
+        if (locations == null || locations.isEmpty()) return hover;
+        final var location = locations.getFirst();
+        final var hoverRange = hover.getRange();
+        if (hoverRange != null && location.getUri().equals(path.toUri().toString())
+                && hoverRange.getStart().equals(location.getRange().getStart())) {
+            return hover;
+        }
+        final var line = location.getRange().getStart().getLine() + 1;
+        contents.setValue(contents.getValue() + "\n\n[Go to definition]("
+                + location.getUri() + "#L" + line + ")");
         return hover;
     }
 
     private static String formatHoverType(final TypeDescriptor type,
                                           final ResolutionResult resolution) {
         return formatHoverText(TypeFormatter.format(type), resolution);
+    }
+
+    private static String typeParameterDetail(final TypeParameterDescriptor parameter) {
+        final var constraints = new ArrayList<String>();
+        if (parameter.admitsNullableArguments()) constraints.add("nullable");
+        if (parameter.isEffectKind()) constraints.add("effect");
+        if (parameter.isEffectRowKind()) constraints.add("effect...");
+        if (parameter.admitsMutableArguments()) constraints.add("mut");
+        parameter.bounds().stream().map(TypeFormatter::format).forEach(constraints::add);
+        final var variance = parameter.variance() == TypeParameterDescriptor.Variance.COVARIANT
+                ? "out " : "";
+        return "type parameter " + variance + parameter.name()
+                + (constraints.isEmpty() ? "" : ": " + String.join(" + ", constraints));
+    }
+
+    private static List<String> typeParameterDetails(final TypeDescriptor type) {
+        final var parameters = new LinkedHashMap<String, TypeParameterDescriptor>();
+        collectTypeParameters(type, parameters);
+        return parameters.values().stream().map(LspFeatures::typeParameterDetail).toList();
+    }
+
+    private static void collectTypeParameters(final TypeDescriptor type,
+                                              final Map<String, TypeParameterDescriptor> parameters) {
+        switch (type) {
+            case TypeParameterDescriptor parameter -> parameters.putIfAbsent(
+                    parameter.scopeId() + ":" + parameter.name(), parameter);
+            case GenericDescriptor generic ->
+                    generic.typeParameters().forEach(argument -> collectTypeParameters(argument, parameters));
+            case TypeConstructorDescriptor constructor ->
+                    constructor.arguments().forEach(argument -> collectTypeParameters(argument, parameters));
+            case AppliedConstructorDescriptor applied ->
+                    collectTypeParameters(applied.argument(), parameters);
+            case ArrayDescriptor array -> collectTypeParameters(array.elementType(), parameters);
+            case NullableDescriptor nullable -> collectTypeParameters(nullable.baseType(), parameters);
+            case ReferenceDescriptor reference -> collectTypeParameters(reference.baseType(), parameters);
+            case TypeProjectionDescriptor projection -> collectTypeParameters(projection.bound(), parameters);
+            case EffectRowDescriptor row -> {
+                row.effects().forEach(effect -> collectTypeParameters(effect, parameters));
+                row.variables().forEach(variable -> collectTypeParameters(variable, parameters));
+            }
+            case FunctionDescriptor function -> {
+                if (function.receiverType() != null) {
+                    collectTypeParameters(function.receiverType(), parameters);
+                }
+                function.typeParameters().forEach(parameter -> parameters.putIfAbsent(
+                        parameter.scopeId() + ":" + parameter.name(), parameter));
+                function.parameters().forEach(argument -> collectTypeParameters(argument, parameters));
+                collectTypeParameters(function.returnType(), parameters);
+                function.raisedEffects().forEach(effect -> collectTypeParameters(effect, parameters));
+                function.handledEffects().forEach(effect -> collectTypeParameters(effect, parameters));
+            }
+            default -> {}
+        }
     }
 
     private static String formatWitnessMethodName(final String text,
@@ -725,15 +889,98 @@ final class LspFeatures {
 
     private static String formatHoverText(final String text,
                                          final ResolutionResult resolution) {
-        if (resolution == null) return text;
         var formatted = text;
-        for (final var sum : resolution.sums().values()) {
-            for (final var sumCase : sum.cases()) {
-                formatted = formatted.replace(sum.generatedCaseName(sumCase),
-                        sum.name().lexeme() + "." + sumCase.name().lexeme());
+        if (resolution != null) {
+            for (final var sum : resolution.sums().values()) {
+                for (final var sumCase : sum.cases()) {
+                    formatted = formatted.replace(sum.generatedCaseName(sumCase),
+                            sum.name().lexeme() + "." + sumCase.name().lexeme());
+                }
             }
         }
-        return formatted;
+        return wrapLongHoverDetail(unqualifyTypeNames(formatted));
+    }
+
+    private static String unqualifyTypeNames(final String text) {
+        return QUALIFIED_TYPE_NAME.matcher(text).replaceAll("$1");
+    }
+
+    private static String wrapLongHoverDetail(final String detail) {
+        if (detail.contains("\n") || detail.length() <= SIGNATURE_HOVER_LINE_LIMIT
+                || detail.startsWith("Evidence available here:")) {
+            return detail;
+        }
+        final var generic = detail.indexOf('<');
+        final var parameters = detail.indexOf('(');
+        final var open = generic < 0 ? parameters
+                : parameters < 0 ? generic : Math.min(generic, parameters);
+        return open < 0 ? detail : wrapDelimited(detail, open);
+    }
+
+    /// Breaks the delimited part of a type or signature into one item per line. The delimiter may
+    /// be a generic argument list or a parameter list; nested delimiters and `->` stay intact.
+    private static String wrapDelimited(final String text, final int open) {
+        if (open < 0 || open >= text.length()) return text;
+        final var opening = text.charAt(open);
+        if (opening != '<' && opening != '(' && opening != '[' && opening != '{') return text;
+        final var stack = new java.util.ArrayDeque<Character>();
+        stack.push(opening);
+        final var separators = new ArrayList<Integer>();
+        var close = -1;
+        scan:
+        for (var index = open + 1; index < text.length(); index++) {
+            final var character = text.charAt(index);
+            switch (character) {
+                case '(', '[', '{', '<' -> stack.push(character);
+                case ')' -> {
+                    if (stack.peek() == '(') stack.pop();
+                    if (stack.isEmpty()) {
+                        close = index;
+                        break scan;
+                    }
+                }
+                case ']' -> {
+                    if (stack.peek() == '[') stack.pop();
+                    if (stack.isEmpty()) {
+                        close = index;
+                        break scan;
+                    }
+                }
+                case '}' -> {
+                    if (stack.peek() == '{') stack.pop();
+                    if (stack.isEmpty()) {
+                        close = index;
+                        break scan;
+                    }
+                }
+                case '>' -> {
+                    // `->` belongs to a function type, not to a generic argument list.
+                    if (index > open && text.charAt(index - 1) == '-') break;
+                    if (stack.peek() == '<') stack.pop();
+                    if (stack.isEmpty()) {
+                        close = index;
+                        break scan;
+                    }
+                }
+                case ',' -> {
+                    if (stack.size() == 1) separators.add(index);
+                }
+                default -> {}
+            }
+        }
+        if (close < 0) return text;
+        final var inner = text.substring(open + 1, close).trim();
+        if (inner.isEmpty()) return text;
+        final var parts = new ArrayList<String>();
+        var start = open + 1;
+        for (final var separator : separators) {
+            parts.add(text.substring(start, separator).trim());
+            start = separator + 1;
+        }
+        parts.add(text.substring(start, close).trim());
+        return text.substring(0, open + 1)
+                + "\n    " + String.join(",\n    ", parts)
+                + "\n" + text.substring(close);
     }
 
     private static String documentation(final ProjectAnalysisWorkspace.Snapshot snapshot,
@@ -837,6 +1084,7 @@ final class LspFeatures {
                 case "Encode" -> "zeron.serialization.Encode";
                 case "Decode" -> "zeron.serialization.Decode";
                 case "Codec" -> "zeron.serialization.Codec";
+                case "Shape" -> "zeron.serialization.Shape";
                 default -> null;
             };
             if (contractName != null) qualifiedContractNames.add(contractName);
@@ -847,8 +1095,21 @@ final class LspFeatures {
                 ? TypeDescriptor.ofName(name)
                 : TypeDescriptor.genericOf(TypeDescriptor.ofName(name),
                         parameters.stream().map(parameter -> (TypeDescriptor) parameter).toList());
+        final var emptyRow = com.maruseron.zeron.domain.EffectRows.of(List.<TypeDescriptor>of());
+        final var decodeRow = declaration instanceof Stmt.ClassDecl dataClassDeclaration
+                && dataClassDeclaration.dataClass()
+                ? com.maruseron.zeron.domain.EffectRows.of(
+                        dataClassDeclaration.declaredConstructorEffects())
+                : emptyRow;
         return qualifiedContractNames.stream()
-                .map(contractName -> TypeDescriptor.genericOf(TypeDescriptor.ofName(contractName), List.of(target)))
+                .map(contractName -> TypeDescriptor.genericOf(TypeDescriptor.ofName(contractName),
+                        switch (contractName) {
+                            case "zeron.serialization.Encode", "zeron.serialization.Codec" ->
+                                    List.<TypeDescriptor>of(target, emptyRow);
+                            case "zeron.serialization.Decode" ->
+                                    List.<TypeDescriptor>of(target, decodeRow);
+                            default -> List.<TypeDescriptor>of(target);
+                        }))
                 .map(TypeFormatter::format)
                 .map(formatted -> shortTypeNames(formatted, snapshot, contextUnit))
                 .toList();
@@ -1000,7 +1261,13 @@ final class LspFeatures {
         }
         if (declaration == null) declaration = symbols.resolve(path, token);
         final var targetToken = declaration == null ? target : declaration.token();
-        if (targetToken == null) return Either.forLeft(List.of());
+        if (targetToken == null) {
+            final var location = symbols.bundledDefinitionLocation(declaration);
+            if (location != null) return Either.forLeft(List.of(location));
+            final var javaLocation = javaDefinitionLocation(snapshot, path, tokens, symbols, token);
+            return javaLocation == null ? Either.forLeft(List.of())
+                    : Either.forLeft(List.of(javaLocation));
+        }
         final var sourcePath = targetToken.span().sourcePath();
         final var targetPath = sourcePath == null ? null : snapshot.filesByCompilerPath().get(sourcePath);
         final var targetText = targetPath == null ? null : snapshot.sourceText().get(targetPath);
@@ -1143,6 +1410,430 @@ final class LspFeatures {
         return item;
     }
 
+    private static List<String> javaHoverDetails(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final Path path,
+            final List<Token> tokens, final Token token, final SymbolIndex symbols) {
+        final var details = new ArrayList<String>();
+        final var ownerName = javaOwnerName(snapshot, path, tokens, symbols, token);
+        if (ownerName != null) {
+            final var javaClass = findJavaClass(snapshot, ownerName);
+            if (javaClass != null) {
+                for (final var method : javaClass.methods()) {
+                    if (!method.isConstructor() && method.name().equals(token.lexeme())) {
+                        details.add(javaMethodDetail(javaClass, method));
+                    }
+                }
+                for (final var field : javaClass.fields()) {
+                    if (field.name().equals(token.lexeme())) {
+                        details.add(javaFieldDetail(javaClass, field));
+                    }
+                }
+            }
+            final var facade = externalClassDeclaration(snapshot, ownerName);
+            if (facade != null) {
+                details.addAll(0, externalMemberDetails(facade, token.lexeme()));
+            }
+            return details;
+        }
+        final var javaClass = javaClassForTypeToken(snapshot, path, symbols, tokens, token);
+        if (javaClass == null) return details;
+        details.add(javaClassDetail(javaClass));
+        final var facade = externalClassDeclaration(snapshot, javaClass.binaryName());
+        if (facade != null) {
+            details.add(0, "external class " + simpleTypeName(facade.name().lexeme())
+                    + " = " + facade.javaBinaryName());
+        }
+        return details;
+    }
+
+    private static List<String> externalMemberDetails(final Stmt.ExternalClass facade,
+                                                      final String memberName) {
+        final var details = new ArrayList<String>();
+        for (final var method : facade.methods()) {
+            if (!method.isPublic() || !method.name().lexeme().equals(memberName)) continue;
+            details.add("external " + SymbolIndex.signature(method.name().lexeme(),
+                    method.typeDescriptor(),
+                    method.parameters().stream().map(Token::lexeme).toList()));
+        }
+        for (final var property : facade.staticProperties()) {
+            if (!property.isPublic() || !property.name().lexeme().equals(memberName)) continue;
+            details.add("external static property " + property.name().lexeme() + ": "
+                    + TypeFormatter.format(property.type()));
+        }
+        return details;
+    }
+
+    private static String javaExternalFunctionDetail(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final Token token) {
+        if (token == null) return null;
+        final var resolution = snapshot.resolution().orElse(null);
+        if (resolution == null) return null;
+        for (final var unit : snapshot.units()) {
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (!(member.declaration() instanceof Stmt.ExternalFunction function)
+                        || function.name() != token) continue;
+                final var binding = resolution.externalFunctionBindings().get(function);
+                return binding == null ? null : javaBindingDetail(binding);
+            }
+        }
+        return null;
+    }
+
+    private static String javaBindingDetail(final FunctionBindingRegistry.Binding binding) {
+        return switch (binding.target()) {
+            case FunctionBindingRegistry.StaticMethod target -> javaTargetDetail(
+                    target.owner(), target.methodName(), target.descriptor(), true);
+            case FunctionBindingRegistry.InstanceMethod target -> javaTargetDetail(
+                    target.owner(), target.methodName(), target.descriptor(), false);
+            case FunctionBindingRegistry.StaticFieldInstanceMethod target -> "java field "
+                    + javaTypeName(target.fieldOwner()) + "." + target.fieldName() + ": "
+                    + javaTypeName(target.fieldType());
+            case FunctionBindingRegistry.IntrinsicBinding _ -> null;
+        };
+    }
+
+    private static String javaTargetDetail(final ClassDesc owner, final String name,
+                                           final MethodTypeDesc descriptor, final boolean isStatic) {
+        final var parameters = new StringBuilder();
+        for (var index = 0; index < descriptor.parameterCount(); index++) {
+            if (index > 0) parameters.append(", ");
+            parameters.append(javaTypeName(descriptor.parameterType(index)));
+        }
+        return "external " + (isStatic ? "static " : "") + "fn " + javaTypeName(owner)
+                + "." + name + "(" + parameters + ") -> "
+                + javaTypeName(descriptor.returnType());
+    }
+
+    private static Location javaDefinitionLocation(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final Path path,
+            final List<Token> tokens, final SymbolIndex symbols, final Token token) {
+        final var ownerName = javaOwnerName(snapshot, path, tokens, symbols, token);
+        if (ownerName != null) {
+            final var facade = externalClassDeclaration(snapshot, ownerName);
+            if (facade != null) {
+                final var memberLocation = externalMemberLocation(
+                        snapshot, facade, token.lexeme());
+                if (memberLocation != null) return memberLocation;
+            }
+            return JavaSourceLocator.locate(
+                    snapshot.javaSourceRoots(), snapshot.javaSourceArchives(),
+                    ownerName, token.lexeme());
+        }
+        final var javaClass = javaClassForTypeToken(snapshot, path, symbols, tokens, token);
+        if (javaClass == null) return null;
+        final var sourceLocation = JavaSourceLocator.locate(
+                snapshot.javaSourceRoots(), snapshot.javaSourceArchives(),
+                javaClass.binaryName(), null);
+        if (sourceLocation != null) return sourceLocation;
+        final var facade = externalClassDeclaration(snapshot, javaClass.binaryName());
+        return facade == null ? null : declarationLocation(snapshot, facade.name());
+    }
+
+    private static Location externalMemberLocation(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                                   final Stmt.ExternalClass facade,
+                                                   final String memberName) {
+        for (final var method : facade.methods()) {
+            if (method.isPublic() && method.name().lexeme().equals(memberName)) {
+                final var location = declarationLocation(snapshot, method.name());
+                if (location != null) return location;
+            }
+        }
+        for (final var property : facade.staticProperties()) {
+            if (property.isPublic() && property.name().lexeme().equals(memberName)) {
+                final var location = declarationLocation(snapshot, property.name());
+                if (location != null) return location;
+            }
+        }
+        return null;
+    }
+
+    private static Location declarationLocation(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                                final Token token) {
+        if (token == null) return null;
+        final var sourcePath = token.span().sourcePath();
+        final var targetPath = sourcePath == null
+                ? null : snapshot.filesByCompilerPath().get(sourcePath);
+        final var targetText = targetPath == null ? null : snapshot.sourceText().get(targetPath);
+        if (targetPath == null || targetText == null) return null;
+        return new Location(targetPath.toUri().toString(),
+                DocumentCoordinates.rangeOf(targetText, token));
+    }
+
+    private static String javaOwnerName(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                        final Path path, final List<Token> tokens,
+                                        final SymbolIndex symbols, final Token token) {
+        final var index = tokens.indexOf(token);
+        if (index <= 0) return null;
+        final var dot = previousSignificantTokenIndex(tokens, index);
+        if (dot < 0 || tokens.get(dot).type() != TokenType.DOT) return null;
+        final var receiverIndex = previousSignificantTokenIndex(tokens, dot);
+        if (receiverIndex < 0) return null;
+        final var receiver = tokens.get(receiverIndex);
+        if (receiver.type() != TokenType.IDENTIFIER && receiver.type() != TokenType.THIS) {
+            return null;
+        }
+        final var resolution = snapshot.resolution().orElse(null);
+        final var type = resolution == null ? null : resolution.referenceType(receiver);
+        final var typeName = type == null ? null : binaryNameOf(type);
+        if (findJavaClass(snapshot, typeName) != null) return typeName;
+        final var javaClass = javaClassForTypeToken(snapshot, path, symbols, tokens, receiver);
+        return javaClass == null ? null : javaClass.binaryName();
+    }
+
+    private static String binaryNameOf(final TypeDescriptor type) {
+        final var base = unwrap(type);
+        return switch (base) {
+            case GenericDescriptor generic -> generic.baseType().name();
+            case NominalDescriptor nominal -> nominal.name();
+            default -> null;
+        };
+    }
+
+    private static JavaClassPath.JavaClass javaClassForTypeToken(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final Path path,
+            final SymbolIndex symbols, final List<Token> tokens, final Token token) {
+        if (token == null) return null;
+        final var qualified = qualifiedNameEndingAt(tokens, token);
+        if (qualified != null && qualified.indexOf('.') >= 0) {
+            final var named = findJavaClass(snapshot, qualified);
+            if (named != null) return named;
+        }
+        final var typeSymbol = symbols.resolveType(path, token);
+        if (typeSymbol != null && typeSymbol.path() != null) {
+            final var declaration = externalTypeDeclaration(snapshot, typeSymbol.qualifiedName());
+            if (declaration != null) return findJavaClass(snapshot, declaration.javaBinaryName());
+        }
+        final var unit = symbols.unitFor(path);
+        if (unit == null) return null;
+        for (final var imported : unit.imports()) {
+            if (imported.onDemand() || !imported.localName().equals(token.lexeme())) continue;
+            final var importedClass = findJavaClass(snapshot, imported.qualifiedName());
+            if (importedClass != null) return importedClass;
+        }
+        return null;
+    }
+
+    private static String qualifiedNameEndingAt(final List<Token> tokens, final Token token) {
+        final var index = tokens.indexOf(token);
+        if (index < 0) return null;
+        var start = index;
+        while (true) {
+            final var dot = previousSignificantTokenIndex(tokens, start);
+            if (dot < 0 || tokens.get(dot).type() != TokenType.DOT) break;
+            final var name = previousSignificantTokenIndex(tokens, dot);
+            if (name < 0 || tokens.get(name).type() != TokenType.IDENTIFIER) break;
+            start = name;
+        }
+        final var qualified = new StringBuilder();
+        for (var cursor = start; cursor <= index; cursor++) {
+            final var candidate = tokens.get(cursor);
+            if (candidate.type() != TokenType.IDENTIFIER) continue;
+            if (!qualified.isEmpty()) qualified.append('.');
+            qualified.append(candidate.lexeme());
+        }
+        return qualified.isEmpty() ? null : qualified.toString();
+    }
+
+    private static JavaClassPath.JavaClass findJavaClass(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final String binaryName) {
+        if (binaryName == null || binaryName.isEmpty()) return null;
+        try {
+            return snapshot.javaClassPath().find(binaryName);
+        } catch (final JavaClassPath.MetadataException _) {
+            return null;
+        }
+    }
+
+    private static Stmt.ExternalClass externalClassDeclaration(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final String binaryName) {
+        if (binaryName == null) return null;
+        for (final var unit : snapshot.compilerUnits()) {
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (member.declaration() instanceof Stmt.ExternalClass external
+                        && external.javaBinaryName().equals(binaryName)) return external;
+            }
+        }
+        return null;
+    }
+
+    private static Stmt.ExternalClass externalTypeDeclaration(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final String qualifiedName) {
+        for (final var unit : snapshot.compilerUnits()) {
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (!(member.declaration() instanceof Stmt.ExternalClass external)) continue;
+                final var name = simpleTypeName(external.name().lexeme());
+                final var qualified = unit.packageName().isEmpty()
+                        ? name : unit.packageName() + "." + name;
+                if (qualified.equals(qualifiedName)) return external;
+            }
+        }
+        return null;
+    }
+
+    private static List<CompletionItem> javaMemberCompletion(
+            final ProjectAnalysisWorkspace.Snapshot snapshot,
+            final JavaClassPath.JavaClass javaClass, final boolean staticContext,
+            final String prefix) {
+        final var facade = externalClassDeclaration(snapshot, javaClass.binaryName());
+        return facade == null ? javaClassCompletion(javaClass, staticContext, prefix)
+                : externalClassCompletion(facade, staticContext, prefix);
+    }
+
+    private static List<CompletionItem> externalClassCompletion(
+            final Stmt.ExternalClass declaration, final boolean staticContext,
+            final String prefix) {
+        final var owner = simpleTypeName(declaration.name().lexeme());
+        final var items = new ArrayList<CompletionItem>();
+        if (staticContext) {
+            for (final var constructor : declaration.constructors()) {
+                if (!constructor.isPublic() || !"new".startsWith(prefix)) continue;
+                final var item = new CompletionItem("new" + parameterList(
+                        constructor.parameters(), constructor.parameterTypes()));
+                item.setInsertText("new");
+                item.setDetail("&" + owner);
+                item.setKind(CompletionItemKind.Constructor);
+                item.setSortText("0new");
+                items.add(item);
+            }
+        }
+        for (final var method : declaration.methods()) {
+            if (!method.isPublic() || method.isStatic() != staticContext
+                    || !method.name().lexeme().startsWith(prefix)) continue;
+            items.add(completionItemForMethod(method.name().lexeme(), method.typeDescriptor(),
+                    method.parameters()));
+        }
+        if (staticContext) {
+            for (final var property : declaration.staticProperties()) {
+                if (!property.isPublic() || !property.name().lexeme().startsWith(prefix)) continue;
+                final var item = new CompletionItem(property.name().lexeme());
+                item.setInsertText(property.name().lexeme());
+                item.setDetail(TypeFormatter.format(property.type()));
+                item.setKind(CompletionItemKind.Property);
+                items.add(item);
+            }
+        }
+        return List.copyOf(items);
+    }
+
+    private static String parameterList(final List<Token> names, final List<TypeDescriptor> types) {
+        final var parameters = new ArrayList<String>();
+        for (var index = 0; index < types.size(); index++) {
+            final var name = index < names.size() ? names.get(index).lexeme() + ": " : "";
+            parameters.add(name + TypeFormatter.format(types.get(index)));
+        }
+        return parameters.stream()
+                .collect(java.util.stream.Collectors.joining(", ", "(", ")"));
+    }
+
+    private static List<CompletionItem> javaClassCompletion(
+            final JavaClassPath.JavaClass javaClass, final boolean staticContext,
+            final String prefix) {
+        final var owner = simpleTypeName(javaClass.binaryName());
+        final var items = new ArrayList<CompletionItem>();
+        for (final var method : javaClass.methods()) {
+            if (method.isConstructor()) {
+                if (!staticContext || !"new".startsWith(prefix)) continue;
+                final var parameters = javaParameters(method);
+                if (parameters == null) continue;
+                final var item = new CompletionItem("new" + parameters.stream()
+                        .map(TypeFormatter::format)
+                        .collect(java.util.stream.Collectors.joining(", ", "(", ")")));
+                item.setInsertText("new");
+                item.setDetail("&" + owner);
+                item.setKind(CompletionItemKind.Constructor);
+                item.setSortText("0new");
+                items.add(item);
+                continue;
+            }
+            if (method.isStatic() != staticContext || method.hasGenericSignature()
+                    || !method.name().startsWith(prefix)) continue;
+            final var parameters = javaParameters(method);
+            final var returnType = JavaTypeMapping.toZeronReturnType(method.descriptor().returnType());
+            if (parameters == null || returnType == null) continue;
+            final var item = new CompletionItem(method.name() + parameters.stream()
+                    .map(TypeFormatter::format)
+                    .collect(java.util.stream.Collectors.joining(", ", "(", ")")));
+            item.setInsertText(method.name());
+            item.setDetail(TypeFormatter.format(returnType));
+            item.setKind(CompletionItemKind.Method);
+            item.setSortText("1" + method.name());
+            items.add(item);
+        }
+        for (final var field : javaClass.fields()) {
+            if (field.isStatic() != staticContext || !field.name().startsWith(prefix)) continue;
+            final var type = JavaTypeMapping.toZeronType(field.descriptor());
+            if (type == null) continue;
+            final var item = new CompletionItem(field.name());
+            item.setInsertText(field.name());
+            item.setDetail(TypeFormatter.format(type));
+            item.setKind(CompletionItemKind.Property);
+            item.setSortText("1" + field.name());
+            items.add(item);
+        }
+        return List.copyOf(items);
+    }
+
+    private static List<TypeDescriptor> javaParameters(final JavaClassPath.JavaMethod method) {
+        final var parameters = new ArrayList<TypeDescriptor>();
+        for (var index = 0; index < method.descriptor().parameterCount(); index++) {
+            final var mapped = JavaTypeMapping.toZeronMethodType(
+                    method.descriptor().parameterType(index));
+            if (mapped == null) return null;
+            parameters.add(mapped);
+        }
+        return List.copyOf(parameters);
+    }
+
+    private static String javaClassDetail(final JavaClassPath.JavaClass javaClass) {
+        return "external " + (javaClass.isInterface() ? "interface " : "class ")
+                + javaClass.binaryName();
+    }
+
+    private static String javaMethodDetail(final JavaClassPath.JavaClass owner,
+                                           final JavaClassPath.JavaMethod method) {
+        final var parameters = new StringBuilder();
+        for (var index = 0; index < method.descriptor().parameterCount(); index++) {
+            if (index > 0) parameters.append(", ");
+            parameters.append(javaTypeName(method.descriptor().parameterType(index)));
+        }
+        final var prefix = method.isConstructor() ? "java constructor "
+                : "external " + (method.isStatic() ? "static " : "") + "fn ";
+        final var signature = prefix + owner.binaryName()
+                + (method.isConstructor() ? "" : "." + method.name())
+                + "(" + parameters + ")";
+        final var result = method.isConstructor()
+                ? signature + " -> &" + owner.binaryName()
+                : signature + " -> " + javaTypeName(method.descriptor().returnType());
+        return method.exceptionTypes().isEmpty() ? result
+                : result + " throws " + String.join(", ", method.exceptionTypes());
+    }
+
+    private static String javaFieldDetail(final JavaClassPath.JavaClass owner,
+                                          final JavaClassPath.JavaField field) {
+        return "java " + (field.isStatic() ? "static " : "") + "field "
+                + owner.binaryName() + "." + field.name() + ": "
+                + javaTypeName(field.descriptor());
+    }
+
+    private static String javaTypeName(final ClassDesc type) {
+        if (type.isArray()) return javaTypeName(type.componentType()) + "[]";
+        final var descriptor = type.descriptorString();
+        return switch (descriptor) {
+            case "V" -> "void";
+            case "I" -> "int";
+            case "J" -> "long";
+            case "B" -> "byte";
+            case "D" -> "double";
+            case "F" -> "float";
+            case "Z" -> "boolean";
+            case "C" -> "char";
+            case "S" -> "short";
+            default -> descriptor.startsWith("L") && descriptor.endsWith(";")
+                    ? descriptor.substring(1, descriptor.length() - 1).replace('/', '.')
+                    : type.displayName();
+        };
+    }
+
     private static final class SymbolIndex {
         private final Map<String, List<Symbol>> byName = new LinkedHashMap<>();
         private final Map<String, List<Symbol>> byQualifiedName = new LinkedHashMap<>();
@@ -1151,7 +1842,14 @@ final class LspFeatures {
         private final Map<Token, Token> witnessRequirementTokens = new IdentityHashMap<>();
         private final Map<Path, CompilationUnit> unitsByPath = new LinkedHashMap<>();
         private final Map<Path, String> packagesByPath = new LinkedHashMap<>();
+        private final Map<String, String> modelDetailsByGeneratedClassName = new LinkedHashMap<>();
+        private final Map<String, List<String>> parameterNamesByQualifiedName = new LinkedHashMap<>();
+        private final Map<Token, TypeParameterDescriptor> typeParametersByToken = new IdentityHashMap<>();
+        private final List<TypeParameterScope> typeParameterScopes = new ArrayList<>();
         private final ProjectAnalysisWorkspace.Snapshot snapshot;
+
+        private record TypeParameterScope(Path path, String name, TypeParameterDescriptor parameter,
+                                          int start, int end) {}
 
         private record Symbol(String name, String qualifiedName, String packageName,
                               String namespaceName, String detail, CompletionItemKind kind,
@@ -1182,24 +1880,50 @@ final class LspFeatures {
                 packagesByPath.put(path, unit.packageName());
                 indexUnit(unit, path);
             }
-            addCodeModelAnnotation();
             indexAnnotationReferences();
             indexWitnessReferences();
             snapshot.resolution().ifPresent(this::indexResolvedFunctions);
-            snapshot.memberCatalog().ifPresent(catalog -> catalog.typeNames().forEach(name -> {
-                final var split = splitQualifiedName(name);
-                add(new Symbol(split[1], name, split[0], null,
-                        codeModelTypeDetail(split[0], split[1]), CompletionItemKind.Class, null, null, true));
-            }));
+            snapshot.memberCatalog().ifPresent(this::indexCatalogTypes);
             addCodeModelTypes();
         }
 
-        private void addCodeModelAnnotation() {
-            final var qualifiedName = "zeron.compiler.CodeModel";
-            annotationsByQualifiedName.putIfAbsent(qualifiedName,
-                    new Symbol("CodeModel", qualifiedName, "zeron.compiler", null,
-                            "annotation @CodeModel on PARAMETER",
-                            CompletionItemKind.Interface, null, null, true));
+        private void indexCatalogTypes(final PublicMemberCatalog catalog) {
+            for (final var qualifiedName : catalog.typeNames()) {
+                if (byQualifiedName.containsKey(qualifiedName)) continue;
+                final var split = splitQualifiedName(qualifiedName);
+                final var declaration = catalog.findTypeDeclaration(qualifiedName).orElse(null);
+                final var detail = declaration == null
+                        ? codeModelTypeDetail(split[0], split[1])
+                        : catalogTypeDetail(declaration);
+                add(new Symbol(split[1], qualifiedName, split[0], null, detail,
+                        CompletionItemKind.Class, null, null, true, split[1], detail));
+            }
+        }
+
+        private static String catalogTypeDetail(final PublicMemberCatalog.TypeDeclaration declaration) {
+            final var name = simpleTypeName(declaration.qualifiedName());
+            final var typeParameters = formatCatalogTypeParameters(declaration.typeParameters());
+            return switch (declaration.kind()) {
+                case CLASS -> "class " + name + typeParameters;
+                case CONTRACT -> "contract " + name + typeParameters;
+                case SUM, PRODUCT -> "type " + name + typeParameters;
+                case NEWTYPE -> "newtype " + name + typeParameters;
+            };
+        }
+
+        private static String formatCatalogTypeParameters(
+                final List<PublicMemberCatalog.TypeParameter> parameters) {
+            if (parameters.isEmpty()) return "";
+            return parameters.stream().map(parameter -> {
+                final var constraints = new ArrayList<String>();
+                if (parameter.admitsNullableArguments()) constraints.add("nullable");
+                if (parameter.effectKind()) constraints.add("effect");
+                if (parameter.effectRowKind()) constraints.add("effect...");
+                if (parameter.admitsMutableArguments()) constraints.add("mut");
+                parameter.bounds().stream().map(LspFeatures::formatType).forEach(constraints::add);
+                return parameter.name() + (constraints.isEmpty() ? ""
+                        : ": " + String.join(" + ", constraints));
+            }).collect(java.util.stream.Collectors.joining(", ", "<", ">"));
         }
 
         private void indexResolvedFunctions(final ResolutionResult resolution) {
@@ -1229,8 +1953,10 @@ final class LspFeatures {
                 }
                 final var parameterNames = declaration instanceof Stmt.FunctionDeclaration function
                         ? function.parameters().stream().map(Token::lexeme).toList() : List.<String>of();
+                recordParameterNames(qualifiedName, parameterNames);
                 add(new Symbol(declarationToken.lexeme(), qualifiedName, packageName, namespace,
-                        signature(declarationToken.lexeme(), functionType), CompletionItemKind.Function,
+                        signature(declarationToken.lexeme(), functionType, parameterNames),
+                        CompletionItemKind.Function,
                         declarationToken, null, isPublic,
                         callableLabel(declarationToken.lexeme(), functionType, parameterNames),
                         TypeFormatter.format(functionType.returnType())));
@@ -1257,6 +1983,7 @@ final class LspFeatures {
             for (final var member : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = member.declaration();
                 final var namespace = member.namespaceName();
+                indexTypeParameterDeclarations(declaration, path);
                 if (declaration instanceof Stmt.AnnotationDeclaration value) {
                     final var qualified = namespace == null
                             ? qualify(unit.packageName(), value.name().lexeme())
@@ -1341,6 +2068,16 @@ final class LspFeatures {
                             .forEach(method -> addMethod(method.name(), method.typeDescriptor(),
                                     unit.packageName(), value.name().lexeme(), path,
                                     method.parameters().stream().map(Token::lexeme).toList(), "external "));
+                    value.staticProperties().stream().filter(Stmt.ExternalStaticProperty::isPublic)
+                            .forEach(property -> add(new Symbol(property.name().lexeme(),
+                                    qualify(unit.packageName(), value.name().lexeme()) + "."
+                                            + property.name().lexeme(),
+                                    unit.packageName(), null,
+                                    "external static property " + property.name().lexeme() + ": "
+                                            + TypeFormatter.format(property.type()),
+                                    CompletionItemKind.Property, property.name(), path, true,
+                                    property.name().lexeme(),
+                                    TypeFormatter.format(property.type()))));
                 } else if (declaration instanceof Stmt.ContractDecl value) {
                     final var requirements = value.requiredContracts().stream()
                             .map(contractUse -> formatContractUse(contractUse, unit))
@@ -1392,10 +2129,13 @@ final class LspFeatures {
                         && value instanceof Stmt.ExtensionMethod extension) {
                     final var qualified = "extension:" + TypeFormatter.format(extension.receiverType())
                             + "." + value.name().lexeme();
+                    final var parameterNames = value.parameters().stream().map(Token::lexeme).toList();
+                    recordParameterNames(qualified, parameterNames);
                     byToken.put(value.name(), new Symbol(value.name().lexeme(), qualified,
                             unit.packageName(), null,
                             "extension on " + TypeFormatter.format(extension.receiverType())
-                                    + ": " + signature(value),
+                                    + ": " + signature(value.name().lexeme(), value.typeDescriptor(),
+                                            parameterNames),
                             extension.property() ? CompletionItemKind.Property : CompletionItemKind.Method,
                             value.name(), path, value.isPublic(),
                             extension.property() ? value.name().lexeme()
@@ -1408,7 +2148,10 @@ final class LspFeatures {
                             : NamespaceMembers.qualifiedName(unit.packageName(), namespace,
                                     value.name().lexeme());
                     final var witnessDetail = witnessMethods.get(value.name());
-                    final var functionSignature = signature(value);
+                    final var parameterNames = value.parameters().stream().map(Token::lexeme).toList();
+                    recordParameterNames(qualified, parameterNames);
+                    final var functionSignature = signature(value.name().lexeme(),
+                            value.typeDescriptor(), parameterNames);
                     final var detail = witnessDetail == null
                             ? (value instanceof Stmt.ExternalFunction ? "external " : "")
                             + functionSignature
@@ -1423,11 +2166,19 @@ final class LspFeatures {
                             ? qualify(unit.packageName(), value.name().lexeme())
                             : NamespaceMembers.qualifiedName(unit.packageName(), namespace,
                                     value.name().lexeme());
-                    final var isHandler = value.initializer() instanceof com.maruseron.zeron.ast.Expr.HandlerLiteral;
-                    add(new Symbol(value.name().lexeme(), qualified, unit.packageName(), namespace,
-                            isHandler ? "handler " + value.name().lexeme()
+                    final var isHandler = value.initializer() instanceof Expr.HandlerLiteral;
+                    final var model = value.initializer() instanceof Expr.ModelLiteral literal
+                            ? literal : null;
+                    final var detail = model != null
+                            ? modelDetail(value.name().lexeme(), model)
+                            : isHandler ? "handler " + value.name().lexeme()
                                     : "value " + value.name().lexeme() + ": "
-                                            + TypeFormatter.format(value.type()),
+                                            + TypeFormatter.format(value.type());
+                    if (model != null && model.generatedClassName() != null) {
+                        modelDetailsByGeneratedClassName.put(model.generatedClassName(), detail);
+                    }
+                    add(new Symbol(value.name().lexeme(), qualified, unit.packageName(), namespace,
+                            detail,
                             CompletionItemKind.Variable, value.name(), path, value.isPublic(),
                             value.name().lexeme(), TypeFormatter.format(value.type())));
                 }
@@ -1558,9 +2309,12 @@ final class LspFeatures {
         private void addMethod(final Token token, final FunctionDescriptor type,
                                final String packageName, final String owner, final Path path,
                                final List<String> parameterNames, final String modifier) {
-            add(new Symbol(token.lexeme(), qualify(packageName, owner) + "." + token.lexeme(),
-                    packageName, null, modifier + signature(token.lexeme(), type), CompletionItemKind.Method,
-                    token, path, true, callableLabel(token.lexeme(), type, parameterNames),
+            final var qualifiedName = qualify(packageName, owner) + "." + token.lexeme();
+            recordParameterNames(qualifiedName, parameterNames);
+            add(new Symbol(token.lexeme(), qualifiedName,
+                    packageName, null, modifier + signature(token.lexeme(), type, parameterNames),
+                    CompletionItemKind.Method, token, path, true,
+                    callableLabel(token.lexeme(), type, parameterNames),
                     TypeFormatter.format(type.returnType())));
         }
 
@@ -1604,6 +2358,204 @@ final class LspFeatures {
 
         CompilationUnit unitFor(final Path path) {
             return unitsByPath.get(path);
+        }
+
+        String modelDetail(final TypeDescriptor type) {
+            final var base = type instanceof ReferenceDescriptor reference
+                    ? reference.baseType()
+                    : type;
+            if (!(base instanceof NominalDescriptor nominal)) return null;
+            return modelDetailsByGeneratedClassName.get(nominal.name());
+        }
+
+        private void indexTypeParameterDeclarations(final Stmt declaration, final Path path) {
+            switch (declaration) {
+                case Stmt.ClassDecl value -> {
+                    indexTypeParameterTokens(value.name(), value.typeParameters(), path);
+                    value.methods().forEach(method -> indexTypeParameterTokens(
+                            method.name(), method.typeDescriptor().typeParameters(), path));
+                    value.namedConstructors().forEach(constructor -> indexTypeParameterTokens(
+                            constructor.name(), constructor.typeDescriptor().typeParameters(), path));
+                }
+                case Stmt.ContractDecl value -> {
+                    indexTypeParameterTokens(value.name(), value.typeParameters(), path);
+                    value.methods().forEach(method -> indexTypeParameterTokens(
+                            method.name(), method.typeDescriptor().typeParameters(), path));
+                }
+                case Stmt.SumDecl value ->
+                        indexTypeParameterTokens(value.name(), value.typeParameters(), path);
+                case Stmt.ProductDecl value ->
+                        indexTypeParameterTokens(value.name(), value.typeParameters(), path);
+                case Stmt.FunctionDeclaration value -> {
+                    indexTypeParameterTokens(value.name(), value.typeDescriptor().typeParameters(), path);
+                    if (value instanceof Stmt.ExtensionMethod extension) {
+                        indexExtensionTypeParameters(extension, path);
+                    }
+                }
+                default -> {}
+            }
+        }
+
+        private void indexExtensionTypeParameters(final Stmt.ExtensionMethod extension, final Path path) {
+            if (extension.receiverTypeParameters().isEmpty()) return;
+            final var tokens = snapshot.tokens().get(path);
+            if (tokens == null) return;
+            final var nameIndex = indexOfToken(tokens, extension.name());
+            if (nameIndex < 0) return;
+            for (var index = nameIndex - 1; index >= 0; index--) {
+                final var token = tokens.get(index);
+                if (token.type() == TokenType.EXTENSION) {
+                    indexTypeParameterTokens(token, extension.receiverTypeParameters(), path);
+                    return;
+                }
+            }
+        }
+
+        private void indexTypeParameterTokens(final Token declarationName,
+                                              final List<TypeParameterDescriptor> parameters,
+                                              final Path path) {
+            if (parameters.isEmpty()) return;
+            final var tokens = snapshot.tokens().get(path);
+            if (tokens == null) return;
+            final var nameIndex = indexOfToken(tokens, declarationName);
+            if (nameIndex < 0) return;
+            final var open = nextTypeParameterList(tokens, nameIndex);
+            if (open < 0) return;
+
+            final var declarations = new ArrayList<Integer>();
+            final var declared = new ArrayList<TypeParameterDescriptor>();
+            var depth = 0;
+            var expectingName = true;
+            var close = -1;
+            for (var index = open; index < tokens.size(); index++) {
+                final var token = tokens.get(index);
+                switch (token.type()) {
+                    case LESS -> depth++;
+                    case GREATER -> {
+                        depth--;
+                        if (depth == 0) {
+                            close = index;
+                        }
+                    }
+                    case COMMA -> {
+                        if (depth == 1) expectingName = true;
+                    }
+                    case IDENTIFIER -> {
+                        if (depth != 1 || !expectingName) continue;
+                        if (token.lexeme().equals("out")) continue;
+                        final var parameter = parameters.stream()
+                                .filter(candidate -> candidate.name().equals(token.lexeme()))
+                                .findFirst().orElse(null);
+                        if (parameter != null) {
+                            declarations.add(index);
+                            declared.add(parameter);
+                        }
+                        expectingName = false;
+                    }
+                    default -> {}
+                }
+                if (close >= 0) break;
+            }
+            if (declarations.isEmpty()) return;
+
+            final var endIndex = typeParameterScopeEnd(tokens, nameIndex);
+            final var endOffset = tokenEndOffset(tokens.get(endIndex));
+            for (var index = 0; index < declarations.size(); index++) {
+                final var token = tokens.get(declarations.get(index));
+                final var parameter = declared.get(index);
+                typeParametersByToken.put(token, parameter);
+                final var startOffset = tokenStartOffset(token);
+                if (startOffset == null || endOffset == null) continue;
+                typeParameterScopes.add(new TypeParameterScope(path, parameter.name(), parameter,
+                        startOffset, endOffset));
+            }
+        }
+
+        private static int indexOfToken(final List<Token> tokens, final Token token) {
+            for (var index = 0; index < tokens.size(); index++) {
+                if (tokens.get(index) == token) return index;
+            }
+            final var start = tokenStartOffset(token);
+            if (start == null) return -1;
+            for (var index = 0; index < tokens.size(); index++) {
+                final var candidate = tokens.get(index);
+                if (candidate.lexeme().equals(token.lexeme())
+                        && Objects.equals(tokenStartOffset(candidate), start)) return index;
+            }
+            return -1;
+        }
+
+        private static int nextTypeParameterList(final List<Token> tokens, final int nameIndex) {
+            for (var index = nameIndex + 1; index < tokens.size(); index++) {
+                final var type = tokens.get(index).type();
+                if (type == TokenType.LESS) return index;
+                if (type == TokenType.LEFT_PAREN || type == TokenType.LEFT_BRACE
+                        || type == TokenType.EQUAL || type == TokenType.SEMICOLON) return -1;
+            }
+            return -1;
+        }
+
+        private static int typeParameterScopeEnd(final List<Token> tokens, final int startIndex) {
+            var braceDepth = 0;
+            var parenDepth = 0;
+            var blockBody = false;
+            var expressionBody = false;
+            for (var index = startIndex + 1; index < tokens.size(); index++) {
+                final var type = tokens.get(index).type();
+                if (type == TokenType.LEFT_PAREN) {
+                    parenDepth++;
+                } else if (type == TokenType.RIGHT_PAREN && parenDepth > 0) {
+                    parenDepth--;
+                } else if (type == TokenType.EQUAL && braceDepth == 0 && parenDepth == 0) {
+                    expressionBody = true;
+                } else if (type == TokenType.LEFT_BRACE) {
+                    braceDepth++;
+                    if (!expressionBody) blockBody = true;
+                } else if (type == TokenType.RIGHT_BRACE && braceDepth > 0) {
+                    braceDepth--;
+                    if (blockBody && braceDepth == 0) return index;
+                } else if (type == TokenType.SEMICOLON && braceDepth == 0) {
+                    return index;
+                }
+            }
+            return tokens.size() - 1;
+        }
+
+        private static Integer tokenStartOffset(final Token token) {
+            return token.span().start() == null ? null : token.span().start().offset();
+        }
+
+        private static Integer tokenEndOffset(final Token token) {
+            return token.span().end() == null ? null : token.span().end().offset();
+        }
+
+        TypeParameterDescriptor typeParameterAt(final Path path, final Token token,
+                                               final int offset, final boolean typeNamePosition) {
+            final var declaration = typeParametersByToken.get(token);
+            if (declaration != null) return declaration;
+            if (!typeNamePosition) return null;
+            TypeParameterScope best = null;
+            for (final var scope : typeParameterScopes) {
+                if (!scope.path().equals(path) || !scope.name().equals(token.lexeme())
+                        || offset < scope.start() || offset > scope.end()) continue;
+                if (best == null || scope.end() - scope.start() < best.end() - best.start()) {
+                    best = scope;
+                }
+            }
+            return best == null ? null : best.parameter();
+        }
+
+        List<String> parameterNames(final Symbol symbol) {
+            final var names = parameterNamesByQualifiedName.getOrDefault(
+                    symbol.qualifiedName(), List.of());
+            if (symbol.qualifiedName().startsWith("extension:") && names.size() > 1) {
+                return names.subList(1, names.size());
+            }
+            return names;
+        }
+
+        private void recordParameterNames(final String qualifiedName, final List<String> names) {
+            if (!names.isEmpty()) parameterNamesByQualifiedName.putIfAbsent(qualifiedName, List.copyOf(names));
         }
 
         Stmt sourceType(final Path path, final String name) {
@@ -1705,6 +2657,32 @@ final class LspFeatures {
 
         Symbol byToken(final Token token) {
             return byToken.get(token);
+        }
+
+        Location bundledDefinitionLocation(final Symbol symbol) {
+            if (symbol == null || symbol.token() != null) return null;
+            final var packageName = symbol.packageName();
+            if (packageName == null || packageName.isEmpty()) return null;
+            for (final var entry : snapshot.filesByCompilerPath().entrySet()) {
+                if (!StandardLibrary.isBundledSourcePath(entry.getKey())) continue;
+                final var text = snapshot.sourceText().get(entry.getValue());
+                if (text == null) continue;
+                final var scan = Scanner.from(text, entry.getKey()).scanWithDiagnostics();
+                final var parsed = Parser.of(scan).parseCompilationUnitWithDiagnostics(entry.getKey());
+                final var unit = parsed.compilationUnit();
+                if (!packageName.equals(unit.packageName())) continue;
+                for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                    final var declaration = member.declaration();
+                    if (!isTypeDeclaration(declaration)
+                            || !typeName(declaration).equals(symbol.name())) continue;
+                    final var token = sourceTypeNameToken(declaration);
+                    if (token != null) {
+                        return new Location(entry.getValue().toUri().toString(),
+                                DocumentCoordinates.rangeOf(text, token));
+                    }
+                }
+            }
+            return null;
         }
 
         Symbol resolve(final Path path, final Token token) {
@@ -1887,14 +2865,75 @@ final class LspFeatures {
         }
 
         private static String signature(final Stmt.FunctionDeclaration declaration) {
-            return signature(declaration.name().lexeme(), declaration.typeDescriptor());
+            return signature(declaration.name().lexeme(), declaration.typeDescriptor(),
+                    declaration.parameters().stream().map(Token::lexeme).toList());
         }
 
         private static String signature(final String name, final FunctionDescriptor descriptor) {
+            return signature(name, descriptor, List.of());
+        }
+
+        private static String signature(final String name, final FunctionDescriptor descriptor,
+                                        final List<String> parameterNames) {
             final var raises = descriptor.raisedEffects().isEmpty() ? ""
                     : descriptor.raisedEffects().stream().map(TypeFormatter::format).sorted()
                             .collect(java.util.stream.Collectors.joining(", ", " raises {", "}"));
-            return "fn " + name + TypeFormatter.format(descriptor) + raises;
+            final var names = parameterNames.size() == descriptor.parameters().size()
+                    ? parameterNames : List.<String>of();
+            final var parameters = new ArrayList<String>();
+            for (var index = 0; index < descriptor.parameters().size(); index++) {
+                final var parameterName = index < names.size() ? names.get(index) : null;
+                parameters.add((parameterName == null || parameterName.isBlank()
+                        ? "" : parameterName + ": ")
+                        + TypeFormatter.format(descriptor.parameters().get(index)));
+            }
+            final var receiver = descriptor.receiverType() == null ? ""
+                    : TypeFormatter.format(descriptor.receiverType()) + ".";
+            final var parameterList = String.join(", ", parameters);
+            final var signature = unqualifyTypeNames("fn " + receiver + name
+                    + formatTypeParameters(descriptor.typeParameters())
+                    + "(" + parameterList + ")"
+                    + " -> " + TypeFormatter.format(descriptor.returnType()) + raises);
+            return signature.length() <= SIGNATURE_HOVER_LINE_LIMIT
+                    ? signature : wrapDelimited(signature, signature.indexOf('('));
+        }
+
+        private static String modelDetail(final String name, final Expr.ModelLiteral model) {
+            final var lines = new ArrayList<String>();
+            lines.add("model " + name + ": " + modelContract(model));
+            for (final var assignment : model.assignments) {
+                lines.add("    " + assignment.property().lexeme() + " = "
+                        + modelValue(assignment.value()));
+            }
+            for (final var mapping : model.mappings) {
+                lines.add("    " + mapping.property().lexeme() + " -> "
+                        + literalText(mapping.externalName().literal()));
+            }
+            return String.join("\n", lines);
+        }
+
+        private static String modelValue(final Expr value) {
+            if (value instanceof Expr.Literal literal) return literalText(literal.value);
+            if (value instanceof Expr.PropertyReference reference) {
+                return (reference.declaringTypeName() == null ? ""
+                        : reference.declaringTypeName() + ".")
+                        + reference.propertyName.lexeme();
+            }
+            return "<constant>";
+        }
+
+        private static String literalText(final Object value) {
+            if (!(value instanceof String text)) return String.valueOf(value);
+            return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        }
+
+        private static String modelContract(final Expr.ModelLiteral model) {
+            final var name = model.contract.name().lexeme();
+            final var contract = model.contract.typeArguments().isEmpty() ? name
+                    : name + model.contract.typeArguments().stream()
+                            .map(TypeFormatter::format)
+                            .collect(java.util.stream.Collectors.joining(", ", "<", ">"));
+            return unqualifyTypeNames(contract);
         }
 
         private static String sumTypeDetail(final Stmt.SumDecl declaration) {

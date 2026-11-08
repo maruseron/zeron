@@ -36,23 +36,29 @@ public final class ContractDerivationTest {
                     next: Node?;
                 }
                 public type Choice deriving Hashable = Empty | Value(value: Int);
+                public type Coordinates deriving Hashable = (left: Int, right: Int);
+                public type CasePayload deriving Hashable = Left(value: Int) | Right(value: Int);
                 public newtype UserId deriving Eq, Hashable = Int;
                 fn same<T: mut + Eq<T>>(left: T, right: T): Boolean = left.eq(right);
-                fn hash<T: mut + Hashable<T>>(value: T): Int = value.hash();
+                fn hash<T: mut + Hashable<T>>(value: T): Long = value.hash();
                 fn equalRecords(): Boolean =
                     same(Record.new(7, "seven"), Record.new(7, "seven"));
                 fn unequalRecords(): Boolean =
                     same(Record.new(7, "seven"), Record.new(8, "seven"));
-                fn recordHash(): Int = hash(Record.new(7, "seven"));
+                fn recordHash(): Long = hash(Record.new(7, "seven"));
                 fn sameRecordHash(): Boolean =
                     hash(Record.new(7, "seven")) == hash(Record.new(7, "seven"));
                 fn sameNodes(): Boolean =
                     same(Node.new(7, Node.new(8, null)), Node.new(7, Node.new(8, null)));
-                fn nodeHash(): Int = hash(Node.new(7, Node.new(8, null)));
-                fn pairHash(): Int = hash(Pair.new(7, "seven"));
-                fn emptyHash(): Int = hash(Choice.Empty());
-                fn valueHash(): Int = hash(Choice.Value(7));
-                fn idHash(): Int = hash(UserId.new(7));
+                fn nodeHash(): Long = hash(Node.new(7, Node.new(8, null)));
+                fn pairHash(): Long = hash(Pair.new(7, "seven"));
+                fn emptyHash(): Long = hash(Choice.Empty());
+                fn valueHash(): Long = hash(Choice.Value(7));
+                fn idHash(): Long = hash(UserId.new(7));
+                fn coordinateOrder(): Boolean =
+                    hash(Coordinates.new(7, 8)) != hash(Coordinates.new(8, 7));
+                fn sumCaseSeeds(): Boolean =
+                    hash(CasePayload.Left(7)) != hash(CasePayload.Right(7));
                 """;
         final var compiler = new CompilationService(parse(source), programName);
         try {
@@ -63,18 +69,22 @@ public final class ContractDerivationTest {
                 final var program = loader.loadClass(programName);
                 assertTrue((Boolean) program.getMethod("equalRecords").invoke(null));
                 assertFalse((Boolean) program.getMethod("unequalRecords").invoke(null));
-                assertTrue((Integer) program.getMethod("recordHash").invoke(null) != 0);
+                assertTrue((Long) program.getMethod("recordHash").invoke(null) != 0L);
                 assertTrue((Boolean) program.getMethod("sameRecordHash").invoke(null));
                 assertTrue((Boolean) program.getMethod("sameNodes").invoke(null));
-                assertTrue((Integer) program.getMethod("nodeHash").invoke(null) != 0);
-                assertTrue((Integer) program.getMethod("pairHash").invoke(null) != 0);
-                assertTrue((Integer) program.getMethod("emptyHash").invoke(null) != 0);
-                assertTrue((Integer) program.getMethod("valueHash").invoke(null) != 0);
-                assertTrue((Integer) program.getMethod("idHash").invoke(null) != 0);
+                assertTrue((Long) program.getMethod("nodeHash").invoke(null) != 0L);
+                assertTrue((Long) program.getMethod("pairHash").invoke(null) != 0L);
+                assertTrue((Long) program.getMethod("emptyHash").invoke(null) != 0L);
+                assertTrue((Long) program.getMethod("valueHash").invoke(null) != 0L);
+                assertTrue((Long) program.getMethod("idHash").invoke(null) != 0L);
+                assertTrue((Boolean) program.getMethod("coordinateOrder").invoke(null));
+                assertTrue((Boolean) program.getMethod("sumCaseSeeds").invoke(null));
             }
         } finally {
             for (final var generated : List.of(programName + ".class", "Pair.class", "Record.class", "Node.class",
-                    "Choice.class", "Choice$$sum$Empty.class", "Choice$$sum$Value.class", "UserId.class")) {
+                    "Choice.class", "Choice$$sum$Empty.class", "Choice$$sum$Value.class",
+                    "Coordinates.class", "CasePayload.class", "CasePayload$$sum$Left.class",
+                    "CasePayload$$sum$Right.class", "UserId.class")) {
                 Files.deleteIfExists(Path.of("dist", generated));
             }
         }
@@ -133,8 +143,8 @@ public final class ContractDerivationTest {
                         package client;
                         import %s.Box;
                         import zeron.lang.Hashable;
-                        fn hashBox<T: mut + Hashable<T>>(value: T): Int = value.hash();
-                        fn result(): Int = hashBox(Box<Int>.new(17));
+                        fn hashBox<T: mut + Hashable<T>>(value: T): Long = value.hash();
+                        fn result(): Long = hashBox(Box<Int>.new(17));
                         """.formatted(libraryPackage));
                 final var clientCompiler = CompilationService.forCompilationUnits(
                         List.of(client), "client.Main", "client",
@@ -144,7 +154,7 @@ public final class ContractDerivationTest {
                 try (final var loader = new URLClassLoader(new java.net.URL[]{
                         clientOutput.toUri().toURL(), libraryOutput.toUri().toURL()},
                         getClass().getClassLoader())) {
-                    assertTrue((Integer) loader.loadClass("client.Main").getMethod("result").invoke(null) != 0);
+                    assertTrue((Long) loader.loadClass("client.Main").getMethod("result").invoke(null) != 0L);
                 }
             } finally {
                 deleteTree(clientOutput);

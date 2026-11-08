@@ -180,6 +180,17 @@
           }
         },
         {
+          "match": "\\b(model)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.model.zeron"
+            },
+            "2": {
+              "name": "entity.name.constant.zeron"
+            }
+          }
+        },
+        {
           "match": "\\b(class|contract|effect|extension|type|witness)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
@@ -223,7 +234,7 @@
     },
     "contextual-keywords": {
       "patterns": [
-        {
+          {
           "match": "(?<=:)\\s*(nullable)\\b(?=\\s*(?:\\+|,|>))",
           "captures": {
             "1": {

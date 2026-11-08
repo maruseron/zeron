@@ -10,13 +10,10 @@ import com.maruseron.zeron.domain.AnnotationConstant;
 import com.maruseron.zeron.domain.BooleanDescriptor;
 import com.maruseron.zeron.domain.ByteDescriptor;
 import com.maruseron.zeron.domain.FloatDescriptor;
-import com.maruseron.zeron.domain.FunctionDescriptor;
-import com.maruseron.zeron.domain.GenericDescriptor;
 import com.maruseron.zeron.domain.IntDescriptor;
 import com.maruseron.zeron.domain.LongDescriptor;
 import com.maruseron.zeron.domain.NullableDescriptor;
 import com.maruseron.zeron.domain.NullDescriptor;
-import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.StringDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
@@ -75,7 +72,6 @@ final class AnnotationResolver {
             for (final var site : unit.annotationSites()) {
                 validateSite(context, unit, definitions, site.target(), site.isPublic(),
                         site.applications(), visited);
-                validateCodeModelParameter(context, unit, site);
             }
             for (final var member : NamespaceMembers.flatten(unit.declarations())) {
                 if (member.annotations().isEmpty()) continue;
@@ -86,84 +82,6 @@ final class AnnotationResolver {
                 }
             }
         }
-    }
-
-    private static void validateCodeModelParameter(final ResolutionContext context,
-                                                   final CompilationUnit unit,
-                                                   final Stmt.AnnotationSite site) {
-        if (site.target() != Stmt.AnnotationTarget.PARAMETER) return;
-        for (final var application : site.applications()) {
-            if (!"zeron.compiler.CodeModel".equals(application.resolvedName())) continue;
-            final var parameterType = parameterType(unit, site);
-            if (parameterType == null || !isCodeModelFunctionType(parameterType)) {
-                record(context, unit, application.location(),
-                        "@CodeModel parameters must use CodeModel<F>, where F is a function type.");
-            }
-        }
-    }
-
-    private static TypeDescriptor parameterType(final CompilationUnit unit,
-                                                final Stmt.AnnotationSite site) {
-        for (final var member : NamespaceMembers.flatten(unit.declarations())) {
-            final var declaration = member.declaration();
-            if (declaration instanceof Stmt.FunctionDeclaration function) {
-                final var receiverOffset = function instanceof Stmt.ExtensionMethod ? 1 : 0;
-                final var parameterIndex = site.parameterIndex() + receiverOffset;
-                final var targetMatches = function instanceof Stmt.ExtensionMethod extension
-                        ? site.targetName().endsWith(extension.receiverType().name() + "."
-                                + function.name().lexeme())
-                        : functionTargetName(unit, member.namespaceName(), function.name().lexeme())
-                                .equals(site.targetName());
-                if (targetMatches
-                        && parameterIndex < function.typeDescriptor().parameters().size()) {
-                    return function.typeDescriptor().parameters().get(parameterIndex);
-                }
-            }
-            if (declaration instanceof Stmt.ClassDecl classDeclaration) {
-                for (final var method : classDeclaration.methods()) {
-                    if (memberTargetMatches(site, classDeclaration.name().lexeme(), method.name().lexeme())
-                            && site.parameterIndex() < method.typeDescriptor().parameters().size()) {
-                        return method.typeDescriptor().parameters().get(site.parameterIndex());
-                    }
-                }
-            } else if (declaration instanceof Stmt.ContractDecl contractDeclaration) {
-                for (final var method : contractDeclaration.methods()) {
-                    if (memberTargetMatches(site, contractDeclaration.name().lexeme(), method.name().lexeme())
-                            && site.parameterIndex() < method.typeDescriptor().parameters().size()) {
-                        return method.typeDescriptor().parameters().get(site.parameterIndex());
-                    }
-                }
-            } else if (declaration instanceof Stmt.ExternalClass externalClass) {
-                for (final var method : externalClass.methods()) {
-                    if (memberTargetMatches(site, externalClass.name().lexeme(), method.name().lexeme())
-                            && site.parameterIndex() < method.typeDescriptor().parameters().size()) {
-                        return method.typeDescriptor().parameters().get(site.parameterIndex());
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    private static String functionTargetName(final CompilationUnit unit, final String namespace,
-                                             final String functionName) {
-        return namespace == null
-                ? qualify(unit.packageName(), functionName)
-                : NamespaceMembers.qualifiedName(unit.packageName(), namespace, functionName);
-    }
-
-    private static boolean memberTargetMatches(final Stmt.AnnotationSite site, final String ownerName,
-                                               final String memberName) {
-        return site.targetName().endsWith(ownerName + "." + memberName);
-    }
-
-    private static boolean isCodeModelFunctionType(final TypeDescriptor type) {
-        final var unwrapped = type instanceof ReferenceDescriptor reference
-                ? reference.baseType() : type;
-        return unwrapped instanceof GenericDescriptor generic
-                && generic.baseType().name().equals("zeron.compiler.CodeModel")
-                && generic.typeParameters().size() == 1
-                && generic.typeParameters().getFirst() instanceof FunctionDescriptor;
     }
 
     private static void validateSite(final ResolutionContext context, final CompilationUnit unit,

@@ -73,6 +73,22 @@ public final class JsonSupportTest {
     }
 
     @Test
+    public void writesIndentedValuesAndKeepsZeroIndentCompact() {
+        final var parsed = JsonSupport.parse("{\"a\":[1,[]],\"b\":{}}");
+        assertTrue(parsed.isSuccess());
+        assertEquals("""
+                {
+                  "a": [
+                    1,
+                    []
+                  ],
+                  "b": {}
+                }""", JsonSupport.stringifyIndented(parsed.value(), 2).text());
+        assertEquals(JsonSupport.stringify(parsed.value()).text(),
+                JsonSupport.stringifyIndented(parsed.value(), 0).text());
+    }
+
+    @Test
     public void rejectsCyclicValuesAndInvalidSurrogatesDuringSerialization() {
         final var array = new JsonArray();
         array.add(JsonValue.arrayValue(array));

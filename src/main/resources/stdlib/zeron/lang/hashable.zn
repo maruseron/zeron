@@ -1,11 +1,11 @@
 package zeron.lang;
 
-/// Defines a hashing operation for types that can be mapped to an integer hash. 
-/// `Eq<T>` is a contract prerequisite. This contract can be derived by the compiler 
+/// Defines a hashing operation for types that can be mapped to a 64-bit hash.
+/// `Eq<T>` is a contract prerequisite. This contract can be derived by the compiler
 /// for Algebraic Data Types, newtypes and classes.
 public contract Hashable<T: nullable + mut> requires Eq<T> {
 
-    /// Returns an integer hash value for this object.
+    /// Returns a 64-bit hash value for this object.
     ///
     /// The general contract of `hash` is:
     /// - Arbitrary `hash` invocations on the same object during the execution of a
@@ -19,5 +19,5 @@ public contract Hashable<T: nullable + mut> requires Eq<T> {
     /// integer results. However, the programmer should be aware that producing
     /// distinct integer results for unequal objects may improve the performance
     /// of hash-aware collections.
-    hash(): Int;
+    hash(): Long;
 }

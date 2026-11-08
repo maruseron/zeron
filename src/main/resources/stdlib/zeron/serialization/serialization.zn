@@ -1,8 +1,10 @@
 package zeron.serialization;
 
+import zeron.collections.Array.append;
 import zeron.lang.Option;
 import zeron.lang.Result;
 
+/// The kind of value a decoded or encoded representation describes.
 public type ValueKind =
       NullKind
     | BooleanKind
@@ -16,6 +18,10 @@ public type ValueKind =
     | SequenceKind
     | MapKind;
 
+/// The format-independent logical value model.
+///
+/// This is an optional convenience layer: streaming codecs write and read through `Encoder` and
+/// `Decoder` without building a tree.
 public type CanonicalValue =
       NullValue
     | BooleanValue(value: Boolean)
@@ -32,9 +38,14 @@ public type CanonicalValue =
 public type RecordField = (name: String, value: CanonicalValue);
 public type MapEntry = (key: CanonicalValue, value: CanonicalValue);
 
+/// A failure reported by an encoder. `path` names the components that led to it.
 public type EncodeError = (message: String, path: Array<String>);
+
+/// A failure reported by a decoder. `path` names the components that led to it, and `position`
+/// carries a format-specific source position when one is available.
 public type DecodeError = (message: String, path: Array<String>, position: Option<Int>);
 
+/// The streaming writing side of the canonical model.
 public contract Encoder {
     mut writeNull(): Result<Unit, EncodeError>;
     mut writeBoolean(value: Boolean): Result<Unit, EncodeError>;
@@ -54,6 +65,10 @@ public contract Encoder {
     mut endMap(): Result<Unit, EncodeError>;
 }
 
+/// The streaming reading side of the canonical model.
+///
+/// `readKind` inspects the next value without consuming it, and `skipValue` consumes exactly one
+/// complete value.
 public contract Decoder {
     mut readKind(): Result<ValueKind, DecodeError>;
     mut readBoolean(): Result<Boolean, DecodeError>;
@@ -76,6 +91,106 @@ public contract Decoder {
     mut skipValue(): Result<Unit, DecodeError>;
 }
 
-public contract Encode<T: nullable + mut> {}
-public contract Decode<T: nullable + mut> {}
-public contract Codec<T: nullable + mut> requires Encode<T> + Decode<T> {}
+/// The capability of writing values of `T`.
+///
+/// `E` is the effect row of the operation, so a codec whose body raises effects declares them
+/// here. Derivation provides this evidence for native products, native sums, and transparent data
+/// classes; a hand-written codec is an explicit witness.
+public contract Encode<T: nullable + mut, E: effect...> {
+    /// Writes `value` to `encoder`, in order.
+    ///
+    /// Like `decode`, this is static: the free `encode` entry point supplies the value and the
+    /// evidence supplies the operation, so derived types need no methods of their own.
+    static encode(value: T, encoder: &Encoder): Result<Unit, EncodeError> raises E;
+}
+
+/// The capability of reading values of `T`.
+///
+/// `decode` is static because decoding has no receiver: the type of the result comes from the
+/// evidence, not from a value.
+public contract Decode<T: nullable + mut, E: effect...> {
+    /// Reads one value from `decoder`.
+    static decode(decoder: &Decoder): Result<T, DecodeError> raises E;
+}
+
+/// The combined capability of writing and reading values of `T`.
+///
+/// `deriving Codec` is equivalent to `deriving Encode, Decode`.
+public contract Codec<T: nullable + mut, E: effect...> requires Encode<T, {E}> + Decode<T, {E}> {}
+
+/// Static shape information about `T`, for consumers such as schema generation.
+///
+/// Kind is `RecordKind` for products and transparent data classes, and `AlternativeKind` for sums.
+public contract Shape<T: nullable + mut> {
+    /// The kind of the encoded representation of `T`.
+    static shape(): ValueKind;
+
+    /// Whether `T` admits a null representation.
+    static nullable(): Boolean;
+}
+
+/// Writes `value` to `encoder` using the `Encode` evidence for `T`.
+///
+/// This is the canonical entry point. The effect row is inferred at the call site.
+public fn encode<E: effect..., T: nullable + mut + Encode<T, {E}>>(
+    value: T,
+    encoder: &Encoder
+): Result<Unit, EncodeError> raises E =
+    T.encode(value, encoder);
+
+/// Reads a `T` from `decoder` using the `Decode` evidence for `T`.
+///
+/// This is the canonical entry point. The effect row is inferred at the call site.
+public fn decode<E: effect..., T: nullable + mut + Decode<T, {E}>>(
+    decoder: &Decoder
+): Result<T, DecodeError> raises E =
+    T.decode(decoder);
+
+public fn encodeErrorAt(error: EncodeError, name: String): EncodeError =
+    EncodeError.new(error.message, error.path.append(name));
+
+public fn decodeErrorAt(error: DecodeError, name: String): DecodeError =
+    DecodeError.new(error.message, error.path.append(name), error.position);
+
+fn encodeNamed<T: nullable + mut>(
+    name: String, writeValue: (T, &Encoder) -> Result<Unit, EncodeError>
+): (T, &Encoder) -> Result<Unit, EncodeError> =
+    (owner, encoder) -> match (encoder.writeField(name)) {
+        case Result.Err(error) -> Result<Unit, EncodeError>.Err(encodeErrorAt(error, name));
+        case Result.Ok(_) -> match (writeValue(owner, encoder)) {
+            case Result.Err(error) -> Result<Unit, EncodeError>.Err(encodeErrorAt(error, name));
+            case Result.Ok(_) -> Result<Unit, EncodeError>.Ok(());
+        };
+    };
+
+fn decodeNamed<T: nullable + mut, V: nullable + mut>(
+    name: String, readValue: (&Decoder) -> Result<V, DecodeError>, write: (&T, V) -> Unit
+): (&Decoder) -> Result<(&T) -> Unit, DecodeError> =
+    (decoder) -> match (readValue(decoder)) {
+        case Result.Err(error) -> Result<(&T) -> Unit, DecodeError>.Err(decodeErrorAt(error, name));
+        case Result.Ok(value) -> Result<(&T) -> Unit, DecodeError>.Ok((target) -> write(target, value));
+    };
+
+// el nulo lo maneja la biblioteca: la evidencia se resuelve sobre V, no sobre V?
+fn encodeNullable<V: Encode<V, {}>>(value: V?, encoder: &Encoder): Result<Unit, EncodeError> {
+    let present = value;
+    if (present == null) return encoder.writeNull();
+    return encode<{}, V>(present, encoder);
+}
+
+fn decodeNullable<V: Decode<V, {}>>(decoder: &Decoder): Result<V?, DecodeError> =
+    match (decoder.readKind()) {
+        case Result.Err(error) -> Result<V?, DecodeError>.Err(error);
+        case Result.Ok(kind) -> match (kind) {
+            case ValueKind.NullKind() -> match (decoder.skipValue()) {
+                case Result.Err(error) -> Result<V?, DecodeError>.Err(error);
+                case Result.Ok(_) -> Result<V?, DecodeError>.Ok(null);
+            };
+            case _ -> match (decode<{}, V>(decoder)) {
+                case Result.Err(error) -> Result<V?, DecodeError>.Err(error);
+                case Result.Ok(value) -> Result<V?, DecodeError>.Ok(value);
+            };
+        };
+    };
+
+public fn unmapped(id: PropertyId): String = "Property '" + id.name + "' is not mapped by the model.";

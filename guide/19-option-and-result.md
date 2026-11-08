@@ -48,13 +48,9 @@ Use `Result<T, E>` when a function can succeed or fail and callers should be abl
 `Err(error)`:
 
 ```zeron
-import zeron.lang.Err;
-import zeron.lang.Ok;
-import zeron.lang.Result;
-
 fn findName(id: Int): Result<String, String> {
-    if (id == 1) return Ok<String, String>.from("Ada");
-    return Err<String, String>.from("No name exists for that id");
+    if (id == 1) return Result.Ok<String, String>("Ada");
+    return Result.Err<String, String>("No name exists for that id");
 }
 ```
 
@@ -62,15 +58,15 @@ The caller can inspect either case and decide what to do:
 
 ```zeron
 let label = match (findName(1)) {
-    case Ok<String, String>.value(name) -> name;
-    case Err<String, String>.error(message) -> "lookup failed: " + message;
+    case Ok(name) -> name;
+    case Err(message) -> "lookup failed: " + message;
 };
 ```
 
 `Ok` carries the successful value, and `Err` carries the error. Both are ordinary values, so the
 function's caller chooses whether to handle the error, return it, or transform it. The standard
 operations include `map` for transforming a success, `mapError` for transforming an error, and
-`andThen` for chaining operations that can also fail.
+`flatMap` for chaining operations that can also fail.
 
 Choose `Option<T>` when the only distinction that matters is whether a value exists. Choose
 `Result<T, E>` when a failure reason is useful information that should travel with the returned

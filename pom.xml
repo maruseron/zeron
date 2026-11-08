@@ -96,6 +96,27 @@
                             <goal>run</goal>
                         </goals>
                     </execution>
+                    <!-- Give every parallel test fork a clean working directory. Many tests write
+                         relative output such as dist/ and target/, so sharing them would race. -->
+                    <execution>
+                        <id>prepare-parallel-test-working-directories</id>
+                        <phase>generate-test-resources</phase>
+                        <configuration>
+                            <target>
+                                <delete dir="${project.build.directory}/test-work-1" quiet="true"/>
+                                <delete dir="${project.build.directory}/test-work-2" quiet="true"/>
+                                <delete dir="${project.build.directory}/test-work-3" quiet="true"/>
+                                <delete dir="${project.build.directory}/test-work-4" quiet="true"/>
+                                <mkdir dir="${project.build.directory}/test-work-1/target"/>
+                                <mkdir dir="${project.build.directory}/test-work-2/target"/>
+                                <mkdir dir="${project.build.directory}/test-work-3/target"/>
+                                <mkdir dir="${project.build.directory}/test-work-4/target"/>
+                            </target>
+                        </configuration>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
                 </executions>
             </plugin>
             <plugin>
@@ -103,6 +124,22 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
                     <release>${maven.compiler.release}</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.4</version>
+                <configuration>
+                    <!-- Tests use relative paths heavily, so each fork runs in its own directory.
+                         The project root is exposed for the few reads that must stay anchored to
+                         the source tree (see TestPaths). -->
+                    <forkCount>4</forkCount>
+                    <reuseForks>true</reuseForks>
+                    <workingDirectory>${project.build.directory}/test-work-${surefire.forkNumber}</workingDirectory>
+                    <systemPropertyVariables>
+                        <zeron.test.project.root>${project.basedir}</zeron.test.project.root>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
             <plugin>

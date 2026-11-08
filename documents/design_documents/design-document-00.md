@@ -121,7 +121,8 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     arrays, functions, and class/contract views.
 - Basic nullable types: a non-null value can be widened to `T?`, and `null` can initialize an
     explicitly nullable binding or parameter.
-- Single-expression function bodies and range-literal syntax.
+- Single-expression function bodies and inclusive integer range expressions, whose endpoints may be
+    any `Int` expression (`0..values.length - 1`).
 - For-expressions use ordered `for`, `let`, and `if` clauses followed by exactly one final result
     clause. `yield expression` produces a lazy `Stream<T>`; `collect expression into sink` eagerly
     adds each projected value to a mutable `Sink<T>` and returns that sink. Generators nest in

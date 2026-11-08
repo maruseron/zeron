@@ -16,11 +16,13 @@ record ProjectManifest(List<Path> sourceRoots,
                        Path outputDirectory,
                        StandardLibraryMode standardLibraryMode,
                        List<Path> libraryRoots,
-                       List<Path> javaClassPathRoots) {
+                       List<Path> javaClassPathRoots,
+                       List<Path> javaSourceRoots) {
     private static final Set<String> TOP_LEVEL_KEYS = Set.of("project", "platform", "dependencies");
     private static final Set<String> PROJECT_KEYS = Set.of("entry", "source-roots", "output");
     private static final Set<String> PLATFORM_KEYS = Set.of("stdlib");
-    private static final Set<String> DEPENDENCY_KEYS = Set.of("zeron-libraries", "java-classpath");
+    private static final Set<String> DEPENDENCY_KEYS =
+            Set.of("zeron-libraries", "java-classpath", "java-sources");
 
     static ProjectManifest load(final Path path) throws IOException {
         final var absolutePath = path.toAbsolutePath().normalize();
@@ -67,9 +69,11 @@ record ProjectManifest(List<Path> sourceRoots,
                 ? List.of() : optionalStringArray(dependencies, "zeron-libraries", "[dependencies]"));
         final var javaClassPathRoots = resolvePaths(baseDirectory, dependencies == null
                 ? List.of() : optionalStringArray(dependencies, "java-classpath", "[dependencies]"));
+        final var javaSourceRoots = resolvePaths(baseDirectory, dependencies == null
+                ? List.of() : optionalStringArray(dependencies, "java-sources", "[dependencies]"));
 
         return new ProjectManifest(sourceRoots, entry, outputDirectory,
-                standardLibraryMode, libraryRoots, javaClassPathRoots);
+                standardLibraryMode, libraryRoots, javaClassPathRoots, javaSourceRoots);
     }
 
     private static Path resolvePath(final Path baseDirectory, final String value) {

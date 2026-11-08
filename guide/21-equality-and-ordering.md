@@ -44,9 +44,12 @@ and two non-null values are compared using `Eq<T>` for their underlying type. St
 for products compares their components; for sums, values must first be from the same case, then
 their payloads are compared. Hashing is a separate capability: `Hashable<T>` requires `Eq<T>`.
 The standard library supports it for scalar types and nullable values, and generic code can require
-it with a bound. Products, sums, classes, and newtypes can opt into derived `Eq` and `Hashable`
-implementations; derivation is explicit, not automatic. `Map` and `Set` use `Hashable` keys or
-elements, which must not be mutated in ways that change their equality or hash while stored.
+it with a bound. `Hashable.hash()` returns a 64-bit `Long`; built-in, nullable, and derived values
+all use full-width 64-bit hashing, and hash collections mix the full value before choosing a bucket.
+Products, sums, classes, and newtypes can opt into derived `Eq` and `Hashable` implementations;
+derivation is explicit, not automatic. See [Contract derivation](./38-contract-derivation.md) for
+the declaration rules, participating components, and generic requirements. `Map` and `Set` use `Hashable` keys or elements, which must
+not be mutated in ways that change their equality or hash while stored.
 
 ## Ordering with `Comparable<T>`
 

@@ -71,11 +71,11 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0058](./ZEP-0058.md) | Clause-Based For-Expressions and Lazy Yield | Implemented | Shipped | 0.5.0 |
 | [ZEP-0059](./ZEP-0059.md) | Removing Contract Constructor Requirements | Implemented | Shipped | 0.5.0 |
 | [ZEP-0060](./ZEP-0060.md) | Treating Arrays as Iterable Values | Implemented | Unscheduled | — |
-| [ZEP-0061](./ZEP-0061.md) | Java and External Interop Language Support | Accepted | Candidate | 0.6.0 |
+| [ZEP-0061](./ZEP-0061.md) | Java and External Interop Language Support | Implemented | Candidate | 0.6.0 |
 | [ZEP-0062](./ZEP-0062.md) | Mutable-Type Admissibility for Generic Parameters | Implemented | Shipped | 0.5.0 |
 | [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Draft | Unscheduled | — |
 | [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Draft | Unscheduled | — |
-| [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Accepted | Candidate | 0.6.0 |
+| [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Implemented | Candidate | 0.6.0 |
 | [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Draft | Unscheduled | — |
 | [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Unscheduled | — |
 | [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Accepted | Candidate | 0.6.0 |
@@ -89,12 +89,12 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0076](./ZEP-0076.md) | Delegating Witness Implementations | Implemented | Unscheduled | — |
 | [ZEP-0077](./ZEP-0077.md) | Delegating Higher-Kinded Implementations | Implemented | Unscheduled | — |
 | [ZEP-0078](./ZEP-0078.md) | Default Method Implementations in Higher-Kinded Contracts | Implemented | Unscheduled | — |
-| [ZEP-0079](./ZEP-0079.md) | Model Declarations | Draft | Unscheduled | — |
+| [ZEP-0079](./ZEP-0079.md) | Model Declarations | Implemented | Unscheduled | — |
 | [ZEP-0080](./ZEP-0080.md) | Typed Code Models for Selected Expressions | Implemented | Unscheduled | — |
-| [ZEP-0081](./ZEP-0081.md) | Type-Safe Embedded DSL Support | Draft | Unscheduled | — |
+| [ZEP-0081](./ZEP-0081.md) | Type-Safe Embedded DSL Support | Implemented | Unscheduled | — |
 | [ZEP-0082](./ZEP-0082.md) | Receiver Lambdas and Type-Safe Builders | Implemented | Unscheduled | — |
 | [ZEP-0083](./ZEP-0083.md) | Lambda and Function-Type Syntax Ergonomics | Implemented | Unscheduled | — |
-| [ZEP-0084](./ZEP-0084.md) | 64-Bit Hashes for Zeron Values | Draft | Unscheduled | — |
+| [ZEP-0084](./ZEP-0084.md) | 64-Bit Hashes for Zeron Values | Implemented | Unscheduled | — |
 | [ZEP-0085](./ZEP-0085.md) | Explicit Mutable Projections for Inferred Bindings | Draft | Unscheduled | — |
 | [ZEP-0086](./ZEP-0086.md) | Effect-Row Polymorphism | Implemented | Unscheduled | — |
 | [ZEP-0087](./ZEP-0087.md) | Negative Flow Refinement for Closed Sum Types | Implemented | Unscheduled | — |
@@ -102,8 +102,16 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0089](./ZEP-0089.md) | Explicit Unchecked Casts | Draft | Unscheduled | — |
 | [ZEP-0090](./ZEP-0090.md) | Property References | Implemented | Unscheduled | — |
 | [ZEP-0091](./ZEP-0091.md) | Annotation Consumption | Draft | Unscheduled | — |
-| [ZEP-0092](./ZEP-0092.md) | Generated Serialization Operations | Draft | Unscheduled | — |
+| [ZEP-0092](./ZEP-0092.md) | Generated Serialization Operations | Implemented | Unscheduled | — |
 | [ZEP-0093](./ZEP-0093.md) | Unified Property Identity and a Typed Code-Model API | Implemented | Unscheduled | — |
 | [ZEP-0094](./ZEP-0094.md) | Collection Contracts | Implemented | Unscheduled | — |
 | [ZEP-0095](./ZEP-0095.md) | Bytecode Quality and Evidence Inlining | Draft | Unscheduled | — |
 | [ZEP-0096](./ZEP-0096.md) | Primitive Specialization for Generic Code | Draft | Unscheduled | — |
+| [ZEP-0097](./ZEP-0097.md) | Annotation Target for Model Mapping Clauses | Draft | Unscheduled | — |
+| [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Draft | Unscheduled | — |
+| [ZEP-0099](./ZEP-0099.md) | Row-Polymorphic Derived Witnesses and Inclusion Matching | Draft | Unscheduled | — |
+| [ZEP-0100](./ZEP-0100.md) | Callable References for Methods, Constructors, and Static Functions | Draft | Unscheduled | — |
+| [ZEP-0101](./ZEP-0101.md) | Field Representation Adapters for Model Mappings | Draft | Unscheduled | — |
+| [ZEP-0102](./ZEP-0102.md) | Generic Models through Model Factories | Draft | Unscheduled | — |
+| [ZEP-0103](./ZEP-0103.md) | Polymorphic Models for Closed Sum Types | Draft | Unscheduled | — |
+| [ZEP-0104](./ZEP-0104.md) | Exploration: Existential Types | Draft | Unscheduled | — |

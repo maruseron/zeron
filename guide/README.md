@@ -29,6 +29,7 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [Products, data classes, and sum types](17-sum-types-and-products.md)
 1. [Pattern matching](18-pattern-matching.md)
 1. [Option and Result](19-option-and-result.md)
+1. [Functional Programming essentials in Zeron](36-functional-programming-essentials.md)
 
 ## Part IV — Advanced type-directed behavior
 
@@ -41,6 +42,7 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [Model declarations](34-model-declarations.md)
 1. [Raised effects](22-raised-effects.md)
 1. [Resource management](26-resource-management.md)
+1. [Advanced functional abstractions](37-functional-abstractions.md)
 
 ## Part V — Use Zeron with the wider platform
 
@@ -57,3 +59,4 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 ## Addendum
 
 1. [Why unit?](35-why-unit.md)
+1. [Contract derivation](38-contract-derivation.md)

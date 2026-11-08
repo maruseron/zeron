@@ -15,29 +15,36 @@ public final class ProjectInitTest {
     public void createsBuildableProjectManifestAndEntry() throws Exception {
         final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-init-")
                 .toAbsolutePath().normalize();
+        final var distribution = Files.createTempDirectory(Path.of("target"), "zeron-init-home-")
+                .toAbsolutePath().normalize();
         final var previousHome = System.getProperty("zeron.home");
-        System.clearProperty("zeron.home");
+
         try {
+            System.setProperty("zeron.home", distribution.toString());
             assertEquals(0, Zeron.initializeProject(projectRoot));
 
             final var manifestPath = projectRoot.resolve("zeron.toml");
             final var sourcePath = projectRoot.resolve("src/main.zn");
+
             assertTrue(Files.isRegularFile(manifestPath));
             assertEquals("""
                     fn main() {
                     }
                     """, Files.readString(sourcePath));
+
             final var manifest = ProjectManifest.load(manifestPath);
             assertEquals(sourcePath, manifest.entry());
             assertEquals(java.util.List.of(projectRoot.resolve("src")), manifest.sourceRoots());
             assertEquals(projectRoot.resolve("dist"), manifest.outputDirectory());
             assertEquals(StandardLibraryMode.SOURCE, manifest.standardLibraryMode());
+
             assertEquals(0, Zeron.runCli("build", "--manifest", manifestPath.toString()));
             assertTrue(Files.isRegularFile(projectRoot.resolve("dist/main.class")));
         } finally {
             if (previousHome == null) System.clearProperty("zeron.home");
             else System.setProperty("zeron.home", previousHome);
             deleteTree(projectRoot);
+            deleteTree(distribution);
         }
     }
 

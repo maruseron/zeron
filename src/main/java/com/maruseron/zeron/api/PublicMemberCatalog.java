@@ -258,6 +258,16 @@ public final class PublicMemberCatalog {
         }
     }
 
+    /** The declaration shape of a public type, without computing its members or extensions. */
+    public record TypeDeclaration(String qualifiedName, TypeKind kind,
+                                  List<TypeParameter> typeParameters) {
+        public TypeDeclaration {
+            Objects.requireNonNull(qualifiedName);
+            Objects.requireNonNull(kind);
+            typeParameters = List.copyOf(typeParameters);
+        }
+    }
+
     private final Map<String, TypeSpec> types;
     private final List<ExtensionSpec> extensions;
 
@@ -517,6 +527,17 @@ public final class PublicMemberCatalog {
 
     public Optional<TypeView> findType(final String qualifiedName) {
         return findType(qualifiedName, List.of());
+    }
+
+    /**
+     * Queries the declaration shape of a public type without computing its members or extensions.
+     */
+    public Optional<TypeDeclaration> findTypeDeclaration(final String qualifiedName) {
+        Objects.requireNonNull(qualifiedName);
+        final var spec = lookupType(qualifiedName);
+        return spec == null ? Optional.empty() : Optional.of(new TypeDeclaration(
+                spec.qualifiedName(), spec.kind(),
+                spec.typeParameters().stream().map(TypeParameter::from).toList()));
     }
 
     /**

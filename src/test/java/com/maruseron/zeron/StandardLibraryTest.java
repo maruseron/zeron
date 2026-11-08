@@ -10,6 +10,7 @@ import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.net.URL;
 import java.net.URLClassLoader;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.Instruction;
@@ -29,6 +30,15 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public final class StandardLibraryTest {
+
+    private URLClassLoader makeStandardLoader() throws Exception {
+        return new URLClassLoader(
+                new URL[]{
+                        Path.of("dist").toUri().toURL(),
+                        Zeron.bundledStandardLibraryJar().orElseThrow().toUri().toURL()
+                },
+                getClass().getClassLoader());
+    }
 
     @Test
     public void cellSharesMutableStateAcrossClosuresAndEscapesItsScope() throws Exception {
@@ -61,8 +71,7 @@ public final class StandardLibraryTest {
             deleteTree(Path.of("dist"));
             assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
                     "--entry", Path.of(packageName, "Main.zn").toString()));
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+            try (final var loader = makeStandardLoader()) {
                 final var main = loader.loadClass(packageName + ".Main");
                 assertEquals(2, main.getMethod("shared").invoke(null));
                 final var escaped = main.getMethod("escaped").invoke(null);
@@ -253,8 +262,7 @@ public final class StandardLibraryTest {
             deleteTree(Path.of("dist"));
             assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
                     "--entry", Path.of(packageName, "Main.zn").toString()));
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+            try (final var loader = makeStandardLoader()) {
                 final var main = loader.loadClass(packageName + ".Main");
                 assertEquals(42, main.getMethod("someResult").invoke(null));
                 assertEquals(1, main.getMethod("callCount").invoke(null));
@@ -471,8 +479,7 @@ public final class StandardLibraryTest {
             deleteTree(Path.of("dist"));
             assertEquals(0, Zeron.runCli("--root", sourceRoot.toString(),
                     "--entry", Path.of(packageName, "Main.zn").toString()));
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+            try (final var loader = makeStandardLoader()) {
                 final var main = loader.loadClass(packageName + ".Main");
                 final var some = main.getMethod("some").invoke(null);
                 final var negative = main.getMethod("negative").invoke(null);
@@ -502,49 +509,34 @@ public final class StandardLibraryTest {
     public void matchRejectsMissingDuplicateAndUnreachableCases() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var packageName = "invalidMatch" + suffix;
-        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-match-invalid-");
-        final var entry = sourceRoot.resolve(packageName).resolve("Main.zn");
-        Files.createDirectories(entry.getParent());
         final var header = """
                 package %s;
                 import zeron.lang.Option;
                 fn result(value: Option<Int>): Int =
                 """.formatted(packageName);
 
-        try {
-            for (final var match : List.of(
-                    "match (value) { case Option.Some(_) -> 1; }",
-                    "match (value) { case Option.Some(_) -> 1; case Option.Some(_) -> 2; case Option.None() -> 3; }",
-                    "match (value) { case Option.Some(_) if true -> 1; case Option.None() -> 2; }",
-                    "match (value) { case Option.Some(_) -> 1; case Option.None() if true -> 2; }",
-                    "match (value) { case _ if true -> 1; }",
-                    "match (value) { case Option.Some(_) if 1 -> 1; case Option.None() -> 2; }",
-                    "match (value) { case Option.Some(_) -> 1; case Option.None() -> 2; case Option.Some(_) -> 3; }",
-                    "match (value) { case _ -> 1; case Option.Some(_) -> 2; }",
-                    "match (value) { case Option.Some(_) -> 1; case Option.None() -> 2; case _ -> 3; }",
-                    "match (value) { case Option<Int> -> 1; }",
-                    "match (value) { case Option<String>.Some(_) -> 1; case Option.None() -> 2; }")) {
-                Files.writeString(entry, header + match + ";");
-                deleteTree(Path.of("dist"));
-                assertTrue("Expected invalid match to fail: " + match,
-                        Zeron.runCli("--root", sourceRoot.toString(),
-                                "--entry", Path.of(packageName, "Main.zn").toString()) != 0);
-            }
-            Files.writeString(entry, """
-                    package %s;
-                    import zeron.lang.Option;
-                    fn result(value: Option<Int>?): Int = match (value) {
-                        case Option.Some(_) -> 1;
-                        case Option.None() -> 2;
-                    };
-                    """.formatted(packageName));
-            deleteTree(Path.of("dist"));
-            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
-                    "--entry", Path.of(packageName, "Main.zn").toString()) != 0);
-        } finally {
-            deleteTree(Path.of("dist"));
-            deleteTree(sourceRoot);
+        for (final var match : List.of(
+                "match (value) { case Option.Some(_) -> 1; }",
+                "match (value) { case Option.Some(_) -> 1; case Option.Some(_) -> 2; case Option.None() -> 3; }",
+                "match (value) { case Option.Some(_) if true -> 1; case Option.None() -> 2; }",
+                "match (value) { case Option.Some(_) -> 1; case Option.None() if true -> 2; }",
+                "match (value) { case _ if true -> 1; }",
+                "match (value) { case Option.Some(_) if 1 -> 1; case Option.None() -> 2; }",
+                "match (value) { case Option.Some(_) -> 1; case Option.None() -> 2; case Option.Some(_) -> 3; }",
+                "match (value) { case _ -> 1; case Option.Some(_) -> 2; }",
+                "match (value) { case Option.Some(_) -> 1; case Option.None() -> 2; case _ -> 3; }",
+                "match (value) { case Option<Int> -> 1; }",
+                "match (value) { case Option<String>.Some(_) -> 1; case Option.None() -> 2; }")) {
+            assertSourceRejected(packageName, "Main.zn", header + match + ";");
         }
+        assertSourceRejected(packageName, "Main.zn", """
+                package %s;
+                import zeron.lang.Option;
+                fn result(value: Option<Int>?): Int = match (value) {
+                    case Option.Some(_) -> 1;
+                    case Option.None() -> 2;
+                };
+                """.formatted(packageName));
     }
 
     @Test
@@ -584,8 +576,7 @@ public final class StandardLibraryTest {
         try {
             deleteTree(Path.of("dist"));
             assertEquals(0, Zeron.runCli(source.toString()));
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+            try (final var loader = makeStandardLoader()) {
                 final var main = loader.loadClass(packageName + "." +
                         source.getFileName().toString().replaceFirst("\\.zn$", ""));
                 assertEquals(4, main.getMethod("compute", int.class).invoke(null, 2));
@@ -646,8 +637,7 @@ public final class StandardLibraryTest {
         try {
             deleteTree(Path.of("dist"));
             assertEquals(0, Zeron.runCli(source.toString()));
-            try (final var loader = new URLClassLoader(
-                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+            try (final var loader = makeStandardLoader()) {
                 final var main = loader.loadClass(packageName + "." +
                         source.getFileName().toString().replaceFirst("\\.zn$", ""));
                 assertEquals(10, main.getMethod("empty").invoke(null));
@@ -749,7 +739,7 @@ public final class StandardLibraryTest {
             deleteTree(Path.of("dist"));
             final var compiler = CompilationService.forCompilationUnits(List.of(source),
                     packageName + ".ExternalDefaults", packageName, List.of(), true,
-                    List.of(Path.of("target", "test-classes")), bindings);
+                    List.of(TestPaths.projectFile("target", "test-classes")), bindings);
             compiler.resolve();
             compiler.compile();
             try (final var loader = new URLClassLoader(
@@ -774,7 +764,7 @@ public final class StandardLibraryTest {
 
     @Test
     public void bundledSourcesFollowTheirPackageDirectoryStructure() throws Exception {
-        final var sourceRoot = Path.of("src", "main", "resources", "stdlib");
+        final var sourceRoot = TestPaths.projectFile("src", "main", "resources", "stdlib");
         final var expectedSources = new ArrayList<String>();
         try (final var sources = Files.walk(sourceRoot)) {
             sources.filter(Files::isRegularFile)
@@ -820,7 +810,7 @@ public final class StandardLibraryTest {
         final var source = distribution.resolve("share").resolve("zeron").resolve("stdlib")
                 .resolve(relativePath);
         Files.createDirectories(source.getParent());
-        Files.copy(Path.of("src", "main", "resources", "stdlib").resolve(relativePath), source);
+        Files.copy(TestPaths.projectFile("src", "main", "resources", "stdlib").resolve(relativePath), source);
         final var previousHome = System.getProperty("zeron.home");
         try {
             System.setProperty("zeron.home", distribution.toString());
@@ -1078,7 +1068,7 @@ public final class StandardLibraryTest {
                     Result.ok<Int, String>(value + 1);
                 fn success(): Result<Int, String> = Result.ok<Int, String>(41)
                     .map(value -> value + 1)
-                    .andThen(value -> increment(value + 1));
+                    .flatMap(value -> increment(value + 1));
                 fn failure(): Result<Int, String> = Result.err<Int, String>("bad")
                     .map(value -> value + 1);
                 fn mappedFailure(): Result<Int, Int> = Result.err<Int, String>("bad")
@@ -1102,8 +1092,8 @@ public final class StandardLibraryTest {
                 fn successIsOk(): Boolean = success().isOk() and not success().isErr();
                 fn errorIsRetained(): Boolean = failure().isErr()
                     and failure().fold(value -> false, error -> error == "bad");
-                fn errorShortCircuitsAndThen(): Boolean = failure()
-                    .andThen(value -> increment(value + 1))
+                fn errorShortCircuitsFlatMap(): Boolean = failure()
+                    .flatMap(value -> increment(value + 1))
                     .fold(value -> false, error -> error == "bad");
                 """.formatted(packageName));
         final var compiler = CompilationService.forCompilationUnits(
@@ -1124,7 +1114,7 @@ public final class StandardLibraryTest {
                 assertEquals(true, test.getMethod("errorIsRetained").invoke(null));
                 assertEquals(true, test.getMethod("mappedFailureHasMappedError").invoke(null));
                 assertEquals(true, test.getMethod("successAfterErrorMapPreservesValue").invoke(null));
-                assertEquals(true, test.getMethod("errorShortCircuitsAndThen").invoke(null));
+                assertEquals(true, test.getMethod("errorShortCircuitsFlatMap").invoke(null));
             }
         } finally {
             deleteTree(Path.of("dist"));
@@ -1450,33 +1440,22 @@ public final class StandardLibraryTest {
 
     @Test
     public void rejectsDirectAndFunctionMediatedProjectValueCycles() throws Exception {
-        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-cycle-");
-        final var entry = sourceRoot.resolve("app").resolve("Main.zn");
-        final var second = sourceRoot.resolve("app").resolve("Second.zn");
-        Files.createDirectories(entry.getParent());
-        Files.writeString(entry, """
-                package app;
-                let first: Int = readSecond();
-                fn readSecond(): Int = second;
-                fn result(): Int = first;
-                """);
-        Files.writeString(second, "package app; let second: Int = first;");
+        assertRejected(List.of(
+                parse("Main.zn", """
+                        package app;
+                        let first: Int = readSecond();
+                        fn readSecond(): Int = second;
+                        fn result(): Int = first;
+                        """),
+                parse("Second.zn", "package app; let second: Int = first;")), "app.Main", "app");
 
-        try {
-            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
-                    "--entry", Path.of("app", "Main.zn").toString()) != 0);
-            Files.writeString(entry, """
-                    package app;
-                    let first: Int = second;
-                    fn result(): Int = first;
-                    """);
-            Files.writeString(second, "package app; let second: Int = first;");
-            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
-                    "--entry", Path.of("app", "Main.zn").toString()) != 0);
-        } finally {
-            deleteTree(Path.of("dist"));
-            deleteTree(sourceRoot);
-        }
+        assertRejected(List.of(
+                parse("Main.zn", """
+                        package app;
+                        let first: Int = second;
+                        fn result(): Int = first;
+                        """),
+                parse("Second.zn", "package app; let second: Int = first;")), "app.Main", "app");
     }
 
     @Test
@@ -1513,8 +1492,7 @@ public final class StandardLibraryTest {
             final var output = new ByteArrayOutputStream();
             final var originalOutput = System.out;
             try (final var capture = new PrintStream(output, true, StandardCharsets.UTF_8);
-                 final var loader = new URLClassLoader(
-                         new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                 final var loader = makeStandardLoader()) {
                 System.setOut(capture);
                 assertEquals(3, loader.loadClass("app.Main").getMethod("result").invoke(null));
             } finally {
@@ -1601,21 +1579,9 @@ public final class StandardLibraryTest {
 
     @Test
     public void projectValuesRequireInitializersAndPublicMutabilityIsRejected() throws Exception {
-        final var sourceRoot = Files.createTempDirectory(Path.of("target"), "zeron-value-validation-");
-        final var entry = sourceRoot.resolve("app").resolve("Main.zn");
-        Files.createDirectories(entry.getParent());
-        Files.writeString(entry, "package app; let value: Int?;");
-
-        try {
-            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
-                    "--entry", Path.of("app", "Main.zn").toString()) != 0);
-            Files.writeString(entry, "package app; public let mut value: Int = 1;");
-            assertTrue(Zeron.runCli("--root", sourceRoot.toString(),
-                    "--entry", Path.of("app", "Main.zn").toString()) != 0);
-        } finally {
-            deleteTree(Path.of("dist"));
-            deleteTree(sourceRoot);
-        }
+        assertRejected(List.of(parse("Main.zn", "package app; let value: Int?;")), "app.Main", "app");
+        assertRejected(List.of(parse("Main.zn", "package app; public let mut value: Int = 1;")),
+                "app.Main", "app");
     }
 
     @Test
@@ -2323,7 +2289,9 @@ public final class StandardLibraryTest {
             assertEquals(0, Zeron.runCli(clientSource.toString(), "--library", libraryRoot.toString()));
 
             try (final var loader = new URLClassLoader(new java.net.URL[]{
-                    Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()}, getClass().getClassLoader())) {
+                    Path.of("dist").toUri().toURL(),
+                    Zeron.bundledStandardLibraryJar().orElseThrow().toUri().toURL(),
+                    libraryRoot.toUri().toURL()}, getClass().getClassLoader())) {
                 final var main = loader.loadClass(appPackage + "." +
                         clientSource.getFileName().toString().replaceFirst("\\.zn$", ""));
                 assertEquals(80, main.getMethod("result").invoke(null));
@@ -2547,9 +2515,11 @@ public final class StandardLibraryTest {
         try {
             deleteTree(Path.of("dist"));
             assertEquals(0, Zeron.runCli(
-                    sourceFile.toString(), "--java-classpath", "target/test-classes"));
+                    sourceFile.toString(), "--java-classpath",
+                    TestPaths.projectFile("target", "test-classes").toString()));
             try (final var loader = new URLClassLoader(new java.net.URL[]{
-                    Path.of("dist").toUri().toURL(), Path.of("target", "test-classes").toUri().toURL()},
+                    Path.of("dist").toUri().toURL(),
+                    TestPaths.projectFile("target", "test-classes").toUri().toURL()},
                     getClass().getClassLoader())) {
                 assertEquals(42, loader.loadClass(className).getMethod("result").invoke(null));
             }
@@ -2562,8 +2532,8 @@ public final class StandardLibraryTest {
 
     @Test
     public void intRangeStopsAtInclusiveIntegerBounds() throws Exception {
-        final var sourcePath = Path.of("src", "main", "resources", "stdlib",
-                "zeron", "ranges", "intrange.zn");
+        final var sourcePath = TestPaths.projectFile("src", "main", "resources", "stdlib",
+                "zeron", "ranges", "int_range.zn");
         final var rangeClass = "zeron.ranges.IntRange";
         final var mainClass = "zeron.ranges.IntRangeValidation";
         final var rangeFile = Path.of("dist", "zeron", "ranges", "IntRange.class");
@@ -2605,6 +2575,22 @@ public final class StandardLibraryTest {
             values.add((Integer) step.getClass().getMethod("$zeron$payload$0").invoke(step));
         }
         return values;
+    }
+
+    private static void assertSourceRejected(final String packageName,
+                                             final String sourcePath,
+                                             final String source) throws Exception {
+        assertRejected(List.of(parse(sourcePath, source)), packageName + ".Result", packageName);
+    }
+
+    private static void assertRejected(final List<CompilationUnit> units,
+                                       final String mainClassName,
+                                       final String packageName) throws Exception {
+        final var compiler = CompilationService.forCompilationUnits(units, mainClassName, packageName);
+        final var resolution = compiler.resolveWithDiagnostics();
+        if (!resolution.errors().isEmpty()) return;
+        final var compilation = compiler.compileWithDiagnostics();
+        assertFalse("Expected compilation to fail.", compilation.diagnostics().isEmpty());
     }
 
     private static void deleteTree(final Path path) throws Exception {

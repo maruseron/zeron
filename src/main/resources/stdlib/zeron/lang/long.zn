@@ -33,7 +33,7 @@ witness Integral<Long> for Long {
     fn toInteger(): Integer = Integer.fromLong(this);
     fn toRational(): Rational = Rational.fromInteger(this.toInteger());
 
-    fn hash(): Int = java.lang.Long.hashCode(this);
+    fn hash(): Long = this;
     fn eq(other: Long): Boolean = this == other;
 
     fn compareTo(other: Long): Ordering {

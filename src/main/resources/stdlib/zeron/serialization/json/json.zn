@@ -1,6 +1,5 @@
 package zeron.serialization.json;
 
-import zeron.lang.Result;
 import com.maruseron.zeron.runtime.json.JsonArray;
 import com.maruseron.zeron.runtime.json.JsonErrorInfo;
 import com.maruseron.zeron.runtime.json.JsonObject;
@@ -9,13 +8,17 @@ import com.maruseron.zeron.runtime.json.JsonSupport;
 import com.maruseron.zeron.runtime.json.JsonTextResult;
 import com.maruseron.zeron.runtime.json.JsonValue;
 
-public type JsonError = (message: String, offset: Int, line: Int, column: Int);
+import zeron.serialization.EncodeError;
+
+public type JsonError = 
+      Encode(message: String)
+    | Parse(message: String, offset: Int, line: Int, column: Int);
 
 public fn parse(text: String): Result<&JsonValue, JsonError> {
     let result = JsonSupport.parse(text);
     if (result.isSuccess()) return Result.Ok(result.value());
     let error = result.error();
-    return Result.Err(JsonError.new(
+    return Result.Err(JsonError.Parse(
         error.message(),
         error.offset(),
         error.line(),
@@ -27,7 +30,7 @@ public fn number(lexeme: String): Result<&JsonValue, JsonError> {
     let result = JsonSupport.number(lexeme);
     if (result.isSuccess()) return Result.Ok(result.value());
     let error = result.error();
-    return Result.Err(JsonError.new(
+    return Result.Err(JsonError.Parse(
         error.message(),
         error.offset(),
         error.line(),
@@ -39,12 +42,26 @@ public fn stringify(value: &JsonValue): Result<String, JsonError> {
     let result = JsonSupport.stringify(value);
     if (result.isSuccess()) return Result.Ok(result.text());
     let error = result.error();
-    return Result.Err(JsonError.new(
+    return Result.Err(JsonError.Parse(
         error.message(),
         error.offset(),
         error.line(),
         error.column()
     ));
+}
+
+public fn json(block: &JsonObjectBuilder.() -> Unit): Result<&JsonValue, JsonError> {
+    let builder = JsonObjectBuilder.empty();
+    builder.block();
+    return builder.build();
+}
+
+public fn jsonModel<T: nullable + mut>(
+    model: Model<T>, owner: T, block: &JsonModelObjectBuilder<T>.() -> Unit
+): Result<&JsonValue, JsonError> {
+    let builder = JsonModelObjectBuilder.of(model, owner);
+    builder.block();
+    return builder.build();
 }
 
 public fn nullValue(): &JsonValue = JsonValue.nullValue();

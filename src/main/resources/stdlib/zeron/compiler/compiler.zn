@@ -4,8 +4,6 @@ import zeron.lang.Eq;
 import zeron.lang.Hashable;
 import zeron.lang.PropertyId;
 
-public annotation CodeModel on PARAMETER;
-
 /// The source range that produced a node, a parameter list, or a model.
 ///
 /// The file is relative to the compilation's source root, as in diagnostics. Missing columns are
@@ -86,7 +84,7 @@ public class CodeNode is Eq<CodeNode>, Hashable<CodeNode> {
         this.shape == other.shape and typeEq(this.sourceType, other.sourceType);
 
     /// Returns a structural hash consistent with `eq`.
-    public hash(): Int = hashValue(this.shape) * 31 + typeHash(this.sourceType);
+    public hash(): Long = hashValue(this.shape) * 31L + typeHash(this.sourceType);
 }
 
 /// One parameter of a code model. Names are for display and do not take part in equality.
@@ -143,16 +141,16 @@ public class CodeModel<F> is Eq<CodeModel<F>>, Hashable<CodeModel<F>> {
     }
 
     /// Returns a structural hash consistent with `eq`.
-    public hash(): Int {
-        let mut hash = 17;
+    public hash(): Long {
+        let mut hash = 17L;
         for (let parameter in this.parameters) {
-            hash = hash * 31 + parameter.position;
-            hash = hash * 31 + typeHash(parameter.sourceType);
+            hash = hash * 31L + parameter.position.toLong();
+            hash = hash * 31L + typeHash(parameter.sourceType);
         }
-        hash = hash * 31 + this.body.hash();
+        hash = hash * 31L + this.body.hash();
         for (let capture in this.captures) {
-            hash = hash * 31 + capture.slot;
-            hash = hash * 31 + typeHash(capture.sourceType);
+            hash = hash * 31L + capture.slot.toLong();
+            hash = hash * 31L + typeHash(capture.sourceType);
         }
         return hash;
     }
@@ -203,18 +201,18 @@ fn typeArrayEq(left: Array<CodeType>, right: Array<CodeType>): Boolean {
     return true;
 }
 
-fn typeHash(codeType: CodeType): Int = match (codeType) {
+fn typeHash(codeType: CodeType): Long = match (codeType) {
     case CodeType.NominalType(name, arguments) ->
-        hashValue(name) * 31 + typeArrayHash(arguments);
-    case CodeType.NullableType(inner) -> typeHash(inner) * 31 + 1;
+        hashValue(name) * 31L + typeArrayHash(arguments);
+    case CodeType.NullableType(inner) -> typeHash(inner) * 31L + 1L;
     case CodeType.FunctionType(parameters, result) ->
-        typeArrayHash(parameters) * 31 + typeHash(result) * 7 + 2;
+        typeArrayHash(parameters) * 31L + typeHash(result) * 7L + 2L;
 };
 
-fn typeArrayHash(values: Array<CodeType>): Int {
-    let mut hash = 1;
-    for (let value in values) hash = hash * 31 + typeHash(value);
+fn typeArrayHash(values: Array<CodeType>): Long {
+    let mut hash = 1L;
+    for (let value in values) hash = hash * 31L + typeHash(value);
     return hash;
 }
 
-fn hashValue<T: Hashable<T>>(value: T): Int = value.hash();
+fn hashValue<T: Hashable<T>>(value: T): Long = value.hash();

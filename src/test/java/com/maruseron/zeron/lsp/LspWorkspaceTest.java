@@ -1799,11 +1799,11 @@ public class LspWorkspaceTest {
         final var listHover = hoverAt(snapshot, project.entry(), source,
                 "java.util.List<String>", "java.util.".length());
         assertTrue("Unexpected Java type hover: " + listHover,
-                listHover.contains("java interface java.util.List"));
+                listHover.contains("external interface java.util.List"));
         final var memberHover = hoverAt(snapshot, project.entry(), source,
                 "file.getPath", "file.".length());
         assertTrue("Unexpected Java member hover: " + memberHover,
-                memberHover.contains("java method java.io.File.getPath() -> java.lang.String"));
+                memberHover.contains("external fn java.io.File.getPath() -> java.lang.String"));
         assertTrue("Missing facade binding in hover: " + memberHover,
                 memberHover.contains("external fn getPath() -> String?"));
         final var fieldHover = hoverAt(snapshot, project.entry(), source,
@@ -1815,7 +1815,7 @@ public class LspWorkspaceTest {
         final var methodHover = hoverAt(snapshot, project.entry(), source,
                 "System.nanoTime", "System.".length());
         assertTrue("Unexpected Java static method hover: " + methodHover,
-                methodHover.contains("java static method java.lang.System.nanoTime() -> long"));
+                methodHover.contains("external static fn java.lang.System.nanoTime() -> long"));
         assertTrue("Missing facade method in hover: " + methodHover,
                 methodHover.contains("external fn nanoTime() -> Long"));
         assertTrue("Missing definition link in hover: " + memberHover,

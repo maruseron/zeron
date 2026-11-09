@@ -5,10 +5,9 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 ## Part I — Get a program running
 
 1. [Install Zeron and create a project](01-install-and-create-a-project.md)
-2. [Your first program](02-your-first-program.md)
-3. [The REPL](03-the-repl.md)
-4. [Values, types, and variables](04-values-types-and-variables.md)
-5. [Expressions and control flow](05-expressions-and-control-flow.md)
+1. [Your first program](02-your-first-program.md)
+1. [Values, types, and variables](04-values-types-and-variables.md)
+1. [Expressions and control flow](05-expressions-and-control-flow.md)
 
 ## Part II — Build programs from functions and data
 
@@ -58,5 +57,6 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 
 ## Addendum
 
+1. [The REPL](03-the-repl.md)
 1. [Why unit?](35-why-unit.md)
 1. [Contract derivation](38-contract-derivation.md)

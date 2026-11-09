@@ -7,8 +7,9 @@ package zeron.lang;
 /// knows the external format; a consumer supplies its own contract, for example one that adds a
 /// table name, and reads the descriptor through `Model`.
 ///
-/// Mappings are read-only metadata. A model does not wrap the mapped type, add members to it, or
-/// change its representation, and it never constructs it.
+/// Mappings are metadata: reading one does not wrap or change the mapped type, and a mapped field
+/// exposes a writer only when the property has an accessible setter. A model never constructs the
+/// target.
 public contract Model<T: nullable + mut> {
     /// The mapped fields, in the order the model declaration lists them.
     property fields: Array<AnyField<T>>;

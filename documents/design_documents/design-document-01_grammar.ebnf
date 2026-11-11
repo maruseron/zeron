@@ -32,7 +32,7 @@
 program = [ packageDeclaration ], { importDeclaration }, { topLevelDeclaration }, EOF ;
 packageDeclaration = "package", qualifiedName, ";" ;
 qualifiedName = IDENTIFIER, { ".", IDENTIFIER } ;
-importDeclaration = "import", [ 'suffix' ],
+importDeclaration = "import", [ "witness" | 'suffix' ],
                       ( qualifiedName, [ "as", IDENTIFIER ] | qualifiedName, ".", "*" ), ";" ;
 
 (* [CHANGED] Annotations: every annotation target accepts an optional application. design-document-14: newtype declarations are reachable. *)
@@ -182,7 +182,10 @@ externalClassMember = { annotationApplication }, [ "public" ], [ "mut" ],
 typeParameters = "<", typeParameter, { ",", typeParameter }, ">" ;
 typeParameter = [ 'out' ], IDENTIFIER, [ "<", '_', ">" ],
                   [ ":", typeParameterConstraint, { "+", typeParameterConstraint } ] ;
-typeParameterConstraint = type | 'nullable' | "mut" | "effect", [ "..." ] ;
+(* [CHANGED] ZEP-0015: `reified` is an admissibility marker on callable type parameters. It
+   cannot be combined with higher-kinded or effect-row parameters, and class/contract type
+   parameters cannot be reified. *)
+typeParameterConstraint = type | 'nullable' | "mut" | "reified" | "effect", [ "..." ] ;
 parameters = [ parameter, { ",", parameter } ] ;
 
 (* [CHANGED] Annotations: parameters are annotation targets (e.g. @Entity in ZEP-0031).
@@ -210,7 +213,15 @@ contractUse = qualifiedName, [ typeArguments ] ;
 (* [CHANGED] Annotations: optional, stackable applications on every class member. *)
 
 classMember = { annotationApplication },
-                ( fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl | suffixDeclaration | hktImplementationDecl | methodDecl | patternDecl ) ;
+                ( fieldDecl | propertyDecl | constructorDecl | namedConstructorDecl | suffixDeclaration | hktImplementationDecl | methodDecl | staticFunctionDecl | patternDecl ) ;
+
+(* [NEW] ZEP-0072: ordinary classes may declare companion namespace functions. A static
+   function has no receiver or `this`, cannot capture the class's type parameters, and may
+   declare its own type parameters. Effects, data classes, and contracts are not covered. *)
+staticFunctionDecl = [ visibility ], "static", "fn", memberName, [ typeParameters ],
+                       "(", staticFunctionParameters, ")", ":", type, [ raisesClause ],
+                       ( "=", expression, ";" | block ) ;
+staticFunctionParameters = [ parameter, { ",", parameter } ] ;
 hktImplementationDecl = [ 'delegating' ], 'implementation', contractUse, "{",
                           { hktImplementationMethod }, "}" ;
 hktImplementationMethod = "fn", memberName, [ typeParameters ], "(", methodParameters, ")",
@@ -250,8 +261,9 @@ contractDecl = "contract", IDENTIFIER, [ typeParameters ],
                  [ 'requires', contractUse, { "+", contractUse } ],
                  [ 'permits', permittedClass, { ",", permittedClass } ], "{", { contractMember }, "}" ;
 permittedClass = qualifiedName, [ typeArguments ] ;
-witnessDecl = [ 'delegating' ], "witness", [ typeParameters ], type, "for", type, "{",
-                { witnessMethod }, "}" ;
+witnessDecl = [ "default" ], [ 'delegating' ], "witness",
+              [ IDENTIFIER, [ typeParameters ], ":" ],
+              [ typeParameters ], type, "for", type, "{", { witnessMethod }, "}" ;
 witnessMethod = [ "static" ], "fn", memberName, [ typeParameters ], "(", methodParameters, ")",
                   ":", type, [ raisesClause ], ( "=", expression, ";" | block ) ;
 
@@ -373,7 +385,17 @@ typeAtom = qualifiedName, [ "<", typeArgumentsBody, ">" ]
          | "(", type, ")", [ "->", type, [ raisesClause ] ]
          | "(", type, ",", type, { ",", type }, ")", "->", type, [ raisesClause ] ;
 typeArgumentsBody = projectedTypeArgument, { ",", projectedTypeArgument } ;
-projectedTypeArgument = [ 'out' | "in" ], ( type | '_' ) ;
+
+(* [NEW] ZEP-0104: `*` is the universal read-only projection `out Any?`. An anonymous
+   existential `: bounds + markers` is accepted only as a direct argument of the outermost
+   applied type in a declared function, method, or contract-method parameter. The grammar
+   leaves the position restriction to resolution. *)
+projectedTypeArgument = [ 'out' | "in" ], ( type | '_' )
+                     | starProjection
+                     | anonymousExistential ;
+starProjection = "*" ;
+anonymousExistential = ":", anonymousExistentialElement, { "+", anonymousExistentialElement } ;
+anonymousExistentialElement = type | 'nullable' | "mut" | "reified" | "effect", [ "..." ] ;
 primary = INT
         | LONG
         | DOUBLE
@@ -393,6 +415,7 @@ primary = INT
         | ifExpr
         | matchExpr
         | forExpr
+        | doExpr
         | anonymousObjectExpr
         | "(", ")"
         | "(", expression, ")" ;
@@ -441,6 +464,9 @@ forClause = "for", IDENTIFIER, "in", expression
           | "let", IDENTIFIER, "=", expression
           | "if", expression ;
 forResult = 'yield', expression | 'collect', expression, 'into', expression ;
+doExpr = "do", [ "<", type, ">" ], "{", doClause, { doClause }, "yield", expression, ";", "}" ;
+doClause = "let", IDENTIFIER, "<-", expression, ";"
+         | "let", IDENTIFIER, "=", expression, ";" ;
 lambda = IDENTIFIER, "->", lambdaBody
        | "(", [ lambdaParameter, { ",", lambdaParameter } ], ")", "->", lambdaBody ;
 lambdaParameter = IDENTIFIER, [ ":", type ] ;
@@ -464,8 +490,10 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    - A wildcard import ends in `.*`, cannot have an alias, and cannot be a suffix import.
    - Namespace members are functions and immutable values; public mutable values remain unsupported.
    - `model` and `data` are soft keywords.
-   - A type parameter may use `nullable`, `mut`, or `effect` (or `effect...`) as admissibility
-   markers instead of ordinary contract bounds. `effect...` denotes an effect-row parameter.
+   - A type parameter may use `nullable`, `mut`, `effect`, or `reified` as an admissibility marker
+   instead of ordinary contract bounds. `effect...` denotes an effect-row parameter. `reified`
+   passes a runtime applied-type descriptor and is permitted only on callable type parameters;
+   class and contract type parameters reject it.
    - The `out` prefix is allowed only on class and contract type parameters. A higher-kinded
    parameter is written `F<_>` and cannot be covariant; class/contract covariance is checked for
    unsafe positions rather than trusted from the annotation.
@@ -489,9 +517,23 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    projected values are added in traversal order, and the expression returns the sink.
    - The words `yield`, `collect`, and `into` are contextual identifiers used in for-expression result
    clauses, not globally reserved keywords.
+   - A `do` block is an expression with at least one bind clause (`let name <- expression;`), plain
+   local clauses (`let name = expression;`) only after the first bind, and exactly one final
+   `yield expression;`. `do` is a contextual identifier in expression position, and `<-` is a single
+   token that appears nowhere else. An optional constructor prefix (`do<Option<_>>`,
+   `do<Result<_, E>>`) must be an applied type with exactly one open slot and is checked against the
+   inferred result constructor.
    - Contracts describe instance behavior and do not declare class-side constructor requirements.
    - `delegating` is a soft keyword permitted only before a witness declaration or a class HKT
    implementation block; elsewhere it remains an ordinary identifier.
+   - A witness may introduce a name before its contract (`witness Name<T>: Contract for Target`).
+   Witness names share a package-scoped namespace separate from types, values, and functions;
+   `public` exports a named witness, while an unmarked named witness is package-local. `default`
+   is unnamed, may not be combined with `public`, and must appear in the compilation unit that
+   declares the head of a nominal target type, or in the canonical package for an intrinsic target.
+   `import witness` activates only named public non-default
+   witnesses and imports no types, functions, values, or extensions; a default is activated by the
+   scope of its target type instead.
    - A class HKT implementation block must match one class-header constructor conformance. Prefixing
    it with `delegating` forwards compatible receiver-based operations to public methods on that
    class; explicit block methods take precedence and receiverless operations remain explicit.

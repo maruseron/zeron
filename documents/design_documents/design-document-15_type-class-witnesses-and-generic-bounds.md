@@ -258,8 +258,10 @@ uses `Display` evidence. The hierarchy, exact literal carriers, and conversion r
 
 ## JVM representation and library metadata
 
-The witness is runtime evidence; generic type arguments are not reified. The implementation passes
-`java.lang.invoke.MethodHandle` values as hidden evidence and invokes them with erased signatures.
+The witness is runtime evidence; generic type arguments are not reified unless a parameter opts
+in with `reified`. The implementation passes `java.lang.invoke.MethodHandle` values as hidden
+evidence and invokes them with erased signatures; reified parameters add `AppliedTypeDescriptor`
+hidden arguments after the evidence slots.
 The API index preserves source-level applied bounds, function signatures, witness patterns, HKT
 implementation metadata, method signatures, helper owners/names, and prerequisite bounds. Its
 schema version must be advanced when the evidence metadata format changes.

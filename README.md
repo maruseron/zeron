@@ -1,10 +1,11 @@
 # Zeron
 
-Zeron is an experimental, statically typed programming language for the JVM. It is built
-around a simple belief: you will read your code far more often than you write it, so the
-language should make that reading pleasant, and make the important things impossible to miss.
-For the impatient ones that would like to see what Zeron has to offer from the get go, here's
-a sneak peek:
+Zeron is an experimental, statically typed, hybrid programming language for the JVM. It aims for
+the expressive power of highly academic languages like Scala and Haskell with the ergonomics of
+productivity-focused languages like Kotlin and Swift. It is built around a simple belief: you will
+read your code far more often than you write it, so the language should make that reading pleasant,
+and make the important things impossible to miss. For the impatient ones that would like to see
+what Zeron has to offer from the get go, here's a sneak peek:
 
 ```zeron
 import zeron.collections.Array.stream;
@@ -71,7 +72,7 @@ longer, and nobody has ever had to reread it twice.
 
 ### Nothing important happens behind your back
 
-- **Mutation is a choice you announce.** `let` bindings are immutable. `let mut` allows
+- **Mutation is a choice you make.** `let` bindings are immutable. `let mut` allows
   rebinding, and a reference marked `&T` carries the permission to mutate what it points to.
   Most values never change, so the few that do get to stand out.
 - **Absence is part of the type.** A `String` is never `null`. A `String?` might be, and the
@@ -93,16 +94,19 @@ failures are different phases, and the compiler never guesses which `main` you m
 ### Hybrid language
 
 Zeron has classes, contracts, namespaces, and extensions. It also has immutability by default,
-algebraic data types, pattern matching, lambdas, effects, and typeclass-style witnesses. These
-are not rival camps, and Zeron does not ask you to enlist in one. Model a domain with classes
-where objects fit, with sum and product types where data fits, and mix them freely in the same
-project, or the same file, or the same function. I don't judge. (The compiler won't either.)
+algebraic data types, pattern matching, lambdas, effects, and typeclass-style witnesses. I believe
+both have their place: objects are incredibly expressive as a tool to model boundaries and internal
+information, and ADTs, pattern matching and higher-order functions are incredibly ergonomic as a
+way to model logic. Zeron wants you to use both: model a domain with classes where objects fit,
+with sum and product types where data fits, and mix them freely in the same project, or the same
+file, or the same function. I don't judge. The compiler won't either.
 
 ### Platform honesty
 
-Zeron emits JVM class files and can use a deliberately limited Java API surface through
-explicit classpath configuration. Generic type arguments are erased at runtime, as on the JVM,
-and Zeron passes hidden method-handle evidence where bounded generic code needs it. Where
+Zeron emits JVM class files along with a binary sidecar that contains an index with all signatures
+and documentation found in your project; and can use a deliberately limited Java API surface
+through explicit classpath configuration. Generic type arguments are erased at runtime, as on the
+JVM, and Zeron passes hidden method-handle evidence where bounded generic code needs it. Where
 there are rough edges, the guide and design documents say so.
 
 ## Language features

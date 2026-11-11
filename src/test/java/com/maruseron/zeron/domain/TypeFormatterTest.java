@@ -12,7 +12,17 @@ public final class TypeFormatterTest {
         final var function = new FunctionDescriptor("", TypeDescriptor.ofString(),
                 List.of(TypeDescriptor.ofInt()));
 
-        assertEquals("(Int) -> String", TypeFormatter.format(function));
+        assertEquals("Int -> String", TypeFormatter.format(function));
+    }
+
+    @Test
+    public void keepsParenthesesAroundFunctionTypeInputs() {
+        final var inner = new FunctionDescriptor("", TypeDescriptor.ofString(),
+                List.of(TypeDescriptor.ofInt()));
+        final var function = new FunctionDescriptor("", TypeDescriptor.ofBoolean(),
+                List.of(inner));
+
+        assertEquals("(Int -> String) -> Boolean", TypeFormatter.format(function));
     }
 
     @Test

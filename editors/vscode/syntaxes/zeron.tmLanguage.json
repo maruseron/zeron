@@ -230,11 +230,11 @@
     },
     "keywords": {
       "name": "keyword.control.zeron",
-      "match": "\\b(?:and|annotation|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|private|property|public|raise|raises|return|sealed|static|then|this|throws|type|typeof|until|using|witness|while)\\b"
+      "match": "\\b(?:and|annotation|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|private|property|public|raise|raises|return|sealed|static|then|this|throws|type|typeof|under|until|using|witness|while)\\b"
     },
     "contextual-keywords": {
       "patterns": [
-          {
+        {
           "match": "(?<=:)\\s*(nullable)\\b(?=\\s*(?:\\+|,|>))",
           "captures": {
             "1": {
@@ -251,12 +251,31 @@
           }
         },
         {
+          "match": "\\b(Int|Float|Boolean|String)(\\s+)(where)\\b",
+          "captures": {
+            "1": {
+              "name": "support.type.builtin.zeron"
+            },
+            "3": {
+              "name": "keyword.control.zeron"
+            }
+          }
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\bmatches\\b(?=\\s+(?:[A-Z_]|[0-9]|-|\"|'|null\\b|true\\b|false\\b))"
+        },
+        {
           "name": "keyword.control.zeron",
           "match": "\\bderiving\\b(?=\\s+[A-Z][A-Za-z0-9_]*(?:\\s*,\\s*[A-Z][A-Za-z0-9_]*)*\\s*(?:=|\\{))"
         },
         {
           "name": "keyword.control.zeron",
           "match": "\\bwith\\b(?=\\s*\\{|\\s+suppressed\\b)"
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\bdo\\b(?=\\s*(?:\\{|<))"
         },
         {
           "name": "keyword.control.zeron",
@@ -380,7 +399,7 @@
     },
     "operators": {
       "name": "keyword.operator.zeron",
-      "match": "(?:===|==|!=|<=|>=|>>>=|>>>|>>=|>>|<<=|<<|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|\\.\\.\\.|\\.\\.|~>|->|\\?\\?=|\\?\\?|\\?\\.|::|[+*/%&|^~!<>=?:-])"
+      "match": "(?:<-|===|==|!=|<=|>=|>>>=|>>>|>>=|>>|<<=|<<|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|\\.\\.\\.|\\.\\.|~>|->|\\?\\?=|\\?\\?|\\?\\.|::|[+*/%&|^~!<>=?:-])"
     },
     "punctuation": {
       "patterns": [

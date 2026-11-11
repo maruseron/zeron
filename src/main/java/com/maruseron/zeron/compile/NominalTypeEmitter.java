@@ -85,13 +85,16 @@ final class NominalTypeEmitter {
                             final var flags = ClassFile.ACC_PUBLIC
                                     | (jvmDefault ? 0 : ClassFile.ACC_ABSTRACT);
                             final var witnessSlots = BytecodeEmitter.witnessSlots(context, method.typeDescriptor());
-                            final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
-                                    toJavaMethodDescriptor(method.typeDescriptor()), witnessSlots.size());
+                            final var reifiedSlots = BytecodeEmitter.reifiedSlots(method.typeDescriptor());
+                            final var methodDescriptor = BytecodeEmitter.withHiddenParameters(
+                                    toJavaMethodDescriptor(method.typeDescriptor()), witnessSlots.size(),
+                                    reifiedSlots.size());
                             if (jvmDefault) {
                                 builder.withMethod(method.name().lexeme(),
                                         methodDescriptor, flags, methodBuilder -> {
                                             final var methodSignature = ClassSignatureEmitter.methodSignature(method.typeDescriptor());
-                                            if (methodSignature != null && witnessSlots.isEmpty()) {
+                                            if (methodSignature != null && witnessSlots.isEmpty()
+                                                    && reifiedSlots.isEmpty()) {
                                                 methodBuilder.with(SignatureAttribute.of(
                                                         methodBuilder.constantPool().utf8Entry(methodSignature)));
                                             }
@@ -102,20 +105,22 @@ final class NominalTypeEmitter {
                                         methodDescriptor, flags,
                                         methodBuilder -> {
                                             final var methodSignature = ClassSignatureEmitter.methodSignature(method.typeDescriptor());
-                                            if (methodSignature != null && witnessSlots.isEmpty()) {
+                                            if (methodSignature != null && witnessSlots.isEmpty()
+                                                    && reifiedSlots.isEmpty()) {
                                                 methodBuilder.with(SignatureAttribute.of(
                                                         methodBuilder.constantPool().utf8Entry(methodSignature)));
                                             }
                                         });
                             }
-                            if (!witnessSlots.isEmpty()) {
+                            if (!witnessSlots.isEmpty() || !reifiedSlots.isEmpty()) {
                                 final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(
                                         method.typeDescriptor());
                                 final var bridgeFlags = ClassFile.ACC_PUBLIC
                                         | (jvmDefault ? 0 : ClassFile.ACC_ABSTRACT)
                                         | ClassFile.ACC_SYNTHETIC;
                                 builder.withMethod(method.name().lexeme(),
-                                        toJavaMethodDescriptor(bridgeType), bridgeFlags, methodBuilder -> {
+                                        toJavaMethodDescriptor(bridgeType),
+                                        bridgeFlags, methodBuilder -> {
                                             final var methodSignature =
                                                     ClassSignatureEmitter.methodSignature(method.typeDescriptor());
                                             if (methodSignature != null) {
@@ -372,23 +377,106 @@ final class NominalTypeEmitter {
         return sameAppliedType(normalizedPayload, appliedRoot);
     }
 
+    /// Emits a stateless effect as a marker interface plus a package-private implementation class.
+    /// The interface is the effect's identity for handler dispatch; its static `new` constructs the
+    /// implementation, and declared behavior lives in default methods.
+    private static void generateStatelessEffect(CompilationContext context,
+                                                final Stmt.ClassDecl declaration) throws IOException {
+        final var className = declaration.name().lexeme();
+        final var classDesc = ClassDesc.of(className);
+        final var implementationName = className + "$$effect";
+        final var implementationDesc = ClassDesc.of(implementationName);
+        final var interfaceNames = new LinkedHashSet<String>(declaration.contractUses().stream()
+                .map(contractUse -> contractUse.name().lexeme())
+                .toList());
+        interfaceNames.add("zeron.runtime.EffectValue");
+        interfaceNames.addAll(context.resolution.effectMarkerInterfaces(className));
+        interfaceNames.remove(className);
+        final var classPath = outputPath(context, className);
+        Files.createDirectories(classPath.getParent());
+        context.classFile.buildTo(classPath.toAbsolutePath(), classDesc, builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
+            builder.withFlags((declaration.isPublic() ? ClassFile.ACC_PUBLIC : 0)
+                    | ClassFile.ACC_INTERFACE | ClassFile.ACC_ABSTRACT);
+            if (!interfaceNames.isEmpty()) {
+                builder.withInterfaceSymbols(interfaceNames.stream().map(ClassDesc::of).toList());
+            }
+            builder.withMethodBody("new", MethodTypeDesc.of(classDesc),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC, code -> {
+                        code.new_(implementationDesc);
+                        code.dup();
+                        code.invokespecial(implementationDesc, "<init>",
+                                MethodTypeDesc.of(ConstantDescs.CD_void));
+                        code.areturn();
+                    });
+            for (final var method : declaration.methods()) {
+                final var flags = (method.isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE);
+                builder.withMethodBody(method.name().lexeme(),
+                        toJavaMethodDescriptor(method.typeDescriptor()), flags,
+                        code -> emitClassMethod(context, code, declaration, method));
+            }
+            for (final var property : declaration.properties()) {
+                emitPropertyMethods(context, builder, declaration, property, classDesc);
+            }
+            for (final var constructor : declaration.namedConstructors()) {
+                final var factoryType = (FunctionDescriptor) TypeSubstitution.erase(
+                        constructor.typeDescriptor());
+                final var flags = (constructor.isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE)
+                        | ClassFile.ACC_STATIC;
+                builder.withMethodBody(constructor.name().lexeme(),
+                        toJavaMethodDescriptor(factoryType), flags,
+                        code -> emitNamedConstructor(context, code, constructor, List.of()));
+            }
+        });
+        final var implementationPath = outputPath(context, implementationName);
+        context.classFile.buildTo(implementationPath.toAbsolutePath(), implementationDesc, builder -> {
+            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
+            builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL | ClassFile.ACC_SUPER);
+            builder.withInterfaceSymbols(List.of(classDesc));
+            builder.withMethodBody("<init>", MethodTypeDesc.of(ConstantDescs.CD_void),
+                    ClassFile.ACC_PUBLIC, code -> {
+                        code.aload(0);
+                        code.invokespecial(ConstantDescs.CD_Object, "<init>",
+                                MethodTypeDesc.of(ConstantDescs.CD_void));
+                        code.return_();
+                    });
+        });
+    }
+
     private static void generateNominalClass(CompilationContext context, final Stmt.ClassDecl declaration) throws IOException {
         final var className = declaration.name().lexeme();
+        if (declaration.isEffect() && context.resolution.isStatelessEffect(className)) {
+            generateStatelessEffect(context, declaration);
+            return;
+        }
         final var generatedSumCase = className.contains("$$sum$");
         final var product = productDeclaration(context, className);
         final var newtype = newtypeDeclaration(context, className);
         final var classDesc = ClassDesc.of(className);
-        final var interfaces = new ArrayList<ClassDesc>(declaration.contractUses().stream()
-            .map(contractUse -> ClassDesc.of(contractUse.name().lexeme()))
+        final var payloadParentName = declaration.isEffect()
+                ? context.resolution.effectPayloadParent(className) : null;
+        final var inheritedPayloadNames = payloadParentName == null
+                ? Set.<String>of()
+                : context.resolution.inheritedEffectPayloadNames(className);
+        final var interfaceNames = new LinkedHashSet<String>(declaration.contractUses().stream()
+            .map(contractUse -> contractUse.name().lexeme())
             .toList());
-        if (declaration.isEffect()) interfaces.add(ClassDesc.of("zeron.runtime.EffectValue"));
+        if (declaration.isEffect()) {
+            interfaceNames.add("zeron.runtime.EffectValue");
+            interfaceNames.addAll(context.resolution.effectMarkerInterfaces(className));
+        }
+        final var interfaces = interfaceNames.stream().map(ClassDesc::of).toList();
         final var classPath = outputPath(context, className);
         Files.createDirectories(classPath.getParent());
         context.classFile.buildTo(classPath.toAbsolutePath(),
                 classDesc,
                 builder -> {
                     builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
-                    builder.withFlags((declaration.isPublic() ? ClassFile.ACC_PUBLIC : 0) | ClassFile.ACC_FINAL);
+                    builder.withFlags((declaration.isPublic() ? ClassFile.ACC_PUBLIC : 0)
+                            | (declaration.isEffect() ? 0 : ClassFile.ACC_FINAL));
+                    if (payloadParentName != null) {
+                        builder.withSuperclass(ClassDesc.of(payloadParentName));
+                    }
                     final var nestHost = newtype != null && newtype.validator() != null
                             ? newtypeNestHost(context, newtype)
                             : !context.lambdaPlan.lambdaImplementations().isEmpty()
@@ -409,6 +497,7 @@ final class NominalTypeEmitter {
                                 ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL);
                     }
                     for (final var field : declaration.fields()) {
+                        if (inheritedPayloadNames.contains(field.name().lexeme())) continue;
                         builder.withField(field.name().lexeme(), TypeDescriptor.toJavaClassDesc(field.type()),
                                 ClassFile.ACC_PRIVATE);
                     }
@@ -423,6 +512,7 @@ final class NominalTypeEmitter {
                                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL);
                     }
                     for (final var property : declaration.properties()) {
+                        if (inheritedPayloadNames.contains(property.name().lexeme())) continue;
                         if (!property.isCustom() && !declaration.isDataComponent(property.name().lexeme())) {
                             builder.withField(Stmt.propertyBackingFieldName(property.name().lexeme()),
                                     TypeDescriptor.toJavaClassDesc(property.type()),
@@ -450,6 +540,18 @@ final class NominalTypeEmitter {
                         emitPropertyReferenceFactory(builder, declaration, classDesc, constructorType);
                     } else if (className.equals(SyntheticNames.PROPERTY_ID_TYPE)) {
                         emitPropertyIdFactory(builder, classDesc, constructorType);
+                    } else if (className.equals(SyntheticNames.CALLABLE_ID_TYPE)) {
+                        emitCanonicalFactory(builder, classDesc, constructorType,
+                                SyntheticNames.CALLABLE_ID_FACTORY);
+                    } else if (className.equals(SyntheticNames.METHOD_REF_TYPE)) {
+                        emitCanonicalFactory(builder, classDesc, constructorType,
+                                SyntheticNames.METHOD_REF_FACTORY);
+                    } else if (className.equals(SyntheticNames.STATIC_METHOD_REF_TYPE)) {
+                        emitCanonicalFactory(builder, classDesc, constructorType,
+                                SyntheticNames.STATIC_METHOD_REF_FACTORY);
+                    } else if (className.equals(SyntheticNames.CONSTRUCTOR_REF_TYPE)) {
+                        emitCanonicalFactory(builder, classDesc, constructorType,
+                                SyntheticNames.CONSTRUCTOR_REF_FACTORY);
                     }
                     if (!classEvidenceSlots.isEmpty()) {
                         builder.withMethodBody("<init>", constructorType, constructorFlags,
@@ -484,23 +586,27 @@ final class NominalTypeEmitter {
                     for (final var method : declaration.methods()) {
                         final var flags = method.isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE;
                         final var witnessSlots = BytecodeEmitter.witnessSlots(context, method.typeDescriptor());
-                        final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
-                                toJavaMethodDescriptor(method.typeDescriptor()), witnessSlots.size());
+                        final var reifiedSlots = BytecodeEmitter.reifiedSlots(method.typeDescriptor());
+                        final var methodDescriptor = BytecodeEmitter.withHiddenParameters(
+                                toJavaMethodDescriptor(method.typeDescriptor()), witnessSlots.size(),
+                                reifiedSlots.size());
                         builder.withMethod(method.name().lexeme(),
                                 methodDescriptor, flags,
                                 methodBuilder -> {
                                     final var methodSignature = ClassSignatureEmitter.methodSignature(method.typeDescriptor());
-                                    if (methodSignature != null && witnessSlots.isEmpty()) {
+                                    if (methodSignature != null && witnessSlots.isEmpty()
+                                            && reifiedSlots.isEmpty()) {
                                         methodBuilder.with(SignatureAttribute.of(
                                                 methodBuilder.constantPool().utf8Entry(methodSignature)));
                                     }
                                     methodBuilder.withCode(code -> emitClassMethod(context, code, declaration, method));
                                 });
-                        if (!witnessSlots.isEmpty()) {
+                        if (!witnessSlots.isEmpty() || !reifiedSlots.isEmpty()) {
                             final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(
                                     method.typeDescriptor());
                             builder.withMethod(method.name().lexeme(),
-                                    toJavaMethodDescriptor(bridgeType), flags | ClassFile.ACC_SYNTHETIC,
+                                    toJavaMethodDescriptor(bridgeType),
+                                    flags | ClassFile.ACC_SYNTHETIC,
                                     methodBuilder -> {
                                         final var methodSignature =
                                                 ClassSignatureEmitter.methodSignature(method.typeDescriptor());
@@ -517,6 +623,7 @@ final class NominalTypeEmitter {
                         emitClassPattern(context, builder, declaration, pattern);
                     }
                     for (final var property : declaration.properties()) {
+                        if (inheritedPayloadNames.contains(property.name().lexeme())) continue;
                         emitPropertyMethods(context, builder, declaration, property, classDesc);
                     }
                     if (product != null) {
@@ -645,6 +752,27 @@ final class NominalTypeEmitter {
                     code.aload(2);
                     code.aload(3);
                     code.aload(4);
+                    code.invokespecial(classDesc, "<init>", constructorType);
+                    code.areturn();
+                });
+    }
+
+    /// Emits a compiler-only factory whose parameters mirror the canonical constructor. Used by
+    /// callable references and their identity wrappers.
+    private static void emitCanonicalFactory(final ClassBuilder builder,
+                                             final ClassDesc classDesc,
+                                             final MethodTypeDesc constructorType,
+                                             final String factoryName) {
+        final var parameters = constructorType.parameterList();
+        builder.withMethodBody(factoryName,
+                MethodTypeDesc.of(classDesc, parameters),
+                ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                code -> {
+                    code.new_(classDesc);
+                    code.dup();
+                    for (int index = 0; index < parameters.size(); index++) {
+                        code.aload(index);
+                    }
                     code.invokespecial(classDesc, "<init>", constructorType);
                     code.areturn();
                 });
@@ -1315,12 +1443,66 @@ final class NominalTypeEmitter {
                 });
     }
 
+    private static List<String> canonicalParameterNames(final Stmt.ClassDecl declaration) {
+        if (declaration.dataClass()) {
+            return declaration.dataComponents().stream().map(component -> component.name().lexeme()).toList();
+        }
+        final var names = new ArrayList<String>();
+        declaration.fields().stream()
+                .filter(field -> field.initializer() == null)
+                .map(field -> field.name().lexeme())
+                .forEach(names::add);
+        declaration.properties().stream()
+                .filter(Stmt.Property::canonicalConstructorParameter)
+                .map(property -> property.name().lexeme())
+                .forEach(names::add);
+        return List.copyOf(names);
+    }
+
+    private static int canonicalParameterSlot(final Stmt.ClassDecl declaration, final String name) {
+        var slot = 1;
+        for (final var field : declaration.fields()) {
+            if (field.initializer() != null) continue;
+            if (field.name().lexeme().equals(name)) return slot;
+            slot += TypeSubstitution.erase(field.type()).isDoubleWidth() ? 2 : 1;
+        }
+        for (final var property : declaration.properties()) {
+            if (!property.canonicalConstructorParameter()) continue;
+            if (property.name().lexeme().equals(name)) return slot;
+            slot += TypeSubstitution.erase(property.type()).isDoubleWidth() ? 2 : 1;
+        }
+        return 0;
+    }
+
     private static void emitCanonicalConstructor(CompilationContext context, final CodeBuilder code,
                                           final Stmt.ClassDecl declaration,
                                           final ClassDesc classDesc,
                                           final List<BytecodeEmitter.EvidenceField> classEvidenceSlots){
+        final var payloadParentName = declaration.isEffect()
+                ? context.resolution.effectPayloadParent(declaration.name().lexeme()) : null;
+        final var inheritedPayloadNames = payloadParentName == null
+                ? Set.<String>of()
+                : context.resolution.inheritedEffectPayloadNames(declaration.name().lexeme());
         code.aload(0);
-        code.invokespecial(ConstantDescs.CD_Object, "<init>", emptyVoidMethod());
+        if (payloadParentName == null) {
+            code.invokespecial(ConstantDescs.CD_Object, "<init>", emptyVoidMethod());
+        } else {
+            final var parent = context.resolution.classes().get(payloadParentName);
+            final var parentTypes = parent == null ? List.<TypeDescriptor>of()
+                    : parent.canonicalConstructorTypes();
+            final var parentNames = parent == null ? List.<String>of()
+                    : canonicalParameterNames(parent);
+            final var erasedTypes = parentTypes.stream()
+                    .map(type -> TypeSubstitution.erase(type)).toList();
+            for (int index = 0; index < erasedTypes.size(); index++) {
+                final var name = index < parentNames.size() ? parentNames.get(index) : "";
+                final var slot = canonicalParameterSlot(declaration, name);
+                loadLocal(context, code, Math.max(slot, 0), erasedTypes.get(index));
+            }
+            code.invokespecial(ClassDesc.of(payloadParentName), "<init>", MethodTypeDesc.of(
+                    ConstantDescs.CD_void,
+                    erasedTypes.stream().map(TypeDescriptor::toJavaClassDesc).toList()));
+        }
         final var previousOffset = context.localSlotOffset;
         context.localSlotOffset = 0;
         beginScope(context);
@@ -1373,6 +1555,12 @@ final class NominalTypeEmitter {
                 var fieldIndex = 0;
                 for (final var field : declaration.fields()) {
                     final var fieldType = TypeSubstitution.erase(field.type());
+                    if (inheritedPayloadNames.contains(field.name().lexeme())) {
+                        if (field.initializer() == null) {
+                            slot += fieldType.isDoubleWidth() ? 2 : 1;
+                        }
+                        continue;
+                    }
                     if (field.initializer() != null) {
                         emitExpr(context, code, field.initializer());
                         emitConversion(context, code, context.lastEmittedType, fieldType);
@@ -1397,6 +1585,12 @@ final class NominalTypeEmitter {
                 for (final var property : declaration.properties()) {
                     if (property.isCustom()) continue;
                     final var fieldType = TypeSubstitution.erase(property.type());
+                    if (inheritedPayloadNames.contains(property.name().lexeme())) {
+                        if (property.initializer() == null) {
+                            slot += fieldType.isDoubleWidth() ? 2 : 1;
+                        }
+                        continue;
+                    }
                     if (property.initializer() != null) {
                         emitExpr(context, code, property.initializer());
                         emitConversion(context, code, context.lastEmittedType, fieldType);
@@ -1801,8 +1995,9 @@ final class NominalTypeEmitter {
         final var helperType = HktDefaultSupport.helperType(
                 context.resolution.contracts(), owner, method);
         final var witnessSlots = BytecodeEmitter.witnessSlots(context, helperType);
-        final var descriptor = BytecodeEmitter.withEvidenceParameters(
-                toJavaMethodDescriptor(helperType), witnessSlots.size());
+        final var reifiedSlots = BytecodeEmitter.reifiedSlots(helperType);
+        final var descriptor = BytecodeEmitter.withHiddenParameters(
+                toJavaMethodDescriptor(helperType), witnessSlots.size(), reifiedSlots.size());
         builder.withMethod(SyntheticNames.hktDefaultMethod(
                         owner.name().lexeme(), method.name().lexeme()),
                 descriptor, ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
@@ -1840,6 +2035,8 @@ final class NominalTypeEmitter {
                     TypeDescriptor.ofName("java.lang.invoke.MethodHandle"), BindingMutability.IMMUTABLE);
             context.symbols.define(witnessToken);
         }
+        BytecodeEmitter.declareReifiedSlots(context, Resolver.SYNTHETIC_VAR,
+                functionType.typeParameters());
     }
 
     private static void emitNamedConstructor(CompilationContext context, final CodeBuilder code,

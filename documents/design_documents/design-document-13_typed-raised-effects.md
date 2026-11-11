@@ -15,13 +15,18 @@ compiled-library API metadata. Handler cases use the existing named-pattern synt
 whole payload with `as`, and can include Boolean guards.
 
 The implementation supports effect-row polymorphism through declaration-level `effect...` type
-parameters. Effect payload declarations remain non-generic. It does not add effect inheritance,
-catch-all or wildcard cases, or asynchronous effects. Java checked exceptions can be mapped only
-through explicit interop declarations and configured bindings described below; there is no
-automatic translation.
+parameters. It also supports explicit effect-only subtyping with `under` and the denotable top
+`Effect`; the relation is independent of ordinary contract conformance. Effect payload declarations
+remain non-generic. There is no implicit wildcard case, though an unguarded `case Effect` is an
+explicit catch-all, and no asynchronous effects. Java checked exceptions can be mapped only through
+explicit interop declarations and configured bindings described below; there is no automatic
+translation.
 
 Declared effects may escape from the entry-point `main`; top-level initializers remain effect-free.
-Handlers remain expression-scoped; no statement-level `try`/`catch` form is introduced.
+Handlers remain expression-scoped; no statement-level `try`/`catch` form is introduced. The protected
+operand is a single expression. [ZEP-0110](../zeps/ZEP-0110.md) proposes allowing a statement block
+in that operand position, which keeps the handler an expression and changes no coverage or runtime
+rule; it is `Draft` and not implemented.
 
 Synchronous resource cleanup is provided separately by statement-style `using` scopes and the
 `zeron.resource.Disposable` contract. Such scopes contribute body and disposal effects to the
@@ -76,7 +81,8 @@ handle (read(path)) with {
 ```
 
 OR-pattern alternatives in a handler case must name the same effect type. Multiple cases for the
-same effect are allowed and tried in source order. The parser requires at least one case.
+same effect are allowed. Comparable cases are tried most-specific first regardless of source
+order, and the parser requires at least one case.
 
 ### Named and first-class handlers
 
@@ -116,15 +122,39 @@ handler composition and effect subtyping are not supported.
 
 ### Effect declarations
 
-An effect is a class-backed, nominal payload type. It is non-generic and cannot implement contracts
-or declare methods. Its properties must be public so code handling an imported effect can inspect
-the payload through an alias. Fields and constructors follow class construction rules; the effect
-class itself is exported as an ordinary public class plus an effect marker in the library index.
+An effect is a class-backed, nominal payload type. It is non-generic and takes the ordinary class
+member model: payload properties (public or private), methods, contract conformances, and named
+constructors, with the canonical `new` derived from the complete payload. The effect marker is
+independent of ordinary contract conformance, so implementing a contract neither makes a class
+raisable nor widens handler matching. Fields and constructors follow class construction rules; the
+effect class itself is exported as an ordinary class record plus an effect marker in the library
+index, and methods, contract conformances, named constructors, and non-public payload state
+round-trip through that record without a schema change.
 
 Effect types in `raises` clauses and handler cases must resolve to a declared, non-generic effect.
 Ordinary classes, contracts, generic types, nullable types, and mutable-reference types are not
-effect types. Effect identity is exact nominal identity; there is no subclass matching or
-subtyping.
+effect types. Effect identity is nominal: two declared effects are related only by the reflexive and
+transitive closure of their `under` edges, and every declared effect is implicitly a subtype of the
+library top `Effect`.
+
+An effect may name direct effect supertypes with `under`. The relation is independent of ordinary
+class inheritance and `is` conformance. Cycles, self-edges, and naming `Effect` as an `under`
+target are rejected. A child that names a payload-bearing parent redeclares every inherited payload
+member with the same name, type, and mutation capability; its canonical `new` delegates to the
+parent constructor by matching those declarations and stores no second copy. At most one direct
+parent may contribute payload state; every other direct parent, including its ancestors, must be
+stateless. The child may add further payload members.
+
+The library top `Effect` is an ordinary stateless effect value. `Effect.fromException` wraps a host
+`Exception` in a library-owned payload effect; no other host-to-effect mapping is inferred. A bare
+`Effect` cannot be constructed, and ordinary classes cannot be assigned to it. Effect values are
+ordinary values: they can be stored, passed, and raised again, and raising a value of static type
+`Effect` adds `Effect` to the raised set.
+
+A subeffect satisfies a broader `raises` requirement, and a handler case for a super-effect matches
+its subeffects. Handler payloads retain the case's declared static type, so a parent-typed case
+exposes inherited payload but not subtype-only members. Coverage removes every raised element that
+is a subtype of a fully handled case, while a broader element remains.
 
 ### Effect-row polymorphism
 
@@ -207,7 +237,8 @@ value is preserved. A handler removes an effect from that set only if it has an 
 irrefutable pattern for that effect. In particular, guarded or refutable patterns do not prove
 coverage; a set of refutable cases is not combined to infer exhaustiveness. An unmatched payload,
 including one for a listed but incompletely handled effect, remains in the escaping set and must be
-declared or handled by an outer scope. Inline handler arms and guards are resolved in the enclosing effect scope, so effects they raise
+declared or handled by an outer scope. A super-effect case covers its subeffects, and an unguarded,
+irrefutable `case Effect` covers the complete raised set. Inline handler arms and guards are resolved in the enclosing effect scope, so effects they raise
 are not removed by that same handler. A first-class handler records its case-raised set in its
 structural type. Applying it removes only its complete handled set from the protected computation
 and adds the recorded case-raised set:
@@ -226,8 +257,13 @@ type. This ensures that both normal and handled paths produce values compatible 
 static type.
 
 OR-patterns, nested patterns, multiple outputs, and guards reuse `match` pattern semantics. OR
-alternatives must bind the same names with compatible types. The handler has no wildcard or
-catch-all case, so it cannot silently erase an unlisted effect.
+alternatives must bind the same names with compatible types. The handler has no wildcard case, so it
+cannot silently erase an unlisted effect; an explicit `case Effect` is a deliberate catch-all.
+Comparable matching cases select the most-specific effect type independent of source order.
+Incomparable cases that can both match a visible effect are rejected at compile time. A subtype
+introduced by a later library may make two previously incomparable cases match the same payload;
+dispatch then aborts with an ambiguity error naming the payload and both cases instead of choosing
+by source or import order.
 
 ### Functions and library compatibility
 
@@ -239,8 +275,10 @@ handled-effect, and handler-raised-effect sets. JVM callable interfaces encode o
 result and dispatch argument; effect capabilities remain in source-level descriptors and library
 metadata.
 
-The compiled-library index serializes effect and row markers, callable raised sets, handler shapes
-on exported values, and external-facade exception mappings needed for separately compiled clients.
+The compiled-library index serializes effect and row markers, callable raised sets, direct `under`
+edges, handler shapes on exported values, and external-facade exception mappings needed for
+separately compiled clients. The effective payload shape needs no separate record: the exported
+canonical-constructor parameter types and names already describe the child's complete payload.
 The standard-library API version remains independent of the binary schema version. Consumers of
 schemas that predate the relevant metadata must rebuild or use a compatible compiler; such an index
 cannot communicate effect markers, row parameters, raised signatures, handler capabilities, or
@@ -253,16 +291,22 @@ The compiler emits a final `zeron.runtime.RaisedEffect` runtime exception with a
 support class is emitted alongside compiled classes.
 
 A handler compiles its protected expression into a JVM exception-table region catching only
-`RaisedEffect`. Inline cases and first-class handler dispatch try patterns in source order, evaluate
-a guard only after its pattern matches, and evaluate the arm only when both pattern and guard
-succeed. If no case matches, the same carrier is rethrown. Ordinary Java exceptions are not caught
+`RaisedEffect`. Inline cases and first-class handler dispatch order comparable cases most-specific
+first, evaluate a guard only after its pattern matches, and evaluate the arm only when both pattern
+and guard succeed. If no case matches, the same carrier is rethrown. Ordinary Java exceptions are not caught
 by effect handlers; only an explicit external-facade mapping translates the declared checked
 exception at its Java call site. An unhandled carrier escaping the
 generated `main` method likewise propagates unchanged across the host boundary;
 the current compiler does not add a launcher that catches and formats it. A future launcher may
 report an uncaught Zeron effect by catching only `RaisedEffect`, without translating Java exceptions
 or implicitly stringifying the payload. Effect payload classes and carriers are emitted as normal
-class files and public effect metadata is available to imported compiled libraries.
+class files and public effect metadata is available to imported compiled libraries. The generated
+payload class of each effect realizes the declared relation: the single payload-bearing parent is
+the JVM superclass, each stateless parent is a marker interface the child implements, and every
+effect implements the generated `Effect` marker. A stateless effect is itself emitted as a marker
+interface with a package-private implementation class behind its static `new`; a payload-bearing
+effect is emitted as a non-final class. Handler dispatch tests the payload with `instanceof`
+against this generated hierarchy, never against ordinary class names or the carrier exception.
 
 Effect-row parameters are erased at runtime and add no runtime witness; raised values continue to
 use `RaisedEffect`. The API index preserves row-parameter kinds and row expressions for separately
@@ -272,15 +316,18 @@ compiled consumers. Higher-rank row quantification is not supported.
 
 Other follow-up areas:
 
-1. [ZEP-0054](../zeps/ZEP-0054.md) drafts ordinary nominal members and contract conformance for
-   effect payloads while preserving exact effect identity.
+1. [ZEP-0054](../zeps/ZEP-0054.md) adds ordinary nominal members and contract conformance for
+   effect payloads while preserving exact effect identity; implemented 2026-11-09.
 2. [ZEP-0055](../zeps/ZEP-0055.md) drafts an effect-kind constraint for generic declarations and
    propagation of abstract effects. It does not add generic effect payload declarations or generic
    handler cases.
-3. [ZEP-0013](../zeps/ZEP-0013.md) explores effect subtyping and a denotable top `Effect` type.
-   These remain proposals and do not change the exact-matching semantics described above.
-4. Generic effect payload declarations remain separately explored in [ZEP-0005](../zeps/ZEP-0005.md)
-   and depend on a sound runtime identity model.
+3. [ZEP-0013](../zeps/ZEP-0013.md) adds effect subtyping and a denotable top `Effect` type, with
+   inherited payload, most-specific handler selection, runtime ambiguity reporting, and direct
+   `under` edges in the library index; implemented 2026-11-09.
+4. Generic effect payload declarations are designed by the accepted
+   [ZEP-0005](../zeps/ZEP-0005.md) and depend on the implemented ZEP-0015 runtime identity model:
+   closed, invariant applications carry a payload descriptor, and handlers compare it before
+   binding. Applied ancestry and generic propagation remain deferred, and nothing is implemented.
 5. Extend explicit checked-exception mappings only as concrete interop needs arise; they remain an
    opt-in boundary and do not alter ordinary Java exception propagation.
 6. [Effect-row polymorphism](../zeps/ZEP-0086.md) is implemented with declaration-level row
@@ -301,6 +348,12 @@ Other follow-up areas:
    assume Project Loom's virtual threads provide arbitrary continuation capture and resumption;
    investigate a compiler-managed strategy such as CPS transformation, starting with one-shot
    continuations, before committing to this direction.
+   [ZEP-0007](../zeps/ZEP-0007.md) records the mechanism analysis, including why a monadic lowering
+   of a handled block is a resumption mechanism and which type-system pieces it needs. The
+   separable parts are proposed separately: block-bodied abortive handlers
+   ([ZEP-0110](../zeps/ZEP-0110.md)), witness-dispatched `do` notation at library level
+   ([ZEP-0111](../zeps/ZEP-0111.md)), and direct-style suspension with structured concurrency
+   ([ZEP-0112](../zeps/ZEP-0112.md)). None of them changes `raise` or `handle` semantics.
 
 Effect-set polymorphism is implemented in [ZEP-0086](../zeps/ZEP-0086.md); its design and
 validation coverage are recorded there. `Result<T, E>` remains ordinary and is not a migration

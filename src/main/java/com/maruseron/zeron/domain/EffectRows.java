@@ -66,7 +66,23 @@ public final class EffectRows {
 
     public static boolean includedIn(final List<TypeDescriptor> actual,
                                      final List<TypeDescriptor> expected) {
-        return of(actual).includedIn(of(expected));
+        return includedIn(actual, expected, EffectSubtyping.exact());
+    }
+
+    public static boolean includedIn(final List<TypeDescriptor> actual,
+                                     final List<TypeDescriptor> expected,
+                                     final EffectSubtyping subtyping) {
+        return of(actual).includedIn(of(expected), subtyping);
+    }
+
+    /** Whether {@code effect} is covered by one of the declared labels. */
+    public static boolean coveredBy(final TypeDescriptor effect,
+                                    final List<TypeDescriptor> declared,
+                                    final EffectSubtyping subtyping) {
+        for (final var candidate : declared) {
+            if (subtyping.isSubtype(effect, candidate)) return true;
+        }
+        return false;
     }
 
     /**
@@ -75,11 +91,17 @@ public final class EffectRows {
      */
     public static TypeDescriptor firstUnpermitted(final List<TypeDescriptor> actual,
                                                   final List<TypeDescriptor> expected) {
+        return firstUnpermitted(actual, expected, EffectSubtyping.exact());
+    }
+
+    public static TypeDescriptor firstUnpermitted(final List<TypeDescriptor> actual,
+                                                  final List<TypeDescriptor> expected,
+                                                  final EffectSubtyping subtyping) {
         final var actualRow = of(actual);
         final var expectedRow = of(expected);
         if (expectedRow.variables().isEmpty()) {
             for (final var effect : actualRow.effects()) {
-                if (!expectedRow.effects().contains(effect)) return effect;
+                if (!coveredBy(effect, expectedRow.effects(), subtyping)) return effect;
             }
         }
         for (final var variable : actualRow.variables()) {

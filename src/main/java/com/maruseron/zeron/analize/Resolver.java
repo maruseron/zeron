@@ -258,8 +258,10 @@ public final class Resolver {
             for (final var entry : NamespaceMembers.flatten(unit.declarations())) {
                 final var declaration = entry.declaration();
                 final var contractUses = declaration instanceof Stmt.ClassDecl classDeclaration
-                        ? java.util.stream.Stream.concat(classDeclaration.contractUses().stream(),
-                                classDeclaration.higherKindedContractUses().stream()).toList()
+                        ? java.util.stream.Stream.concat(
+                                java.util.stream.Stream.concat(classDeclaration.contractUses().stream(),
+                                        classDeclaration.higherKindedContractUses().stream()),
+                                classDeclaration.underEffects().stream()).toList()
                         : declaration instanceof Stmt.ContractDecl contractDeclaration
                             ? java.util.stream.Stream.concat(
                                     contractDeclaration.requiredContracts().stream(),
@@ -298,6 +300,9 @@ public final class Resolver {
             context.currentImports = importsByUnit.get(unit);
             context.invalidImportAliases = invalidAliasesByUnit.get(unit);
             for (final var error : TypeClassEvidence.activeOverlapErrors(context, reportedWitnessPairs)) {
+                attempt(context, () -> { throw error; });
+            }
+            for (final var error : TypeClassEvidence.witnessImportErrors(context, units)) {
                 attempt(context, () -> { throw error; });
             }
         }
@@ -354,6 +359,8 @@ public final class Resolver {
             }
             context.currentNamespaceName = null;
         }
+        ReifiedTypeArguments.finalizeInferredMarkers(context);
+        WarningAnalysis.analyze(context, units);
         for (final var lambda : context.resolvedLambdas) {
             if (LambdaResolver.containsInfer(context, lambda.getType())) {
                 context.diagnostics.record(ResolutionError.withHelp(
@@ -385,7 +392,10 @@ public final class Resolver {
                 context.extensionMethods.values().stream().flatMap(List::stream).toList(),
                 context.referenceTargets,
                 context.referenceTypes,
-                context.callSiteFunctionTypes);
+                context.callSiteFunctionTypes,
+                Zeron.warnings(),
+                context.typeClassWitnesses.stream()
+                        .map(TypeClassEvidence.WitnessEntry::declaration).toList());
     }
 
     private static boolean attempt(final ResolutionContext context, final Runnable operation) {

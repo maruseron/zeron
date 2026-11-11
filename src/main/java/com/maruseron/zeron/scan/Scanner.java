@@ -42,6 +42,7 @@ public final class Scanner {
             entry("default",     DEFAULT),
             entry("else",        ELSE),
             entry("effect",      EFFECT),
+            entry("under",       UNDER),
             entry("extension",   EXTENSION),
             entry("external",    EXTERNAL),
             entry("false",       FALSE),
@@ -199,7 +200,8 @@ public final class Scanner {
                 }
             }
             case '<' -> {
-                if (match('<')) addToken(match('=') ? SHIFT_LEFT_EQUAL : SHIFT_LEFT);
+                if (match('-')) addToken(LEFT_ARROW);
+                else if (match('<')) addToken(match('=') ? SHIFT_LEFT_EQUAL : SHIFT_LEFT);
                 else addToken(match('=') ? LESS_EQUAL : LESS);
             }
 

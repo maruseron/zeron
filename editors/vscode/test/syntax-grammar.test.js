@@ -43,6 +43,31 @@ test('highlights yield and collect as for-expression result clauses', () => {
   assert.equal(grammar.repository.keywords.match.includes('|collect|'), false);
 });
 
+test('highlights under as a keyword and where in newtype validators', () => {
+  assert.ok(grammar.repository.keywords.match.includes('|under|'));
+
+  const wherePattern = grammar.repository['contextual-keywords'].patterns
+    .find(pattern => pattern.match.includes('(where)'));
+  assert.ok(wherePattern);
+  const matcher = new RegExp(wherePattern.match, 'g');
+  assert.deepEqual(
+    Array.from('newtype Positive = Int where value > 0;'.matchAll(matcher), match => match[3]),
+    ['where']
+  );
+  assert.equal(Array.from('let where = 1;'.matchAll(matcher)).length, 0);
+});
+
+test('highlights matches only before a pattern', () => {
+  const matchesPattern = grammar.repository['contextual-keywords'].patterns
+    .find(pattern => pattern.match.includes('matches'));
+  assert.ok(matchesPattern);
+  const matcher = new RegExp(matchesPattern.match, 'g');
+
+  assert.ok(matcher.test('option matches Option.Some(value)'));
+  assert.equal(matcher.test('let matches = 1;'), false);
+  assert.equal(matcher.test('matches(value)'), false);
+});
+
 test('highlights nullable only as a generic admissibility marker', () => {
   const markerPattern = grammar.repository['contextual-keywords'].patterns
     .find(pattern => pattern.match.includes('(nullable)'));

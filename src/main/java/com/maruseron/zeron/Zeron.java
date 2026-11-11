@@ -41,9 +41,14 @@ public class Zeron {
     static boolean hadError = false;
     static boolean hadResolutionError = false;
     static boolean hadCompilationError = false;
+    private static boolean hadWarning = false;
+    private static boolean denyWarnings = false;
+    private static final List<Diagnostic> warnings = new java.util.ArrayList<>();
+    private static final java.util.Set<String> warningKeys = new java.util.HashSet<>();
     private static boolean debugEnabled;
     private static boolean replSession;
     private static final java.util.Map<String, List<String>> sourceLines = new java.util.HashMap<>();
+
     static void main(final String... args) throws IOException {
         final var exitCode = runCli(args);
         if (exitCode != 0) System.exit(exitCode);
@@ -53,6 +58,10 @@ public class Zeron {
         hadError = false;
         hadResolutionError = false;
         hadCompilationError = false;
+        hadWarning = false;
+        denyWarnings = false;
+        warnings.clear();
+        warningKeys.clear();
         debugEnabled = false;
         replSession = false;
         sourceLines.clear();
@@ -74,6 +83,8 @@ public class Zeron {
         }
         final var invocation = ((CliParser.Parsed) parseResult).invocation();
         debugEnabled = invocation.debug();
+        denyWarnings = invocation instanceof CliParser.ProjectCommand project && project.denyWarnings()
+                || invocation instanceof CliParser.Compile compilation && compilation.denyWarnings();
         return switch (invocation) {
             case CliParser.Version _ -> {
                 System.out.println("zeron " + ZeronVersion.current());
@@ -189,6 +200,7 @@ public class Zeron {
         if (hadError) return 65;
         if (hadResolutionError) return 71;
         if (hadCompilationError) return 70;
+        if (denyWarnings && hadWarning) return 71;
         return 0;
     }
 
@@ -626,6 +638,9 @@ public class Zeron {
         hadError = false;
         hadResolutionError = false;
         hadCompilationError = false;
+        hadWarning = false;
+        warnings.clear();
+        warningKeys.clear();
         sourceLines.clear();
     }
 
@@ -680,6 +695,34 @@ public class Zeron {
     public static void reportCompilationDiagnostic(final Diagnostic diagnostic) {
         reportStageDiagnostic(diagnostic);
         if (diagnostic.severity() == Severity.ERROR) hadCompilationError = true;
+    }
+
+    public static void warning(final Token token, final DiagnosticCatalog.Entry entry,
+                               final String message) {
+        warning(Diagnostic.atToken(entry, token, token.span().sourcePath(), message));
+    }
+
+    /// Reports a non-fatal diagnostic. Warnings share the formatter and source spans with errors but
+    /// never set an error flag, so the current stage keeps running.
+    public static void warning(final Diagnostic diagnostic) {
+        final var key = diagnostic.code() + "|" + diagnostic.primarySpan() + "|"
+                + diagnostic.message();
+        if (!warningKeys.add(key)) return;
+        warnings.add(diagnostic);
+        hadWarning = true;
+        reportStageDiagnostic(diagnostic);
+    }
+
+    public static List<Diagnostic> warnings() {
+        return List.copyOf(warnings);
+    }
+
+    /// Starts a fresh warning collection without disturbing error state, used by repeated
+    /// language-server analyses that parse several files before resolving them.
+    static void clearWarnings() {
+        warnings.clear();
+        warningKeys.clear();
+        hadWarning = false;
     }
 
     private static void reportStageDiagnostic(final Diagnostic diagnostic) {

@@ -13,13 +13,22 @@ non-goals or from a partial implementation.
 
 It is a planning aid, not a proposal. It does not change any ZEP status or release state.
 
-> Update 2026-11-08: the model and callable follow-ups below were drafted as
-> [ZEP-0100](../zeps/ZEP-0100.md) through [ZEP-0104](../zeps/ZEP-0104.md). They remain Draft and unscheduled.
+> Update 2026-11-10: the model, callable, and existential follow-ups below are tracked by
+> [ZEP-0100](../zeps/ZEP-0100.md) through [ZEP-0109](../zeps/ZEP-0109.md). ZEP-0100 is implemented and
+> a candidate; ZEP-0104 is accepted and a candidate; ZEP-0101 through ZEP-0103 and ZEP-0105 through
+> ZEP-0109 remain Draft and unscheduled.
 > Deviations from the initial [ZEP-0079](../zeps/ZEP-0079.md) model surface would still gate any
 > implementation, but that surface is now validated and [ZEP-0079](../zeps/ZEP-0079.md) and
 > [ZEP-0081](../zeps/ZEP-0081.md) are `Implemented`. [ZEP-0092](../zeps/ZEP-0092.md) is also
 > `Implemented`, so the generated serialization operations are no longer a follow-up; the remaining
 > serialization gaps are the external-name and alias work tracked by ZEP-0091 and ZEP-0098.
+>
+> Effect notation and suspension follow-ups are tracked separately by
+> [ZEP-0110](../zeps/ZEP-0110.md) (block-bodied handlers), [ZEP-0111](../zeps/ZEP-0111.md)
+> (witness-dispatched do-notation), and [ZEP-0112](../zeps/ZEP-0112.md) (direct-style suspension and
+> structured concurrency). ZEP-0110 and ZEP-0112 are `Draft`; ZEP-0111 is `Implemented` as a
+> notation-only design; all three are `Unscheduled`. Resumption itself remains with
+> [ZEP-0007](../zeps/ZEP-0007.md), which stays `Deferred`.
 
 ## 1. Work already covered by an existing proposal
 
@@ -27,16 +36,17 @@ These are confirmed gaps, but they should extend an existing proposal rather tha
 
 | Follow-up | Source ZEPs | Existing proposal |
 | --- | --- | --- |
-| Generic effect payloads | 0005, 0056, 0057, 0086 | ZEP-0005 (Deferred) |
+| Generic effect payloads | 0005, 0056, 0057, 0086 | ZEP-0005 (Accepted; closed applied-effect scope, unscheduled) |
 | Effect subtyping / top `Effect` | 0056, 0057, 0086 | ZEP-0013 (Draft) |
 | Nominal effect payload types | 0055, 0086 | ZEP-0054 (Draft) |
 | Numeric literals, newtypes, widening, heterogeneous operators | 0036, 0043, 0071 | ZEP-0041, 0042, 0044, 0045, 0046, 0070, 0074, 0075 |
 | Remaining Java interop (SAM, inherited members, JPMS, extensible bindings) | 0047-0049 | ZEP-0050 (Draft) |
 | Standard-library testing/logging/TOML/XML | 0011, 0065 | ZEP-0063, 0064, 0066, 0067 |
-| Model and callable follow-ups | 0079, 0081, 0090, 0093 | ZEP-0100–0104 (Draft) |
+| Model, callable, and existential follow-ups | 0079, 0081, 0090, 0093 | ZEP-0100–0109 (implemented/candidate or Draft) |
 | 64-bit hashing, mutable projections, unchecked casts | 0008, 0085, 0089 | ZEP-0084, 0085, 0089 |
 | Annotation consumption | 0031 | ZEP-0091 (Accepted) |
 | Annotation target for model mapping clauses | 0079 | ZEP-0097 (Accepted) |
+| Block handlers, `do` notation, suspension | 0007, 0058, 0019 | ZEP-0110, ZEP-0111, ZEP-0112 (Draft; ZEP-0111 Implemented) |
 | Generated serialization operations | 0068, 0069, 0094, 0099 | ZEP-0092 (Implemented; delivered) |
 
 **Important overlap:** ZEP-0092 is implemented and closed the generated serialization operations
@@ -141,7 +151,10 @@ Source: ZEP-0090, ZEP-0093.
 - Public `PropertyId` construction, property paths, and further model nodes `[E]`.
 - Model field representation adapters — [ZEP-0101](../zeps/ZEP-0101.md).
 - Generic and polymorphic models — [ZEP-0102](../zeps/ZEP-0102.md), [ZEP-0103](../zeps/ZEP-0103.md).
-- Existential types exploration — [ZEP-0104](../zeps/ZEP-0104.md).
+- Bounded existentials and type-bound pattern matching — [ZEP-0104](../zeps/ZEP-0104.md);
+  general existentials, storage, ancestor matching, and contract-bound tests —
+  [ZEP-0105](../zeps/ZEP-0105.md) through [ZEP-0108](../zeps/ZEP-0108.md); rank-2 polymorphism and
+  polymorphic function types — [ZEP-0109](../zeps/ZEP-0109.md).
 
 #### J. Class-side and static HKT operations
 
@@ -259,9 +272,9 @@ already `Implemented`. No file/tracker status mismatches remain.
 Use this order for the work after the post-`0.6.0` effect program.
 
 The immediate post-`0.6.0` slot is reserved for the effect semantics and runtime identity program
-recorded in the [tracker review](./zep-tracker-review.md): ZEP-0054 and ZEP-0013 first, then a
-narrowed ZEP-0015 and ZEP-0005, with ZEP-0104 as research. The list below applies after that
-program's first bundle.
+recorded in the [tracker review](./zep-tracker-review.md): ZEP-0054 and ZEP-0013 first, then shared
+ZEP-0015, the bounded ZEP-0104 slice, and ZEP-0005; ZEP-0105 through ZEP-0109 are later research.
+The list below applies after that program's first bundle.
 
 1. Implement **ZEP-0091** (annotation consumption, Direction B first) and **ZEP-0097** (annotation
    target for model mapping clauses); they are the only accepted, unimplemented proposals and they

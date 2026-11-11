@@ -250,8 +250,9 @@ public final class TypedRaisedEffectsTest {
                 } catch (final InvocationTargetException exception) {
                     final var carrier = exception.getCause();
                     assertEquals("zeron.runtime.RaisedEffect", carrier.getClass().getName());
+                    final var payload = carrier.getClass().getMethod("payload").invoke(carrier);
                     assertEquals(packageName + ".Startup",
-                            carrier.getClass().getMethod("payload").invoke(carrier).getClass().getName());
+                            payload.getClass().getInterfaces()[0].getName());
                 }
             }
         } finally {

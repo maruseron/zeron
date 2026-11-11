@@ -114,10 +114,16 @@ final class CliParser {
         final var launch = args[0].equals("run");
         var manifest = Paths.get("zeron.toml");
         var debug = false;
+        var denyWarnings = false;
         for (var index = 1; index < args.length; index++) {
             final var argument = args[index];
             if (argument.equals("--debug") || argument.equals("-d")) {
                 debug = true;
+            } else if (argument.equals("--deny-warnings")) {
+                if (denyWarnings) {
+                    return invalid("The --deny-warnings option may only be specified once.");
+                }
+                denyWarnings = true;
             } else if (argument.equals("--manifest")) {
                 if (++index >= args.length) {
                     return invalid(args[0] + " --manifest requires a TOML file.");
@@ -142,7 +148,7 @@ final class CliParser {
         }
         final var projectPathError = projectPathError(project);
         if (projectPathError.isPresent()) return invalid(projectPathError.get());
-        return parsed(new ProjectCommand(launch, manifest, debug, project));
+        return parsed(new ProjectCommand(launch, manifest, debug, denyWarnings, project));
     }
 
     private static ParseResult parseLspCommand(final String[] args) {
@@ -213,11 +219,17 @@ final class CliParser {
         Path jarOutput = null;
         var standardLibraryMode = StandardLibraryMode.DEFAULT;
         var debug = false;
+        var denyWarnings = false;
 
         for (var index = 0; index < args.length; index++) {
             final var argument = args[index];
             if (argument.equals("--debug") || argument.equals("-d")) {
                 debug = true;
+            } else if (argument.equals("--deny-warnings")) {
+                if (denyWarnings) {
+                    return invalid("The --deny-warnings option may only be specified once.");
+                }
+                denyWarnings = true;
             } else if (argument.equals("--root")) {
                 if (++index >= args.length) return invalid("--root requires a directory.");
                 sourceRoots.add(Paths.get(args[index]));
@@ -272,6 +284,7 @@ final class CliParser {
         }
 
         if (entry == null && sourceRoots.isEmpty() && sourceFiles.isEmpty()) {
+            if (denyWarnings) return invalid("--deny-warnings requires compilation input.");
             if (jarOutput != null) return invalid("--jar-output requires compilation input.");
             if (!libraryRoots.isEmpty() || !javaClassPathRoots.isEmpty()
                     || standardLibraryMode == StandardLibraryMode.COMPILED) {
@@ -331,7 +344,7 @@ final class CliParser {
             if (collision.isPresent()) return invalid(collision.get());
         }
         return parsed(new Compile(sourceFiles, sourceRoots, entry, libraryRoots, javaClassPathRoots,
-                standardLibraryMode, jarOutput, debug));
+                standardLibraryMode, jarOutput, debug, denyWarnings));
     }
 
     private static Optional<String> readableFileError(final Path path, final String description) {
@@ -495,7 +508,8 @@ final class CliParser {
         public boolean debug() { return false; }
     }
 
-    record ProjectCommand(boolean launch, Path manifest, boolean debug, ProjectManifest project)
+    record ProjectCommand(boolean launch, Path manifest, boolean debug, boolean denyWarnings,
+                          ProjectManifest project)
             implements Invocation {}
 
     record LspCommand(Optional<Path> manifest) implements Invocation {
@@ -529,7 +543,8 @@ final class CliParser {
 
     record Compile(List<String> sourceFiles, List<Path> sourceRoots, Path entry,
                    List<Path> libraries, List<Path> javaClassPathRoots,
-                   StandardLibraryMode standardLibraryMode, Path jarOutput, boolean debug)
+                   StandardLibraryMode standardLibraryMode, Path jarOutput, boolean debug,
+                   boolean denyWarnings)
             implements Invocation {
         Compile {
             sourceFiles = List.copyOf(sourceFiles);

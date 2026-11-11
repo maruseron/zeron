@@ -82,6 +82,32 @@ public final class GenericFunctionTest {
     }
 
     @Test
+    public void mutableArgumentsNarrowToReadOnlyGenericParameters() {
+        new ResolutionService().resolve(parse("""
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn extract<T>(box: Box<T>): T = box.value;
+                fn use(): Int = extract(Box.new(1));
+                """));
+
+        // Inference sees through the reference capability, but capability is still not a
+        // subtyping axis: a read-only value cannot satisfy a mutable generic parameter.
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn extract<T>(box: &Box<T>): T = box.value;
+                fn use(): Int {
+                    let box: Box<Int> = Box.new(1);
+                    return extract(box);
+                }
+                """)));
+    }
+
+    @Test
     public void effectAdmissibilityRequiresEffectTypeArguments() {
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 fn relay<E: effect>(value: E): E raises E = value;

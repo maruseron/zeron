@@ -18,3 +18,7 @@ public class Cell<T: nullable + mut> {
         this.value = value;
     }
 }
+
+default witness<T: Display> Display for Cell<T> {
+    fn toString(): String = this.get().toString();
+}

@@ -70,6 +70,50 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void builtinTypeHoverShowsActivePrimitiveEvidence() throws Exception {
+        final var source = """
+                fn inspect(value: Int): Int = value;
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "value: Int", "value: ".length());
+
+        assertTrue("Unexpected hover: " + hover, hover.contains("intrinsic type Int"));
+        assertTrue("Unexpected hover: " + hover, hover.contains("Evidence available here:"));
+        assertTrue("Unexpected hover: " + hover, hover.contains("Integral<Int>"));
+        assertTrue("Unexpected hover: " + hover, hover.contains("Display"));
+        assertTrue("Unexpected hover: " + hover, hover.contains("Eq<Int>"));
+        assertTrue("Unexpected hover: " + hover, hover.contains("Hashable<Int>"));
+    }
+
+    @Test
+    public void builtinTypeHoverShowsImportedArrayEvidence() throws Exception {
+        final var source = """
+                import witness zeron.collections.ArrayFoldable;
+                fn inspect(values: &Array<Int>): Int = values.length;
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "&Array<Int>", 1);
+
+        assertTrue("Unexpected hover: " + hover, hover.contains("intrinsic type Array<T>"));
+        assertTrue("Unexpected hover: " + hover, hover.contains("Foldable<Array<_>>"));
+    }
+
+    @Test
+    public void builtinTypeHoverOmitsUnimportedArrayEvidence() throws Exception {
+        final var source = """
+                fn inspect(values: &Array<Int>): Int = values.length;
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "&Array<Int>", 1);
+
+        assertTrue("Unexpected hover: " + hover, hover.contains("intrinsic type Array<T>"));
+        assertFalse("Unexpected hover: " + hover, hover.contains("Foldable<Array<_>>"));
+    }
+
+    @Test
     public void hoversModelsAsTheirDeclaredContract() throws Exception {
         final var source = """
                 package app;
@@ -241,8 +285,7 @@ public class LspWorkspaceTest {
         final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
         final var hover = hoverAt(snapshot, contractPath, contractSource, "compareTo(other:");
 
-        assertTrue(snapshot.diagnostics().toString(),
-                snapshot.diagnostics().values().stream().allMatch(List::isEmpty));
+        assertNoErrors(snapshot);
         assertTrue("Unexpected hover: " + hover,
                 hover.contains("fn compareTo(other: T) -> String"));
         assertTrue(hover, hover.contains("Evaluates the current instance against `other`"));
@@ -284,6 +327,58 @@ public class LspWorkspaceTest {
                 "fn jsonModel(model: String, owner: Int, block: String) -> String"));
         assertFalse(importHover, importHover.contains("arg0"));
         assertFalse(callHover, callHover.contains("arg0"));
+    }
+
+    @Test
+    public void compiledLibraryNamespaceMembersAndExtensionsSupportHover() throws Exception {
+        final var packageName = "nsmembers" + java.util.UUID.randomUUID().toString().replace("-", "");
+        final var project = project("""
+                import %s.Box;
+                import %s.Box.*;
+                fn main() {
+                    let a = Box.answer;
+                    let b = Box.make();
+                    let c = Box.new().measure();
+                }
+                """.formatted(packageName, packageName));
+        final var libraryRoot = Files.createDirectories(project.root().resolve("lib"));
+        final var libraryUnit = Parser.of(Scanner.from("""
+                package %s;
+                public class Box {
+                    public constructor new;
+                }
+                namespace Box {
+                    public fn make(): Int = 1;
+                    public let answer: Int = 42;
+                }
+                public extension Box {
+                    public fn measure(): Int = 2;
+                }
+                """.formatted(packageName)).scanTokens()).parseCompilationUnit("Library.zn");
+        final var compiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
+                packageName + ".Library", packageName, List.of(), true, List.of(), libraryRoot);
+        compiler.resolve();
+        compiler.compile();
+        Files.writeString(project.manifest(), Files.readString(project.manifest()) + """
+
+                [dependencies]
+                zeron-libraries = ["lib"]
+                """);
+
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var source = Files.readString(project.entry());
+        final var answerHover = hoverAt(snapshot, project.entry(), source, "Box.answer",
+                "Box.".length());
+        final var makeHover = hoverAt(snapshot, project.entry(), source, "Box.make",
+                "Box.".length());
+        final var measureHover = hoverAt(snapshot, project.entry(), source, "measure");
+
+        assertTrue("hover=" + answerHover + " diagnostics=" + snapshot.diagnostics(),
+                answerHover.contains("value answer: Int"));
+        assertTrue("hover=" + makeHover + " diagnostics=" + snapshot.diagnostics(),
+                makeHover.contains("fn make() -> Int"));
+        assertTrue("hover=" + measureHover + " diagnostics=" + snapshot.diagnostics(),
+                measureHover.contains("extension on Box"));
     }
 
     @Test
@@ -466,8 +561,7 @@ public class LspWorkspaceTest {
 
             final var afterEdit = workspace.analyze(Map.of(
                     project.entry(), new ProjectAnalysisWorkspace.Overlay(2, updated)));
-            assertTrue(afterEdit.diagnostics().toString(), afterEdit.diagnostics()
-                    .getOrDefault(project.entry(), List.of()).isEmpty());
+            assertNoErrors(afterEdit);
         }
     }
 
@@ -521,8 +615,7 @@ public class LspWorkspaceTest {
 
             final var afterEdit = workspace.analyze(Map.of(
                     project.entry(), new ProjectAnalysisWorkspace.Overlay(2, updated)));
-            assertTrue(afterEdit.diagnostics().toString(), afterEdit.diagnostics()
-                    .getOrDefault(project.entry(), List.of()).isEmpty());
+            assertNoErrors(afterEdit);
         }
     }
 
@@ -647,8 +740,8 @@ public class LspWorkspaceTest {
         final var hover = LspFeatures.hover(snapshot, project.entry(), new HoverParams(document, position));
 
         assertNotNull(hover);
-        assertTrue(hover.getContents().getRight().getValue().contains("(Int) -> Int"));
-        assertFalse(hover.getContents().getRight().getValue().contains(">(Int)"));
+        assertTrue(hover.getContents().getRight().getValue().contains("Int -> Int"));
+        assertFalse(hover.getContents().getRight().getValue().contains("((Int)"));
     }
 
     @Test
@@ -1301,6 +1394,39 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void hoversUnaryFunctionArgumentWithoutParentheses() throws Exception {
+        final var source = """
+                import zeron.collections.ArrayList;
+                fn main() {
+                    let list = ArrayList<Int>.of();
+                    list.stream().map(i -> i * 2);
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "map");
+
+        assertTrue(hover, hover.contains("fn map(Int -> Int) -> Stream<Int>"));
+        assertFalse(hover, hover.contains("((Int)"));
+    }
+
+    @Test
+    public void hoversInferredGenericReceiverCall() throws Exception {
+        final var source = """
+                import zeron.collections.List;
+                fn listToString<T: Display>(list: List<T>): String =
+                    list.fold("[", (acc, i) -> acc + i.toString());
+                fn main() {}
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var hover = hoverAt(snapshot, project.entry(), source, "fold");
+
+        assertTrue(hover, hover.contains("fn fold(String, (String, T) -> String) -> String"));
+        assertFalse(hover, hover.contains("<R"));
+    }
+
+    @Test
     public void receiverFunctionMembersSupportCompletionHoverAndNavigation() throws Exception {
         final var source = """
                 public class Box {
@@ -1580,6 +1706,112 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void importedNamespaceMembersAndExtensionsSupportHoverAndDefinition() throws Exception {
+        final var project = project("app/Main.zn", """
+                package app;
+                import lib.Box;
+                import lib.Box.*;
+                fn main() {
+                    let a = Box.answer;
+                    let b = Box.make();
+                    let c = Box.new().measure();
+                }
+                """);
+        final var sourceRoot = project.entry().getParent().getParent();
+        final var library = sourceRoot.resolve("lib/Box.zn");
+        Files.createDirectories(library.getParent());
+        Files.writeString(library, """
+                package lib;
+                public class Box {
+                    public constructor new;
+                }
+                namespace Box {
+                    public fn make(): Int = 1;
+                    public let answer: Int = 42;
+                }
+                public extension Box {
+                    public fn measure(): Int = 2;
+                }
+                """);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var source = Files.readString(project.entry());
+
+        assertNoErrors(snapshot);
+        final var answerHover = hoverAt(snapshot, project.entry(), source, "Box.answer",
+                "Box.".length());
+        final var makeHover = hoverAt(snapshot, project.entry(), source, "Box.make",
+                "Box.".length());
+        final var measureHover = hoverAt(snapshot, project.entry(), source, "measure");
+        assertTrue("Unexpected answer hover: " + answerHover, answerHover.contains("value answer: Int"));
+        assertTrue("Unexpected make hover: " + makeHover, makeHover.contains("fn make() -> Int"));
+        assertTrue("Unexpected measure hover: " + measureHover,
+                measureHover.contains("extension on Box"));
+
+        final var answerDefinition = definitionAt(snapshot, project.entry(), source,
+                "Box.answer", "Box.".length());
+        final var makeDefinition = definitionAt(snapshot, project.entry(), source,
+                "Box.make", "Box.".length());
+        final var measureDefinition = definitionAt(snapshot, project.entry(), source, "measure", 0);
+        assertDefinition(library, answerDefinition, "answer");
+        assertDefinition(library, makeDefinition, "make");
+        assertDefinition(library, measureDefinition, "measure");
+    }
+
+    @Test
+    public void explicitlyImportedNamespaceMembersAndExtensionsSupportHoverAndDefinition()
+            throws Exception {
+        final var project = project("app/Main.zn", """
+                package app;
+                import lib.Box;
+                import lib.Box.answer;
+                import lib.Box.make;
+                import lib.Box.measure;
+                fn main() {
+                    let a = answer;
+                    let b = make();
+                    let c = Box.new().measure();
+                }
+                """);
+        final var sourceRoot = project.entry().getParent().getParent();
+        final var library = sourceRoot.resolve("lib/Box.zn");
+        Files.createDirectories(library.getParent());
+        Files.writeString(library, """
+                package lib;
+                public class Box {
+                    public constructor new;
+                }
+                namespace Box {
+                    public fn make(): Int = 1;
+                    public let answer: Int = 42;
+                }
+                public extension Box {
+                    public fn measure(): Int = 2;
+                }
+                """);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var source = Files.readString(project.entry());
+
+        assertNoErrors(snapshot);
+        final var answerHover = hoverAt(snapshot, project.entry(), source,
+                "= answer", "= ".length());
+        final var makeHover = hoverAt(snapshot, project.entry(), source, "= make", "= ".length());
+        final var measureHover = hoverAt(snapshot, project.entry(), source, "measure");
+        assertTrue("Unexpected answer hover: " + answerHover, answerHover.contains("value answer: Int"));
+        assertTrue("Unexpected make hover: " + makeHover, makeHover.contains("fn make() -> Int"));
+        assertTrue("Unexpected measure hover: " + measureHover,
+                measureHover.contains("extension on Box"));
+
+        final var answerDefinition = definitionAt(snapshot, project.entry(), source,
+                "= answer", "= ".length());
+        final var makeDefinition = definitionAt(snapshot, project.entry(), source,
+                "= make", "= ".length());
+        final var measureDefinition = definitionAt(snapshot, project.entry(), source, "measure", 0);
+        assertDefinition(library, answerDefinition, "answer");
+        assertDefinition(library, makeDefinition, "make");
+        assertDefinition(library, measureDefinition, "measure");
+    }
+
+    @Test
     public void importedPrivateExtensionCompletesForSourceDefinedReceiver() throws Exception {
         final var project = project("""
                 import List.fmap;
@@ -1629,7 +1861,7 @@ public class LspWorkspaceTest {
                 DocumentCoordinates.positionAt(source, offset));
 
         final var fmap = completion.getItems().stream()
-                .filter(item -> item.getLabel().equals("fmap(map: (T) -> U)"))
+                .filter(item -> item.getLabel().equals("fmap(map: T -> U)"))
                 .findFirst().orElseThrow(() -> new AssertionError(completion.getItems()
                         .toString()));
         assertEquals("List<U>", fmap.getDetail());
@@ -2106,6 +2338,25 @@ public class LspWorkspaceTest {
         final var range = location.getRange();
         final var line = text.lines().toList().get(range.getStart().getLine());
         return line.substring(range.getStart().getCharacter(), range.getEnd().getCharacter());
+    }
+
+    private static void assertDefinition(final Path expectedFile,
+                                         final List<?> locations,
+                                         final String expectedText) throws Exception {
+        assertEquals(locations.toString(), 1, locations.size());
+        final var location = (Location) locations.getFirst();
+        assertEquals(expectedFile.toUri().toString(), location.getUri());
+        assertEquals(expectedText, textAtRange(location, Files.readString(expectedFile)));
+    }
+
+    private static void assertNoErrors(final ProjectAnalysisWorkspace.Snapshot snapshot) {
+        final var errors = snapshot.diagnostics().values().stream()
+                .flatMap(List::stream)
+                .filter(diagnostic -> diagnostic.severity()
+                        == com.maruseron.zeron.diagnostic.Severity.ERROR)
+                .toList();
+        assertTrue("Unexpected errors: " + errors + " diagnostics=" + snapshot.diagnostics(),
+                errors.isEmpty());
     }
 
     private static void writeFixtureJar(final Path jar) throws Exception {

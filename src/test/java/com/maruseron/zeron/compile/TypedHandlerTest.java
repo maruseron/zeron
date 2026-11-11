@@ -99,9 +99,9 @@ public final class TypedHandlerTest {
                 assertEquals("named", main.getMethod("named").invoke(null));
                 assertEquals("passed", main.getMethod("anonymous").invoke(null));
                 assertEquals("captured!", main.getMethod("captured").invoke(null));
-                assertRaisedEffect(main, "propagated", clientPackage + ".Audit");
-                assertRaisedEffect(main, "partial", clientPackage + ".Audit");
-                assertRaisedEffect(main, "guarded", libraryPackage + ".Failure");
+                assertRaisedEffect(loader, main, "propagated", clientPackage + ".Audit");
+                assertRaisedEffect(loader, main, "partial", clientPackage + ".Audit");
+                assertRaisedEffect(loader, main, "guarded", libraryPackage + ".Failure");
             }
         } finally {
             deleteTree(clientOutput);
@@ -131,8 +131,9 @@ public final class TypedHandlerTest {
                 .parseCompilationUnit(sourcePath);
     }
 
-    private static void assertRaisedEffect(final Class<?> main, final String method,
-                                           final String expectedPayloadClass) throws Exception {
+    private static void assertRaisedEffect(final ClassLoader loader, final Class<?> main,
+                                           final String method,
+                                           final String expectedEffectClass) throws Exception {
         try {
             final var target = java.util.Arrays.stream(main.getMethods())
                     .filter(candidate -> candidate.getName().equals(method))
@@ -143,8 +144,11 @@ public final class TypedHandlerTest {
         } catch (final java.lang.reflect.InvocationTargetException exception) {
             final var carrier = exception.getCause();
             assertEquals("zeron.runtime.RaisedEffect", carrier.getClass().getName());
-            assertEquals(expectedPayloadClass,
-                    carrier.getClass().getMethod("payload").invoke(carrier).getClass().getName());
+            final var payload = carrier.getClass().getMethod("payload").invoke(carrier);
+            // Stateless effects are marker interfaces with a generated implementation class, so
+            // effect identity is the declared type, not the concrete payload class name.
+            assertTrue(payload.getClass().getName(),
+                    loader.loadClass(expectedEffectClass).isInstance(payload));
         }
     }
 

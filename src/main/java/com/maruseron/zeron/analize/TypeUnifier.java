@@ -17,7 +17,7 @@ final class TypeUnifier {
                       final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                       final Token where,
                       final TypeProjector projector) {
-        final var rows = new RowInference();
+        final var rows = new RowInference(projector.effectSubtyping());
         unify(pattern, actual, substitutions, where, rows, true, projector, false);
         rows.solve(substitutions, where);
     }
@@ -42,7 +42,7 @@ final class TypeUnifier {
                                   final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                                   final Token where,
                                   final TypeProjector projector) {
-        final var rows = new RowInference();
+        final var rows = new RowInference(projector.effectSubtyping());
         unify(pattern, actual, substitutions, where, rows, true, projector, true);
         rows.solve(substitutions, where);
     }
@@ -63,10 +63,12 @@ final class TypeUnifier {
     static void bindEffectRows(final List<TypeDescriptor> patternEffects,
                                final List<TypeDescriptor> actualEffects,
                                final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
-                               final Token where) {
+                               final Token where,
+                               final TypeProjector projector) {
         if (EffectRows.of(patternEffects).variables().isEmpty()) return;
-        final var rows = new RowInference();
-        unifyEffects(patternEffects, actualEffects, substitutions, where, rows, true);
+        final var rows = new RowInference(projector.effectSubtyping());
+        unifyEffects(patternEffects, actualEffects, substitutions, where, rows, true,
+                projector.effectSubtyping());
         rows.solve(substitutions, where);
     }
 
@@ -120,6 +122,13 @@ final class TypeUnifier {
                                 + previous.name() + " and " + actual.name() + "."));
             }
             return;
+        }
+        // Capability is not part of the type structure inference compares. A mutable argument
+        // unifies with a read-only pattern by dropping its outer reference; assignability still
+        // checks the direction afterwards, so this cannot admit a read-only-to-mutable upgrade.
+        if (!(pattern instanceof ReferenceDescriptor)
+                && actual instanceof ReferenceDescriptor(var baseType)) {
+            actual = baseType;
         }
         if (pattern instanceof AppliedConstructorDescriptor applied) {
             if (actual instanceof ReferenceDescriptor reference) actual = reference.baseType();
@@ -189,7 +198,8 @@ final class TypeUnifier {
         }
         if (pattern instanceof EffectRowDescriptor rowPattern
                 && actual instanceof EffectRowDescriptor rowActual) {
-            unifyRowValues(rowPattern, rowActual, substitutions, where, rows, covariant);
+            unifyRowValues(rowPattern, rowActual, substitutions, where, rows, covariant,
+                    projector.effectSubtyping());
             return;
         }
         if (pattern instanceof TypeConstructorDescriptor constructorPattern
@@ -217,7 +227,7 @@ final class TypeUnifier {
             unify(functionPattern.returnType(), functionActual.returnType(), substitutions, where, rows,
                     covariant, projector, bindOnly);
             unifyEffects(functionPattern.raisedEffects(), functionActual.raisedEffects(),
-                    substitutions, where, rows, covariant);
+                    substitutions, where, rows, covariant, projector.effectSubtyping());
             return;
         }
         if (pattern instanceof GenericDescriptor genericPattern
@@ -250,21 +260,23 @@ final class TypeUnifier {
                                      final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                                      final Token where,
                                      final RowInference rows,
-                                     final boolean covariant) {
+                                     final boolean covariant,
+                                     final EffectSubtyping subtyping) {
         final var patternRow = EffectRows.of(patternEffects);
         final var actualRow = EffectRows.of(actualEffects);
         final var patternVariables = new LinkedHashSet<>(patternRow.variables());
         if (patternVariables.isEmpty()) {
             final var offender = covariant
-                    ? EffectRows.firstUnpermitted(actualEffects, patternEffects)
-                    : EffectRows.firstUnpermitted(patternEffects, actualEffects);
+                    ? EffectRows.firstUnpermitted(actualEffects, patternEffects, subtyping)
+                    : EffectRows.firstUnpermitted(patternEffects, actualEffects, subtyping);
             if (offender != null) {
                 rowError(offender, where, covariant);
             }
             return;
         }
         if (covariant) {
-            final var lowerBound = actualRow.withoutEffects(new LinkedHashSet<>(patternRow.effects()));
+            final var lowerBound = actualRow.withoutEffects(
+                    new LinkedHashSet<>(patternRow.effects()), subtyping);
             for (final var variable : patternVariables) {
                 rows.addLowerBound(variable, lowerBound);
             }
@@ -274,7 +286,8 @@ final class TypeUnifier {
             rows.addUpperBound(variable, actualRow);
         }
         for (final var effect : patternRow.effects()) {
-            if (!actualRow.effects().contains(effect) && actualRow.variables().isEmpty()) {
+            if (!EffectRows.coveredBy(effect, actualRow.effects(), subtyping)
+                    && actualRow.variables().isEmpty()) {
                 rowError(effect, where, false);
             }
         }
@@ -285,17 +298,21 @@ final class TypeUnifier {
                                        final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                                        final Token where,
                                        final RowInference rows,
-                                       final boolean covariant) {
+                                       final boolean covariant,
+                                       final EffectSubtyping subtyping) {
         final var patternVariables = new LinkedHashSet<>(pattern.variables());
         if (patternVariables.isEmpty()) {
             final var offender = covariant
-                    ? actual.includedIn(pattern) ? null : firstOffender(actual, pattern)
-                    : pattern.includedIn(actual) ? null : firstOffender(pattern, actual);
+                    ? actual.includedIn(pattern, subtyping) ? null
+                            : firstOffender(actual, pattern, subtyping)
+                    : pattern.includedIn(actual, subtyping) ? null
+                            : firstOffender(pattern, actual, subtyping);
             if (offender != null) rowError(offender, where, covariant);
             return;
         }
         if (covariant) {
-            final var lowerBound = actual.withoutEffects(new LinkedHashSet<>(pattern.effects()));
+            final var lowerBound = actual.withoutEffects(
+                    new LinkedHashSet<>(pattern.effects()), subtyping);
             for (final var variable : patternVariables) {
                 rows.addLowerBound(variable, lowerBound);
             }
@@ -305,16 +322,18 @@ final class TypeUnifier {
             rows.addUpperBound(variable, actual);
         }
         for (final var effect : pattern.effects()) {
-            if (!actual.effects().contains(effect) && actual.variables().isEmpty()) {
+            if (!EffectRows.coveredBy(effect, actual.effects(), subtyping)
+                    && actual.variables().isEmpty()) {
                 rowError(effect, where, false);
             }
         }
     }
 
     private static TypeDescriptor firstOffender(final EffectRowDescriptor actual,
-                                                final EffectRowDescriptor expected) {
+                                                final EffectRowDescriptor expected,
+                                                final EffectSubtyping subtyping) {
         for (final var effect : actual.effects()) {
-            if (!expected.effects().contains(effect)) return effect;
+            if (!EffectRows.coveredBy(effect, expected.effects(), subtyping)) return effect;
         }
         for (final var variable : actual.variables()) {
             if (!expected.variables().contains(variable)) return variable;

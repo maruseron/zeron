@@ -14,11 +14,18 @@ import java.util.Set;
 final class TypeCompatibility implements TypeProjector {
     private final Map<String, Stmt.ClassDecl> classes;
     private final Map<String, Stmt.ContractDecl> contracts;
+    private final EffectHierarchy effects;
 
     TypeCompatibility(final Map<String, Stmt.ClassDecl> classes,
                       final Map<String, Stmt.ContractDecl> contracts) {
         this.classes = classes;
         this.contracts = contracts;
+        this.effects = new EffectHierarchy(classes);
+    }
+
+    @Override
+    public EffectSubtyping effectSubtyping() {
+        return effects;
     }
 
     TypeDescriptor ensureExact(final Token where,
@@ -68,6 +75,20 @@ final class TypeCompatibility implements TypeProjector {
     boolean canAssign(final TypeDescriptor expectedType, final TypeDescriptor resolvedType) {
         if (expectedType.equals(resolvedType)) return true;
         if (resolvedType instanceof NeverDescriptor) return true;
+        final var resolvedReference = resolvedType instanceof ReferenceDescriptor reference
+                ? reference : null;
+        final var expectedReference = expectedType instanceof ReferenceDescriptor reference
+                ? reference : null;
+        // Reference capability is not a subtyping axis: a read-only view cannot become mutable.
+        // Effect subtyping may only compare the bases when the expected side does not demand a
+        // mutable reference, or the resolved side is already one.
+        if (expectedReference == null || resolvedReference != null) {
+            final var resolvedNominal = resolvedReference == null
+                    ? resolvedType : resolvedReference.baseType();
+            final var expectedNominal = expectedReference == null
+                    ? expectedType : expectedReference.baseType();
+            if (effects.isSubtype(resolvedNominal, expectedNominal)) return true;
+        }
         if (expectedType instanceof CapturedTypeDescriptor capture) {
             return canAssign(capture.lowerBound(), resolvedType);
         }
@@ -103,7 +124,7 @@ final class TypeCompatibility implements TypeProjector {
                 && canAssign(expectedFunction.returnType(), resolvedFunction.returnType())
                 && (expectedFunction.isHandler()
                     || EffectRows.includedIn(resolvedFunction.raisedEffects(),
-                            expectedFunction.raisedEffects()))) {
+                            expectedFunction.raisedEffects(), effects))) {
             return true;
         }
         if (expectedType instanceof GenericDescriptor expectedGeneric
@@ -230,7 +251,11 @@ final class TypeCompatibility implements TypeProjector {
                 ? nullable.baseType()
                 : sourceType;
         if (sourceBase instanceof ReferenceDescriptor reference) sourceBase = reference.baseType();
+        final var targetNominal = targetType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : targetType;
         return sourceBase instanceof AnyDescriptor
+                || effects.isSubtype(sourceBase, targetNominal)
+                || effects.isSubtype(targetNominal, sourceBase)
                 || canAssign(sourceBase, targetType)
                 || canAssign(targetType, sourceBase);
     }

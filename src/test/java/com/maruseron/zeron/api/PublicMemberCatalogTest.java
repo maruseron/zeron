@@ -34,6 +34,12 @@ public final class PublicMemberCatalogTest {
                     public identity<U: Named<Int>>(item: U): U raises Failure = item;
                     private hidden(): Unit {}
                 }
+                public contract Labelled {
+                    label(): String;
+                }
+                default witness<T> Labelled for Box<T> {
+                    fn label(): String = "box";
+                }
                 public extension Box<Int> {
                     public fn label(value: Int = 1): String = "int";
                 }
@@ -105,6 +111,12 @@ public final class PublicMemberCatalogTest {
                     member.origin() == PublicMemberCatalog.MemberOrigin.EXTENSION));
             assertEquals(1, sourceType.extensions().size());
             assertEquals("catalog.Box.label", sourceType.extensions().getFirst().activationImport());
+            assertEquals(sourceType.evidence().stream().map(PublicMemberCatalog.Evidence::label).toList(),
+                    libraryType.evidence().stream().map(PublicMemberCatalog.Evidence::label).toList());
+            assertTrue(sourceType.evidence().stream().anyMatch(evidence ->
+                    evidence.label().equals("default Labelled for Box")
+                            && evidence.contractType().equals(
+                                    PublicMemberCatalog.TypeRef.named("catalog.Labelled"))));
             assertEquals(0, sourceType.extensions().getFirst().minimumArity());
             assertTrue(sourceType.extensions().getFirst().parameters().getFirst().hasDefault());
             assertTrue(sourceType.extensions().getFirst().provenance().isPresent());

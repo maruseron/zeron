@@ -1,5 +1,103 @@
 # Changelog
 
+## [Unreleased]
+
+### Compiler and language work
+
+- Added named witnesses, default witnesses, and explicit witness imports from ZEP-0114. A witness
+  may be declared as `witness Name<T>: Contract for Target`, with normal `public` visibility and a
+  separate package-scoped name namespace; `delegating` combines with either named or anonymous
+  form. `import witness pkg.Name;`, aliases, and `import witness pkg.*;` activate named public
+  witnesses without importing types, functions, values, or extensions, while a plain `import pkg.*;`
+  keeps activating every exported witness. A `default witness Contract for Target` is unnamed: its
+  identity is the contract/target pair and the compiler derives its index key. It must be declared
+  in the target type's file, or in the canonical package for an intrinsic target, takes its
+  visibility from the target, and is activated by the target type's own scope (the current package,
+  an explicit type import, or a package star import) rather than by a witness import or a fully
+  qualified type name. Intrinsic defaults are always active. The
+  same-package orphan rule is removed for every witness form; overlap and ambiguity checks are
+  unchanged. Public named witnesses are exported under their source names; unnamed defaults use a
+  generated reserved index key and the default marker, and package-local witnesses and defaults of
+  non-public targets are omitted from the API index (schema 13). Anonymous witnesses remain source-compatible for the migration
+  release and now emit the ZEP-0115 deprecation warning. Class-scoped `implementation` blocks are
+  canonical evidence for their owner type: importing the type, explicitly or through a package
+  star import, activates the block's HKT witness without requiring the whole package.
+- Completed the ZEP-0114 migration: standard-library canonical defaults are unnamed `default`
+  declarations beside their target types or in the canonical package for an intrinsic target.
+  `Int`/`Long` now get default `Integral` evidence, and `Float` gets default `Floating` evidence.
+  Array `Foldable` evidence remains the named public `ArrayFoldable` witness, imported explicitly,
+  so intrinsic evidence is not universally active. A default witness for a public target must use
+  a public contract, and the standard-library API version is now 13. Member
+  discovery reports default and class-scoped implementation evidence as evidence attached to a type
+  rather than as callable members.
+- Added warning-severity compiler diagnostics from ZEP-0115. Warnings share the existing catalog,
+  formatter, and source spans but do not block a build; `--deny-warnings` turns them into a failed
+  invocation after the stage completes. The initial set reports unused local variables, imports,
+  and private functions, unreachable statements, unnecessary mutable projections, `while (true)`
+  loops, shadowed locals, and deprecated anonymous witness declarations. Compiler results expose
+  warnings separately from errors, and the language server publishes them with warning severity.
+- Receiver-based calls to HKT contract methods that declare an explicit `this` parameter now
+  subtract the receiver from the call's arity and argument positions. `value.map(...)` and
+  `value.flatMap(...)` resolve on a constructor parameter bounded by `Monad<F>` instead of
+  reporting an argument-count mismatch, and their evidence handles no longer repeat the receiver.
+- Added `do` expressions from ZEP-0111. `do { let value <- source; yield expression; }` binds
+  through the `Monad` witness of the first bind's constructor, lowers to ordinary `flatMap` and
+  `map` call sites marked for witness dispatch, and works for `Option`, `Result<_, E>`, `Stream`,
+  and library-defined constructors. Dispatch ignores instance methods of the same name, so
+  `Stream`'s instance `flatMap`, which takes `(T) -> Iterable<R>`, does not collide with
+  `Monad.flatMap` inside a block. A plain `let name = expression` clause after the first bind
+  computes a local, a final `yield` is required, and an explicit `do<Option<_>>` or
+  `do<Result<_, E>>` asserts the result constructor. The emitted code is the hand-written chain,
+  so there is no runtime, index, or ABI change.
+- Generic type parameters can opt into runtime applied-type identity with `T: reified`. Reified
+  parameters receive an immutable `AppliedTypeDescriptor` as a hidden argument after type-class
+  evidence; monomorphic call sites use interned constants and generic callers compose descriptors
+  from their own reified parameters. The marker is preserved in the API index for exported
+  functions, methods, extension methods, and contract methods, while private and
+  local declarations infer it transitively. Reified generic function values specialize and
+  capture the descriptor. Class and contract type parameters cannot be reified, and generic-effect
+  work remains deferred to ZEP-0005. The API-index schema version is now 13; the standard-library
+  API version remains 12.
+- Added star views and anonymous existentials from ZEP-0104. `F<*>` is the read-only projection
+  `F<out Any?>`, while `F<: bounds + markers>` introduces an unknown argument with upper bounds
+  and optional `nullable`, `mut`, and `reified` markers. Anonymous existentials are accepted only
+  as direct arguments of declared callable parameters, are packed implicitly, and forward bound
+  evidence; they lower to hidden type parameters and are inferred rather than supplied as explicit
+  call-site type arguments. Reified values and type parameters now support exact applied-type
+  tests through ZEP-0015 descriptor equality, including arrays and nullability distinctions.
+  Stored and result-position existentials, scoped opening, rank-2 function-type existentials, and
+  contract-bound runtime tests remain separate proposals.
+- `Type::name` references now cover instance and contract methods, constructors (`Type::new` and
+  named constructors), and class-scoped static functions in addition to properties. A reference
+  carries a stable `CallableId` (`owner#kind#name`), exposes `name`, `identity`, `id`, and a
+  `callable` function value, compares by declaration identity, and converts implicitly to its
+  function type. Generic callable references specialize through `::<...>` or a fully constraining
+  expected function type. Bound references, extensions, witness methods, and static contract
+  requirements are rejected.
+- Ordinary classes can declare `static fn` members. A class-scoped static function is lowered to
+  a function in the namespace sharing the class's simple name, so it is called through the class,
+  follows namespace visibility and API-index rules, and remains available to separately compiled
+  clients. Static functions cannot use `this` or instance state, cannot capture class type
+  parameters, may declare their own generics, and may not share a name with an instance member or
+  an applicable extension.
+- Effects now support explicit effect-only subtyping with `under`, inherited payload
+  redeclaration with canonical-constructor delegation, and the denotable top `Effect` from
+  `zeron.lang`. Subeffects satisfy broader `raises` requirements and handler cases select the
+  most-specific matching effect independent of source order; incomparable visible cases are a
+  compile-time error, and a subtype added by a later library aborts dispatch with a runtime
+  ambiguity error. Stateless effects are emitted as marker interfaces with generated
+  implementations, payload-bearing effects as non-final classes whose single payload parent is the
+  JVM superclass, and the library index records direct `under` edges. The API-index and
+  standard-library API versions are now 12.
+- Effect payload declarations now use the ordinary class member model: they may declare methods,
+  implement contracts, and keep non-public payload properties. Effects remain non-generic, and
+  contract conformance neither makes an ordinary class raisable nor turns a contract into a handler
+  case.
+- Generic call inference now sees through an argument's mutable-reference capability when the
+  parameter is a read-only class type such as `Box<T>`, so `extract(Box.new(1))` type-checks. This
+  restores the documented mutable-to-read-only projection; capability is still not a subtyping
+  axis, so a read-only value cannot satisfy `&Box<T>`.
+
 ## [0.6.0] - 2026, 8 NOV
 
 ### Standard library
@@ -50,6 +148,10 @@
 
 ### Language server
 
+- Hovering a built-in type such as `Int`, `String`, or `Array<T>` now describes the intrinsic type
+  and lists the evidence active in the current file. That includes compiler-provided `Display`,
+  `Eq`, and `Hashable`, active default witnesses such as `Integral<Int>`, and explicitly imported
+  named evidence such as `ArrayFoldable`.
 - Hover, completion, and go-to-definition now cover Java interop and external bindings. Hover
   identifies the resolved Java binary type, constructor, method, or field with its supported
   signature and checked exceptions, together with the external facade binding when one exists.
@@ -64,6 +166,11 @@
   optional `[dependencies].java-sources` directories. Archived sources open from a temporary cache
   at their original line positions; without source, definition falls back to the external
   declaration or no target.
+- Compilation and project analysis with a compiled standard library or other compiled libraries
+  no longer rescans every exported declaration for each library function when binding JVM
+  owners. The lookup is indexed once per pass, so language-server diagnostics update in
+  milliseconds instead of taking seconds on every edit, and builds no longer pay the same
+  repeated cost.
 
 ### Compiler and language work
 

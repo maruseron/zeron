@@ -109,7 +109,7 @@ public final class ReceiverFunctionTest {
 
         final var error = assertThrows(ResolutionError.class,
                 () -> CompilationService.forCompilationUnits(List.of(source), "Invalid", "").resolve());
-        assertTrue(error.getMessage().contains("Expected (Scope) -> Int"));
+        assertTrue(error.getMessage().contains("Expected Scope -> Int"));
     }
 
     @Test

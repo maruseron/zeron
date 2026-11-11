@@ -186,12 +186,13 @@ final class CallResolver {
                                               final FunctionDescriptor genericType) {
         call.setGenericFunctionType(genericType);
         final var typeParameters = genericType.typeParameters();
+        final var explicitTypeParameters = genericType.explicitTypeParameters();
         final var hasExplicitTypeArguments = !call.explicitTypeArguments.isEmpty();
         if (hasExplicitTypeArguments
-                && call.explicitTypeArguments.size() != typeParameters.size()) {
+                && call.explicitTypeArguments.size() != explicitTypeParameters.size()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.callee,
-                    "Expected " + typeParameters.size() + " type arguments, found "
+                    "Expected " + explicitTypeParameters.size() + " type arguments, found "
                             + call.explicitTypeArguments.size() + "."));
         }
         final var minimumArity = minimumArity(call, genericType);
@@ -213,12 +214,12 @@ final class CallResolver {
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        final var rowInference = new RowInference();
+        final var rowInference = new RowInference(context.typeCompatibility.effectSubtyping());
         final var localLambdaBinding = localLambdaBinding(call);
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
             final var explicitType = call.explicitTypeArguments.get(i);
             TypeResolver.validateType(context, explicitType, call.callee);
-            substitutions.put(typeParameters.get(i), explicitType);
+            substitutions.put(explicitTypeParameters.get(i), explicitType);
         }
 
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
@@ -299,6 +300,8 @@ final class CallResolver {
 
         call.setEvidenceArguments(TypeClassEvidence.selectArguments(
                 context, typeParameters, substitutions, call.callee));
+        ReifiedTypeArguments.select(context, call, typeParameters, substitutions, call.callee,
+                call::setReifiedArguments);
 
         final var instantiatedParameters = genericType.parameters().stream()
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))

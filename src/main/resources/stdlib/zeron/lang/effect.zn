@@ -1,0 +1,27 @@
+package zeron.lang;
+
+import java.lang.Exception;
+
+/// The top effect type.
+///
+/// Every declared effect is a subtype of `Effect` without naming it with `under`, so `raises
+/// Effect` permits any effect to escape through a callable boundary and an unguarded, irrefutable
+/// `case Effect` handles the complete raised set. `Effect` is also an ordinary value type: an
+/// effect value with static type `Effect` can be stored and raised again.
+///
+/// User code cannot construct a bare `Effect`; `Effect.fromException` and declared effects supply
+/// the values.
+public effect Effect {
+}
+
+/// Constructors of `Effect`.
+namespace Effect {
+    /// Wraps a host exception as an effect value. This is the only implicit-free bridge between
+    /// host exceptions and effects; no other mapping is inferred.
+    public fn fromException(error: Exception): Effect = HostFailure.new(error);
+}
+
+/// The library-owned effect value behind `Effect.fromException`.
+effect HostFailure {
+    property exception: Exception;
+}

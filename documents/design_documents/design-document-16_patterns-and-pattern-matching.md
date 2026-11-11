@@ -233,7 +233,7 @@ alternatives.
 This contract does not require general runtime reification. A future feature that wants to inspect
 applied generic identity at runtime must define and propagate an explicit type-identity witness,
 including its ABI and separate-compilation behavior; it is outside the current pattern-matching
-contract. See [ZEP-0015](../zeps/ZEP-0015.md) for the separate reification exploration. Generic
+contract. See [ZEP-0015](../zeps/ZEP-0015.md) for the implemented runtime descriptor. Generic
 `is`/`as?` targets with static application proofs are proposed separately in
 [ZEP-0053](../zeps/ZEP-0053.md).
 

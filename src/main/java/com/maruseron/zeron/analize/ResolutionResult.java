@@ -27,7 +27,9 @@ public record ResolutionResult(
         List<Stmt.ExtensionMethod> extensions,
         Map<Token, Token> referenceTargets,
         Map<Token, TypeDescriptor> referenceTypes,
-        Map<Token, FunctionDescriptor> callSiteFunctionTypes) {
+        Map<Token, FunctionDescriptor> callSiteFunctionTypes,
+        List<Diagnostic> warnings,
+        List<Stmt.Witness> witnesses) {
 
     public ResolutionResult {
         Objects.requireNonNull(globalSymbolTable);
@@ -48,8 +50,54 @@ public record ResolutionResult(
         referenceTargets = immutableIdentityMap(referenceTargets);
         referenceTypes = immutableIdentityMap(referenceTypes);
         callSiteFunctionTypes = immutableIdentityMap(callSiteFunctionTypes);
+        warnings = List.copyOf(warnings);
+        witnesses = List.copyOf(witnesses);
         Objects.requireNonNull(packageName);
         extensions = List.copyOf(extensions);
+    }
+
+    /// Whether `sub` is the same effect as, or a declared subtype of, `superEffect`.
+    public boolean isEffectSubtype(final TypeDescriptor sub, final TypeDescriptor superEffect) {
+        return new EffectHierarchy(classes).isSubtype(sub, superEffect);
+    }
+
+    /// A stateless effect is emitted as an interface; an effect carrying payload state is a class.
+    public boolean isStatelessEffect(final String qualifiedName) {
+        return new EffectHierarchy(classes).isStateless(qualifiedName);
+    }
+
+    /// The single superclass carrying inherited payload state, or `null`.
+    public String effectPayloadParent(final String qualifiedName) {
+        return new EffectHierarchy(classes).payloadParent(qualifiedName);
+    }
+
+    /// Names of payload members inherited from the payload-bearing parent chain.
+    public Set<String> inheritedEffectPayloadNames(final String qualifiedName) {
+        final var hierarchy = new EffectHierarchy(classes);
+        final var names = new LinkedHashSet<String>();
+        var current = hierarchy.payloadParent(qualifiedName);
+        while (current != null && names.add(current)) {
+            final var declaration = classes.get(current);
+            if (declaration != null) {
+                declaration.fields().forEach(field -> names.add(field.name().lexeme()));
+                declaration.properties().forEach(property -> names.add(property.name().lexeme()));
+            }
+            current = hierarchy.payloadParent(current);
+        }
+        return names;
+    }
+
+    /// JVM superinterfaces realizing explicit `under` edges plus the implicit `Effect` top.
+    public List<String> effectMarkerInterfaces(final String qualifiedName) {
+        final var hierarchy = new EffectHierarchy(classes);
+        final var markers = new ArrayList<String>();
+        for (final var parent : hierarchy.directParents(qualifiedName)) {
+            if (hierarchy.isStateless(parent)) markers.add(parent);
+        }
+        if (!qualifiedName.equals(EffectSubtyping.TOP_EFFECT)) {
+            markers.add(EffectSubtyping.TOP_EFFECT);
+        }
+        return List.copyOf(markers);
     }
 
     private static <K, V> Map<K, V> immutableIdentityMap(final Map<K, V> map) {
@@ -185,7 +233,8 @@ public record ResolutionResult(
         final var requiredReturn = TypeSubstitution.substitute(required.returnType(), methodSubstitutions);
         final var requiredEffects = required.raisedEffects().stream()
                 .map(effect -> TypeSubstitution.substitute(effect, methodSubstitutions)).toList();
-        return EffectRows.includedIn(implementation.raisedEffects(), requiredEffects)
+        return EffectRows.includedIn(implementation.raisedEffects(), requiredEffects,
+                new EffectHierarchy(classes))
                 && new TypeCompatibility(classes, contracts).canAssign(requiredReturn, implementation.returnType());
     }
 

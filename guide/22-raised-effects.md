@@ -34,6 +34,51 @@ the function's type.
 Effects are useful when a failure should interrupt the current operation and be handled at a
 meaningful level above it, rather than being checked and transformed after every call.
 
+## Effect subtyping and the top `Effect`
+
+Effects can form an explicit effect-only hierarchy with `under`. Every effect is implicitly a
+subtype of the standard-library top `Effect`; a child names any additional effect supertypes and
+redeclares the payload it inherits from the single payload-bearing parent:
+
+```zeron
+public effect IOError {
+    public property path: String;
+}
+
+public effect Retryable {}
+
+public effect FileNotFound under IOError, Retryable {
+    public property path: String;
+    public property code: Int;
+}
+```
+
+`under` does not inherit behavior or imply contract conformance. The parent-typed view exposes the
+parent's payload members; a child that wants the parent's methods on its own values must redeclare
+them or declare the relevant `is` conformance. At most one parent path may carry payload state, and
+every other parent must be stateless. Cycles and naming `Effect` itself are rejected.
+
+A subeffect satisfies a broader `raises` requirement, so a function that may raise `FileNotFound`
+can be used where `raises IOError` is expected:
+
+```zeron
+fn read(path: String): String raises FileNotFound = raise FileNotFound.new(path, 1);
+fn readBroadly(path: String): String raises IOError = read(path);
+```
+
+`Effect` is a value type and an explicit catch-all case. `raises Effect` permits any effect to
+escape, and an unguarded `case Effect` handles every raised effect:
+
+```zeron
+fn report(path: String): String =
+    handle (read(path)) with {
+        case Effect as failure -> "failed";
+    };
+```
+
+`Effect.fromException` wraps a host `Exception` in a library-owned effect. A bare `Effect` cannot be
+constructed, and ordinary classes are never assignable to it.
+
 ## Propagation
 
 If a function calls another function that may raise an effect, it must either handle that effect
@@ -94,8 +139,10 @@ fn displayUser(id: Int): String =
     };
 ```
 
-The handler's cases are tried in order. `as missing` binds the whole effect payload, so the case
-can inspect its public `id` property. A handler is an expression: on the normal path it preserves
+Comparable handler cases are tried most-specific first, independent of source order. `as missing`
+binds the whole effect payload, so the case can inspect its public `id` property. A case for an
+effect supertype may match any subeffect and views the payload through that supertype, exposing only
+its inherited members. A handler is an expression: on the normal path it preserves
 the protected expression's result, and when an effect is handled it evaluates the matching arm.
 The normal result and all handler-arm results must have compatible types.
 
@@ -141,8 +188,9 @@ String ~> {MissingUser}
 The type before `~>` is the normal result type of the protected computation. The first set lists
 effects that the handler completely handles, and the optional `raises` set lists effects that its
 cases may raise. Omitting it means the handler cases raise no effects; an explicit `raises {}` is
-equivalent and remains accepted. Both sets are finite and may be empty. Effect names are exact
-concrete types; assignment requires the same result and the same two effect sets.
+equivalent and remains accepted. Both sets are finite and may be empty. Effect sets follow the same
+subtyping relation as `raises` clauses: a set is covered when every element is a subtype of a
+declared element, and assignment requires the same result with compatible effect sets.
 
 Function types and handler types can look similar at first glance because both describe what
 happens when some logic is applied, and both can mention effects with `raises`. But they describe
@@ -193,9 +241,9 @@ Ordinary Java exceptions are not caught by effect handlers and keep their usual 
 when an external-class method explicitly maps a declared checked exception to an effect at its call
 boundary.
 
-Effect payload declarations remain synchronous, nominal, and non-generic. Generic effect rows are
-supported, but there is no effect inheritance, wildcard handler, asynchronous effect propagation,
-handler composition, or automatic Java-exception translation. An unhandled effect escaping
+Effect payload declarations remain synchronous, nominal, and non-generic. Generic effect rows and
+explicit `under` subtyping are supported, but there is no implicit wildcard handler, asynchronous
+effect propagation, handler composition, or automatic Java-exception translation. An unhandled effect escaping
 generated `main` propagates across the host boundary; the compiler does not currently add a launcher
 that formats it.
 

@@ -98,6 +98,17 @@ public final class FunctionDescriptor implements TypeDescriptor {
         return typeParameters;
     }
 
+    /// Type parameters a caller may write explicitly. Lowered anonymous existentials are part of
+    /// the signature and ABI, but they are inferred from arguments rather than supplied by the
+    /// caller.
+    public List<TypeParameterDescriptor> explicitTypeParameters() {
+        return typeParameters.stream().filter(parameter -> !parameter.isAnonymousExistential()).toList();
+    }
+
+    public List<TypeParameterDescriptor> anonymousExistentialTypeParameters() {
+        return typeParameters.stream().filter(TypeParameterDescriptor::isAnonymousExistential).toList();
+    }
+
     public List<TypeDescriptor> raisedEffects() {
         return raisedEffects;
     }
@@ -170,7 +181,8 @@ public final class FunctionDescriptor implements TypeDescriptor {
                     || first.admitsNullableArguments() != second.admitsNullableArguments()
                     || first.isEffectKind() != second.isEffectKind()
                     || first.isEffectRowKind() != second.isEffectRowKind()
-                    || first.admitsMutableArguments() != second.admitsMutableArguments()) return false;
+                    || first.admitsMutableArguments() != second.admitsMutableArguments()
+                    || first.isReified() != second.isReified()) return false;
         }
         return true;
     }
@@ -179,7 +191,8 @@ public final class FunctionDescriptor implements TypeDescriptor {
         var hash = 1;
         for (final var parameter : typeParameters) {
             hash = 31 * hash + Objects.hash(parameter, parameter.admitsNullableArguments(),
-                    parameter.isEffectKind(), parameter.isEffectRowKind(), parameter.admitsMutableArguments());
+                    parameter.isEffectKind(), parameter.isEffectRowKind(),
+                    parameter.admitsMutableArguments(), parameter.isReified());
         }
         return hash;
     }

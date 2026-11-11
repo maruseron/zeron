@@ -42,13 +42,20 @@ final class LambdaSupportEmitter {
             helper.helperName(),
             functionReferenceMethodType(helper).descriptorString());
         emitEvidenceArguments(context, composer, helper.evidenceArguments());
+        emitReifiedArguments(context, composer, helper.reifiedArguments());
         final var capturedEvidence = java.util.Collections.nCopies(
                 helper.evidenceArguments().size(), ClassDesc.of("java.lang.invoke.MethodHandle"))
                 .toArray(ClassDesc[]::new);
+        final var capturedReified = java.util.Collections.nCopies(
+                helper.reifiedArguments().size(), RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS)
+                .toArray(ClassDesc[]::new);
+        final var captured = new ClassDesc[capturedEvidence.length + capturedReified.length];
+        System.arraycopy(capturedEvidence, 0, captured, 0, capturedEvidence.length);
+        System.arraycopy(capturedReified, 0, captured, capturedEvidence.length, capturedReified.length);
         composer.invokedynamic(DynamicCallSiteDesc.of(
             metafactory,
             "invoke",
-            MethodTypeDesc.of(generatedInterface, capturedEvidence),
+            MethodTypeDesc.of(generatedInterface, captured),
             samMethodType,
             implementation,
             samMethodType));
@@ -60,7 +67,7 @@ final class LambdaSupportEmitter {
                                                              final LambdaCompilationPlan.FunctionReference reference) {
         final var sourceType = reference.sourceType();
         final var targetType = reference.targetType();
-        var slot = reference.evidenceArguments().size();
+        var slot = reference.evidenceArguments().size() + reference.reifiedArguments().size();
         for (int i = 0; i < targetType.arity(); i++) {
             final var parameterType = targetType.parameters().get(i);
             NominalTypeEmitter.loadLocal(context, composer, slot, parameterType);
@@ -77,10 +84,15 @@ final class LambdaSupportEmitter {
         for (int index = 0; index < reference.evidenceArguments().size(); index++) {
             composer.aload(index);
         }
+        var reifiedSlot = reference.evidenceArguments().size();
+        for (int index = 0; index < reference.reifiedArguments().size(); index++) {
+            composer.aload(reifiedSlot);
+            reifiedSlot++;
+        }
         composer.invokestatic(ClassDesc.of(owner),
             reference.functionName().substring(reference.functionName().lastIndexOf('.') + 1),
-            withEvidenceParameters(toJavaMethodDescriptor(sourceType),
-                    reference.evidenceArguments().size()));
+            withHiddenParameters(toJavaMethodDescriptor(sourceType),
+                    reference.evidenceArguments().size(), reference.reifiedArguments().size()));
         emitConversion(context, composer, sourceType.returnType(), targetType.returnType());
         composer.return_(TypeKind.fromDescriptor(
             TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));
@@ -91,6 +103,9 @@ final class LambdaSupportEmitter {
         final var parameters = new ArrayList<TypeDescriptor>();
         for (int index = 0; index < reference.evidenceArguments().size(); index++) {
             parameters.add(TypeDescriptor.ofName("java.lang.invoke.MethodHandle"));
+        }
+        for (int index = 0; index < reference.reifiedArguments().size(); index++) {
+            parameters.add(RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE);
         }
         parameters.addAll(reference.targetType().parameters());
         return toJavaMethodDescriptor(reference.targetType(), parameters);

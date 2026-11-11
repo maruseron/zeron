@@ -547,6 +547,7 @@ public final class ZeronLibraryIndexTest {
                     .findFirst().orElseThrow();
             assertEquals(List.of("this", "transform"),
                     hktWitness.methods().getFirst().methodParameterNames());
+            assertTrue(hktWitness.defaultWitness());
             assertEquals(libraryPackage + ".Box", hktWitness.methods().getFirst().helperJvmOwner());
 
             deleteTree(Path.of("dist"));
@@ -1614,6 +1615,117 @@ public final class ZeronLibraryIndexTest {
                         Files.deleteIfExists(libraryJar);
                 }
         }
+
+    @Test
+    public void separatelyCompiledClientUsesEffectMembersAndContractConformanceFromLibraryIndex()
+            throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "nominaleffectlib" + suffix;
+        final var clientPackage = "nominaleffectclient" + suffix;
+        final var libraryRoot = Files.createTempDirectory(Path.of("target"), "zeron-nominal-effect-library-");
+        final var library = parse("Library.zn", """
+                package %s;
+                public contract Retryable {
+                    retryDelay(): Int;
+                }
+                public effect RetryFailure is Retryable {
+                    public property message: String;
+                    property attempts: Int;
+                    public constructor ofMessage(message: String) = RetryFailure.new(message, 2);
+                    public retryDelay(): Int = this.attempts;
+                }
+                public fn fail(): Int raises RetryFailure = raise RetryFailure.ofMessage("library");
+                """.formatted(libraryPackage));
+        final var client = parse("Main.zn", """
+                package %s;
+                import %s.RetryFailure;
+                import %s.Retryable;
+                import %s.fail;
+                fn delay(): Int = handle (fail()) with {
+                    case RetryFailure as failure -> failure.retryDelay();
+                };
+                fn retryDelay<T: Retryable>(value: T): Int = value.retryDelay();
+                fn delayThroughBound(): Int = handle (raise RetryFailure.ofMessage("bound")) with {
+                    case RetryFailure as failure -> retryDelay(failure);
+                };
+                fn namedPayload(): String = handle (raise RetryFailure.ofMessage("named")) with {
+                    case RetryFailure as failure -> failure.message;
+                };
+                """.formatted(clientPackage, libraryPackage, libraryPackage, libraryPackage));
+        try {
+            deleteTree(Path.of("dist"));
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            copyTree(Path.of("dist"), libraryRoot);
+            final var libraryIndex = ZeronLibraryIndex.readFromDirectory(libraryRoot);
+            final var exported = libraryIndex.declarations().stream()
+                    .filter(ZeronLibraryIndex.ClassExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ClassExport.class::cast)
+                    .filter(export -> export.qualifiedName().equals(libraryPackage + ".RetryFailure"))
+                    .findFirst().orElseThrow();
+            assertTrue(exported.effect());
+            assertEquals(List.of(libraryPackage + ".Retryable"),
+                    exported.contracts().stream()
+                            .map(ZeronLibraryIndex.ContractUseExport::qualifiedName).toList());
+            assertTrue(exported.methods().stream()
+                    .anyMatch(method -> method.name().equals("retryDelay")));
+            assertTrue(exported.namedConstructors().stream()
+                    .anyMatch(constructor -> constructor.name().equals("ofMessage")));
+
+            final var reconstructed = libraryIndex.toCompilationUnits("effect-api").stream()
+                    .flatMap(unit -> unit.declarations().stream())
+                    .filter(Stmt.ClassDecl.class::isInstance)
+                    .map(Stmt.ClassDecl.class::cast)
+                    .filter(declaration -> declaration.name().lexeme().equals(libraryPackage + ".RetryFailure"))
+                    .findFirst().orElseThrow();
+            assertTrue(reconstructed.isEffect());
+            assertTrue(reconstructed.contractUses().stream()
+                    .anyMatch(use -> use.name().lexeme().equals(libraryPackage + ".Retryable")));
+
+            deleteTree(Path.of("dist"));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), clientPackage + ".Main", clientPackage, List.of(libraryIndex));
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), libraryRoot.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                final var program = loader.loadClass(clientPackage + ".Main");
+                assertEquals(2, program.getMethod("delay").invoke(null));
+                assertEquals(2, program.getMethod("delayThroughBound").invoke(null));
+                assertEquals("named", program.getMethod("namedPayload").invoke(null));
+            }
+
+            final var contractRaised = parse("InvalidRaises.zn", """
+                    package %s;
+                    import %s.Retryable;
+                    import %s.fail;
+                    fn invalid(): Unit raises Retryable = fail();
+                    """.formatted(clientPackage, libraryPackage, libraryPackage));
+            final var invalidRaisesCompiler = CompilationService.forCompilationUnits(
+                    List.of(contractRaised), clientPackage + ".InvalidRaises", clientPackage,
+                    List.of(libraryIndex));
+            assertThrows(ResolutionError.class, invalidRaisesCompiler::resolve);
+
+            final var contractHandled = parse("InvalidHandler.zn", """
+                    package %s;
+                    import %s.Retryable;
+                    import %s.fail;
+                    fn invalid(): Int = handle (fail()) with {
+                        case Retryable -> 1;
+                    };
+                    """.formatted(clientPackage, libraryPackage, libraryPackage));
+            final var invalidHandlerCompiler = CompilationService.forCompilationUnits(
+                    List.of(contractHandled), clientPackage + ".InvalidHandler", clientPackage,
+                    List.of(libraryIndex));
+            assertThrows(ResolutionError.class, invalidHandlerCompiler::resolve);
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(libraryRoot);
+        }
+    }
 
         private static void copyTree(final Path source, final Path target) throws Exception {
                 try (final var paths = Files.walk(source)) {

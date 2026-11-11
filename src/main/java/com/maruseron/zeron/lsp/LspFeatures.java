@@ -725,6 +725,13 @@ final class LspFeatures {
         if (symbol == null && typeNamePosition) {
             symbol = symbols.resolveType(path, token);
         }
+        if (symbol == null && target == null && type == null) {
+            symbol = symbols.resolveExtension(path, token);
+        }
+        if (symbol == null && target == null
+                && BuiltinTypes.COMPLETION_CANDIDATES.contains(token.lexeme())) {
+            return builtinTypeHover(snapshot, path, params, text, token);
+        }
         final var javaDetails = javaHoverDetails(snapshot, path, tokens, token, symbols);
         final var javaFunctionDetail = symbol == null || !symbol.detail().startsWith("external fn")
                 ? null : javaExternalFunctionDetail(snapshot, symbol.token());
@@ -1053,6 +1060,104 @@ final class LspFeatures {
         return List.copyOf(details);
     }
 
+    private static Hover builtinTypeHover(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                          final Path path,
+                                          final HoverParams params,
+                                          final String text,
+                                          final Token token) {
+        final var details = new ArrayList<String>();
+        details.add("intrinsic type " + builtinTypeLabel(token.lexeme()));
+        final var evidence = builtinEvidenceDetails(snapshot, path, token.lexeme());
+        if (!evidence.isEmpty()) {
+            details.add("");
+            details.add("Evidence available here:");
+            evidence.stream().map(contract -> "  " + contract).forEach(details::add);
+        }
+        final var contents = new MarkupContent(MarkupKind.MARKDOWN,
+                "```zeron\n" + String.join("\n", details) + "\n```");
+        final var hover = new Hover(contents);
+        hover.setRange(DocumentCoordinates.rangeOf(text, token));
+        return withDefinitionLink(hover, snapshot, path, params);
+    }
+
+    private static String builtinTypeLabel(final String name) {
+        return "Array".equals(name) ? "Array<T>" : name;
+    }
+
+    private static List<String> builtinEvidenceDetails(
+            final ProjectAnalysisWorkspace.Snapshot snapshot,
+            final Path path,
+            final String typeName) {
+        final var evidence = new LinkedHashSet<String>();
+        if (BUILTIN_CONTRACTS.contains(typeName)) {
+            evidence.add("Display");
+            evidence.add("Eq<" + typeName + ">");
+            evidence.add("Hashable<" + typeName + ">");
+        }
+        final var resolution = snapshot.resolution().orElse(null);
+        if (resolution == null) return List.copyOf(evidence);
+        final var currentUnit = unitForPath(snapshot, path);
+        for (final var witness : resolution.witnesses()) {
+            if (!intrinsicTargetMatches(witness.targetType(), typeName)
+                    || !intrinsicWitnessIsActive(snapshot, currentUnit, witness)) continue;
+            evidence.add(shortTypeNames(TypeFormatter.format(witness.contractType())));
+        }
+        return evidence.stream().sorted().toList();
+    }
+
+    private static final Set<String> BUILTIN_CONTRACTS = Set.of(
+            "Int", "Char", "Long", "Float", "Boolean", "String", "Unit");
+
+    private static boolean intrinsicTargetMatches(final TypeDescriptor targetType,
+                                                  final String typeName) {
+        final var target = unwrap(targetType);
+        if (!BuiltinTypes.isIntrinsicTarget(target)) return false;
+        return simpleTypeName(target.name()).equals(typeName);
+    }
+
+    private static boolean intrinsicWitnessIsActive(
+            final ProjectAnalysisWorkspace.Snapshot snapshot,
+            final CompilationUnit currentUnit,
+            final Stmt.Witness witness) {
+        if (witness.isDefault()) return true;
+        if (currentUnit == null) return false;
+        final var witnessPackage = witnessPackageName(snapshot, witness);
+        if (witnessPackage == null) return false;
+        if (currentUnit.packageName().equals(witnessPackage)) return true;
+        if (!witness.isPublic()) return false;
+        final var sourceName = witness.sourceName() == null ? null : witness.sourceName().lexeme();
+        for (final var imported : currentUnit.imports()) {
+            if (!imported.witness()) {
+                if (imported.onDemand() && imported.qualifiedName().equals(witnessPackage)) return true;
+                continue;
+            }
+            if (imported.onDemand()) {
+                if (imported.qualifiedName().equals(witnessPackage)) return true;
+            } else if (sourceName != null
+                    && imported.qualifiedName().equals(witnessPackage + "." + sourceName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String witnessPackageName(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                             final Stmt.Witness witness) {
+        final var sourcePath = witness.name().span().sourcePath();
+        if (sourcePath == null) return null;
+        return snapshot.compilerUnits().stream()
+                .filter(unit -> Objects.equals(unit.sourcePath(), sourcePath))
+                .map(CompilationUnit::packageName)
+                .findFirst().orElse(null);
+    }
+
+    private static CompilationUnit unitForPath(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                               final Path path) {
+        return snapshot.units().stream()
+                .filter(unit -> Objects.equals(snapshot.filesByCompilerPath().get(unit.sourcePath()), path))
+                .findFirst().orElse(null);
+    }
+
     private static List<String> derivedEvidenceDetails(final Stmt declaration,
                                                        final ProjectAnalysisWorkspace.Snapshot snapshot,
                                                        final CompilationUnit contextUnit) {
@@ -1260,6 +1365,7 @@ final class LspFeatures {
             declaration = symbols.resolveType(path, token);
         }
         if (declaration == null) declaration = symbols.resolve(path, token);
+        if (declaration == null) declaration = symbols.resolveExtension(path, token);
         final var targetToken = declaration == null ? target : declaration.token();
         if (targetToken == null) {
             final var location = symbols.bundledDefinitionLocation(declaration);
@@ -1843,6 +1949,7 @@ final class LspFeatures {
         private final Map<Path, CompilationUnit> unitsByPath = new LinkedHashMap<>();
         private final Map<Path, String> packagesByPath = new LinkedHashMap<>();
         private final Map<String, String> modelDetailsByGeneratedClassName = new LinkedHashMap<>();
+        private final Map<String, String> namespacesByOwner = new LinkedHashMap<>();
         private final Map<String, List<String>> parameterNamesByQualifiedName = new LinkedHashMap<>();
         private final Map<Token, TypeParameterDescriptor> typeParametersByToken = new IdentityHashMap<>();
         private final List<TypeParameterScope> typeParameterScopes = new ArrayList<>();
@@ -1850,6 +1957,23 @@ final class LspFeatures {
 
         private record TypeParameterScope(Path path, String name, TypeParameterDescriptor parameter,
                                           int start, int end) {}
+
+        private record Owner(String packageName, String namespace) {}
+
+        private Owner owner(final String qualifiedOwner, final ResolutionResult resolution) {
+            final var ownerPackage = resolution.typePackages().get(qualifiedOwner);
+            if (ownerPackage != null) {
+                return new Owner(ownerPackage, qualifiedOwner.substring(
+                        ownerPackage.isEmpty() ? 0 : ownerPackage.length() + 1));
+            }
+            final var namespace = namespacesByOwner.get(qualifiedOwner);
+            if (namespace != null) {
+                return new Owner(qualifiedOwner.length() == namespace.length() ? ""
+                        : qualifiedOwner.substring(0, qualifiedOwner.length() - namespace.length() - 1),
+                        namespace);
+            }
+            return new Owner(qualifiedOwner, null);
+        }
 
         private record Symbol(String name, String qualifiedName, String packageName,
                               String namespaceName, String detail, CompletionItemKind kind,
@@ -1873,6 +1997,18 @@ final class LspFeatures {
 
         SymbolIndex(final ProjectAnalysisWorkspace.Snapshot snapshot) {
             this.snapshot = snapshot;
+            for (final var library : snapshot.libraries()) {
+                for (final var declaration : library.declarations()) {
+                    if (!(declaration instanceof ZeronLibraryIndex.NamespacedDeclaration namespaced)
+                            || namespaced.namespaceName() == null) continue;
+                    final var qualifiedName = namespaced.qualifiedName();
+                    final var separator = qualifiedName.lastIndexOf('.');
+                    if (separator > 0) {
+                        namespacesByOwner.putIfAbsent(qualifiedName.substring(0, separator),
+                                namespaced.namespaceName());
+                    }
+                }
+            }
             for (final var unit : snapshot.units()) {
                 final var path = snapshot.filesByCompilerPath().get(unit.sourcePath());
                 if (path == null) continue;
@@ -1882,6 +2018,8 @@ final class LspFeatures {
             }
             indexAnnotationReferences();
             indexWitnessReferences();
+            snapshot.resolution().ifPresent(this::indexResolvedValues);
+            snapshot.resolution().ifPresent(this::indexResolvedExtensions);
             snapshot.resolution().ifPresent(this::indexResolvedFunctions);
             snapshot.memberCatalog().ifPresent(this::indexCatalogTypes);
             addCodeModelTypes();
@@ -1924,6 +2062,57 @@ final class LspFeatures {
                 return parameter.name() + (constraints.isEmpty() ? ""
                         : ": " + String.join(" + ", constraints));
             }).collect(java.util.stream.Collectors.joining(", ", "<", ">"));
+        }
+
+        private void indexResolvedValues(final ResolutionResult resolution) {
+            for (final var entry : resolution.topLevelValueSymbols().entrySet()) {
+                final var declaration = entry.getKey();
+                final var symbolToken = entry.getValue();
+                if (byToken.containsKey(symbolToken)) continue;
+                final var name = declaration.name().lexeme();
+                final var qualifiedName = symbolToken.lexeme();
+                final var owner = qualifiedName.endsWith("." + name)
+                        ? qualifiedName.substring(0, qualifiedName.length() - name.length() - 1)
+                        : "";
+                final var ownerInfo = owner(owner, resolution);
+                final var packageName = ownerInfo.packageName();
+                final var namespace = ownerInfo.namespace();
+                final var detail = "value " + name + ": "
+                        + TypeFormatter.format(declaration.type());
+                final var symbol = new Symbol(name, qualifiedName, packageName, namespace, detail,
+                        CompletionItemKind.Variable, symbolToken, null, declaration.isPublic(),
+                        name, TypeFormatter.format(declaration.type()));
+                add(symbol);
+                byToken.put(symbolToken, symbol);
+            }
+        }
+
+        private void indexResolvedExtensions(final ResolutionResult resolution) {
+            for (final var extension : resolution.extensions()) {
+                if (byToken.containsKey(extension.name())) continue;
+                final var qualifiedName = resolution.functionNamesByDeclaration().get(extension.name());
+                if (qualifiedName == null) continue;
+                final var separator = qualifiedName.lastIndexOf('.');
+                final var owner = separator < 0 ? "" : qualifiedName.substring(0, separator);
+                final var ownerInfo = owner(owner, resolution);
+                final var packageName = ownerInfo.packageName();
+                final var namespace = ownerInfo.namespace();
+                final var parameterNames = extension.parameters().stream().map(Token::lexeme).toList();
+                recordParameterNames(qualifiedName, parameterNames);
+                final var symbol = new Symbol(extension.name().lexeme(), qualifiedName,
+                        packageName, namespace,
+                        "extension on " + TypeFormatter.format(extension.receiverType())
+                                + ": " + signature(extension.name().lexeme(),
+                                        extension.typeDescriptor(), parameterNames),
+                        extension.property() ? CompletionItemKind.Property : CompletionItemKind.Method,
+                        extension.name(), null, extension.isPublic(),
+                        extension.property() ? extension.name().lexeme()
+                                : callableLabel(extension.name().lexeme(), extension.typeDescriptor(),
+                                        extension.parameters().stream().skip(1).map(Token::lexeme).toList()),
+                        TypeFormatter.format(extension.typeDescriptor().returnType()));
+                add(symbol);
+                byToken.put(extension.name(), symbol);
+            }
         }
 
         private void indexResolvedFunctions(final ResolutionResult resolution) {
@@ -2698,6 +2887,20 @@ final class LspFeatures {
             }
             final var candidates = visibleSymbols(path).stream()
                     .filter(symbol -> symbol.name().equals(token.lexeme()))
+                    .toList();
+            return candidates.size() == 1 ? candidates.getFirst() : null;
+        }
+
+        Symbol resolveExtension(final Path path, final Token token) {
+            final var unit = unitsByPath.get(path);
+            final var resolution = snapshot.resolution().orElse(null);
+            if (unit == null || resolution == null) return null;
+            final var candidates = resolution.extensions().stream()
+                    .filter(extension -> extension.name().lexeme().equals(token.lexeme()))
+                    .filter(extension -> extensionIsActive(extension, path, unit, this))
+                    .map(extension -> byToken.get(extension.name()))
+                    .filter(Objects::nonNull)
+                    .distinct()
                     .toList();
             return candidates.size() == 1 ? candidates.getFirst() : null;
         }

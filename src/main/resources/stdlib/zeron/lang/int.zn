@@ -4,7 +4,7 @@ import zeron.numeric.Integral;
 import zeron.numeric.Integer;
 import zeron.numeric.Rational;
 
-witness Integral<Int> for Int {
+default witness Integral<Int> for Int {
     fn add(other: Int): Int = this + other;
     fn subtract(other: Int): Int = this - other;
     fn multiply(other: Int): Int = this * other;

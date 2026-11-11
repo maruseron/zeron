@@ -46,8 +46,9 @@ public final class Compiler {
                                 + declaration.name().lexeme()));
             }
         }
-        if (!diagnostics.isEmpty()) return new CompilationResult(diagnostics);
+        if (!diagnostics.isEmpty()) return new CompilationResult(diagnostics,
+                com.maruseron.zeron.Zeron.warnings());
         BytecodeEmitter.emit(context);
-        return new CompilationResult(List.of());
+        return new CompilationResult(List.of(), com.maruseron.zeron.Zeron.warnings());
     }
 }

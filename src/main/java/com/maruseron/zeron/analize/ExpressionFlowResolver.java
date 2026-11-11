@@ -323,10 +323,16 @@ final class ExpressionFlowResolver {
     private static TypeDescriptor resolve(final ResolutionContext context, Expr expr) {
         return switch (expr) {
             case Expr.MemberCall call -> {
-                final var resolved = call.requiredContractType() == null
-                        ? MemberInteropResolver.resolveMemberCall(context, call)
-                        : MemberInteropResolver.resolveOperatorContractCall(context, call,
-                                resolve(context, call.receiver), call.requiredContractType());
+                final TypeDescriptor resolved;
+                if (call.requiredContractType() != null) {
+                    resolved = MemberInteropResolver.resolveOperatorContractCall(context, call,
+                            resolve(context, call.receiver), call.requiredContractType());
+                } else if (call.witnessDispatched()) {
+                    resolved = MemberInteropResolver.resolveWitnessDispatchedCall(context, call,
+                            resolve(context, call.receiver));
+                } else {
+                    resolved = MemberInteropResolver.resolveMemberCall(context, call);
+                }
                 final var descriptor = call.resolvedDescriptor();
                 if (descriptor != null) {
                     final var parameters = call.resolvedExtensionMethod() != null
@@ -353,6 +359,7 @@ final class ExpressionFlowResolver {
                 yield resolved;
             }
             case Expr.PropertyAssignment assignment -> {
+                MutationTracking.markRoot(context, assignment.property.receiver);
                 if (assignment.property.safeNavigation()) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             assignment.property.name,
@@ -433,6 +440,7 @@ final class ExpressionFlowResolver {
                 yield resultType;
             }
             case Expr.PropertyCompoundAssignment assignment -> {
+                MutationTracking.markRoot(context, assignment.property.receiver);
                 MemberInteropResolver.resolveProperty(context, assignment.property);
                 if (assignment.property.sumPayloadIndex() >= 0) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
@@ -557,6 +565,7 @@ final class ExpressionFlowResolver {
                 yield operation.resultType();
             }
             case Expr.IndexAssignment assignment -> {
+                MutationTracking.markRoot(context, assignment.array);
                 final var receiverType = resolve(context, assignment.array);
                 MemberInteropResolver.ensureMutationThroughThisFieldAllowed(
                         context, assignment.array, SYNTHETIC_IDENTIFIER);
@@ -583,6 +592,7 @@ final class ExpressionFlowResolver {
                     yield resultType;
             }
             case Expr.Assignment assignment -> {
+                context.mutableUses.add(assignment.name);
                 final var symbolName = context.symbols.containsSymbol(assignment.name)
                         ? assignment.name : MemberInteropResolver.resolveTopLevelValueSymbol(context, assignment.name);
                 if (symbolName == null) {
@@ -832,6 +842,7 @@ final class ExpressionFlowResolver {
                 yield resolveIfExpression(context, iff, null);
             }
             case Expr.Pipeline pipeline -> resolvePipeline(context, pipeline);
+            case Expr.Do doExpression -> resolveDo(context, doExpression);
             case Expr.Match match -> resolveMatch(context, match);
             case Expr.SumCaseTest test -> resolveSumCaseTest(context, test);
             case Expr.Raise raise -> {
@@ -1363,6 +1374,7 @@ final class ExpressionFlowResolver {
                 armPatterns.add(pattern);
                 if (arm.guard() == null && pattern.irrefutable()) fullyHandledEffects.add(effect);
             }
+            validateHandlerAmbiguity(context, handle.arms, context.frame.raisedEffects);
         } finally {
             RaisedEffectFlow.endHandledExpression(
                     context, enclosingEffects, fullyHandledEffects, handle.keyword);
@@ -1409,6 +1421,41 @@ final class ExpressionFlowResolver {
         return resultType;
     }
 
+    /// Diagnoses incomparable handler cases that can both match a visible effect. A later library
+    /// may add the shared subtype; runtime dispatch reports that case instead of choosing.
+    private static void validateHandlerAmbiguity(final ResolutionContext context,
+                                                 final List<Expr.HandleArm> arms,
+                                                 final Set<TypeDescriptor> protectedEffects) {
+        final var hierarchy = context.effectHierarchy;
+        final var visible = protectedEffects == null
+                || protectedEffects.stream().anyMatch(effect -> effect.name().equals(EffectSubtyping.TOP_EFFECT))
+                ? hierarchy.allEffects()
+                : protectedEffects.stream()
+                        .filter(effect -> hierarchy.isEffect(effect.name()))
+                        .flatMap(effect -> hierarchy.visibleSubtypes(effect.name()).stream())
+                        .distinct()
+                        .toList();
+        for (int left = 0; left < arms.size(); left++) {
+            for (int right = left + 1; right < arms.size(); right++) {
+                final var leftEffect = arms.get(left).resolvedEffectType();
+                final var rightEffect = arms.get(right).resolvedEffectType();
+                if (context.effectHierarchy.isSubtype(leftEffect, rightEffect)
+                        || context.effectHierarchy.isSubtype(rightEffect, leftEffect)) continue;
+                final var shared = visible.stream()
+                        .filter(candidate -> hierarchy.isSubtype(TypeDescriptor.ofName(candidate), leftEffect)
+                                && hierarchy.isSubtype(TypeDescriptor.ofName(candidate), rightEffect))
+                        .findFirst();
+                if (shared.isEmpty()) continue;
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        arms.get(right).keyword(),
+                        "Ambiguous handler cases: `" + leftEffect.name() + "` and `"
+                                + rightEffect.name() + "` are incomparable, but both match `"
+                                + shared.get() + "`."));
+            }
+        }
+    }
+
     private static TypeDescriptor resolveHandlerLiteral(final ResolutionContext context,
                                                         final Expr.HandlerLiteral handler) {
         final var enclosingEffects = context.frame.raisedEffects;
@@ -1431,6 +1478,7 @@ final class ExpressionFlowResolver {
                 armPatterns.add(pattern);
                 if (arm.guard() == null && pattern.irrefutable()) fullyHandledEffects.add(effect);
             }
+            validateHandlerAmbiguity(context, handler.arms, null);
             for (int index = 0; index < handler.arms.size(); index++) {
                 final var arm = handler.arms.get(index);
                 final var pattern = armPatterns.get(index);
@@ -1680,6 +1728,34 @@ final class ExpressionFlowResolver {
 
     static TypeDescriptor resolveExpression(final ResolutionContext context, final Expr expression) {
         return resolve(context, expression);
+    }
+
+    /// Resolves a lowered `do` chain and checks an explicitly declared constructor against the
+    /// inferred result. Constructor inference itself comes from the first bind's receiver type and
+    /// the surrounding context, through the ordinary `flatMap`/`map` resolution.
+    private static TypeDescriptor resolveDo(final ResolutionContext context,
+                                            final Expr.Do doExpression) {
+        final var type = resolve(context, doExpression.lowered());
+        doExpression.setType(type);
+
+        final var declared = doExpression.constructorType();
+        if (declared == null) return type;
+
+        final var declaredName = declared.name();
+        final var uncovered = type instanceof NullableDescriptor nullable ? nullable.baseType() : type;
+        final var actualName = switch (uncovered) {
+            case GenericDescriptor generic -> generic.baseType().qualifiedName().simpleName();
+            case NominalDescriptor nominal -> nominal.name();
+            default -> null;
+        };
+        if (declaredName == null || !declaredName.equals(actualName)) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, doExpression.keyword,
+                    "The declared 'do' constructor " + TypeFormatter.format(declared)
+                            + " does not match the inferred result type "
+                            + TypeFormatter.format(type) + "."));
+        }
+        return type;
     }
 
     static TypeDescriptor resolveEmptyArrayLiteral(final ResolutionContext context,
@@ -2279,7 +2355,15 @@ final class ExpressionFlowResolver {
 
         pattern.resolve(null, patternType, false);
         final var bindings = new LinkedHashMap<String, MatchBinding>();
-        if (pattern.alias() != null) addPatternBinding(context, bindings, pattern.alias(), patternType);
+        if (pattern.alias() != null) {
+            // A payload-bearing effect is handled as a mutable object: its `mut` members must stay
+            // reachable through the alias, without upgrading a read-only value elsewhere.
+            final var aliasType = classDeclaration.isEffect()
+                    && context.effectHierarchy.hasState(patternType.name())
+                    ? new ReferenceDescriptor(patternType)
+                    : patternType;
+            addPatternBinding(context, bindings, pattern.alias(), aliasType);
+        }
         boolean refutable = !root && !patternType.equals(inputType);
         if (pattern.extractor() != null) {
             final var declaration = classDeclaration.patterns().stream()
@@ -2446,11 +2530,17 @@ final class ExpressionFlowResolver {
             return TypeDescriptor.ofBoolean();
         }
         final var targetType = resolveSumCaseTestType(context, test.targetType, sourceType, test.operator);
-        validateRuntimeTestTarget(context, targetType, sourceType, test.operator, true);
-        if (!context.typeCompatibility.canTypeTest(sourceType, targetType)) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
-                    test.operator,
-                    "Type test is impossible between " + sourceType + " and " + targetType + "."));
+        final var exactDescriptorTest = isExactDescriptorTestTarget(sourceType, targetType);
+        if (exactDescriptorTest) {
+            TypeResolver.validateType(context, targetType, test.operator);
+            test.setExactDescriptorTest(true);
+        } else {
+            validateRuntimeTestTarget(context, targetType, sourceType, test.operator, true);
+            if (!context.typeCompatibility.canTypeTest(sourceType, targetType)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                        test.operator,
+                        "Type test is impossible between " + sourceType + " and " + targetType + "."));
+            }
         }
         test.setResolvedTargetType(targetType);
         test.setType(TypeDescriptor.ofBoolean());
@@ -2606,6 +2696,49 @@ final class ExpressionFlowResolver {
         context.symbols.define(assignment.name);
         assignment.setType(binding.type());
         return binding.type();
+    }
+
+    private static boolean isExactDescriptorTestTarget(final TypeDescriptor sourceType,
+                                                       final TypeDescriptor targetType) {
+        if (!(targetType instanceof GenericDescriptor || targetType instanceof ArrayDescriptor)) {
+            return false;
+        }
+        return canDescribeSource(sourceType) && ReifiedTypeArguments.canDescribe(targetType);
+    }
+
+    private static boolean canDescribeSource(final TypeDescriptor type) {
+        return containsReifiedTypeParameter(type) && isDescribableSourceShape(type);
+    }
+
+    private static boolean isDescribableSourceShape(final TypeDescriptor type) {
+        var source = type;
+        while (source instanceof NullableDescriptor nullable) source = nullable.baseType();
+        return switch (source) {
+            case AnyDescriptor _, NullDescriptor _, NeverDescriptor _, InferDescriptor _ -> false;
+            case TypeParameterDescriptor parameter -> parameter.isReified();
+            case ReferenceDescriptor reference -> isDescribableSourceShape(reference.baseType());
+            case ArrayDescriptor array -> ReifiedTypeArguments.canDescribe(array.elementType());
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .allMatch(ReifiedTypeArguments::canDescribe);
+            case UnitDescriptor _, IntDescriptor _, CharDescriptor _, LongDescriptor _,
+                 ByteDescriptor _, FloatDescriptor _, BooleanDescriptor _, StringDescriptor _,
+                 ByteArrayDescriptor _, NominalDescriptor _ -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean containsReifiedTypeParameter(final TypeDescriptor type) {
+        return switch (type) {
+            case TypeParameterDescriptor parameter -> parameter.isReified();
+            case NullableDescriptor nullable -> containsReifiedTypeParameter(nullable.baseType());
+            case ReferenceDescriptor reference -> containsReifiedTypeParameter(reference.baseType());
+            case ArrayDescriptor array -> containsReifiedTypeParameter(array.elementType());
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .anyMatch(ExpressionFlowResolver::containsReifiedTypeParameter);
+            case TypeProjectionDescriptor projection ->
+                    containsReifiedTypeParameter(projection.bound());
+            default -> false;
+        };
     }
 
     private static void validateRuntimeTestTarget(final ResolutionContext context, final TypeDescriptor targetType,

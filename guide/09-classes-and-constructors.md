@@ -96,6 +96,27 @@ canonical constructor; it does not allocate a different kind of object. Use name
 when their names make common starting choices easier to understand or when they need to prepare
 values before construction.
 
+## Static functions
+
+A class can group a receiver-free helper with its instance API by declaring it `static`. The
+function is called through the class name, has no `this`, and cannot read instance state:
+
+```zeron
+public class Box<T: mut> {
+    public property value: T;
+    public constructor new;
+
+    public static fn of<U: mut>(value: U): Box<U> = Box<U>.new(value);
+    public static fn twice(value: Int): Int = value * 2;
+}
+```
+
+`Box.of("x")` and `Box.twice(4)` are ordinary namespace-function calls. A static function is
+equivalent to declaring `of` or `twice` in `namespace Box`, and it follows the same visibility,
+import, API-index, and separate-compilation rules. It can declare its own type parameters, but it
+does not capture the class's type parameters. A static function cannot share its name with an
+instance member or an applicable extension.
+
 ## Methods and `this`
 
 A method is an operation declared inside a class. It can use that object's fields and can be

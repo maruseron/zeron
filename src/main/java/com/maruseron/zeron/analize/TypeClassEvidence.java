@@ -1,5 +1,6 @@
 package com.maruseron.zeron.analize;
 
+import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.ast.SyntheticNames;
@@ -29,6 +30,16 @@ final class TypeClassEvidence {
 
     static void register(final ResolutionContext context, final Stmt.Witness witness,
                          final String packageName) {
+        if (witness.sourceName() != null
+                && context.typeClassWitnesses.stream().anyMatch(entry ->
+                        entry.packageName().equals(packageName)
+                                && entry.declaration().sourceName() != null
+                                && entry.declaration().sourceName().lexeme()
+                                        .equals(witness.sourceName().lexeme()))) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                    witness.sourceName(), "Witness name '" + witness.sourceName().lexeme()
+                            + "' is already declared in this package."));
+        }
         validateType(context, witness.contractType(), witness.name());
         validateType(context, witness.targetType(), witness.name());
         witness.typeParameters().forEach(parameter ->
@@ -46,10 +57,10 @@ final class TypeClassEvidence {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     witness.name(), "A witness must name a contract and a supported target type."));
         }
-        if (!packageName.equals(packageOf(contract.name().lexeme()))
-                && !packageName.equals(packageOfTarget(witness.targetType()))) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    witness.name(), "A witness must be declared in the contract or target type package."));
+        if (witness.isDefault() && contract != null && !contract.isPublic()
+                && targetIsPublic(context, witness.targetType())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                    witness.name(), "A default witness for a public target type must use a public contract."));
         }
         if (contract.higherKinded()) {
             registerConstructorWitness(context, witness, packageName, contract);
@@ -285,7 +296,8 @@ final class TypeClassEvidence {
         }
         if (!context.typeCompatibility.canAssign(required.returnType(), candidate.returnType())) return false;
         final var requiredEffects = required.raisedEffects();
-        return EffectRows.includedIn(candidate.raisedEffects(), requiredEffects);
+        return EffectRows.includedIn(candidate.raisedEffects(), requiredEffects,
+                context.effectHierarchy);
     }
 
     private static boolean compatibleDelegatedTypeParameters(
@@ -449,6 +461,20 @@ final class TypeClassEvidence {
             final ResolutionContext context, final Stmt.Witness witness) {
         return context.classes.values().stream()
                 .anyMatch(classDeclaration -> classDeclaration.higherKindedImplementations().contains(witness));
+    }
+
+    private static boolean targetIsPublic(final ResolutionContext context,
+                                          final com.maruseron.zeron.domain.TypeDescriptor targetType) {
+        if (BuiltinTypes.isIntrinsicTarget(targetType)) return true;
+        final var name = nominalName(targetType);
+        final var classDeclaration = context.classes.get(name);
+        if (classDeclaration != null) return classDeclaration.isPublic();
+        final var sum = context.sums.get(name);
+        if (sum != null) return sum.isPublic();
+        final var product = context.products.get(name);
+        if (product != null) return product.isPublic();
+        final var newtype = context.newtypes.get(name);
+        return newtype != null && newtype.isPublic();
     }
 
     private static boolean containsTypeParameter(final TypeDescriptor type,
@@ -689,6 +715,56 @@ final class TypeClassEvidence {
                         && isEqContract(entry.declaration().contractType())
                         && matchPattern(entry.declaration().targetType(), target,
                                 entry.declaration().typeParameters(), new LinkedHashMap<>()));
+    }
+
+    /// Validates that every `import witness` names a public, named, non-default witness exported
+    /// by the imported package. Defaults are reached through their target type instead.
+    static List<ResolutionError> witnessImportErrors(final ResolutionContext context,
+                                                     final List<CompilationUnit> units) {
+        final var errors = new ArrayList<ResolutionError>();
+        final var witnessPackages = new HashSet<String>();
+        for (final var entry : context.typeClassWitnesses) witnessPackages.add(entry.packageName());
+        witnessPackages.addAll(context.declarationPackages.values());
+        for (final var unit : units) {
+            for (final var importDeclaration : unit.imports()) {
+                if (!importDeclaration.witness()) continue;
+                final var target = importDeclaration.qualifiedName();
+                if (importDeclaration.onDemand()) {
+                    if (!witnessPackages.contains(target)) {
+                        errors.add(new ResolutionError(
+                                DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                                importDeclaration.location(),
+                                "Unknown witness package '" + target + "'."));
+                    }
+                    continue;
+                }
+                final var separator = target.lastIndexOf('.');
+                final var witnessPackage = separator < 0 ? "" : target.substring(0, separator);
+                final var witnessName = separator < 0 ? target : target.substring(separator + 1);
+                final var candidate = context.typeClassWitnesses.stream()
+                        .filter(entry -> entry.packageName().equals(witnessPackage)
+                                && entry.declaration().sourceName() != null
+                                && entry.declaration().sourceName().lexeme().equals(witnessName))
+                        .findFirst().orElse(null);
+                if (candidate == null) {
+                    errors.add(new ResolutionError(
+                            DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                            importDeclaration.location(),
+                            "Unknown witness '" + target + "'."));
+                } else if (candidate.declaration().isDefault()) {
+                    errors.add(new ResolutionError(
+                            DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                            importDeclaration.location(),
+                            "Default witness '" + target
+                                    + "' is activated by importing its target type."));
+                } else if (!candidate.declaration().isPublic()) {
+                    errors.add(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                            importDeclaration.location(),
+                            "Witness '" + target + "' is not public."));
+                }
+            }
+        }
+        return errors;
     }
 
     static List<ResolutionError> activeOverlapErrors(
@@ -2043,10 +2119,37 @@ final class TypeClassEvidence {
     }
 
     private static boolean isActive(final ResolutionContext context, final WitnessEntry entry) {
-        return entry.packageName().equals(context.packageName)
-                || context.currentImports.onDemandPackages().contains(entry.packageName())
-                || context.currentImports.types().values().stream()
-                        .anyMatch(importedType -> packageOf(importedType).equals(entry.packageName()));
+        final var witness = entry.declaration();
+        // Class-scoped implementation blocks are canonical evidence for their owner type, even
+        // though they are not written with `default`. They activate with the owner type instead of
+        // requiring a package star import.
+        if (witness.isDefault() || isClassHktImplementation(context, witness)) {
+            return isDefaultActive(context, witness);
+        }
+        if (entry.packageName().equals(context.packageName)) return true;
+        if (witness.sourceName() != null && !witness.isPublic()) return false;
+        if (context.currentImports.onDemandPackages().contains(entry.packageName())) return true;
+        if (witness.sourceName() == null) return false;
+        if (context.currentImports.witnessOnDemandPackages().contains(entry.packageName())) {
+            return true;
+        }
+        return context.currentImports.witnesses().containsValue(
+                qualifyPackage(entry.packageName(), witness.sourceName().lexeme()));
+    }
+
+    /// A default witness travels with its target type: it is active when the nominal declaration at
+    /// the head of that target is in scope through the package, an explicit type import, or a
+    /// package star import. A fully qualified type reference does not activate it. Class-scoped
+    /// implementation blocks use the same rule, with their owner type as the target.
+    private static boolean isDefaultActive(final ResolutionContext context,
+                                           final Stmt.Witness witness) {
+        if (BuiltinTypes.isIntrinsicTarget(witness.targetType())) return true;
+        final var targetName = nominalName(witness.targetType());
+        if (targetName == null) return false;
+        final var targetPackage = packageOf(targetName);
+        if (targetPackage.equals(context.packageName)) return true;
+        if (context.currentImports.onDemandPackages().contains(targetPackage)) return true;
+        return context.currentImports.types().containsValue(targetName);
     }
 
     private static String qualifyPackage(final String packageName, final String name) {

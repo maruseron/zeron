@@ -62,11 +62,11 @@ For example, define a contract for values that can provide a label, then provide
 `Int`:
 
 ```zeron
-contract Label<T> {
+public contract Label<T> {
     label(): String;
 }
 
-witness Label<Int> for Int {
+public witness IntLabel: Label<Int> for Int {
     fn label(): String = "integer";
 }
 ```
@@ -117,15 +117,68 @@ For a concrete target type and fully applied contract, Zeron must find exactly o
 witness in the active scope. If it finds none, the bound cannot be satisfied; if it finds more
 than one, the selection is ambiguous. The compiler does not choose a “closest” witness.
 
-Witnesses in the current package are active automatically. A star import such as
-`import labels.*;` activates witnesses from that package. An explicit import of a single symbol
-does not activate that package's witnesses. This means imports can affect which evidence is
-available, and adding a star import can make a previously unique selection ambiguous.
+Witnesses in the current package are active automatically, and a star import such as
+`import labels.*;` activates every witness exported by that package. A named public witness can
+be activated on its own with `import witness labels.IntLabel;` or `import witness labels.*;`. An
+alias, as in `import witness labels.IntLabel as LocalLabel;`, changes only the name used in
+diagnostics. Importing a single type, function, or value does not activate that package's
+witnesses. Imports can therefore affect which evidence is available, and adding a star import can
+make a previously unique selection ambiguous.
 
-Witnesses also follow an **orphan rule**: the witness must be declared in the package of either its
-contract or its target type. This keeps witness definitions near at least one of the types they
-connect. When multiple generic witness declarations could apply, their patterns must not overlap
-in active scope; the current overlap checks reject overlaps they can identify.
+Witness names occupy their own declaration namespace: a witness name may match a type or function
+name, and a witness is never used as a value or a type. A named witness without `public` is
+package-local. Anonymous witnesses have no exportable identity, are deprecated during the
+migration release, and are removed one release after the standard library migrates.
+
+A `default` witness is canonical evidence declared in the same file as the type it targets:
+
+```zeron
+public class Box<T: mut> {
+    public constructor new(value: T);
+}
+
+default witness<T: Display> Display for Box<T> {
+    fn toString(): String = render(this);
+}
+```
+
+A default witness is unnamed and is not marked `public`; its identity is the pair (contract, target
+pattern), and the compiler derives an internal index key from it. Its visibility follows the target
+type. It becomes active when the target type is in scope through the current package, an explicit
+type import, or a package star import. Intrinsic targets are always in scope. `import witness` never
+activates a default, and writing a fully qualified type name does not import the type, so it does not
+activate its defaults. At most one default may apply to a fully applied contract and target,
+overlapping defaults are declaration errors, and a default has no priority over an ordinary witness:
+importing both makes the selection ambiguous.
+
+A default witness of a public target must use a public contract, because it becomes public
+canonical evidence for that type.
+
+A class-scoped `implementation Contract<T<_>>` block is canonical evidence for its owner type. It
+activates when that owner type is in scope through the current package, an explicit type import, or
+a package star import, so importing `Stream` is enough to use `Stream`'s `Monad` implementation;
+the whole `zeron.collections` package does not need to be imported. A class implementation block is
+not source syntax for a `default witness`, but it follows the same owner-scoped activation rule and
+is exported with the default marker for separately compiled consumers.
+
+The standard library declares canonical evidence for nominal types as unnamed defaults, such as
+`Integral<Integer>` and `Display` for `Integer`, and `Monad<Option<_>>` and `Foldable<Option<_>>` for
+`Option`. Their
+evidence travels with those types. All intrinsic types are canonically owned by `zeron.lang`, and
+primitive evidence such as `Integral<Int>`, `Integral<Long>`, `Floating<Float>`, and the primitive
+codecs is available as intrinsic defaults. An intrinsic default is always active, so a generic bound
+such as `Floating<Float>` needs no witness import.
+
+Not every intrinsic witness is a default. `Array` keeps its `Foldable<Array<_>>` evidence as the
+named public witness `zeron.collections.ArrayFoldable`; it is imported explicitly with
+`import witness zeron.collections.ArrayFoldable;` when a generic bound needs it. This keeps the cost
+of evidence handling visible instead of activating it for every array user.
+
+Declaration placement is unrestricted. A witness may be declared in any package, including one
+that owns neither the contract nor the target type; there is no orphan rule. Only a `default`
+stays beside its target type, because canonical evidence travels with the type. When multiple
+generic witness declarations could apply, their patterns must not overlap in active scope; the
+current overlap checks reject overlaps they can identify.
 
 Witness methods participate in member lookup after ordinary instance methods and applicable
 extensions. If more than one witness exposes the same method, the call is ambiguous. A generic

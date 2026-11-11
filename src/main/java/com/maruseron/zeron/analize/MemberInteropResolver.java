@@ -413,6 +413,31 @@ final class MemberInteropResolver {
         return resolveWitnessMethodCall(context, call, receiverType, contractType);
     }
 
+    /// Resolves a call that must dispatch through a contract witness rather than through an
+    /// instance method of the same name. `do` lowering marks its `map` and `flatMap` steps this
+    /// way, because a class may declare an instance method whose signature differs from the
+    /// witness operation (`Stream.flatMap` takes `(T) -> Iterable<R>`, while `Monad.flatMap` takes
+    /// `(A) -> M<B>`).
+    static TypeDescriptor resolveWitnessDispatchedCall(final ResolutionContext context,
+                                                       final Expr.MemberCall call,
+                                                       final TypeDescriptor receiverType) {
+        final var base = receiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : receiverType;
+        if (base instanceof TypeParameterDescriptor parameter) {
+            return resolveBoundedMemberCall(context, call, parameter, null);
+        }
+        if (base instanceof AppliedConstructorDescriptor applied) {
+            return resolveBoundedMemberCall(context, call, applied.constructor(), null);
+        }
+        final var resolved = resolveWitnessMethodCall(context, call, receiverType, null);
+        if (resolved == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.name, "No contract witness provides '" + call.name.lexeme() + "' for '"
+                            + TypeFormatter.format(receiverType) + "'."));
+        }
+        return resolved;
+    }
+
     private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                                      final TypeDescriptor expectedType) {
         if (call.safeNavigation()) {
@@ -596,6 +621,9 @@ final class MemberInteropResolver {
     private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                              final TypeDescriptor alreadyResolvedReceiverType,
                                              final TypeDescriptor expectedType) {
+        // Any method call may require mutable access to its receiver. Treat it conservatively so the
+        // unnecessary-projection warning never fires on a receiver that a mutating method could use.
+        MutationTracking.markRoot(context, call.receiver);
         Zeron.debug("resolving member call       " + call.name.lexeme() + " for " + call.receiver);
         final var receiverDescriptor = call.receiver.getType() instanceof TypeParameterDescriptor parameter
                 ? context.activeTypeSubstitutions.getOrDefault(parameter, parameter)
@@ -1172,8 +1200,9 @@ final class MemberInteropResolver {
         final var method = selected.method();
         if (method.isMutating()) ensureMutationThroughThisFieldAllowed(context, call.receiver, call.name);
         final var fixedArity = method.fixedCallArity();
+        final var explicitMethodTypeParameters = method.typeDescriptor().explicitTypeParameters();
         if ((!call.explicitTypeArguments.isEmpty()
-                && call.explicitTypeArguments.size() != method.methodTypeParameters().size())
+                && call.explicitTypeArguments.size() != explicitMethodTypeParameters.size())
                 || call.arguments.size() < method.minimumCallArity()
                 || !method.variadic() && call.arguments.size() > fixedArity) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
@@ -1196,7 +1225,7 @@ final class MemberInteropResolver {
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
             final var explicitType = call.explicitTypeArguments.get(i);
             TypeResolver.validateType(context, explicitType, call.name);
-            substitutions.put(method.methodTypeParameters().get(i), explicitType);
+            substitutions.put(explicitMethodTypeParameters.get(i), explicitType);
         }
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -1243,6 +1272,8 @@ final class MemberInteropResolver {
         }
         call.setEvidenceArguments(TypeClassEvidence.selectArguments(
                 context, signature.typeParameters(), substitutions, call.name));
+        ReifiedTypeArguments.select(context, call, signature.typeParameters(), substitutions, call.name,
+                call::setReifiedArguments);
         final var instantiatedDescriptor = (FunctionDescriptor) TypeSubstitution.substitute(signature, substitutions);
         call.setResolvedExtensionMethod(method);
         context.recordReference(call.name, method.name(), method.typeDescriptor());
@@ -1456,6 +1487,11 @@ final class MemberInteropResolver {
                                                            final ClassFactory factory,
                                                            final TypeDescriptor expectedType,
                                                            final List<TypeDescriptor> priorArgumentTypes) {
+        if (factory.canonical() && className.equals(EffectSubtyping.TOP_EFFECT)) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, call.name,
+                    "The top effect `Effect` cannot be constructed directly. Use a declared effect or `Effect.fromException`."));
+        }
         call.setResolvedClassName(className);
         final var typeParameters = declaration.typeParameters();
         final var explicitClassTypeArguments = call.explicitOwnerTypeArguments().isEmpty()
@@ -1503,7 +1539,7 @@ final class MemberInteropResolver {
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        final var rowInference = new RowInference();
+        final var rowInference = new RowInference(context.typeCompatibility.effectSubtyping());
         for (int i = 0; i < explicitClassTypeArguments.size(); i++) {
             substitutions.put(typeParameters.get(i), explicitClassTypeArguments.get(i));
         }
@@ -1791,11 +1827,12 @@ final class MemberInteropResolver {
                                                     final TypeDescriptor receiverParameter,
                                                     final TypeDescriptor receiverType) {
         final var typeParameters = genericType.typeParameters();
+        final var explicitTypeParameters = genericType.explicitTypeParameters();
         if (!call.explicitTypeArguments.isEmpty()
-                && call.explicitTypeArguments.size() != typeParameters.size()) {
+                && call.explicitTypeArguments.size() != explicitTypeParameters.size()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.name,
-                    "Expected " + typeParameters.size() + " type arguments, found "
+                    "Expected " + explicitTypeParameters.size() + " type arguments, found "
                             + call.explicitTypeArguments.size() + "."));
         }
         if (call.arguments.size() < minimumArity || !variadic && call.arguments.size() > genericType.arity()) {
@@ -1809,11 +1846,11 @@ final class MemberInteropResolver {
         }
 
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
-        final var rowInference = new RowInference();
+        final var rowInference = new RowInference(context.typeCompatibility.effectSubtyping());
         for (int i = 0; i < call.explicitTypeArguments.size(); i++) {
             final var explicitType = call.explicitTypeArguments.get(i);
             TypeResolver.validateType(context, explicitType, call.name);
-            substitutions.put(typeParameters.get(i), explicitType);
+            substitutions.put(explicitTypeParameters.get(i), explicitType);
         }
         if (receiverParameter != null) {
             TypeUnifier.unify(receiverParameter, receiverType, substitutions, call.name, rowInference, context.typeCompatibility);
@@ -1882,6 +1919,8 @@ final class MemberInteropResolver {
 
         call.setEvidenceArguments(TypeClassEvidence.selectArguments(
                 context, typeParameters, substitutions, call.name));
+        ReifiedTypeArguments.select(context, call, typeParameters, substitutions, call.name,
+                call::setReifiedArguments);
         final var instantiatedParameters = genericType.parameters().stream()
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
                 .toList();
@@ -1891,8 +1930,10 @@ final class MemberInteropResolver {
         }
         final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
         final var exposedReturn = exposeProjectedResult(instantiatedReturn, call.name);
-        call.setResolvedDescriptor(TypeDescriptor.functionOf(genericType.name(), instantiatedReturn,
-                instantiatedParameters.toArray(TypeDescriptor[]::new)));
+        final var resolvedDescriptor = TypeDescriptor.functionOf(genericType.name(), instantiatedReturn,
+                instantiatedParameters.toArray(TypeDescriptor[]::new));
+        call.setResolvedDescriptor(resolvedDescriptor);
+        context.recordCallSiteFunctionType(call.name, resolvedDescriptor);
         if (variadic) {
             call.setVariadic(((ArrayDescriptor) instantiatedParameters.getLast()).elementType(), fixedArity);
         }
@@ -2648,8 +2689,19 @@ final class MemberInteropResolver {
 
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
                 method.typeDescriptor(), selectedContractSubstitutions);
+        // An HKT contract method spells its receiver as the first signature parameter, while a
+        // member-call site spells it before the dot; arity and argument positions start after it.
+        final var receiverOperation = Stmt.hasReceiverParameter(method.parameters());
+        final var signature = receiverOperation
+                ? TypeDescriptor.functionWithEffectsOf(descriptor.name(), descriptor.returnType(),
+                        descriptor.parameters().subList(1, descriptor.arity()),
+                        descriptor.typeParameters(), descriptor.raisedEffects())
+                : descriptor;
+        final var receiverParameter = receiverOperation ? descriptor.parameters().getFirst() : null;
+        final var receiverBaseType = call.receiver.getType() instanceof ReferenceDescriptor reference
+                ? reference.baseType() : call.receiver.getType();
         final var evidenceMethodParameters = new ArrayList<TypeDescriptor>();
-        if (!method.isStatic()) evidenceMethodParameters.add(call.receiver.getType());
+        if (!method.isStatic() && !receiverOperation) evidenceMethodParameters.add(call.receiver.getType());
         evidenceMethodParameters.addAll(descriptor.parameters());
         final var evidenceMethodType = TypeDescriptor.functionWithEffectsOf(
                 method.name().lexeme(), descriptor.returnType(), evidenceMethodParameters,
@@ -2657,10 +2709,13 @@ final class MemberInteropResolver {
         call.setWitnessMethodEvidence(Expr.methodEvidenceToken(parameter, selectedBoundIndex, selectedMethodIndex),
                 evidenceMethodType, !method.isStatic());
         final var variadic = method.variadic();
-        final var fixedArity = Stmt.fixedArity(method.parameters(), variadic);
-        if (descriptor.isGeneric()) {
-            final var result = resolveGenericMemberCall(context, call, descriptor,
-                    method.minimumArity(), variadic, fixedArity);
+        final var fixedArity = Stmt.fixedArity(method.parameters(), variadic)
+                - (receiverOperation ? 1 : 0);
+        final var minimumArity = method.minimumArity() - (receiverOperation ? 1 : 0);
+        if (signature.isGeneric()) {
+            final var result = resolveGenericMemberCall(context, call, signature,
+                    minimumArity, variadic, fixedArity, receiverParameter,
+                    receiverOperation ? receiverBaseType : null);
             call.setResolvedOwnerName(ownerName);
             call.setReceiverRequiresCast(true);
             final var resolvedDescriptor = (FunctionDescriptor) call.resolvedDescriptor();
@@ -2668,21 +2723,24 @@ final class MemberInteropResolver {
             context.recordCallSiteFunctionType(call.name, resolvedDescriptor);
             return result;
         }
-        ensureMemberCallArity(call, descriptor, method.minimumArity(), variadic);
+        if (receiverOperation) {
+            ensureAssignable(context, receiverParameter, receiverBaseType, call.name);
+        }
+        ensureMemberCallArity(call, signature, minimumArity, variadic);
         if (variadic) {
-            call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(), fixedArity);
+            call.setVariadic(((ArrayDescriptor) signature.parameters().getLast()).elementType(), fixedArity);
         }
         for (int index = 0; index < call.arguments.size(); index++) {
-            final var expected = memberParameterType(descriptor.parameters(), index, fixedArity, variadic);
+            final var expected = memberParameterType(signature.parameters(), index, fixedArity, variadic);
             ensureAssignable(context, expected, resolveArgument(context, call.arguments.get(index), expected), call.name);
         }
         call.setResolvedOwnerName(ownerName);
         call.setReceiverRequiresCast(true);
-        call.setResolvedDescriptor(descriptor);
-        call.setType(descriptor.returnType());
-        context.recordReference(call.name, method.name(), descriptor);
-        context.recordCallSiteFunctionType(call.name, descriptor);
-        return descriptor.returnType();
+        call.setResolvedDescriptor(signature);
+        call.setType(signature.returnType());
+        context.recordReference(call.name, method.name(), signature);
+        context.recordCallSiteFunctionType(call.name, signature);
+        return signature.returnType();
     }
 
     static String resolveClassName(final ResolutionContext context, final String name, final Token where) {

@@ -17,6 +17,22 @@ public final class SyntheticNames {
     public static final String PROPERTY_ID_TYPE = "zeron.lang.PropertyId";
     /// The compiler-only factory that constructs property identities.
     public static final String PROPERTY_ID_FACTORY = "$zeron$propertyId";
+    /// The standard-library callable identity type.
+    public static final String CALLABLE_ID_TYPE = "zeron.lang.CallableId";
+    /// The compiler-only factory that constructs callable identities.
+    public static final String CALLABLE_ID_FACTORY = "$zeron$callableId";
+    /// The standard-library instance/contract method reference type.
+    public static final String METHOD_REF_TYPE = "zeron.lang.MethodRef";
+    /// The compiler-only factory that constructs method references.
+    public static final String METHOD_REF_FACTORY = "$zeron$methodRef";
+    /// The standard-library static-function reference type.
+    public static final String STATIC_METHOD_REF_TYPE = "zeron.lang.StaticMethodRef";
+    /// The compiler-only factory that constructs static-function references.
+    public static final String STATIC_METHOD_REF_FACTORY = "$zeron$staticMethodRef";
+    /// The standard-library constructor reference type.
+    public static final String CONSTRUCTOR_REF_TYPE = "zeron.lang.ConstructorRef";
+    /// The compiler-only factory that constructs constructor references.
+    public static final String CONSTRUCTOR_REF_FACTORY = "$zeron$constructorRef";
 
     private SyntheticNames() {}
 

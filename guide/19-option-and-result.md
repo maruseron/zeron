@@ -72,6 +72,48 @@ Choose `Option<T>` when the only distinction that matters is whether a value exi
 `Result<T, E>` when a failure reason is useful information that should travel with the returned
 value.
 
+## Chaining steps with `do`
+
+A chain of two or three fallible steps written as nested `match` expressions is hard to read. A `do`
+block lists the steps in order and yields the value to produce when every step succeeds:
+
+```zeron
+fn total(first: Int, second: Int): Result<Int, String> = do {
+    let left <- positive(first);
+    let right <- positive(second);
+    yield left + right;
+};
+```
+
+`let name <- expression` binds the value of a successful step. If a step is `None` or `Err`, the
+rest of the block is skipped and that value becomes the block's result, so a later step never runs
+on a missing value. The final `yield` produces the success value. The same shape works for
+`Option`, `Result<_, E>`, `Stream`, and any library constructor with a `Monad` implementation.
+
+A plain `let name = expression` clause computes a local for the clauses that follow it. It must
+appear after the first bind:
+
+```zeron
+fn labelled(): Option<String> = do {
+    let value <- Option.Some(21);
+    let doubled = value * 2;
+    yield "value: " + doubled.toString();
+};
+```
+
+The constructor comes from the first bind, so `Option.Some(...)` makes the block an `Option` and a
+`Result` case makes it a `Result` with that error type. Steps dispatch through that constructor's
+`Monad` witness, not through instance methods with the same name, so a type may keep an instance
+`flatMap` with a different signature — `Stream.flatMap` accepts `(T) -> Iterable<R>`, for example —
+without changing what a `do` block means. Every bind must use the same constructor,
+and `Result` binds must agree on `E`; adapt a single expression with `mapError` when its error type
+differs. Write `do<Option<_>>` or `do<Result<_, E>>` to state the constructor explicitly; the
+declared constructor must match the chain's inferred one. Because the constructor is not chosen
+from the surrounding expected type, an empty or ambiguous chain is an error rather than a guess.
+
+There are no `do` guards and no `collect` clause: put an `if` expression in a bind when a step is
+conditional, and use a [for-expression](16-for-expressions.md) when you want to collect values.
+
 ## When a function must stop normal work
 
 Sometimes a function cannot continue normally: for example, a required user record is missing and

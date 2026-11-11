@@ -57,6 +57,25 @@ The explanation provides more context than the short diagnostic message. `zeron 
 `zeron help explain` show command usage. In VS Code, the language server publishes diagnostics as
 you edit; see [VS Code and the language server](28-vscode-and-language-server.md).
 
+## Warnings
+
+Warnings use the same catalog codes and source spans as errors but do not block a build. The
+initial warning set covers unused local variables, imports, and private functions (`ZR3011` to
+`ZR3013`), unreachable statements (`ZR3014`), unnecessary mutable projections (`ZR3015`),
+`while (true)` loops that can be written as `loop` (`ZR3016`), shadowed locals (`ZR3017`), and
+deprecated anonymous witness declarations (`ZR3010`); that warning's help names the named form that
+replaces the declaration.
+
+Warnings are advisory by default. Pass `--deny-warnings` to `zeron build`, `zeron run`, or a direct
+compilation to report the warnings and then fail the invocation if any were produced:
+
+```text
+zeron build --deny-warnings
+```
+
+The language server publishes warnings with warning severity, so editors can distinguish them from
+errors without changing whether the document resolves.
+
 ## Check the compiler version
 
 Print the version of the running Zeron distribution from any directory, without a project manifest:

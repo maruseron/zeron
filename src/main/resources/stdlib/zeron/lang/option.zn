@@ -57,7 +57,7 @@ public extension<T: nullable + mut> Option<T> {
         };
 }
 
-witness Monad<Option<_>> for Option<_> {
+default witness Monad<Option<_>> for Option<_> {
     fn map<A: mut, B: mut>(this: Option<A>, transform: (A) -> B): Option<B> =
         this.map(transform);
 
@@ -79,7 +79,7 @@ witness Monad<Option<_>> for Option<_> {
         };
 }
 
-witness Foldable<Option<_>> for Option<_> {
+default witness Foldable<Option<_>> for Option<_> {
     fn foldLeft<A: mut, B: mut>(this: Option<A>, initial: B, combine: (B, A) -> B): B =
         match (this) {
             case Option.Some(value) -> combine(initial, value);

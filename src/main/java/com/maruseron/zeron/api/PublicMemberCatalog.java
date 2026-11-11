@@ -239,12 +239,23 @@ public final class PublicMemberCatalog {
         }
     }
 
+    /// Canonical evidence attached to a type by a default witness or a class-scoped
+    /// implementation block. Evidence is deliberately separate from callable members.
+    public record Evidence(String label, TypeRef contractType, TypeRef targetType) {
+        public Evidence {
+            Objects.requireNonNull(label);
+            Objects.requireNonNull(contractType);
+            Objects.requireNonNull(targetType);
+        }
+    }
+
     public record TypeView(String qualifiedName, TypeKind kind,
                            List<TypeParameter> typeParameters,
                            List<TypeRef> appliedArguments,
                            Map<String, TypeRef> appliedSubstitutions,
                            List<Member> directMembers, List<Member> contractMembers,
-                           List<Member> extensions, Optional<Provenance> provenance) {
+                           List<Member> extensions, List<Evidence> evidence,
+                           Optional<Provenance> provenance) {
         public TypeView {
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(kind);
@@ -254,6 +265,7 @@ public final class PublicMemberCatalog {
             directMembers = List.copyOf(directMembers);
             contractMembers = List.copyOf(contractMembers);
             extensions = List.copyOf(extensions);
+            evidence = List.copyOf(evidence);
             provenance = Objects.requireNonNull(provenance);
         }
     }
@@ -412,6 +424,7 @@ public final class PublicMemberCatalog {
                     extension.minimumCallArity(), extension.variadic(), extension.isMutating(),
                     extension.property(), provenance(extension.name())));
         }
+        attachDefaults(types, resolution);
         return new PublicMemberCatalog(types, extensions);
     }
 
@@ -513,6 +526,15 @@ public final class PublicMemberCatalog {
                 default -> { }
             }
         }
+        for (final var exported : library.declarations()) {
+            if (!(exported instanceof ZeronLibraryIndex.WitnessExport witness)
+                    || !witness.defaultWitness()) continue;
+            final var label = witness.qualifiedName().contains("$zeron$")
+                    ? evidenceLabel(witness.contractType(), witness.targetType())
+                    : witness.qualifiedName();
+            addEvidence(types, witness.targetType().name(), new EvidenceSpec(label,
+                    witness.contractType(), witness.targetType()));
+        }
         return new PublicMemberCatalog(types, extensions);
     }
 
@@ -567,11 +589,16 @@ public final class PublicMemberCatalog {
                 .filter(Objects::nonNull)
                 .map(match -> match.extension().member(match.substitutions()))
                 .sorted(MEMBER_ORDER).toList();
+        final var evidence = spec.evidence().stream()
+                .map(item -> new Evidence(item.label(),
+                        TypeRef.from(TypeSubstitution.substitute(item.contractType(), substitutions)),
+                        TypeRef.from(TypeSubstitution.substitute(item.targetType(), substitutions))))
+                .toList();
         return Optional.of(new TypeView(spec.qualifiedName(), spec.kind(),
                 spec.typeParameters().stream().map(TypeParameter::from).toList(),
                 arguments.stream().map(TypeRef::from).toList(),
                 descriptorSubstitutions(spec.typeParameters(), arguments),
-                direct, contractMembers, extensionMembers, spec.provenance()));
+                direct, contractMembers, extensionMembers, evidence, spec.provenance()));
     }
 
     private List<Member> availableContractMembers(final TypeSpec classType,
@@ -684,6 +711,47 @@ public final class PublicMemberCatalog {
         if (exact != null) return exact;
         final var matches = types.values().stream()
                 .filter(type -> simpleName(type.qualifiedName()).equals(simpleName(name))).toList();
+        return matches.size() == 1 ? matches.getFirst() : null;
+    }
+
+    private static void attachDefaults(final Map<String, TypeSpec> types,
+                                       final ResolutionResult resolution) {
+        for (final var witness : resolution.witnesses()) {
+            if (!witness.isDefault()) continue;
+            final var targetName = witness.targetType().name();
+            final var packageName = resolution.typePackages().getOrDefault(
+                    targetName, resolution.packageName());
+            final var label = witness.sourceName() == null
+                    ? evidenceLabel(witness.contractType(), witness.targetType())
+                    : qualifySourceName(packageName, witness.sourceName().lexeme());
+            addEvidence(types, targetName, new EvidenceSpec(label,
+                    witness.contractType(), witness.targetType()));
+        }
+        for (final var declaration : resolution.classes().values()) {
+            if (!declaration.isPublic()) continue;
+            for (final var implementation : declaration.higherKindedImplementations()) {
+                addEvidence(types, declaration.name().lexeme(), new EvidenceSpec(
+                        evidenceLabel(implementation.contractType(), implementation.targetType()),
+                        implementation.contractType(), implementation.targetType()));
+            }
+        }
+    }
+
+    private static void addEvidence(final Map<String, TypeSpec> types, final String targetName,
+                                    final EvidenceSpec evidence) {
+        final var key = findTypeName(types, targetName);
+        if (key == null) return;
+        types.computeIfPresent(key, (_, spec) -> {
+            final var combined = new ArrayList<>(spec.evidence());
+            combined.add(evidence);
+            return spec.withEvidence(combined);
+        });
+    }
+
+    private static String findTypeName(final Map<String, TypeSpec> types, final String name) {
+        if (types.containsKey(name)) return name;
+        final var matches = types.keySet().stream()
+                .filter(candidate -> simpleName(candidate).equals(simpleName(name))).toList();
         return matches.size() == 1 ? matches.getFirst() : null;
     }
 
@@ -915,7 +983,8 @@ public final class PublicMemberCatalog {
                     parameter.name(), parameter.bounds().stream().map(PublicMemberCatalog::copyType).toList(),
                     parameter.isHigherKinded(), parameter.variance(),
                     parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                    parameter.isEffectRowKind(), parameter.admitsMutableArguments());
+                    parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
+                    parameter.isReified());
             case AppliedConstructorDescriptor applied -> new AppliedConstructorDescriptor(
                     (TypeParameterDescriptor) copyType(applied.constructor()), copyType(applied.argument()));
             case TypeConstructorDescriptor constructor -> new TypeConstructorDescriptor(
@@ -1008,6 +1077,11 @@ public final class PublicMemberCatalog {
                 ? name : packageName + "." + name;
     }
 
+    private static String evidenceLabel(final TypeDescriptor contractType,
+                                        final TypeDescriptor targetType) {
+        return "default " + simpleName(contractType.name()) + " for " + simpleName(targetType.name());
+    }
+
     private static String namespaceOf(final String qualifiedName) {
         final var separator = qualifiedName.lastIndexOf('.');
         return separator < 0 ? "" : qualifiedName.substring(0, separator);
@@ -1035,15 +1109,36 @@ public final class PublicMemberCatalog {
     private record AppliedContract(TypeSpec spec, Map<TypeParameterDescriptor, TypeDescriptor> substitutions) {}
     private record NominalType(String name, List<TypeDescriptor> arguments) {}
 
+    private record EvidenceSpec(String label, TypeDescriptor contractType,
+                                TypeDescriptor targetType) {
+        private EvidenceSpec {
+            contractType = copyType(contractType);
+            targetType = copyType(targetType);
+        }
+    }
+
     private record TypeSpec(String qualifiedName, TypeKind kind, List<TypeParameterDescriptor> typeParameters,
                             List<UseSpec> contracts, List<MemberSpec> members,
-                            Optional<Provenance> provenance) {
+                            Optional<Provenance> provenance, List<EvidenceSpec> evidence) {
+        private TypeSpec(final String qualifiedName, final TypeKind kind,
+                         final List<TypeParameterDescriptor> typeParameters,
+                         final List<UseSpec> contracts, final List<MemberSpec> members,
+                         final Optional<Provenance> provenance) {
+            this(qualifiedName, kind, typeParameters, contracts, members, provenance, List.of());
+        }
+
         private TypeSpec {
             typeParameters = typeParameters.stream()
                     .map(parameter -> (TypeParameterDescriptor) copyType(parameter)).toList();
             contracts = List.copyOf(contracts);
             members = List.copyOf(members);
             provenance = Objects.requireNonNull(provenance);
+            evidence = List.copyOf(evidence);
+        }
+
+        private TypeSpec withEvidence(final List<EvidenceSpec> evidence) {
+            return new TypeSpec(qualifiedName, kind, typeParameters, contracts, members,
+                    provenance, evidence);
         }
     }
 

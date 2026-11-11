@@ -118,6 +118,22 @@ public final class DiagnosticCatalog {
 
     public static final Entry GENERATED_PROGRAM_NAME_CONFLICT =
             entry("ZR3001", "Generated program name conflicts with a declared type");
+    public static final Entry ANONYMOUS_WITNESS_DEPRECATED =
+            warning("ZR3010", "Anonymous witness declarations are deprecated");
+    public static final Entry UNUSED_LOCAL_VARIABLE =
+            warning("ZR3011", "Unused local variable");
+    public static final Entry UNUSED_IMPORT =
+            warning("ZR3012", "Unused import");
+    public static final Entry UNUSED_FUNCTION =
+            warning("ZR3013", "Unused function");
+    public static final Entry UNREACHABLE_STATEMENT =
+            warning("ZR3014", "Unreachable statement");
+    public static final Entry UNNECESSARY_MUTABLE_PROJECTION =
+            warning("ZR3015", "Unnecessary mutable projection");
+    public static final Entry WHILE_TRUE_LOOP =
+            warning("ZR3016", "'while (true)' can be written as 'loop'");
+    public static final Entry SHADOWED_LOCAL =
+            warning("ZR3017", "Local declaration shadows an outer declaration");
     public static final Entry PACKAGE_SOURCE_DIRECTORY_MISMATCH =
             entry("ZR4001", "Package does not match source directory");
 
@@ -171,6 +187,14 @@ public final class DiagnosticCatalog {
             UNSUPPORTED_JAVA_INTEROP_FEATURE,
             NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK,
             GENERATED_PROGRAM_NAME_CONFLICT,
+            ANONYMOUS_WITNESS_DEPRECATED,
+            UNUSED_LOCAL_VARIABLE,
+            UNUSED_IMPORT,
+            UNUSED_FUNCTION,
+            UNREACHABLE_STATEMENT,
+            UNNECESSARY_MUTABLE_PROJECTION,
+            WHILE_TRUE_LOOP,
+            SHADOWED_LOCAL,
             PACKAGE_SOURCE_DIRECTORY_MISMATCH);
 
     private static final Map<DiagnosticCode, Entry> ENTRIES_BY_CODE;
@@ -198,6 +222,12 @@ public final class DiagnosticCatalog {
     private static Entry entry(final String code, final String title) {
         final var diagnosticCode = new DiagnosticCode(code);
         return new Entry(diagnosticCode, title, Severity.ERROR,
+                "errorcode/" + diagnosticCode + ".md");
+    }
+
+    private static Entry warning(final String code, final String title) {
+        final var diagnosticCode = new DiagnosticCode(code);
+        return new Entry(diagnosticCode, title, Severity.WARNING,
                 "errorcode/" + diagnosticCode + ".md");
     }
 }

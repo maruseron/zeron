@@ -66,6 +66,13 @@ public final class EffectRowDescriptor implements TypeDescriptor {
                 .filter(effect -> !removed.contains(effect)).toList(), variables);
     }
 
+    public EffectRowDescriptor withoutEffects(final Set<TypeDescriptor> removed,
+                                             final EffectSubtyping subtyping) {
+        return new EffectRowDescriptor(effects.stream()
+                .filter(effect -> !EffectRows.coveredBy(effect, List.copyOf(removed), subtyping))
+                .toList(), variables);
+    }
+
     public EffectRowDescriptor union(final EffectRowDescriptor other) {
         final var unionEffects = new ArrayList<>(effects);
         unionEffects.addAll(other.effects);
@@ -88,7 +95,16 @@ public final class EffectRowDescriptor implements TypeDescriptor {
      * variables must still be preserved by identity.
      */
     public boolean includedIn(final EffectRowDescriptor expected) {
-        if (expected.variables.isEmpty() && !expected.effects.containsAll(effects)) return false;
+        return includedIn(expected, EffectSubtyping.exact());
+    }
+
+    public boolean includedIn(final EffectRowDescriptor expected,
+                              final EffectSubtyping subtyping) {
+        if (expected.variables.isEmpty()) {
+            for (final var effect : effects) {
+                if (!EffectRows.coveredBy(effect, expected.effects, subtyping)) return false;
+            }
+        }
         return expected.variables.containsAll(variables);
     }
 

@@ -52,6 +52,10 @@ public final class NamespaceMembers {
                 members.add(new Member(namespaceName, method.implementation()));
             }
         } else if (unwrapped instanceof Stmt.ClassDecl classDeclaration) {
+            final var companionName = simpleName(classDeclaration.name().lexeme());
+            for (final var function : classDeclaration.staticFunctions()) {
+                members.add(new Member(companionName, function));
+            }
             for (final var witness : classDeclaration.higherKindedImplementations()) {
                 members.add(new Member(namespaceName, witness));
                 for (final var method : witness.methods()) {
@@ -59,6 +63,11 @@ public final class NamespaceMembers {
                 }
             }
         }
+    }
+
+    private static String simpleName(final String qualifiedName) {
+        final var separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
     }
 
     public static String qualifiedName(final String packageName, final String namespaceName,

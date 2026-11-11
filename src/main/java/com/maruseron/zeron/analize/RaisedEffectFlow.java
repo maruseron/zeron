@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
+import com.maruseron.zeron.domain.EffectRows;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.scan.Token;
 
@@ -21,8 +22,10 @@ final class RaisedEffectFlow {
 
     static void verifyCallable(final ResolutionContext context, final List<TypeDescriptor> declared,
                                final Token where) {
-        final var missing = new LinkedHashSet<>(context.frame.raisedEffects);
-        missing.removeAll(declared);
+        final var missing = new LinkedHashSet<TypeDescriptor>();
+        for (final var effect : context.frame.raisedEffects) {
+            if (!EffectRows.coveredBy(effect, declared, context.effectHierarchy)) missing.add(effect);
+        }
         if (!missing.isEmpty()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     where, "Undeclared raised effects: " + missing.stream().map(TypeDescriptor::name).collect(Collectors.joining(", ")) + ". Add them to the raises clause or handle them."));
@@ -43,8 +46,13 @@ final class RaisedEffectFlow {
                                      final Set<TypeDescriptor> enclosing,
                                      final Set<TypeDescriptor> handled,
                                      final Token where) {
-        final var remaining = new LinkedHashSet<>(context.frame.raisedEffects);
-        remaining.removeAll(handled);
+        final var handledLabels = List.copyOf(handled);
+        final var remaining = new LinkedHashSet<TypeDescriptor>();
+        for (final var effect : context.frame.raisedEffects) {
+            if (!EffectRows.coveredBy(effect, handledLabels, context.effectHierarchy)) {
+                remaining.add(effect);
+            }
+        }
         context.frame.raisedEffects = enclosing;
         add(context, remaining, where);
     }

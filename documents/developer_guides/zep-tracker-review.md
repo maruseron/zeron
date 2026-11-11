@@ -9,6 +9,45 @@
 This is a planning snapshot. It reflects the tracker and each ZEP file as of 2026-11-08. It does not
 change any proposal's status or release state by itself.
 
+## Update 2026-11-09: `0.6.0` shipped
+
+`0.6.0` was published, so all 24 rows in the candidate set below moved from `Candidate` to `Shipped`
+with release reference `0.6.0` in the [ZEP tracker](../zeps/ZEP.md). The `0.6.0` scope is unchanged:
+the release contains exactly that candidate set. ZEP-0068 remains `Accepted` and ships with its
+accepted external-name and adapter scope still open under ZEP-0091, ZEP-0097, and ZEP-0098.
+
+The candidate table below is retained as the record of the `0.6.0` bundle. The post-`0.6.0` program
+and the recommended order after it are unaffected.
+
+## Update 2026-11-09: `0.7.0` candidacy begins
+
+The first post-`0.6.0` bundle now has accepted designs:
+
+- **ZEP-0054** is `Implemented` and `Candidate` for `0.7.0`. Its library-index round trip passes
+  with no schema change, and effect payloads now take the ordinary class member model.
+- **ZEP-0013** is `Implemented` and `Candidate` for `0.7.0`. Its three open questions are resolved:
+  parent-declared members are reachable only through a parent-typed view, a late-declared
+  incomparable match is a runtime ambiguity error, and one index schema revision adds `under`
+  edges, shared with ZEP-0015, ZEP-0005, and the bounded ZEP-0104 slice. Implementation landed on
+  2026-11-09; that slice used schema 12, and the shared ZEP-0015 revision later advanced the
+  schema to 13 while the standard-library API version stayed at 12.
+- **ZEP-0100** is implemented and remains an optional co-candidate for `0.7.0`.
+- **ZEP-0015** was accepted on 2026-11-09 and is now `Implemented` as a shared applied-type
+  descriptor. The declaration ABI, hidden descriptor arguments, function-value capture, API-index
+  schema 13, separate-compilation tests, exact-test consumer, and applicable overhead rows are
+  validated in its 2026-11-10 validation matrix. It remains `Candidate` for `0.7.0`. Generic
+  effect construction and handler dispatch are not part of this implementation.
+- **ZEP-0104** was split into a bounded initial slice and four follow-on proposals. The initial
+  slice was accepted on 2026-11-09, its 2026-11-10 revision was approved, and the bounded
+  implementation landed: star views, parameter-position anonymous existentials with implicit
+  packing and hidden type parameters, and exact descriptor tests for reified values. It remains
+  `Candidate` for `0.7.0` under the recorded scope and prototype conditions. ZEP-0005 was reopened
+  on 2026-11-10 and accepted the same day with a narrower closed-applied-effect scope.
+
+`0.7.0` currently means the effect-semantics bundle plus the bounded type-bound-matching slice.
+ZEP-0015 is implemented and remains a release candidate; its applicable descriptor gates are
+closed, while generic effects remain a separate ZEP-0005 effort.
+
 ## Summary
 
 - **`0.6.0` is a stabilization bundle for work that has already landed**, not an opportunity to
@@ -28,11 +67,12 @@ change any proposal's status or release state by itself.
   They close the already-shipped annotation and serialization surfaces, but they are now queued after
   the first post-`0.6.0` program bundle below.
 - The next post-`0.6.0` program is **effect semantics and runtime identity**: ZEP-0054 and ZEP-0013
-  first, then a narrowed ZEP-0015 and ZEP-0005, with ZEP-0104 kept as research. ZEP-0100 is an
-  independent co-candidate, not part of the reification dependency chain. None of these is
-  `Candidate` yet because their designs are not accepted.
+  first, then a shared ZEP-0015 descriptor, the bounded ZEP-0104 slice, and ZEP-0005. ZEP-0100 is
+  an independent co-candidate, not part of the reification dependency chain. ZEP-0054 (implemented),
+  ZEP-0013, the bounded ZEP-0104 slice, and ZEP-0015 are now implemented `Candidate`s for
+  `0.7.0`; ZEP-0005 is accepted with a narrowed closed-application scope and no release target.
 
-## Current `0.6.0` candidate set
+## `0.6.0` candidate set (shipped)
 
 | ZEP | Name | Proposal status | Notes |
 | --- | --- | --- | --- |
@@ -83,10 +123,12 @@ changes no proposal status or release state, and it commits no release target.
 
 | Track | ZEPs | Current status | Character |
 | --- | --- | --- | --- |
-| Effect semantics | ZEP-0054, ZEP-0013 | Draft | Nominal payload capability, subtyping, and the top effect |
-| Runtime applied identity | ZEP-0015, ZEP-0005 | Draft / Deferred | Reification and generic effect payloads |
-| Type abstraction | ZEP-0104 | Draft | Research only; no shipping commitment |
+| Effect semantics | ZEP-0054, ZEP-0013 | Implemented | Nominal payload capability, subtyping, and the top effect; `Candidate` for `0.7.0` |
+| Runtime applied identity | ZEP-0015, ZEP-0005 | Implemented / Accepted | Shared reification descriptors validated and `Candidate` for `0.7.0`; generic effect payloads accepted with closed applications and no release target |
+| Type abstraction | ZEP-0104, ZEP-0105, ZEP-0106, ZEP-0107, ZEP-0108, ZEP-0109 | Accepted / Draft | Initial type-bound matching slice is `Candidate` for `0.7.0`; later existential, storage, ancestor, evidence, and rank-2 work is research |
 | Static declaration identity | ZEP-0100 | Draft | Orthogonal; useful independently of reification |
+| Witness declarations and evidence scope | ZEP-0004, ZEP-0114 | Implemented / Accepted | Named, default, and explicitly imported witnesses replace anonymous declarations; accepted with no release target |
+| Effect notation and suspension | ZEP-0110, ZEP-0111, ZEP-0112 | Draft / Implemented | Block-bodied abortive handlers, witness-dispatched do-notation, and direct-style structured concurrency; none changes `raise` or `handle` semantics |
 
 Two foundations are already implemented and should be reused, not redesigned: ZEP-0055 provides the
 `effect` kind constraint and compiler-owned runtime effect marker, and ZEP-0086 provides `effect...`
@@ -99,57 +141,140 @@ rows and the empty row `{}`. ZEP-0013 adds the top of the lattice; it does not r
 - **ZEP-0054 first.** It is independent of reification and turns effect payloads into ordinary
   nominal classes with methods, properties, and contract conformance while retaining the effect
   marker. It removes a resolver special case and makes ZEP-0013's inherited-payload rules easier.
-  Settle its open questions on member restrictions and index metadata during acceptance.
+  Member restrictions are settled (none beyond ordinary classes), and the library-index round trip
+  passed on 2026-11-09 with no schema change. Implemented and `Candidate` for `0.7.0`.
 - **ZEP-0013 second.** It adds `under` edges, inherited payload properties, `raises Effect`, the
   explicit catch-all `case Effect`, and most-specific handler selection. It needs a stable nominal
   effect identity and explicit subtype edges, not full applied-type reification, so it can land
-  before ZEP-0015.
-- **Lattice and naming.** `{}` is already the empty row and the bottom of the lattice; `Effect` is
-  the denotable top. `AnyEffect` is not defined by any current ZEP. Prefer one source-level top name
-  (`Effect`) and keep any runtime marker compiler-owned, as ZEP-0055 already does; do not introduce
-  a second public top without a distinct role. ZEP-0013 should record the decision.
+  before ZEP-0015. Implemented 2026-11-09 and `Candidate` for `0.7.0`.
 - **ZEP-0100 is orthogonal.** Callable references carry static `owner + kind + name` identity and do
   not depend on ZEP-0015. Method and constructor references can land without ZEP-0072; static
-  function references wait for it. Include ZEP-0100 in this bundle only if its design is accepted;
-  do not make either track depend on the other.
+  function references now build on the implemented ZEP-0072. Include ZEP-0100 in this bundle only if
+  its design is accepted; do not make either track depend on the other.
 
 ### Second bundle (provisional; follows the first)
 
-**ZEP-0015, then ZEP-0005.**
+**ZEP-0015, then ZEP-0104, then ZEP-0005.**
 
-- **ZEP-0015 is narrowed first.** Scope the initial design to runtime identity for applied effect
-  types: owner, type arguments, effect marker, propagation through generic calls and forwarding,
-  handler dispatch without accidental catches, library-index encoding, and measured overhead. Keep
-  general reusable applied-type identity as follow-on scope; do not start with general reflection.
-  ZEP-0055's marker proves effect-kind membership only and does not preserve applied arguments, so
-  ZEP-0015 must extend it rather than replace it.
-- **ZEP-0005 follows ZEP-0015.** Generic effect declarations and applications require the applied
-  identity descriptor. Follow ZEP-0005's own staging note: exact matching first, then integrate with
-  ZEP-0013's `under` relation. Do not block generic payloads on generic subtyping.
-- **ZEP-0005 is currently `Deferred`.** The first process step is to reopen it to `Draft`; it is not
-  part of the accepted set yet.
+- **ZEP-0015 is implemented and shared first.** It defines one internal applied-type descriptor for
+  owner, type arguments, nullability, mutability markers, arrays, generic forwarding, exact type
+  tests, and library-index encoding. The descriptor and its ZEP-0104 consumer are validated; it
+  remains `Candidate` for 0.7.0. Descriptors stay separate from contract witnesses. ZEP-0055's
+  marker proves effect-kind membership only and does not preserve applied arguments.
+- **ZEP-0104 is the initial type-abstraction slice.** It adds parameter-position bounded
+  existentials, implicit packing/capture, and exact type-bound tests against closed applied types.
+  It does not add storage, result positions, variance, ancestor matching, or contract-bound tests.
+  It is implemented and `Candidate` for 0.7.0.
+- **ZEP-0005 follows, accepted 2026-11-10.** Its first slice allows generic effect declarations
+  and exact closed applications only; it rejects applications containing type variables,
+  wildcards, omitted arguments, and applied `under`. Ancestor-aware matching waits for ZEP-0107.
+  Generic propagation and effect-variable handlers are follow-up work. Acceptance settles the
+  design but does not schedule it: it has no release target.
 
-### Research track (no release target)
+### Later and research tracks (no release target)
 
-**ZEP-0104.** Keep it `Draft` and do not nominate it for a bundle. Revisit after ZEP-0015 and
-ZEP-0005: does reification change packing and opening, are existential evidence dictionaries the
-same machinery as witnesses, and does the model-field use case justify a full feature? Only then
-write a separate accepted-scope ZEP.
+- **ZEP-0105:** pattern-scoped opening (`if (value is C<let T>)`), result positions, escape
+  approximation, variance, and projection sharing.
+- **ZEP-0106:** stored existentials and holder ABI, including the model-field use case. Compare it
+  honestly against visitors and generated per-field operations.
+- **ZEP-0107:** ancestor-aware descriptors and generic effect matching under `under`. Depends on
+  ZEP-0013, ZEP-0005, and ZEP-0015.
+- **ZEP-0108:** contract-bound runtime tests. This is evidence selection, not type identity, and is
+  deliberately independent of descriptor matching.
 
 ### Why not one bundle
 
-ZEP-0054 and ZEP-0013 deliver user-visible value without waiting for reification. ZEP-0015 and
-ZEP-0005 are research-heavy and should be gated on a bounded identity design. ZEP-0104 is
-exploration. ZEP-0100 shares the value-level identity theme but not the runtime type-descriptor
-machinery, so bundling all six would couple unrelated risks.
+ZEP-0054 and ZEP-0013 deliver user-visible value without waiting for reification. ZEP-0015 and the
+bounded ZEP-0104 slice are implemented; their applicable descriptor and exact-test gates are
+validated, so they are no longer blocked on the descriptor prototype. Generic effects remain a
+separate ZEP-0005 effort. Storage, ancestor matching, and contract-bound tests each add a different
+runtime mechanism and should not block the initial slice. ZEP-0100 shares the value-level identity
+theme but not the runtime type-descriptor machinery, so bundling all of them would couple unrelated
+risks.
 
 ### Release-state caveat
 
-None of these can move to `Candidate` yet: ZEP-0000 requires an Accepted design for a candidate or
-planned item. They remain `Unscheduled` (and ZEP-0005 remains `Deferred`) until their designs are
-accepted. Once accepted, the first bundle may be marked `Candidate` with
-`Next release (proposed)`, or with an assigned version once one is chosen. This is a priority
-change: ZEP-0091 and ZEP-0097 move behind the first bundle, not out of the plan.
+ZEP-0015, ZEP-0054, ZEP-0013, and ZEP-0104 are `Candidate` for `0.7.0`: ZEP-0000 requires an
+Accepted design, and each accepted design now satisfies that gate. ZEP-0015 and ZEP-0104 are
+implemented; their applicable descriptor and exact-test gates are validated. ZEP-0100 is
+implemented and an optional co-candidate. ZEP-0005 is accepted with no release target. This is a
+priority change: ZEP-0091 and ZEP-0097 move behind the first bundle, not out of the plan.
+
+## Design decisions recorded 2026-11-09
+
+Details live in each ZEP. No proposal status or release state changed.
+
+- **ZEP-0054:** full ordinary member model; canonical `new` plus delegating named constructors.
+- **ZEP-0013:** `under` modeled on contract conformance (children redeclare inherited payload);
+  behavior only through `is`; JVM-hierarchy representation; `Effect` is also a value type and wraps
+  host exceptions only through library constructors; canonical effect sets and row rules.
+- **ZEP-0015:** one shared internal applied-type descriptor; payload-carried for effects and
+  supplied as a hidden parameter for existential hidden types and reified variables; explicit
+  `reified` marker for exported declarations, inferred only for non-exported ones.
+- **ZEP-0005:** reopened as `Draft` on 2026-11-09 and accepted on 2026-11-10; exact matching with
+  closed, fully written applications; consumes the implemented shared descriptor. Generic
+  propagation, effect-variable handlers, and applied ancestry remain deferred. The settled points
+  are recorded below.
+- **ZEP-0100:** open questions resolved; `F` carries the declaration's `raises`; ZEP-0072 is
+  implemented, so static function references are no longer blocked on its amendment.
+- **ZEP-0072:** accepted and implemented 2026-11-09; class static functions lower to companion
+  namespace functions with no class type-parameter capture, `this`, or member-name collisions.
+- **ZEP-0104:** accepted and `Candidate` for 0.7.0. The 2026-11-10 revision replaces the former
+  `let T: Bound` binder and `?` wildcard with `F<*>` star projections and parameter-position
+  `F<: B + C>` anonymous existentials, implicit packing/capture, and exact type-bound tests against
+  closed applied types. Acceptance is conditional on one type-test mechanism, separate evidence,
+  coordinated index encoding, validation, and the ZEP-0015 descriptor ABI. General existential semantics, storage, ancestor matching, and contract-bound tests move to
+  ZEP-0105 through ZEP-0108.
+- **ZEP-0105–ZEP-0109:** later existential semantics, stored holders, ancestor-aware descriptors,
+  contract-bound runtime tests, and rank-2 polymorphic function types respectively; all `Draft` and
+  `Unscheduled`.
+- **Index schema:** ZEP-0015's descriptor schema has landed. ZEP-0005 settled that generic effect
+  declarations and closed applied `raises` entries need no schema change. A later coordinated
+  revision covers wildcard signatures and rank-2 function types; ZEP-0054 needs none.
+- **ZEP-0013 open questions (2026-11-09):** parent-declared members are reachable only through a
+  parent-typed view; a late-declared incomparable match is a runtime ambiguity error rather than an
+  order-based choice; one schema revision adds `under` edges, with the effective payload shape
+  reusing the canonical-constructor metadata already in `ClassExport`.
+
+## Design decisions recorded 2026-11-10
+
+Details live in each ZEP. No release state changed.
+
+- **ZEP-0005 accepted.** The closed-application design is approved: generic effect declarations,
+  invariant exact fully written applications, payload-carried ZEP-0015 descriptor, descriptor
+  comparison before payload binding, exact coverage plus `Effect` coverage, nominal-only `under`
+  with no generic parent, and no index-schema change. The former open questions are resolved in the
+  proposal, including handler case syntax (`case Failure<Int> as failure ->`), the fail-safe rule for
+  null or forged foreign descriptors, and duplicate normalization through the existing ordered set.
+  The proposal remains unscheduled and unimplemented.
+- **ZEP-0110–ZEP-0112 recorded** from the effect-notation discussion. ZEP-0110 adds a block form to
+  `handle` with no semantic change and stays `Draft`; ZEP-0112 defines direct-style suspension
+  through virtual threads and a structured-concurrency surface rather than `async`/`await` or
+  monadic lowering and stays `Draft`; both are `Unscheduled`. ZEP-0007 gained a mechanism analysis
+  of monadic lowering and stays `Deferred`.
+- **ZEP-0111 implemented** on 2026-11-11 as a notation-only design: `do` with `let x <- e` binds,
+  plain `let x = e` locals after the first bind, mandatory final `yield`, at least one bind, no
+  guards or `collect`, and receiver-call lowering that never names `pure`. The constructor comes
+  from the first bind because Zeron has no expected-type-directed constructor selection, so an
+  explicit `do<Option<_>>`/`do<Result<_, E>>` validates the inferred constructor instead of
+  steering inference; that narrowing, and the plain-`let` ordering limit, are recorded in the
+  proposal. `Stream` stays a valid constructor through its existing witness and `for` is
+  unchanged. Steps dispatch through the receiver's contract witness rather than a same-named
+  instance method, which also required fixing receiver-based HKT contract calls on constructor
+  parameters bounded by `Monad<F>`. The evidence gate was waived by the author because nested
+  `match` chains compose poorly. Implemented but `Unscheduled`; `DoNotationTest` covers `Option`,
+  `Result`, `Stream`, a nested cartesian chain, a bounded constructor parameter, locals, a
+  constructor mismatch, and the malformed-block diagnostics.
+- **ZEP-0114 accepted** as the replacement for anonymous witnesses. Witnesses get stable names in a
+  parallel namespace, normal visibility, `import witness` activation (including a witness-only star
+  form),  and `default` declarations that travel with their target type and require a name. Witness
+  declarations may live in any package, including for foreign type/contract pairs; the same-package
+  orphan rule is removed for every form, and only defaults stay beside their target. Fully qualified
+  type references never activate defaults, and
+  overlapping defaults stay declaration errors rather than a precedence ladder. Anonymous syntax is
+  deprecated at introduction, warns during the migration release, and is removed one release after
+  the standard library migrates; the index gains named exports and a default marker under the
+  existing one-bump-per-release-cycle rule. Accepted but unscheduled.
 
 ## Recommended order after the first program bundle
 
@@ -204,12 +329,15 @@ ZEP-0013 is not in this list: it is part of the post-`0.6.0` program above.
 
 ## Release sequencing guidance
 
-1. **`0.6.0`**: finish the current accepted candidates and reconcile status. Do not add new scope.
-2. **First post-`0.6.0` bundle (provisional)**: ZEP-0054 and ZEP-0013, with ZEP-0100 as an optional
-   co-candidate. This is the effect-semantics bundle; it does not wait for reification.
-3. **Second post-`0.6.0` bundle (provisional)**: narrowed ZEP-0015 and ZEP-0005. This is the
-   runtime-identity bundle.
-4. **Research**: ZEP-0104, with no target.
+1. **`0.6.0`**: shipped. The accepted candidates moved to `Shipped`.
+2. **`0.7.0` (effect semantics)**: ZEP-0054 and ZEP-0013, both `Candidate` for `0.7.0`, with
+   ZEP-0100 as an optional co-candidate if its design is accepted. ZEP-0054 is implemented; ZEP-0013
+   is accepted and not yet implemented. This bundle does not wait for reification.
+3. **Runtime-identity slice**: shared ZEP-0015 descriptor and bounded ZEP-0104 type-bound matching
+   are implemented and `Candidate` for 0.7.0. ZEP-0005 generic effects are accepted with a
+   closed-application scope and have no release target.
+4. **Later research**: ZEP-0105 (general existentials), ZEP-0106 (storage), ZEP-0107 (ancestor
+   matching), and ZEP-0108 (contract-bound tests), with no release target.
 5. **After the first bundle**: ZEP-0091 and ZEP-0097, then collection completion and derivation
    expansion, as listed above. These close already-shipped gaps but no longer occupy the immediate
    post-`0.6.0` slot.
@@ -234,11 +362,10 @@ ZEP-0013 is not in this list: it is part of the post-`0.6.0` program above.
   `Unscheduled`; that is not an error by itself.
 - A ZEP cannot move to `Candidate` while it is `Draft` or `Deferred`; accept the design first.
 - The post-`0.6.0` program is provisional. It records intended order, not an approved release scope.
-- Do not reuse a ZEP number. The next available number is `0105`.
+- Do not reuse a ZEP number. The next available number is `0113`.
 - Routine fixes and contained changes do not need a ZEP.
-- The release process has moved `pom.xml` and `CHANGELOG.md` to `0.6.0`. Do not treat the candidate
-  set above as shipped until the release artifact is published and the tracker rows move to
-  `Shipped`.
+- `pom.xml` and `CHANGELOG.md` record `0.6.0`, and the tracker rows for the candidate set above now
+  read `Shipped` / `0.6.0`.
 
 ## References
 

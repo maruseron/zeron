@@ -1,0 +1,90 @@
+package zeron.lang;
+
+/// The kind of callable a reference denotes.
+public type CallableKind deriving Hashable =
+      Method
+    | Static
+    | Constructor;
+
+/// Identifies a callable declaration.
+///
+/// The identity belongs to the declaring symbol: a contract method and a class method with the
+/// same name are different identities. Type arguments are not part of the identity. The compiler
+/// creates every instance, so source programs cannot fabricate an identity.
+public class CallableId deriving Eq, Hashable {
+    /// The qualified name of the declaring type.
+    public property owner: String;
+    /// The stable kind text used to form the identity.
+    private property kindName: String;
+    /// The callable's source name.
+    public property name: String;
+
+    private constructor new;
+
+    /// The declaration kind, decoded from the canonical identity text.
+    public property kind: CallableKind {
+        get =
+            if (this.kindName == "method") then CallableKind.Method()
+            else if (this.kindName == "static") then CallableKind.Static()
+            else CallableKind.Constructor();
+    }
+
+    /// Returns the identity text, `owner#kind#name`, the same text as each reference's `identity`.
+    public text(): String = this.owner + "#" + this.kindName + "#" + this.name;
+}
+
+/// A statically resolved reference to an instance or contract method.
+///
+/// References are written `Type::method`; the compiler selects the kind and creates every
+/// instance. A method reference converts implicitly to its callable function type, with the
+/// receiver as the first invocation parameter. Two references are equal (`==`) when they denote
+/// the same declaration, while `===` remains wrapper identity.
+public class MethodRef<F> is Eq<MethodRef<F>> {
+    /// The callable function value; invoking it passes the receiver as the first argument.
+    public property callable: F;
+    /// The method's source name, without its owner type.
+    public property name: String;
+    /// The method's stable identity text.
+    public property identity: String;
+    /// The method declaration this reference denotes. `id.text()` equals `identity`.
+    public property id: CallableId;
+
+    private constructor new;
+
+    /// Compares references by declaration identity.
+    public eq(other: MethodRef<F>): Boolean = this.identity == other.identity;
+}
+
+/// A statically resolved reference to a class-scoped static function.
+public class StaticMethodRef<F> is Eq<StaticMethodRef<F>> {
+    /// The callable function value; it has no receiver parameter.
+    public property callable: F;
+    /// The function's source name.
+    public property name: String;
+    /// The function's stable identity text.
+    public property identity: String;
+    /// The function declaration this reference denotes. `id.text()` equals `identity`.
+    public property id: CallableId;
+
+    private constructor new;
+
+    /// Compares references by declaration identity.
+    public eq(other: StaticMethodRef<F>): Boolean = this.identity == other.identity;
+}
+
+/// A statically resolved reference to a canonical or named constructor.
+public class ConstructorRef<F> is Eq<ConstructorRef<F>> {
+    /// The callable function value; construction returns a mutable reference.
+    public property callable: F;
+    /// The constructor's source name.
+    public property name: String;
+    /// The constructor's stable identity text.
+    public property identity: String;
+    /// The constructor declaration this reference denotes. `id.text()` equals `identity`.
+    public property id: CallableId;
+
+    private constructor new;
+
+    /// Compares references by declaration identity.
+    public eq(other: ConstructorRef<F>): Boolean = this.identity == other.identity;
+}

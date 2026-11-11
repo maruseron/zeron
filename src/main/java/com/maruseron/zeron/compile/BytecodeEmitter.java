@@ -659,6 +659,7 @@ final class BytecodeEmitter {
             case Expr.Match match -> ExpressionFlowEmitter.emitMatchExpression(context, composer, match);
             case Expr.Raise raise -> ExpressionFlowEmitter.emitRaise(context, composer, raise);
             case Expr.Handle handle -> ExpressionFlowEmitter.emitHandle(context, composer, handle);
+            case Expr.Do doExpression -> emitExpr(context, composer, doExpression.lowered());
             case Expr.HandlerLiteral handler -> emitExpr(context, composer, handler.implementation);
             case Expr.ModelLiteral model -> {
                 final var declaration = model.declaration();
@@ -760,6 +761,15 @@ final class BytecodeEmitter {
                 context.lastEmittedType = literal.getType();
             }
             case Expr.PropertyReference reference -> {
+                if (reference.isCallableReference()) {
+                    if (reference.converted()) {
+                        emitExpr(context, composer, reference.callable());
+                    } else {
+                        emitCallableReference(context, composer, reference);
+                    }
+                    context.lastEmittedType = reference.getType();
+                    break;
+                }
                 if (reference.codeModelType() != null) {
                     emitCodeModel(context, composer, reference.reader());
                     break;
@@ -1525,12 +1535,12 @@ final class BytecodeEmitter {
                 final var fixedArity = call.variadicFixedArity();
                 emitVariadicArguments(context, composer, call.arguments, runtimeType,
                         fixedArity, call.variadicElementType());
-                emitEvidenceArguments(context, composer, call.evidenceArguments());
+                emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
                 final var invokedType = call.arguments.size() < fixedArity
                         ? prefixFunctionType(runtimeType, call.arguments.size())
                         : runtimeType;
-                final var invocation = withEvidenceParameters(toJavaMethodDescriptor(invokedType),
-                        call.evidenceArguments().size());
+                final var invocation = withHiddenParameters(toJavaMethodDescriptor(invokedType),
+                        call.evidenceArguments().size(), call.reifiedArguments().size());
                 composer.invokestatic(ClassDesc.of(functionOwner),
                         functionName.substring(functionName.lastIndexOf('.') + 1),
                         invocation);
@@ -1539,10 +1549,10 @@ final class BytecodeEmitter {
                     emitExpr(context, composer, call.arguments.get(i));
                     emitConversion(context, composer, context.lastEmittedType, functionType.parameters().get(i));
                 }
-                emitEvidenceArguments(context, composer, call.evidenceArguments());
+                emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
                 final var invokedType = prefixFunctionType(runtimeType, call.arguments.size());
-                final var invocation = withEvidenceParameters(toJavaMethodDescriptor(invokedType),
-                        call.evidenceArguments().size());
+                final var invocation = withHiddenParameters(toJavaMethodDescriptor(invokedType),
+                        call.evidenceArguments().size(), call.reifiedArguments().size());
                 composer.invokestatic(ClassDesc.of(functionOwner),
                         functionName.substring(functionName.lastIndexOf('.') + 1),
                         invocation);
@@ -1726,6 +1736,49 @@ final class BytecodeEmitter {
         final var parameters = new ClassDesc[count];
         java.util.Arrays.fill(parameters, ClassDesc.of("java.lang.invoke.MethodHandle"));
         return methodType.insertParameterTypes(methodType.parameterCount(), parameters);
+    }
+
+    static MethodTypeDesc withHiddenParameters(final MethodTypeDesc methodType,
+                                               final int evidenceCount,
+                                               final int reifiedCount) {
+        return withReifiedParameters(withEvidenceParameters(methodType, evidenceCount), reifiedCount);
+    }
+
+    static MethodTypeDesc withReifiedParameters(final MethodTypeDesc methodType,
+                                                final int count) {
+        if (count == 0) return methodType;
+        final var parameters = new ClassDesc[count];
+        java.util.Arrays.fill(parameters, RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS);
+        return methodType.insertParameterTypes(methodType.parameterCount(), parameters);
+    }
+
+    static List<Token> reifiedSlots(final FunctionDescriptor functionType) {
+        return RuntimeTypeDescriptorEmitter.reifiedSlots(functionType.typeParameters());
+    }
+
+    static List<Token> reifiedSlots(final List<TypeParameterDescriptor> typeParameters) {
+        return RuntimeTypeDescriptorEmitter.reifiedSlots(typeParameters);
+    }
+
+    static void declareReifiedSlots(final CompilationContext context, final Stmt declaration,
+                                    final List<TypeParameterDescriptor> typeParameters) {
+        for (final var token : reifiedSlots(typeParameters)) {
+            context.symbols.declareSymbol(declaration, token,
+                    RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE, BindingMutability.IMMUTABLE);
+            context.symbols.define(token);
+        }
+    }
+
+    static void emitReifiedArguments(final CompilationContext context, final CodeBuilder composer,
+                                     final List<TypeDescriptor> arguments) {
+        RuntimeTypeDescriptorEmitter.emitArguments(context, composer, arguments);
+    }
+
+    static void emitHiddenArguments(final CompilationContext context, final CodeBuilder composer,
+                                    final List<Expr.EvidenceArgument> evidenceArguments,
+                                    final List<TypeDescriptor> reifiedArguments) {
+        emitEvidenceArguments(context, composer, evidenceArguments);
+        emitReifiedArguments(context, composer, reifiedArguments);
     }
 
     static void emitEvidenceUnavailable(final CodeBuilder composer) {
@@ -2012,14 +2065,14 @@ final class BytecodeEmitter {
                 emitConversion(context, composer, context.lastEmittedType,
                         TypeSubstitution.erase(factoryType.parameters().get(i + receiverOffset)));
             }
-            emitEvidenceArguments(context, composer, call.evidenceArguments());
+            emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
             final var erasedParameters = factoryType.parameters().stream()
                     .map(TypeSubstitution::erase)
                     .map(TypeDescriptor::toJavaClassDesc).toList();
             composer.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
-                    withEvidenceParameters(
+                    withHiddenParameters(
                             MethodTypeDesc.of(ConstantDescs.CD_Object, erasedParameters),
-                            call.evidenceArguments().size()));
+                            call.evidenceArguments().size(), call.reifiedArguments().size()));
             emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"),
                     TypeSubstitution.erase(factoryType.returnType()));
             context.lastEmittedType = factoryType.returnType();
@@ -2040,10 +2093,10 @@ final class BytecodeEmitter {
                         TypeSubstitution.erase(helperType.parameters().get(
                                 index + (call.witnessMethodHasReceiver() ? 1 : 0))));
             }
-            emitEvidenceArguments(context, composer, call.evidenceArguments());
+            emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
             composer.invokestatic(ClassDesc.of(owner), call.witnessMethodName(),
-                    withEvidenceParameters(toJavaMethodDescriptor(helperType),
-                            call.evidenceArguments().size()));
+                    withHiddenParameters(toJavaMethodDescriptor(helperType),
+                            call.evidenceArguments().size(), call.reifiedArguments().size()));
             emitConversion(context, composer,
                     TypeSubstitution.erase(helperType.returnType()), call.getType());
             context.lastEmittedType = call.getType();
@@ -2085,6 +2138,12 @@ final class BytecodeEmitter {
             final var parameters = constructorTypes.stream()
                     .map(type -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(type)))
                     .toList();
+            if (declaration.isEffect()
+                    && context.resolution.isStatelessEffect(call.resolvedClassName())) {
+                composer.invokestatic(classDesc, "new", MethodTypeDesc.of(classDesc), true);
+                context.lastEmittedType = call.getType();
+                return;
+            }
             composer.new_(classDesc);
             composer.dup();
             for (int i = 0; i < call.arguments.size(); i++) {
@@ -2092,10 +2151,10 @@ final class BytecodeEmitter {
                 emitConversion(context, composer, context.lastEmittedType,
                         TypeSubstitution.erase(constructorTypes.get(i)));
             }
-            emitEvidenceArguments(context, composer, call.evidenceArguments());
+            emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
             composer.invokespecial(classDesc, "<init>",
-                    withEvidenceParameters(MethodTypeDesc.of(ConstantDescs.CD_void, parameters),
-                            call.evidenceArguments().size()));
+                    withHiddenParameters(MethodTypeDesc.of(ConstantDescs.CD_void, parameters),
+                            call.evidenceArguments().size(), call.reifiedArguments().size()));
             context.lastEmittedType = call.getType();
             return;
         }
@@ -2124,10 +2183,10 @@ final class BytecodeEmitter {
                             TypeSubstitution.erase(namedConstructor.typeDescriptor().parameters().get(i)));
                     }
                 }
-                emitEvidenceArguments(context, composer, call.evidenceArguments());
+                emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
                 composer.invokestatic(ClassDesc.of(call.resolvedClassName()), call.name.lexeme(),
-                    withEvidenceParameters(toJavaMethodDescriptor(erasedFactory),
-                            call.evidenceArguments().size()));
+                    withHiddenParameters(toJavaMethodDescriptor(erasedFactory),
+                            call.evidenceArguments().size(), call.reifiedArguments().size()));
                 final var erasedReturnType = TypeSubstitution.erase(namedConstructor.typeDescriptor().returnType());
                 emitConversion(context, composer, erasedReturnType, call.getType());
                 context.lastEmittedType = call.getType();
@@ -2175,14 +2234,14 @@ final class BytecodeEmitter {
                     TypeSubstitution.erase(descriptor.parameters().get(i)));
             }
         }
-        emitEvidenceArguments(context, composer, call.evidenceArguments());
+        emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
         final var invokedType = call.variadicElementType() != null
                 ? call.arguments.size() < call.variadicFixedArity()
                     ? prefixFunctionType(runtimeType, call.arguments.size())
                     : runtimeType
                 : prefixFunctionType(descriptor, call.arguments.size());
-        final var methodType = withEvidenceParameters(toJavaMethodDescriptor(invokedType),
-                call.evidenceArguments().size());
+        final var methodType = withHiddenParameters(toJavaMethodDescriptor(invokedType),
+                call.evidenceArguments().size(), call.reifiedArguments().size());
         if (contractMethod != null) {
             composer.invokeinterface(ClassDesc.of(ownerName), call.name.lexeme(),
                     methodType);
@@ -2193,8 +2252,8 @@ final class BytecodeEmitter {
             bridgeParameters.add(TypeDescriptor.of(ownerName));
             bridgeParameters.addAll(erasedDescriptor.parameters());
             composer.invokestatic(ClassDesc.of(ownerName), NominalTypeEmitter.lambdaMethodBridge(call.name.lexeme()),
-                    withEvidenceParameters(toJavaMethodDescriptor(erasedDescriptor, bridgeParameters),
-                            call.evidenceArguments().size()));
+                    withHiddenParameters(toJavaMethodDescriptor(erasedDescriptor, bridgeParameters),
+                            call.evidenceArguments().size(), call.reifiedArguments().size()));
         } else if (!classMethod.isPublic() && !context.emittingLambdaImplementation) {
             composer.invokespecial(ClassDesc.of(ownerName), call.name.lexeme(),
                     methodType);
@@ -2338,15 +2397,15 @@ final class BytecodeEmitter {
                         sourceType.parameters().get(i + 1));
             }
         }
-        emitEvidenceArguments(context, composer, call.evidenceArguments());
+        emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
         final var invokedType = call.variadicElementType() != null
                 ? call.arguments.size() < call.variadicFixedArity()
                     ? prefixFunctionType(runtimeType, call.arguments.size() + 1)
                     : runtimeType
                 : prefixFunctionType(runtimeType, call.arguments.size() + 1);
         composer.invokestatic(ClassDesc.of(owner), extension.name().lexeme(),
-                withEvidenceParameters(toJavaMethodDescriptor(invokedType),
-                        call.evidenceArguments().size()));
+                withHiddenParameters(toJavaMethodDescriptor(invokedType),
+                        call.evidenceArguments().size(), call.reifiedArguments().size()));
         emitConversion(context, composer, runtimeType.returnType(), call.getType());
         context.lastEmittedType = call.getType();
     }
@@ -3188,6 +3247,40 @@ final class BytecodeEmitter {
     static TypeDescriptor propertyReferenceReaderType() {
         return TypeDescriptor.functionOf("", TypeDescriptor.ofName("java.lang.Object"),
                 TypeDescriptor.ofName("java.lang.Object"));
+    }
+
+    private static void emitCallableReference(final CompilationContext context,
+                                              final CodeBuilder composer,
+                                              final Expr.PropertyReference reference) {
+        final var declaredName = reference.callableToken().lexeme();
+        final var kindText = switch (reference.callableKind()) {
+            case METHOD -> "method";
+            case STATIC -> "static";
+            case CONSTRUCTOR -> "constructor";
+        };
+        final var wrapper = switch (reference.callableKind()) {
+            case METHOD -> ClassDesc.of(SyntheticNames.METHOD_REF_TYPE);
+            case STATIC -> ClassDesc.of(SyntheticNames.STATIC_METHOD_REF_TYPE);
+            case CONSTRUCTOR -> ClassDesc.of(SyntheticNames.CONSTRUCTOR_REF_TYPE);
+        };
+        final var factory = switch (reference.callableKind()) {
+            case METHOD -> SyntheticNames.METHOD_REF_FACTORY;
+            case STATIC -> SyntheticNames.STATIC_METHOD_REF_FACTORY;
+            case CONSTRUCTOR -> SyntheticNames.CONSTRUCTOR_REF_FACTORY;
+        };
+        emitExpr(context, composer, reference.callable());
+        composer.ldc(declaredName);
+        composer.ldc(reference.identity());
+        composer.ldc(reference.declaringTypeName());
+        composer.ldc(kindText);
+        composer.ldc(declaredName);
+        composer.invokestatic(ClassDesc.of(SyntheticNames.CALLABLE_ID_TYPE),
+                SyntheticNames.CALLABLE_ID_FACTORY,
+                MethodTypeDesc.of(ClassDesc.of(SyntheticNames.CALLABLE_ID_TYPE),
+                        ConstantDescs.CD_String, ConstantDescs.CD_String, ConstantDescs.CD_String));
+        composer.invokestatic(wrapper, factory,
+                MethodTypeDesc.of(wrapper, ConstantDescs.CD_Object, ConstantDescs.CD_String,
+                        ConstantDescs.CD_String, ClassDesc.of(SyntheticNames.CALLABLE_ID_TYPE)));
     }
 
     private static boolean isErasedContractProjection(CompilationContext context, final TypeDescriptor targetType,

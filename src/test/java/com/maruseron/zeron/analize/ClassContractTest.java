@@ -1288,9 +1288,9 @@ public final class ClassContractTest {
         final var result = new ResolutionService().resolveWithDiagnostics(parse(source));
 
         assertTrue(result.errors().toString(), result.errors().stream().anyMatch(diagnostic ->
-                diagnostic.message().contains("Contract 'Numeric<T>' requires 'add(T) -> T'")
+                diagnostic.message().contains("Contract 'Numeric<T>' requires 'add T -> T'")
                         && diagnostic.message().contains(
-                                "public 'add(Vector2<T>) -> Vector2<T>'")));
+                                "public 'add Vector2<T> -> Vector2<T>'")));
     }
 
     @Test

@@ -162,6 +162,75 @@ the property itself is accessible.
 Note that `::` keeps its existing meaning after a function name: `parse::<Int>` specializes a
 generic function, while `User::name` denotes a property.
 
+## Callable references
+
+When a name after `::` is not a property, it can denote an instance or contract method, a
+constructor, or a class-scoped static function:
+
+```zeron
+public class User {
+    public property name: String;
+    public constructor new;
+    public constructor from(name: String) = User.new(name);
+
+    public label(): String = this.name;
+
+    public mut rename(name: String): Unit {
+        this.name = name;
+    }
+
+    public static fn anonymous(): User = User.new("anonymous");
+}
+
+let label: MethodRef<User -> String> = User::label;
+let rename: MethodRef<(&User, String) -> Unit> = User::rename;
+let construct: ConstructorRef<(String) -> &User> = User::from;
+let anonymous: StaticMethodRef<() -> &User> = User::anonymous;
+```
+
+A method reference's function type includes the receiver as its first parameter. The receiver is
+read-only unless the method is `mut`, in which case it is a mutable reference. A constructor
+reference has no receiver and returns a mutable reference; `Type::new` and named constructors
+share `ConstructorRef<F>`. A static function reference has no receiver, and its declaring class
+appears only in the identity.
+
+Each reference exposes `name`, `identity`, `id`, and the underlying `callable` function value:
+
+| Member | Meaning |
+| ------ | ------- |
+| `callable: F` | The function value; invoking it supplies the receiver first for methods |
+| `name: String` | The method, constructor, or static function name |
+| `identity: String` | Stable declaration identity, such as `"example.User#method#label"` |
+| `id: CallableId` | The identity as a value; `id.text()` equals `identity` |
+
+`CallableId` has `owner`, `name`, and a `kind` of `CallableKind.Method`,
+`CallableKind.Static`, or `CallableKind.Constructor`. Type arguments are not part of an identity,
+so `Box<Int>::value` and `Box<String>::value` denote the same declaration where applicable. Two
+references are equal when their identities match, even across separately compiled libraries.
+
+A reference also converts implicitly to its function type, so it can be passed wherever a function
+of that shape is expected:
+
+```zeron
+let read: User -> String = User::label;
+let make: (String) -> &User = User::from;
+```
+
+A contract reference uses the contract as its declaring symbol and dispatches virtually:
+`Named::name` reads through the contract even when the value is a concrete implementation.
+
+A generic callable is specialized with the existing `::<...>` form, or from a fully constraining
+expected function type:
+
+```zeron
+let map: (Box<Int>, (Int) -> Int) -> Int = Box<Int>::map::<Int>;
+```
+
+Without either source of type arguments, the reference is rejected. Bound references such as
+`user::label`, extension and witness methods, and static contract requirements do not form
+callable references; write a lambda instead. A callable reference is a constant, so a model can
+assign a constructor reference to a parent-contract property.
+
 ## Receiver functions
 
 A receiver function adds a typed receiver context to a function value. Write the receiver type

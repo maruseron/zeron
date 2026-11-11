@@ -68,6 +68,8 @@ public final class AnsiSyntaxHighlighter {
             case "string" -> followsSuffixStringInput(tokens, index);
             case "out" -> isTypeProjection(tokens, index);
             case "nullable" -> isGenericAdmissibilityMarker(tokens, index);
+            case "where" -> followsNewtypeRepresentation(tokens, index);
+            case "matches" -> isMatchesOperator(tokens, index);
             case "implementation" -> followsHigherKindedImplementation(tokens, index);
             case "delegating" -> followsDelegatingDeclaration(tokens, index);
             default -> false;
@@ -161,6 +163,46 @@ public final class AnsiSyntaxHighlighter {
             case CLASS, CONTRACT, EFFECT, FN, TYPE -> true;
             default -> false;
         };
+    }
+
+    private static boolean followsNewtypeRepresentation(final List<Token> tokens, final int index) {
+        final var previous = previousSignificantIndex(tokens, index);
+        if (previous < 0 || tokens.get(previous).type() != TokenType.IDENTIFIER) return false;
+        return switch (tokens.get(previous).lexeme()) {
+            case "Int", "Float", "Boolean", "String" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isMatchesOperator(final List<Token> tokens, final int index) {
+        final var previous = previousSignificantIndex(tokens, index);
+        final var next = nextSignificantIndex(tokens, index);
+        if (previous < 0 || next < 0) return false;
+        final var previousType = tokens.get(previous).type();
+        final var previousEndsExpression = previousType == TokenType.IDENTIFIER
+                || previousType == TokenType.THIS
+                || previousType == TokenType.RIGHT_PAREN
+                || previousType == TokenType.RIGHT_BRACKET
+                || previousType == TokenType.INT
+                || previousType == TokenType.LONG
+                || previousType == TokenType.DOUBLE
+                || previousType == TokenType.SUFFIXABLE_NUMBER
+                || previousType == TokenType.STRING
+                || previousType == TokenType.CHAR
+                || previousType == TokenType.TRUE
+                || previousType == TokenType.FALSE
+                || previousType == TokenType.NULL;
+        if (!previousEndsExpression) return false;
+        final var nextType = tokens.get(next).type();
+        return nextType == TokenType.IDENTIFIER
+                || nextType == TokenType.MINUS
+                || nextType == TokenType.INT
+                || nextType == TokenType.LONG
+                || nextType == TokenType.DOUBLE
+                || nextType == TokenType.STRING
+                || nextType == TokenType.CHAR
+                || nextType == TokenType.TRUE
+                || nextType == TokenType.FALSE;
     }
 
     private static boolean isTypeProjection(final List<Token> tokens, final int index) {
@@ -310,7 +352,7 @@ public final class AnsiSyntaxHighlighter {
                     EFFECT, EXTENSION, EXTERNAL, FN, FOR, HANDLE, IF, IMPLEMENT, IMPORT,
                     IN, IS, LET, LOOP, MATCH, MUT, NOT, NAMESPACE, OR, PACKAGE, PATTERN,
                     OBJECT, PRIVATE, PROPERTY, PUBLIC, RAISE, RAISES, RETURN, SEALED, STATIC,
-                    THEN, THIS, THROWS, TYPE, TYPEOF, UNTIL, USING, WITNESS, WHILE -> "35";
+                    THEN, THIS, THROWS, TYPE, TYPEOF, UNTIL, UNDER, USING, WITNESS, WHILE -> "35";
             case LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE, LEFT_BRACKET, RIGHT_BRACKET,
                     COMMA, SEMICOLON, TILDE, DOT, DOT_DOT, ELLIPSIS, COLON, COLON_COLON,
                     MINUS, MINUS_EQUAL, ARROW, PLUS, PLUS_EQUAL, PERCENT, PERCENT_EQUAL,

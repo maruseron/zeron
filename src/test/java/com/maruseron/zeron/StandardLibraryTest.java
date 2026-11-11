@@ -1131,6 +1131,7 @@ public final class StandardLibraryTest {
                 import zeron.collections.ArrayList;
                 import zeron.collections.Stream;
                 import zeron.control.Foldable;
+                import witness zeron.collections.ArrayFoldable;
                 import zeron.control.Functor;
                 import zeron.control.Monad;
                 import zeron.function.identity;

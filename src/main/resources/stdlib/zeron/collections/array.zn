@@ -35,7 +35,9 @@ public extension<T: mut> Array<T> {
     }
 }
 
-witness Foldable<Array<_>> for Array<_> {
+/// Canonical `Foldable` evidence for intrinsic arrays. This remains an explicitly imported
+/// witness: making it a default would hide the cost of evidence handling from array users.
+public witness ArrayFoldable: Foldable<Array<_>> for Array<_> {
     fn foldLeft<A: mut, B: mut>(this: Array<A>, initial: B, combine: (B, A) -> B): B =
         this.foldLeft(initial, combine);
 }

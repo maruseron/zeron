@@ -64,36 +64,9 @@ final class CompilationMetadata {
                         functionOwners.putIfAbsent(method.helperQualifiedName(), method.helperJvmOwner());
                     }
                 }
-                for (final var unit : units) {
-                    if (!unit.metadataOnly()) continue;
-                    for (final var member : NamespaceMembers.flatten(unit.declarations())) {
-                        if (!(member.declaration() instanceof Stmt.FunctionDeclaration function)) continue;
-                        final var qualifiedName = member.namespaceName() == null
-                                ? qualifiedName(unit.packageName(), function.name().lexeme())
-                                : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
-                                        function.name().lexeme());
-                        final var owner = libraries.stream().flatMap(libraryIndex -> libraryIndex.declarations().stream())
-                                .filter(export -> export.qualifiedName().equals(qualifiedName))
-                                .filter(export -> switch (export) {
-                                    case ZeronLibraryIndex.FunctionExport functionExport ->
-                                            !(function instanceof Stmt.ExtensionMethod)
-                                                    && functionExport.signature().equals(function.typeDescriptor());
-                                    case ZeronLibraryIndex.ExtensionExport extensionExport ->
-                                            function instanceof Stmt.ExtensionMethod
-                                                    && extensionExport.signature().equals(function.typeDescriptor());
-                                    default -> false;
-                                })
-                                .map(export -> switch (export) {
-                                    case ZeronLibraryIndex.FunctionExport functionExport -> functionExport.jvmOwner();
-                                    case ZeronLibraryIndex.ExtensionExport extensionExport -> extensionExport.jvmOwner();
-                                    default -> null;
-                                })
-                                .findFirst().orElse(null);
-                        if (owner != null) declarationOwners.put(function, owner);
-                    }
-                }
             }
         }
+        indexLibraryFunctionOwners(units, libraries);
         for (final var unit : units) {
             if (!unit.metadataOnly()) continue;
             for (final var member : NamespaceMembers.flatten(unit.declarations())) {
@@ -108,6 +81,49 @@ final class CompilationMetadata {
                 if (initializationOwner != null) {
                     initializationOwners.put(variable, initializationOwner);
                 }
+            }
+        }
+    }
+
+    private void indexLibraryFunctionOwners(final List<CompilationUnit> units,
+                                            final List<ZeronLibraryIndex> libraries) {
+        if (libraries.isEmpty()) return;
+        final var exportsByQualifiedName = new HashMap<String, List<ZeronLibraryIndex.ExportedDeclaration>>();
+        for (final var library : libraries) {
+            for (final var declaration : library.declarations()) {
+                if (declaration instanceof ZeronLibraryIndex.FunctionExport
+                        || declaration instanceof ZeronLibraryIndex.ExtensionExport) {
+                    exportsByQualifiedName
+                            .computeIfAbsent(declaration.qualifiedName(), _ -> new ArrayList<>())
+                            .add(declaration);
+                }
+            }
+        }
+        for (final var unit : units) {
+            if (!unit.metadataOnly()) continue;
+            for (final var member : NamespaceMembers.flatten(unit.declarations())) {
+                if (!(member.declaration() instanceof Stmt.FunctionDeclaration function)) continue;
+                final var qualifiedName = member.namespaceName() == null
+                        ? qualifiedName(unit.packageName(), function.name().lexeme())
+                        : NamespaceMembers.qualifiedName(unit.packageName(), member.namespaceName(),
+                                function.name().lexeme());
+                final var owner = exportsByQualifiedName.getOrDefault(qualifiedName, List.of()).stream()
+                        .filter(export -> switch (export) {
+                            case ZeronLibraryIndex.FunctionExport functionExport ->
+                                    !(function instanceof Stmt.ExtensionMethod)
+                                            && functionExport.signature().equals(function.typeDescriptor());
+                            case ZeronLibraryIndex.ExtensionExport extensionExport ->
+                                    function instanceof Stmt.ExtensionMethod
+                                            && extensionExport.signature().equals(function.typeDescriptor());
+                            default -> false;
+                        })
+                        .map(export -> switch (export) {
+                            case ZeronLibraryIndex.FunctionExport functionExport -> functionExport.jvmOwner();
+                            case ZeronLibraryIndex.ExtensionExport extensionExport -> extensionExport.jvmOwner();
+                            default -> null;
+                        })
+                        .findFirst().orElse(null);
+                if (owner != null) declarationOwners.put(function, owner);
             }
         }
     }

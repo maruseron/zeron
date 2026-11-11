@@ -874,7 +874,8 @@ final class ExpressionFlowEmitter {
         composer.invokevirtual(carrier, "payload", MethodTypeDesc.of(ConstantDescs.CD_Object));
         storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
 
-        for (final var arm : handle.arms) {
+        final var orderedArms = orderedHandlerArms(context, handle.arms);
+        for (final var arm : orderedArms) {
             final var next = composer.newLabel();
             beginScope(context);
             try {
@@ -894,6 +895,7 @@ final class ExpressionFlowEmitter {
                     emitExpr(context, composer, arm.guard());
                     composer.ifeq(next);
                 }
+                emitAmbiguousEffectCheck(context, composer, arm, orderedArms, payload);
                 emitExpr(context, composer, arm.expression());
                 emitConversion(context, composer, context.lastEmittedType, handle.getType());
             } finally {
@@ -910,6 +912,59 @@ final class ExpressionFlowEmitter {
         composer.exceptionCatch(start, end, handler, carrier);
         endScope(context);
         context.lastEmittedType = handle.getType();
+    }
+
+    /// Orders handler cases most-specific first, independent of source order. Incomparable cases
+    /// keep their relative order; their overlap is reported as an ambiguity.
+    private static List<Expr.HandleArm> orderedHandlerArms(final CompilationContext context,
+                                                          final List<Expr.HandleArm> arms) {
+        final var ordered = new ArrayList<>(arms);
+        ordered.sort((left, right) -> {
+            if (left == right) return 0;
+            if (context.resolution.isEffectSubtype(
+                    left.resolvedEffectType(), right.resolvedEffectType())) return -1;
+            if (context.resolution.isEffectSubtype(
+                    right.resolvedEffectType(), left.resolvedEffectType())) return 1;
+            return 0;
+        });
+        return ordered;
+    }
+
+    /// Emits the late-library ambiguity guard: when a payload matches an incomparable case that
+    /// was declared outside the hierarchy visible at compile time, dispatch aborts instead of
+    /// choosing by source or import order.
+    private static void emitAmbiguousEffectCheck(final CompilationContext context,
+                                                 final CodeBuilder composer,
+                                                 final Expr.HandleArm arm,
+                                                 final List<Expr.HandleArm> ordered,
+                                                 final Bind payload) {
+        final var own = erasedNominal(arm.resolvedEffectType());
+        if (own == null) return;
+        for (final var other : ordered) {
+            if (other == arm) continue;
+            final var otherNominal = erasedNominal(other.resolvedEffectType());
+            if (otherNominal == null || otherNominal.equals(own)) continue;
+            if (context.resolution.isEffectSubtype(own, otherNominal)
+                    || context.resolution.isEffectSubtype(otherNominal, own)) continue;
+            final var notAmbiguous = composer.newLabel();
+            loadPipelineValue(context, composer, payload, TypeDescriptor.ofAny());
+            composer.instanceOf(TypeDescriptor.toJavaClassDesc(otherNominal));
+            composer.ifeq(notAmbiguous);
+            loadPipelineValue(context, composer, payload, TypeDescriptor.ofAny());
+            composer.ldc(own.name());
+            composer.ldc(otherNominal.name());
+            composer.invokestatic(ClassDesc.of("zeron.runtime.EffectSupport"), "ambiguousEffect",
+                    MethodTypeDesc.of(ClassDesc.of("java.lang.RuntimeException"),
+                            ConstantDescs.CD_Object, ConstantDescs.CD_String, ConstantDescs.CD_String));
+            composer.athrow();
+            composer.labelBinding(notAmbiguous);
+        }
+    }
+
+    private static NominalDescriptor erasedNominal(final TypeDescriptor type) {
+        var erased = TypeSubstitution.erase(type);
+        if (erased instanceof ReferenceDescriptor reference) erased = reference.baseType();
+        return erased instanceof NominalDescriptor nominal ? nominal : null;
     }
 
     private static void emitHandlerApplication(final CompilationContext context,
@@ -970,7 +1025,8 @@ final class ExpressionFlowEmitter {
         storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
         final var done = composer.newLabel();
 
-        for (final var arm : arms) {
+        final var orderedArms = orderedHandlerArms(context, arms);
+        for (final var arm : orderedArms) {
             final var next = composer.newLabel();
             beginScope(context);
             try {
@@ -990,6 +1046,7 @@ final class ExpressionFlowEmitter {
                     emitExpr(context, composer, arm.guard());
                     composer.ifeq(next);
                 }
+                emitAmbiguousEffectCheck(context, composer, arm, orderedArms, payload);
                 emitExpr(context, composer, arm.expression());
                 emitConversion(context, composer, context.lastEmittedType, resultType);
             } finally {
@@ -1017,6 +1074,8 @@ final class ExpressionFlowEmitter {
             composer.labelBinding(matched);
             composer.iconst_1();
             composer.labelBinding(done);
+        } else if (test.isExactDescriptorTest()) {
+            emitExactDescriptorTest(context, composer, test.value.getType(), test.resolvedTargetType());
         } else if (test.resolvedTargetType() instanceof CharDescriptor) {
             composer.invokestatic(ClassDesc.of("zeron.runtime.StringUnicode"), "isCharValue",
                     MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
@@ -1024,6 +1083,28 @@ final class ExpressionFlowEmitter {
             composer.instanceOf(runtimeTypeTestClass(context, test.resolvedTargetType()));
         }
         context.lastEmittedType = TypeDescriptor.ofBoolean();
+    }
+
+    private static void emitExactDescriptorTest(final CompilationContext context,
+                                                final CodeBuilder composer,
+                                                final TypeDescriptor sourceType,
+                                                final TypeDescriptor targetType) {
+        final var failed = composer.newLabel();
+        final var done = composer.newLabel();
+        composer.dup();
+        composer.ifnull(failed);
+        composer.pop();
+        var source = sourceType;
+        while (source instanceof NullableDescriptor nullable) source = nullable.baseType();
+        RuntimeTypeDescriptorEmitter.emit(context, composer, source);
+        RuntimeTypeDescriptorEmitter.emit(context, composer, targetType);
+        composer.invokevirtual(RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS, "equals",
+                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
+        composer.goto_(done);
+        composer.labelBinding(failed);
+        composer.pop();
+        composer.iconst_0();
+        composer.labelBinding(done);
     }
 
     static void emitSumCaseTest(final CompilationContext context, final CodeBuilder composer,

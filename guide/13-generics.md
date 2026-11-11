@@ -152,11 +152,85 @@ argument as a separate runtime class. This is called **type erasure**. For examp
 `ArrayList<String>` are both represented at runtime by the same `ArrayList` class; `Array<T>` is represented
 as an array of JVM references.
 
-As a result, generic code cannot ask at runtime which concrete type was used for `T`. The type
-parameter preserves type relationships while Zeron checks the program, but it does not give the
-program a runtime type value to inspect. Also, writing `T` alone does not say which operations are
-available on values of that type; a generic function can only use operations justified by its
-declaration. Later chapters explain how to describe such requirements.
+As a result, generic code cannot ask at runtime which concrete type was used for `T` unless the
+declaration opts in with the `reified` marker. The type parameter preserves type relationships
+while Zeron checks the program, but it does not give the program a runtime type value to inspect.
+Also, writing `T` alone does not say which operations are available on values of that type; a
+generic function can only use operations justified by its declaration. Later chapters explain how
+to describe such requirements.
+
+## Star views and anonymous existentials
+
+A star view is a read-only view of an unknown type argument. `Box<*>` is exactly
+`Box<out Any?>`, so it adds no new type variable and supports no exact type test. The class must
+admit the `Any?` projection argument, just as it would for the explicit projection:
+
+```zeron
+public class Box<T: nullable> {
+    public property value: T;
+    public constructor new;
+}
+
+fn read(box: Box<*>): Any? = box.value;
+```
+
+When a parameter needs a specific, unknown argument with inherited contract evidence, write an
+anonymous existential with `<: ...>`:
+
+```zeron
+public contract Render {
+    render(): String;
+}
+
+fn describe(box: Box<: Render>): String = box.value.render();
+```
+
+At the call site the compiler implicitly packs the argument and infers the hidden type. The hidden
+type does not appear in the source signature and does not consume an explicit call-site type
+argument. Since `describe` chooses a different hidden type for each call, its second `Box`
+parameter would be unrelated unless it shares a named type parameter: `fn compare(a: Box<: Render>,
+ordered: Box<: Render>)` does not say the two arguments contain the same type.
+
+Anonymous existentials are limited to direct arguments of the outermost applied parameter type of
+a declared function, method, or contract method. They are rejected in variables, fields, results,
+receivers, arrays, nested arguments, lambda parameters, and function-type parameters. `Array<*>` is
+also rejected because arrays do not accept projections.
+
+Add `reified` when the hidden argument needs a runtime descriptor. Reified type parameters and
+hidden arguments support exact applied-type tests:
+
+```zeron
+fn isIntBox<T: reified>(value: T): Boolean = value is Box<Int>;
+fn isReifiedIntBox(box: Box<: reified>): Boolean = box is Box<Int>;
+```
+
+An exact test compares applied type descriptors, including array elements and nullable or mutable
+markers. A null source is false. The test is available only when the source actually carries a
+descriptor; an erased or projected source keeps the existing static generic test rules. Stored and
+result-position existentials, scoped opening, and runtime contract-bound tests are separate
+proposals.
+
+## Runtime type descriptors
+
+A type parameter marked `reified` receives a runtime descriptor for its type argument. A reified
+parameter can be forwarded to another declaration that requires runtime identity:
+
+```zeron
+public fn identity<T: reified>(value: T): T = value;
+public fn relay<T: reified>(value: T): T = identity(value);
+```
+
+The marker is part of the declaration's ABI. Exported declarations must state it explicitly, so a
+signature always determines which hidden descriptor arguments its implementation receives.
+Private and local declarations infer the marker transitively from calls that require a descriptor.
+At a call site with concrete types the compiler passes an interned constant; when the argument is
+another reified type parameter it forwards the descriptor directly. Nested applications, arrays,
+and nullability or mutability markers compose into a descriptor at the call site.
+
+Class and contract type parameters cannot be reified, because instances and contract dispatch do
+not carry those descriptors in this version. Effects also remain non-generic; generic effect
+payloads are a separate proposal. Exact applied-type tests use the descriptor of a reified value or
+type parameter, as described above.
 
 ## Naming conventions
 

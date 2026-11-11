@@ -1,0 +1,5 @@
+package java.lang;
+
+public external class Exception = "java.lang.Exception" {
+    public constructor new(message: String);
+}

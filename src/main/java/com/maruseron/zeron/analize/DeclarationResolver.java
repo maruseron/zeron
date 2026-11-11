@@ -24,6 +24,15 @@ final class DeclarationResolver {
         }
     }
 
+    private static void rejectReifiedTypeParameters(final List<TypeParameterDescriptor> parameters,
+                                                     final Token where) {
+        for (final var parameter : parameters) {
+            if (!parameter.isReified()) continue;
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                    where, "Class and contract type parameters cannot be reified."));
+        }
+    }
+
     static void resolveProduct(final ResolutionContext context, final Stmt.ProductDecl product) {
         if (context.products.get(product.name().lexeme()) != product) return;
         final var declaration = context.classes.get(product.name().lexeme());
@@ -39,6 +48,7 @@ final class DeclarationResolver {
     }
 
     static void resolveContract(final ResolutionContext context, final Stmt.ContractDecl contract) {
+        rejectReifiedTypeParameters(contract.typeParameters(), contract.name());
         contract.typeParameters().forEach(parameter ->
                 TypeResolver.validateTypeParameterBound(context, parameter, contract.name()));
         validateRequiredContracts(context, contract);
@@ -66,6 +76,13 @@ final class DeclarationResolver {
         }
         VariancePositionValidator.validate(context, contract);
         validateContractComposition(context, contract);
+    }
+
+    private static boolean extensionTargets(final Stmt.ExtensionMethod extension,
+                                            final String className) {
+        final var receiver = extension.receiverType() instanceof GenericDescriptor generic
+                ? generic.baseType() : extension.receiverType();
+        return receiver instanceof NominalDescriptor nominal && nominal.name().equals(className);
     }
 
     private static void validateRequiredContracts(final ResolutionContext context,
@@ -313,20 +330,136 @@ final class DeclarationResolver {
         TypeResolver.validateType(context, appliedType, use.name());
     }
 
+    private record EffectPayloadMember(String name, TypeDescriptor type, boolean mutating,
+                                       boolean field) {}
+
+    /// Validates `under` targets and the inherited-payload rule. The child restates its complete
+    /// payload, including members inherited through the one payload-bearing parent, so the compiler
+    /// can derive constructor delegation and the value exposes no second copy of the state.
+    private static void validateEffectSupertypes(final ResolutionContext context,
+                                                 final Stmt.ClassDecl declaration) {
+        if (!declaration.isEffect()) return;
+        final var hierarchy = context.effectHierarchy;
+        final var ownName = declaration.name().lexeme();
+        final var seen = new HashSet<String>();
+        final var validTargets = new ArrayList<String>();
+        for (final var use : declaration.underEffects()) {
+            Resolver.attemptMember(context, () -> {
+                validateContractUse(context, use);
+                final var target = use.name().lexeme();
+                if (!seen.add(target)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, use.name(),
+                            "Duplicate effect supertype `" + target + "`."));
+                    return;
+                }
+                if (target.equals(EffectSubtyping.TOP_EFFECT)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, use.name(),
+                            "The top effect `Effect` is implicit and cannot be named by `under`."));
+                    return;
+                }
+                if (target.equals(ownName)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, use.name(),
+                            "An effect cannot name itself as an effect supertype."));
+                    return;
+                }
+                if (!hierarchy.isEffect(target)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, use.name(),
+                            "Effect supertype `" + target + "` is not an effect type."));
+                    return;
+                }
+                if (hierarchy.ancestors(target).contains(ownName)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, use.name(),
+                            "Effect supertypes form a cycle through `" + ownName + "`."));
+                    return;
+                }
+                validTargets.add(target);
+            });
+        }
+        final var payloadParents = validTargets.stream()
+                .filter(hierarchy::hasState)
+                .toList();
+        if (payloadParents.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, declaration.name(),
+                    "Effect `" + ownName + "` has more than one payload-bearing supertype (`"
+                            + String.join("`, `", payloadParents)
+                            + "`). Mutable payload state must have a single inheritance path."));
+            return;
+        }
+        if (payloadParents.size() == 1) {
+            for (final var inherited : effectiveEffectPayload(hierarchy, payloadParents.getFirst())) {
+                if (!declarationRedeclares(context, declaration, inherited)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, declaration.name(),
+                            "Effect `" + ownName + "` must redeclare inherited payload member `"
+                                    + inherited.name() + "` with the same type and mutation capability."));
+                }
+            }
+        }
+    }
+
+    private static List<EffectPayloadMember> effectiveEffectPayload(
+            final EffectHierarchy hierarchy, final String effectName) {
+        final var chain = new ArrayList<String>();
+        var current = effectName;
+        while (current != null && !chain.contains(current)) {
+            chain.add(0, current);
+            current = hierarchy.payloadParent(current);
+        }
+        final var members = new ArrayList<EffectPayloadMember>();
+        final var names = new HashSet<String>();
+        for (final var owner : chain) {
+            final var declaration = hierarchy.declaration(owner);
+            if (declaration == null) continue;
+            for (final var field : declaration.fields()) {
+                if (names.add(field.name().lexeme())) {
+                    members.add(new EffectPayloadMember(field.name().lexeme(), field.type(), true, true));
+                }
+            }
+            for (final var property : declaration.properties()) {
+                if (names.add(property.name().lexeme())) {
+                    members.add(new EffectPayloadMember(property.name().lexeme(), property.type(),
+                            property.isMutating(), false));
+                }
+            }
+        }
+        return members;
+    }
+
+    private static boolean declarationRedeclares(final ResolutionContext context,
+                                                 final Stmt.ClassDecl declaration,
+                                                 final EffectPayloadMember inherited) {
+        if (inherited.field()) {
+            return declaration.fields().stream().anyMatch(field ->
+                    field.name().lexeme().equals(inherited.name())
+                            && field.type().equals(inherited.type())
+                            && field.initializer() == null);
+        }
+        return declaration.properties().stream().anyMatch(property ->
+                property.name().lexeme().equals(inherited.name())
+                        && property.type().equals(inherited.type())
+                        && property.isMutating() == inherited.mutating()
+                        && property.canonicalConstructorParameter());
+    }
+
     static void resolveClass(final ResolutionContext context, final Stmt.ClassDecl declaration) {
+        rejectReifiedTypeParameters(declaration.typeParameters(), declaration.name());
         for (final var parameter : declaration.typeParameters()) {
             Resolver.attemptMember(context,
                     () -> TypeResolver.validateTypeParameterBound(context, parameter, declaration.name()));
         }
-        if (declaration.isEffect() && (!declaration.typeParameters().isEmpty()
-                || !declaration.contractUses().isEmpty() || !declaration.methods().isEmpty()
-                || declaration.properties().stream().anyMatch(property -> !property.isPublic()))) {
+        if (declaration.isEffect() && !declaration.typeParameters().isEmpty()) {
             Resolver.attemptMember(context, () -> Zeron.resolutionError(new ResolutionError(
-                    DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                    DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
                     declaration.name(),
-                    "Effects are non-generic payload classes; they cannot implement contracts or declare methods, "
-                            + "and payload properties must be public.")));
+                    "Effect declarations cannot be generic.")));
         }
+        validateEffectSupertypes(context, declaration);
         final var fieldNames = new HashSet<String>();
         final var invalidFields = Collections.newSetFromMap(new IdentityHashMap<Stmt.Field, Boolean>());
         for (final var field : declaration.fields()) {
@@ -382,6 +515,40 @@ final class DeclarationResolver {
                 TypeResolver.validateFunctionTypes(context, method.typeDescriptor(), method.name());
                 TypeResolver.validateTypeParameterBounds(context, method.typeDescriptor(), method.name());
             })) invalidMethods.add(method);
+        }
+        final var staticNames = new HashSet<String>();
+        final var invalidStaticFunctions =
+                Collections.newSetFromMap(new IdentityHashMap<Stmt.Function, Boolean>());
+        for (final var function : declaration.staticFunctions()) {
+            if (!Resolver.attemptMember(context, () -> {
+                final var name = function.name().lexeme();
+                final var instanceMember = fieldNames.contains(name) || methodNames.contains(name)
+                        || declaration.constructor() != null
+                                && declaration.constructor().name().lexeme().equals(name)
+                        || declaration.namedConstructors().stream()
+                                .anyMatch(constructor -> constructor.name().lexeme().equals(name))
+                        || declaration.patterns().stream()
+                                .anyMatch(pattern -> pattern.name().lexeme().equals(name));
+                if (instanceMember || !staticNames.add(name)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, function.name(),
+                            "Static function '" + name
+                                    + "' conflicts with another class member of the same name."));
+                }
+                TypeResolver.validateFunctionTypes(context, function.typeDescriptor(), function.name());
+                TypeResolver.validateTypeParameterBounds(context, function.typeDescriptor(), function.name());
+                for (final var extensions : context.extensionMethods.values()) {
+                    if (extensions.stream().anyMatch(extension ->
+                            extension.name().lexeme().equals(name)
+                                    && extensionTargets(extension, declaration.name().lexeme()))) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, function.name(),
+                                "Static function '" + name
+                                        + "' conflicts with an applicable extension member."));
+                        break;
+                    }
+                }
+            })) invalidStaticFunctions.add(function);
         }
         final var patternNames = new HashSet<String>();
         final var invalidPatterns = Collections.newSetFromMap(new IdentityHashMap<Stmt.Pattern, Boolean>());
@@ -854,6 +1021,9 @@ final class DeclarationResolver {
 
     private static void resolveMethod(final ResolutionContext context, final Stmt.ClassDecl owner, final Stmt.Method method) {
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
+        final var exported = owner.isPublic() && method.isPublic();
+        final var typeParameters = method.typeDescriptor().typeParameters();
+        context.enterInferableReifiedScope(exported, typeParameters);
         beginScope(context);
     context.frame.expectedReturnTypes.push(method.typeDescriptor().returnType());
         final var enclosingFlow = context.frame.flowState;
@@ -900,6 +1070,7 @@ final class DeclarationResolver {
             endScope(context);
             context.frame.flowState = enclosingFlow;
             context.frame.currentMethodOwner = enclosingMethodOwner;
+            context.exitInferableReifiedScope(exported, typeParameters);
             RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
@@ -1014,6 +1185,7 @@ final class DeclarationResolver {
                                 + ", but this class does not provide a compatible public implementation. "
                                 + candidateDetails
                                 + " The implementation must match the required parameter and return types"
+                                + " and generic admissibility markers"
                                 + (required.isMutating() ? " and be mutating." : "."));
                 if (firstMethodError == null) {
                     firstMethodError = methodError;
@@ -1069,7 +1241,7 @@ final class DeclarationResolver {
 
     private static String formatMethodSignature(final String name, final FunctionDescriptor type,
                                                 final boolean isMutating) {
-        return (isMutating ? "mut " : "") + "'" + name + TypeFormatter.format(type) + "'";
+        return (isMutating ? "mut " : "") + "'" + name + " " + TypeFormatter.format(type) + "'";
     }
 
     private static String formatMethodStub(final Stmt.ContractMethod required,
@@ -1238,7 +1410,8 @@ final class DeclarationResolver {
                     || requiredParameter.isEffectKind() != implementationParameter.isEffectKind()
                     || requiredParameter.isEffectRowKind() != implementationParameter.isEffectRowKind()
                     || requiredParameter.admitsMutableArguments()
-                            != implementationParameter.admitsMutableArguments()) {
+                            != implementationParameter.admitsMutableArguments()
+                    || requiredParameter.isReified() != implementationParameter.isReified()) {
                 return false;
             }
             final var requiredBounds = required.typeParameters().get(i).bounds().stream()
@@ -1253,7 +1426,8 @@ final class DeclarationResolver {
         final var requiredReturn = TypeSubstitution.substitute(required.returnType(), methodSubstitutions);
         final var requiredEffects = required.raisedEffects().stream()
                 .map(effect -> TypeSubstitution.substitute(effect, methodSubstitutions)).toList();
-        return EffectRows.includedIn(implementation.raisedEffects(), requiredEffects)
+        return EffectRows.includedIn(implementation.raisedEffects(), requiredEffects,
+                context.effectHierarchy)
                 && context.typeCompatibility.canAssign(requiredReturn, implementation.returnType());
     }
 

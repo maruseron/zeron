@@ -73,7 +73,7 @@ public final class HktDefaultSupport {
                 result.put(parameter, new TypeParameterDescriptor(parameter.scopeId(), parameter.name(),
                         bounds, true, parameter.variance(), parameter.admitsNullableArguments(),
                         parameter.isEffectKind(), parameter.isEffectRowKind(),
-                        parameter.admitsMutableArguments()));
+                        parameter.admitsMutableArguments(), parameter.isReified()));
             }
         }
         return result;

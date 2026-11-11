@@ -390,14 +390,18 @@ public final class JavaInteropTest {
                                 MethodTypeDesc.of(ClassDesc.of("java.io.IOException")))));
         try {
             final var compiler = CompilationService.forCompilationUnits(
-                    List.of(source), programName, packageName, List.of(), false,
+                    List.of(source), programName, packageName, List.of(), true,
                     List.of(JAVA_FIXTURE_ROOT), functionBindings, output);
             compiler.resolve();
             compiler.compile();
             final var libraryIndex = ZeronLibraryIndex.readFromDirectory(output);
+            // Bundling the standard library emits its own external classes into the same output
+            // directory, so select the fixture class by qualified name rather than by position.
             final var externalClass = libraryIndex.declarations().stream()
                     .filter(ZeronLibraryIndex.ExternalClassExport.class::isInstance)
                     .map(ZeronLibraryIndex.ExternalClassExport.class::cast)
+                    .filter(declaration -> declaration.qualifiedName()
+                            .equals(packageName + ".CheckedExceptionHost"))
                     .findFirst().orElseThrow();
             final var checkedMapping = externalClass.methods().stream()
                     .filter(method -> method.signature().name().equals("checked"))

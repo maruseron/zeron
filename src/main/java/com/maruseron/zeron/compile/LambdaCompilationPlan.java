@@ -14,13 +14,15 @@ final class LambdaCompilationPlan {
     record NullableFunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
     record FunctionReference(String functionName, Stmt.FunctionDeclaration declaration, FunctionDescriptor sourceType,
                              FunctionDescriptor targetType, String helperName,
-                             List<Expr.EvidenceArgument> evidenceArguments) {}
+                             List<Expr.EvidenceArgument> evidenceArguments,
+                             List<TypeDescriptor> reifiedArguments) {}
 
     private record FunctionAdapterKey(String sourceInterface, String targetInterface) {}
     private record FunctionAdapterDefinition(FunctionDescriptor source, FunctionDescriptor target,
                                              String name) {}
     private record FunctionReferenceKey(String functionName, Stmt.FunctionDeclaration declaration,
-                                        FunctionDescriptor targetType) {}
+                                        FunctionDescriptor targetType,
+                                        List<TypeDescriptor> reifiedArguments) {}
     private record LambdaMemberKey(String owner, String member) {}
 
     private final SymbolTable symbols;
@@ -385,6 +387,8 @@ final class LambdaCompilationPlan {
                 }
             }
             case Expr.AnonymousObject object -> object.initializers().forEach(this::collectLambdaShapes);
+            case Expr.ModelLiteral model -> model.assignments.forEach(assignment ->
+                    collectLambdaShapes(assignment.value()));
             case Expr.Binary binary -> {
                 collectLambdaShapes(binary.left);
                 collectLambdaShapes(binary.right);
@@ -420,6 +424,7 @@ final class LambdaCompilationPlan {
                 }
             }
             case Expr.SumCaseTest test -> collectLambdaShapes(test.value);
+            case Expr.Do doExpression -> collectLambdaShapes(doExpression.lowered());
             case Expr.Pipeline pipeline -> {
                 if (pipeline.isComprehension()) {
                     collectLambdaShapes(pipeline.loweredExpression());
@@ -479,6 +484,7 @@ final class LambdaCompilationPlan {
             }
             case Expr.SuffixedLiteral literal -> collectLambdaShapes(literal.factoryCall());
             case Expr.PropertyReference reference -> {
+                collectLambdaShapes(reference.callable());
                 collectLambdaShapes(reference.reader());
                 if (reference.reader() != null) {
                     collectFunctionAdapters(reference.reader().getType(),
@@ -506,11 +512,12 @@ final class LambdaCompilationPlan {
         final var sourceType = (FunctionDescriptor) TypeSubstitution.erase(expression.sourceFunctionType());
         final var targetType = (FunctionDescriptor) TypeSubstitution.erase(expression.specializedFunctionType());
         final var key = new FunctionReferenceKey(expression.resolvedFunctionName(),
-                expression.resolvedFunctionDeclaration(), targetType);
+                expression.resolvedFunctionDeclaration(), targetType, expression.reifiedArguments());
         final var reference = functionReferences.computeIfAbsent(key,
                 _ -> new FunctionReference(expression.resolvedFunctionName(),
                         expression.resolvedFunctionDeclaration(), sourceType, targetType,
-                        "$functionRef$" + functionReferences.size(), expression.evidenceArguments()));
+                        "$functionRef$" + functionReferences.size(), expression.evidenceArguments(),
+                        expression.reifiedArguments()));
         referencesByExpression.put(expression, reference);
         for (int i = 0; i < targetType.arity(); i++) {
             collectFunctionAdapters(targetType.parameters().get(i), sourceType.parameters().get(i));
@@ -746,6 +753,8 @@ final class LambdaCompilationPlan {
                     collectCapturedVariables(arm.expression(), armNames, captured, seen);
                 }
             }
+            case Expr.Do doExpression ->
+                    collectCapturedVariables(doExpression.lowered(), localNames, captured, seen);
             case Expr.Pipeline pipeline -> {
                 if (pipeline.isComprehension() && pipeline.loweredExpression() != null) {
                     collectCapturedVariables(pipeline.loweredExpression(), localNames, captured, seen);
@@ -807,6 +816,8 @@ final class LambdaCompilationPlan {
             }
             case Expr.AnonymousObject object -> object.initializers().forEach(initializer ->
                     collectCapturedVariables(initializer, localNames, captured, seen));
+            case Expr.ModelLiteral model -> model.assignments.forEach(assignment ->
+                    collectCapturedVariables(assignment.value(), localNames, captured, seen));
             case Expr.SuffixedLiteral literal ->
                     collectCapturedVariables(literal.factoryCall(), localNames, captured, seen);
             case Expr.Literal _ -> {}

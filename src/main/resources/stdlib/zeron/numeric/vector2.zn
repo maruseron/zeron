@@ -50,11 +50,11 @@ public class Vector2<T: Numeric<T>> {
     public signum(): Vector2<T> = Vector2.new(this.x.signum(), this.y.signum());
 }
 
-delegating witness<T: Numeric<T>> Numeric<Vector2<T>> for Vector2<T> {
+default delegating witness<T: Numeric<T>> Numeric<Vector2<T>> for Vector2<T> {
     static fn fromInteger(value: zeron.numeric.Integer): Vector2<T> =
         Vector2<T>.new(T.fromInteger(value), T.fromInteger(value));
 }
 
-witness<T: Numeric<T> + Display> Display for Vector2<T> {
+default witness<T: Numeric<T> + Display> Display for Vector2<T> {
     fn toString(): String = "<" + this.x + ", " + this.y + ">";
 }

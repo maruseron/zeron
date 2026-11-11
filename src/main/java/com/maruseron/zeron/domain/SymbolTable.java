@@ -203,6 +203,10 @@ public final class SymbolTable {
         final var lvt = locals.size();
         final var previous = symbols.get(name.lexeme());
         if (previous != null) {
+            if (!name.lexeme().equals("_")) {
+                Zeron.warning(name, DiagnosticCatalog.SHADOWED_LOCAL,
+                        "Local '" + name.lexeme() + "' shadows an outer declaration.");
+            }
             shadowedSymbols.computeIfAbsent(name.lexeme(), _ -> new ArrayDeque<>()).push(previous);
         }
         symbols.put(name.lexeme(), new Bind(

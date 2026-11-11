@@ -127,9 +127,9 @@ public final class ArrayViewTest {
         for (final var source : List.of(
             "fn test() { let values: Array<Int> = [1]; values[0] = 2; }",
             "fn test() { let values: Array<Int> = [1]; let writable: &Array<Int> = values; }",
-                "fn test() { let mut values: Array<Int> = [1]; values[0] = 2; }",
-                "fn test() { let values: &Array<Int> = [1]; values[0] = \"wrong\"; }",
-                "fn test() { let values: &Array<Int> = [1]; let wrong: Array<String> = values; }")) {
+            "fn test() { let mut values: Array<Int> = [1]; values[0] = 2; }",
+            "fn test() { let values: &Array<Int> = [1]; values[0] = \"wrong\"; }",
+            "fn test() { let values: &Array<Int> = [1]; let wrong: Array<String> = values; }")) {
             assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }
     }

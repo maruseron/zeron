@@ -122,6 +122,7 @@ final class LambdaCaptureValidator {
     private void walkCaptureUsage(final Expr expr, final Set<String> localNames) {
         if (expr == null) return;
         switch (expr) {
+            case Expr.Do doExpression -> walkCaptureUsage(doExpression.lowered(), localNames);
             case Expr.MemberCall call -> {
                 walkCaptureUsage(call.receiver, localNames);
                 for (final var argument : call.arguments) walkCaptureUsage(argument, localNames);

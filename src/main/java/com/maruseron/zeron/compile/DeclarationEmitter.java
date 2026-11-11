@@ -48,8 +48,11 @@ final class DeclarationEmitter {
                             ? context.symbols.getFunctionType(context.resolution.functionSymbolToken(name))
                             : function.typeDescriptor();
                     final var witnessSlots = BytecodeEmitter.witnessSlots(context, typeDescriptor);
+                    final var reifiedSlots = BytecodeEmitter.reifiedSlots(typeDescriptor);
                     final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
                             toJavaMethodDescriptor(functionType), witnessSlots.size());
+                    final var completeMethodDescriptor = BytecodeEmitter.withReifiedParameters(
+                            methodDescriptor, reifiedSlots.size());
                     if (entryHolder && name.lexeme().equals("main")
                             && functionType.parameters().isEmpty()
                             && functionType.returnType() instanceof UnitDescriptor) {
@@ -64,11 +67,11 @@ final class DeclarationEmitter {
                     }
                     classBuilder.withMethod(
                             name.lexeme(),
-                            methodDescriptor,
+                            completeMethodDescriptor,
                             ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL,
                             methodBuilder -> {
                                 final var signature = ClassSignatureEmitter.methodSignature(typeDescriptor);
-                                if (signature != null && witnessSlots.isEmpty()) {
+                                if (signature != null && witnessSlots.isEmpty() && reifiedSlots.isEmpty()) {
                                     methodBuilder.with(SignatureAttribute.of(
                                             methodBuilder.constantPool().utf8Entry(signature)));
                                 }
@@ -88,6 +91,8 @@ final class DeclarationEmitter {
                                                 BindingMutability.IMMUTABLE);
                                         context.symbols.define(witnessToken);
                                     }
+                                    BytecodeEmitter.declareReifiedSlots(context, declaration,
+                                            typeDescriptor.typeParameters());
                                     //currentFunction = new FunctionModel(name.lexeme(), functionType);
                                     final var binding = externalFunction == null
                                             ? null
@@ -118,7 +123,7 @@ final class DeclarationEmitter {
                                     //Zeron.debug(currentFunction.toString());
                                 });
                             });
-                    if (!witnessSlots.isEmpty()) {
+                    if (!witnessSlots.isEmpty() || !reifiedSlots.isEmpty()) {
                         final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(functionType);
                         classBuilder.withMethod(name.lexeme(), toJavaMethodDescriptor(bridgeType),
                                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
@@ -246,13 +251,14 @@ final class DeclarationEmitter {
                                                     final Stmt.Function function) {
         final var typeDescriptor = function.typeDescriptor();
         final var witnessSlots = BytecodeEmitter.witnessSlots(context, typeDescriptor);
-        final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
-                toJavaMethodDescriptor(typeDescriptor), witnessSlots.size());
+        final var reifiedSlots = BytecodeEmitter.reifiedSlots(typeDescriptor);
+        final var methodDescriptor = BytecodeEmitter.withHiddenParameters(
+                toJavaMethodDescriptor(typeDescriptor), witnessSlots.size(), reifiedSlots.size());
         classBuilder.withMethod(function.name().lexeme(), methodDescriptor,
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                 methodBuilder -> {
                     final var signature = ClassSignatureEmitter.methodSignature(typeDescriptor);
-                    if (signature != null && witnessSlots.isEmpty()) {
+                    if (signature != null && witnessSlots.isEmpty() && reifiedSlots.isEmpty()) {
                         methodBuilder.with(SignatureAttribute.of(
                                 methodBuilder.constantPool().utf8Entry(signature)));
                     }
@@ -272,6 +278,8 @@ final class DeclarationEmitter {
                                     BindingMutability.IMMUTABLE);
                             context.symbols.define(witnessToken);
                         }
+                        BytecodeEmitter.declareReifiedSlots(context, function,
+                                typeDescriptor.typeParameters());
                         StatementEmitter.emitStmts(context, composer, function.body());
                         if (typeDescriptor.returnType() instanceof UnitDescriptor) {
                             emitUnitValue(context, composer);
@@ -281,7 +289,7 @@ final class DeclarationEmitter {
                         context.currentReturnType = previousReturnType;
                     });
                 });
-        if (!witnessSlots.isEmpty()) {
+        if (!witnessSlots.isEmpty() || !reifiedSlots.isEmpty()) {
             final var bridgeType = (FunctionDescriptor) TypeSubstitution.erase(typeDescriptor);
             classBuilder.withMethod(function.name().lexeme(), toJavaMethodDescriptor(bridgeType),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
@@ -303,13 +311,21 @@ final class DeclarationEmitter {
         final var erasedContractType = (FunctionDescriptor) TypeSubstitution.erase(contractType);
         final var contractSlots = BytecodeEmitter.witnessSlots(context, contractType);
         final var implementationSlots = BytecodeEmitter.witnessSlots(context, implementationType);
+        final var contractReifiedSlots = BytecodeEmitter.reifiedSlots(contractType);
+        final var implementationReifiedSlots = BytecodeEmitter.reifiedSlots(implementationType);
         if (contractSlots.size() != implementationSlots.size()) {
             throw new IllegalStateException("HKT contract and implementation evidence arities do not match.");
         }
-        final var bridgeDescriptor = BytecodeEmitter.withEvidenceParameters(
-                toJavaMethodDescriptor(erasedContractType), contractSlots.size());
-        final var implementationDescriptor = BytecodeEmitter.withEvidenceParameters(
-                toJavaMethodDescriptor(implementationType), implementationSlots.size());
+        if (contractReifiedSlots.size() != implementationReifiedSlots.size()) {
+            throw new IllegalStateException(
+                    "HKT contract and implementation reified arities do not match.");
+        }
+        final var bridgeDescriptor = BytecodeEmitter.withHiddenParameters(
+                toJavaMethodDescriptor(erasedContractType), contractSlots.size(),
+                contractReifiedSlots.size());
+        final var implementationDescriptor = BytecodeEmitter.withHiddenParameters(
+                toJavaMethodDescriptor(implementationType), implementationSlots.size(),
+                implementationReifiedSlots.size());
         if (bridgeDescriptor.equals(implementationDescriptor)) return;
         classBuilder.withMethodBody(implementation.name().lexeme(), bridgeDescriptor,
                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
@@ -325,6 +341,10 @@ final class DeclarationEmitter {
                     final var handleType = TypeDescriptor.ofName("java.lang.invoke.MethodHandle");
                     for (int index = 0; index < contractSlots.size(); index++) {
                         NominalTypeEmitter.loadLocal(context, code, slot, handleType);
+                        slot++;
+                    }
+                    for (int index = 0; index < contractReifiedSlots.size(); index++) {
+                        code.aload(slot);
                         slot++;
                     }
                     code.invokestatic(owner, implementation.name().lexeme(), implementationDescriptor);

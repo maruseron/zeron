@@ -65,6 +65,11 @@ public sealed interface Expr {
                 null, -1);
     }
 
+    static Token reifiedToken(final TypeParameterDescriptor parameter) {
+        return new Token(TokenType.IDENTIFIER,
+                "$zeron$reified$" + parameter.scopeId() + "$" + parameter.name(), null, -1);
+    }
+
     static Token methodEvidenceToken(final TypeParameterDescriptor parameter,
                                     final int boundIndex,
                                     final int methodIndex) {
@@ -146,7 +151,9 @@ public sealed interface Expr {
         private FunctionDescriptor witnessMethodType;
         private boolean witnessMethodHasReceiver = true;
         private TypeDescriptor requiredContractType;
+        private boolean witnessDispatched;
         private List<EvidenceArgument> evidenceArguments = List.of();
+        private List<TypeDescriptor> reifiedArguments = List.of();
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -239,6 +246,8 @@ public sealed interface Expr {
         public void setRequiredContractType(final TypeDescriptor contractType) {
             requiredContractType = contractType;
         }
+        public boolean witnessDispatched() { return witnessDispatched; }
+        public void setWitnessDispatched(final boolean value) { witnessDispatched = value; }
         public void setWitnessMethod(final String owner, final String methodName,
                                      final FunctionDescriptor methodType) {
             setWitnessMethod(owner, methodName, methodType, true);
@@ -253,6 +262,10 @@ public sealed interface Expr {
         public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
         public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
             evidenceArguments = List.copyOf(arguments);
+        }
+        public List<TypeDescriptor> reifiedArguments() { return reifiedArguments; }
+        public void setReifiedArguments(final List<TypeDescriptor> arguments) {
+            reifiedArguments = List.copyOf(arguments);
         }
 
         @Override
@@ -328,7 +341,10 @@ public sealed interface Expr {
         public void setType(TypeDescriptor type) { this.type = type; }
     }
 
-    /// A statically resolved property reference written `Type::property`.
+    /// The kind of callable selected by a `Type::name` reference when no property matches.
+    public enum CallableReferenceKind { METHOD, STATIC, CONSTRUCTOR }
+
+    /// A statically resolved property or callable reference written `Type::name`.
     final class PropertyReference implements Expr {
         public final Token operator;
         public final Token propertyName;
@@ -340,6 +356,10 @@ public sealed interface Expr {
         private Lambda reader;
         private Lambda writer;
         private TypeDescriptor codeModelType;
+        private CallableReferenceKind callableKind;
+        private Lambda callable;
+        private Token callableToken;
+        private List<TypeDescriptor> explicitTypeArguments = List.of();
         private boolean resolved;
         private boolean converted;
 
@@ -375,6 +395,21 @@ public sealed interface Expr {
         public void markResolved() { resolved = true; }
         public boolean converted() { return converted; }
         public void markConverted() { converted = true; }
+        public CallableReferenceKind callableKind() { return callableKind; }
+        public void setCallableKind(final CallableReferenceKind callableKind) {
+            this.callableKind = callableKind;
+        }
+        public boolean isCallableReference() { return callableKind != null; }
+        public Lambda callable() { return callable; }
+        public void setCallable(final Lambda callable) { this.callable = callable; }
+        public Token callableToken() { return callableToken; }
+        public void setCallableToken(final Token callableToken) {
+            this.callableToken = callableToken;
+        }
+        public List<TypeDescriptor> explicitTypeArguments() { return explicitTypeArguments; }
+        public void setExplicitTypeArguments(final List<TypeDescriptor> explicitTypeArguments) {
+            this.explicitTypeArguments = List.copyOf(explicitTypeArguments);
+        }
     }
 
     /// The identity of a property declaration, without building a `PropertyRef`.
@@ -608,6 +643,7 @@ public sealed interface Expr {
         public final boolean nullTest;
         private TypeDescriptor type = TypeDescriptor.ofBoolean();
         private TypeDescriptor resolvedTargetType;
+        private boolean exactDescriptorTest;
 
         public TypeTest(final Expr value, final Token operator, final TypeDescriptor targetType) {
             this(value, operator, targetType, false);
@@ -641,6 +677,14 @@ public sealed interface Expr {
 
         public void setResolvedTargetType(final TypeDescriptor resolvedTargetType) {
             this.resolvedTargetType = resolvedTargetType;
+        }
+
+        public boolean isExactDescriptorTest() {
+            return exactDescriptorTest;
+        }
+
+        public void setExactDescriptorTest(final boolean exactDescriptorTest) {
+            this.exactDescriptorTest = exactDescriptorTest;
         }
     }
 
@@ -1002,6 +1046,7 @@ public sealed interface Expr {
         private TypeDescriptor variadicElementType;
         private int variadicFixedArity = -1;
         private List<EvidenceArgument> evidenceArguments = List.of();
+        private List<TypeDescriptor> reifiedArguments = List.of();
 
         public Call(Token callee, Token paren, List<Expr> arguments,
                     List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -1054,6 +1099,10 @@ public sealed interface Expr {
         public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
         public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
             evidenceArguments = List.copyOf(arguments);
+        }
+        public List<TypeDescriptor> reifiedArguments() { return reifiedArguments; }
+        public void setReifiedArguments(final List<TypeDescriptor> arguments) {
+            reifiedArguments = List.copyOf(arguments);
         }
 
         public void setGenericFunctionType(final FunctionDescriptor functionType) {
@@ -1415,6 +1464,30 @@ public sealed interface Expr {
         record Collect(Token keyword, Expr expression, Token into, Expr sink) implements PipelineResult {}
     }
 
+    /// A `do` expression. The parser lowers the clause chain to witness-dispatched `flatMap`/`map`
+    /// calls and keeps the original keyword and optional declared constructor for diagnostics.
+    final class Do implements Expr {
+        public final Token keyword;
+        private final TypeDescriptor constructorType;
+        private final Expr lowered;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+
+        public Do(final Token keyword, final TypeDescriptor constructorType, final Expr lowered) {
+            this.keyword = keyword;
+            this.constructorType = constructorType;
+            this.lowered = lowered;
+        }
+
+        /// The declared constructor of a `do<C<_>>` block, or `null` when it is inferred.
+        public TypeDescriptor constructorType() { return constructorType; }
+
+        /// The lowered `flatMap`/`map` chain that implements this block.
+        public Expr lowered() { return lowered; }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor resolvedType) { type = resolvedType; }
+    }
+
     final class Pipeline implements Expr  {
         public final Token keyword;
         public final Expr source;
@@ -1734,6 +1807,7 @@ public sealed interface Expr {
         private FunctionDescriptor sourceFunctionType;
         private FunctionDescriptor specializedFunctionType;
         private List<EvidenceArgument> evidenceArguments = List.of();
+        private List<TypeDescriptor> reifiedArguments = List.of();
         private FunctionDescriptor storedFunctionType;
         private Token resolvedSymbolToken;
         private Stmt.Var resolvedValueDeclaration;
@@ -1772,6 +1846,10 @@ public sealed interface Expr {
         public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
         public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
             evidenceArguments = List.copyOf(arguments);
+        }
+        public List<TypeDescriptor> reifiedArguments() { return reifiedArguments; }
+        public void setReifiedArguments(final List<TypeDescriptor> arguments) {
+            reifiedArguments = List.copyOf(arguments);
         }
         public FunctionDescriptor storedFunctionType() { return storedFunctionType; }
         public void setStoredFunctionType(final FunctionDescriptor type) { storedFunctionType = type; }

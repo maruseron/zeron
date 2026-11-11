@@ -27,4 +27,29 @@ public final class BuiltinTypes {
                 || receiverType instanceof BooleanDescriptor
                 || receiverType instanceof StringDescriptor;
     }
+
+    /// The package that owns canonical evidence for an intrinsic target. All intrinsic targets,
+    /// including `Array`, are canonically owned by `zeron.lang`; defaults for an intrinsic type are
+    /// allowed only in this package.
+    public static String canonicalWitnessPackage(final TypeDescriptor type) {
+        if (type == null) return null;
+        final var base = type instanceof TypeConstructorDescriptor constructor
+                ? constructor.baseType() : type;
+        final var name = base.name();
+        if (base instanceof ArrayDescriptor || base instanceof ByteDescriptor || base instanceof ByteArrayDescriptor
+                || base instanceof UnitDescriptor || base instanceof IntDescriptor
+                || base instanceof CharDescriptor || base instanceof LongDescriptor
+                || base instanceof FloatDescriptor || base instanceof BooleanDescriptor
+                || base instanceof StringDescriptor || "Int".equals(name) || "Long".equals(name)
+                || "Float".equals(name) || "Boolean".equals(name) || "String".equals(name)
+                || "Char".equals(name) || "Byte".equals(name) || "ByteArray".equals(name)
+                || "Unit".equals(name) || "Array".equals(name)) {
+            return "zeron.lang";
+        }
+        return null;
+    }
+
+    public static boolean isIntrinsicTarget(final TypeDescriptor type) {
+        return canonicalWitnessPackage(type) != null;
+    }
 }

@@ -66,6 +66,21 @@ public class AnsiSyntaxHighlighterTest {
     }
 
     @Test
+    public void highlightsEffectHierarchiesAndSoftKeywordsContextually() {
+        final var highlighted = AnsiSyntaxHighlighter.highlight("""
+                public effect IoFailure under IOError, Retryable {}
+                public newtype Positive = Int where value > 0;
+                fn present(option: Option<Int>): Boolean = option matches Option.Some(value);
+                let where = 2;
+                let matches = 3;
+                """);
+
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("under", "35")));
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("where", "35")));
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("matches", "35")));
+    }
+
+    @Test
     public void highlightsUseSiteProjectionKeywords() {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 let producers: Box<out Animal> = source;

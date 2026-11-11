@@ -73,7 +73,8 @@ public final class TypeSubstitution {
                                         .map(bound -> substitute(bound, substitutions))
                                         .toList(), parameter.isHigherKinded(), parameter.variance(),
                                 parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                                parameter.isEffectRowKind(), parameter.admitsMutableArguments()))
+                                parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
+                                parameter.isReified()))
                         .toList();
                 final var returnType = substitute(function.returnType(), substitutions);
                 final var parameters = function.parameters().stream()

@@ -7,7 +7,7 @@ import zeron.numeric.Integer;
 import zeron.numeric.Rational;
 import zeron.numeric.Floating;
 
-witness Floating<Float> for Float {
+default witness Floating<Float> for Float {
     fn add(other: Float): Float = this + other;
     fn subtract(other: Float): Float = this - other;
     fn multiply(other: Float): Float = this * other;

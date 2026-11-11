@@ -45,7 +45,7 @@ fn codePointAt(text: String, index: Int): Int =
         case Option.None() -> -1;
     };
 
-witness Encode<Int, {}> for Int {
+default witness Encode<Int, {}> for Int {
     static fn encode(value: Int, encoder: &Encoder): Result<Unit, EncodeError> =
         encoder.writeInteger("" + value);
 }
@@ -68,7 +68,7 @@ fn intResult(text: String): Result<Int, DecodeError> =
         case Option.None() -> errInt(text);
     };
 
-witness Decode<Int, {}> for Int {
+default witness Decode<Int, {}> for Int {
     static fn decode(decoder: &Decoder): Result<Int, DecodeError> =
         match (decoder.readInteger()) {
             case Result.Ok(text) -> intResult(text);
@@ -76,29 +76,29 @@ witness Decode<Int, {}> for Int {
         };
 }
 
-witness Encode<Boolean, {}> for Boolean {
+default witness Encode<Boolean, {}> for Boolean {
     static fn encode(value: Boolean, encoder: &Encoder): Result<Unit, EncodeError> =
         encoder.writeBoolean(value);
 }
 
-witness Decode<Boolean, {}> for Boolean {
+default witness Decode<Boolean, {}> for Boolean {
     static fn decode(decoder: &Decoder): Result<Boolean, DecodeError> = decoder.readBoolean();
 }
 
-witness Encode<String, {}> for String {
+default witness Encode<String, {}> for String {
     static fn encode(value: String, encoder: &Encoder): Result<Unit, EncodeError> =
         encoder.writeString(value);
 }
 
-witness Decode<String, {}> for String {
+default witness Decode<String, {}> for String {
     static fn decode(decoder: &Decoder): Result<String, DecodeError> = decoder.readString();
 }
 
-witness Encode<Float, {}> for Float {
+default witness Encode<Float, {}> for Float {
     static fn encode(value: Float, encoder: &Encoder): Result<Unit, EncodeError> =
         encoder.writeFloat(value);
 }
 
-witness Decode<Float, {}> for Float {
+default witness Decode<Float, {}> for Float {
     static fn decode(decoder: &Decoder): Result<Float, DecodeError> = decoder.readFloat();
 }

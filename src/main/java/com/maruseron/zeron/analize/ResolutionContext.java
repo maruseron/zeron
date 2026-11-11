@@ -6,8 +6,13 @@ import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 final class ResolutionContext {
+    record PendingReifiedSelection(List<TypeParameterDescriptor> typeParameters,
+                                   Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                                   Token where, List<List<TypeParameterDescriptor>> inferableScopes,
+                                   Consumer<List<TypeDescriptor>> setter) {}
     final ResolutionDiagnostics diagnostics = new ResolutionDiagnostics();
     final SymbolTable symbols = new SymbolTable();
     final Set<String> types = new HashSet<>();
@@ -34,9 +39,13 @@ final class ResolutionContext {
     final Map<Token, Resolver.IterationProtocol> iterationProtocols = new IdentityHashMap<>();
     final Map<Token, Resolver.SinkProtocol> sinkProtocols = new IdentityHashMap<>();
     final Map<Token, Token> referenceTargets = new IdentityHashMap<>();
+    final Set<Token> mutableUses = new java.util.LinkedHashSet<>();
     final Map<Token, TypeDescriptor> referenceTypes = new IdentityHashMap<>();
     final Map<Token, FunctionDescriptor> callSiteFunctionTypes = new IdentityHashMap<>();
     Map<TypeParameterDescriptor, TypeDescriptor> activeTypeSubstitutions = Map.of();
+    private final Deque<List<TypeParameterDescriptor>> inferableReifiedScopes = new ArrayDeque<>();
+    private final Map<Expr, PendingReifiedSelection> pendingReifiedSelections =
+            new IdentityHashMap<>();
     final List<Expr.Lambda> resolvedLambdas = new ArrayList<>();
     private final Set<Expr.Lambda> trackedLambdas = Collections.newSetFromMap(new IdentityHashMap<>());
     final IdentityHashMap<Stmt, String> sourcePathsByDeclaration = new IdentityHashMap<>();
@@ -46,6 +55,7 @@ final class ResolutionContext {
     final Map<String, String> declarationPackages = new LinkedHashMap<>();
     final IdentityHashMap<Token, String> sourcePathsByToken = new IdentityHashMap<>();
     final TypeCompatibility typeCompatibility = new TypeCompatibility(classes, contracts);
+    final EffectHierarchy effectHierarchy = new EffectHierarchy(classes);
     final IntrinsicRegistry intrinsics = IntrinsicRegistry.standard();
     final JavaClassPath javaClassPath;
     final ImportResolver importResolver;
@@ -123,5 +133,57 @@ final class ResolutionContext {
 
     void recordCallSiteFunctionType(final Token callSite, final FunctionDescriptor type) {
         if (callSite != null && type != null) callSiteFunctionTypes.put(callSite, type);
+    }
+
+    void enterInferableReifiedScope(final boolean exported,
+                                    final List<TypeParameterDescriptor> typeParameters) {
+        if (exported || typeParameters.isEmpty()) return;
+        inferableReifiedScopes.push(List.copyOf(typeParameters));
+    }
+
+    void exitInferableReifiedScope(final boolean exported,
+                                   final List<TypeParameterDescriptor> typeParameters) {
+        if (exported || typeParameters.isEmpty()) return;
+        inferableReifiedScopes.pop();
+    }
+
+    boolean inferReified(final TypeParameterDescriptor parameter) {
+        for (final var scope : inferableReifiedScopes) {
+            for (final var candidate : scope) {
+                if (candidate.scopeId() != parameter.scopeId()) continue;
+                parameter.markReified();
+                candidate.markReified();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void recordPendingReifiedSelection(final Expr expression,
+                                       final List<TypeParameterDescriptor> typeParameters,
+                                       final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+                                       final Token where,
+                                       final Consumer<List<TypeDescriptor>> setter) {
+        if (typeParameters.isEmpty()) return;
+        pendingReifiedSelections.put(expression, new PendingReifiedSelection(
+                List.copyOf(typeParameters), new LinkedHashMap<>(substitutions), where,
+                List.copyOf(inferableReifiedScopes), setter));
+    }
+
+    Collection<PendingReifiedSelection> pendingReifiedSelections() {
+        return pendingReifiedSelections.values();
+    }
+
+    boolean inferReified(final TypeParameterDescriptor parameter,
+                         final List<List<TypeParameterDescriptor>> scopes) {
+        for (final var scope : scopes) {
+            for (final var candidate : scope) {
+                if (candidate.scopeId() != parameter.scopeId()) continue;
+                parameter.markReified();
+                candidate.markReified();
+                return true;
+            }
+        }
+        return false;
     }
 }

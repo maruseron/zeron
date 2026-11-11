@@ -125,8 +125,8 @@ public class Integer {
     public toString(): String = bigIntegerToString(this.value);
 }
 
-delegating witness Integral<Integer> for Integer {
+default delegating witness Integral<Integer> for Integer {
     static fn fromInteger(value: Integer): Integer = value;
 }
 
-delegating witness Display for Integer {}
+default delegating witness Display for Integer {}

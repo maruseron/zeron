@@ -23,7 +23,21 @@ final class ImportResolver {
                              Map<String, LiteralSuffixImport> literalSuffixes,
                              List<String> onDemandPackages,
                              List<String> onDemandNamespaces,
-                             List<String> explicitOnDemandPackages) {}
+                             List<String> explicitOnDemandPackages,
+                             Map<String, String> witnesses,
+                             List<String> witnessOnDemandPackages) {
+        public ImportEnvironment(final Map<String, String> types,
+                                 final Map<String, String> functions,
+                                 final Map<String, String> values,
+                                 final Map<String, String> extensions,
+                                 final Map<String, LiteralSuffixImport> literalSuffixes,
+                                 final List<String> onDemandPackages,
+                                 final List<String> onDemandNamespaces,
+                                 final List<String> explicitOnDemandPackages) {
+            this(types, functions, values, extensions, literalSuffixes, onDemandPackages,
+                    onDemandNamespaces, explicitOnDemandPackages, Map.of(), List.of());
+        }
+    }
 
     private final Set<String> types;
     private final Map<String, Stmt.ClassDecl> classes;
@@ -73,9 +87,11 @@ final class ImportResolver {
         final var onDemandPackages = new ArrayList<String>();
         final var onDemandNamespaces = new ArrayList<String>();
         final var explicitOnDemandPackages = unit.imports().stream()
-                .filter(ImportDeclaration::onDemand)
+                .filter(imported -> imported.onDemand() && !imported.witness())
                 .map(ImportDeclaration::qualifiedName)
                 .toList();
+        final var importedWitnesses = new LinkedHashMap<String, String>();
+        final var witnessOnDemandPackages = new ArrayList<String>();
         final var localTypeNames = new HashSet<String>();
         final var localValueNames = new HashSet<String>();
         final var errors = new ArrayList<ResolutionError>();
@@ -94,6 +110,25 @@ final class ImportResolver {
         for (final var importDeclaration : unit.imports()) {
             try {
             final var target = importDeclaration.qualifiedName();
+            if (importDeclaration.witness()) {
+                if (importDeclaration.onDemand()) {
+                    if (witnessOnDemandPackages.contains(target)) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                                importDeclaration.location(),
+                                "Duplicate witness star import for package '" + target + "'."));
+                    }
+                    witnessOnDemandPackages.add(target);
+                } else if (importedWitnesses.putIfAbsent(
+                        importDeclaration.localName(), target) != null) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_OR_CONFLICTING_IMPORT,
+                            importDeclaration.location(),
+                            "Duplicate or ambiguous witness import '"
+                                    + importDeclaration.localName() + "'."));
+                }
+                continue;
+            }
             if (importDeclaration.suffixImport()) {
                 final var separator = target.lastIndexOf('.');
                 if (separator <= 0 || separator == target.length() - 1) {
@@ -284,7 +319,8 @@ final class ImportResolver {
         return new Validation(new ImportEnvironment(Map.copyOf(importedTypes), Map.copyOf(importedFunctions),
                 Map.copyOf(importedValues), Map.copyOf(importedExtensions),
                 Map.copyOf(importedLiteralSuffixes), List.copyOf(onDemandPackages),
-                List.copyOf(onDemandNamespaces), explicitOnDemandPackages),
+                List.copyOf(onDemandNamespaces), explicitOnDemandPackages,
+                Map.copyOf(importedWitnesses), List.copyOf(witnessOnDemandPackages)),
                 List.copyOf(errors),
                 Set.copyOf(invalidAliases));
     }

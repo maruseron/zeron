@@ -301,6 +301,9 @@ public sealed interface Stmt {
 
     final class Witness implements Stmt, Decl {
         private final Token name;
+        private final Token sourceName;
+        private final boolean isPublic;
+        private final boolean isDefault;
         private final List<TypeParameterDescriptor> typeParameters;
         private final TypeDescriptor contractType;
         private final TypeDescriptor targetType;
@@ -334,7 +337,20 @@ public sealed interface Stmt {
                        final List<WitnessMethod> methods, final boolean derived,
                        final List<WitnessRequirement> requirements, final boolean higherKinded,
                        final Token closingBrace, final boolean delegating) {
+            this(name, null, false, false, typeParameters, contractType, targetType, methods,
+                    derived, requirements, higherKinded, closingBrace, delegating);
+        }
+
+        public Witness(final Token name, final Token sourceName, final boolean isPublic,
+                       final boolean isDefault, final List<TypeParameterDescriptor> typeParameters,
+                       final TypeDescriptor contractType, final TypeDescriptor targetType,
+                       final List<WitnessMethod> methods, final boolean derived,
+                       final List<WitnessRequirement> requirements, final boolean higherKinded,
+                       final Token closingBrace, final boolean delegating) {
             this.name = name;
+            this.sourceName = sourceName;
+            this.isPublic = isPublic;
+            this.isDefault = isDefault;
             this.typeParameters = List.copyOf(typeParameters);
             this.contractType = contractType;
             this.targetType = targetType;
@@ -366,7 +382,23 @@ public sealed interface Stmt {
             this(name, typeParameters, contractType, targetType, List.of());
         }
 
-        public Token name() { return name; }
+        /// The source name when one was declared, otherwise the declaration token. Anonymous
+        /// declarations report the `witness` keyword here, as they always have.
+        public Token name() { return sourceName == null ? name : sourceName; }
+        /// The token that introduced the declaration: the `witness` keyword for source
+        /// declarations, or a synthetic name for loaded witnesses.
+        public Token declarationToken() { return name; }
+        /// The declared witness name, or `null` when the witness is anonymous.
+        public Token sourceName() { return sourceName; }
+        /// A user-facing identity for diagnostics. Defaults are unnamed and are identified by
+        /// their contract and target.
+        public String displayName() {
+            if (sourceName != null) return sourceName.lexeme();
+            if (isDefault) return "default " + contractType.name() + " for " + targetType.name();
+            return "anonymous witness";
+        }
+        public boolean isPublic() { return isPublic; }
+        public boolean isDefault() { return isDefault; }
         public List<TypeParameterDescriptor> typeParameters() { return typeParameters; }
         public TypeDescriptor contractType() { return contractType; }
         public TypeDescriptor targetType() { return targetType; }
@@ -396,8 +428,9 @@ public sealed interface Stmt {
     record ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
                      List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
                      Constructor constructor, List<NamedConstructor> namedConstructors,
-                     List<Method> methods, List<Pattern> patterns,
-                     boolean isPublic, boolean isEffect,
+                     List<Method> methods, List<Stmt.Function> staticFunctions,
+                     List<Pattern> patterns,
+                     boolean isPublic, boolean isEffect, List<ContractUse> underEffects,
                      List<Token> derivedContracts, List<Token> storedStateOrder,
                      List<ContractUse> higherKindedContractUses,
                      List<Witness> higherKindedImplementations,
@@ -408,6 +441,8 @@ public sealed interface Stmt {
                      Token closingBrace) implements Stmt, Decl {
         public ClassDecl {
             patterns = List.copyOf(patterns);
+            staticFunctions = List.copyOf(staticFunctions);
+            underEffects = List.copyOf(underEffects);
             derivedContracts = List.copyOf(derivedContracts);
             storedStateOrder = List.copyOf(storedStateOrder);
             higherKindedContractUses = List.copyOf(higherKindedContractUses);
@@ -434,9 +469,30 @@ public sealed interface Stmt {
                          List<InitializerBlock> initializerBlocks,
                          List<TypeDescriptor> declaredConstructorEffects) {
             this(name, typeParameters, contractUses, fields, properties, constructor, namedConstructors,
-                    methods, patterns, isPublic, isEffect, derivedContracts, storedStateOrder,
-                    higherKindedContractUses, higherKindedImplementations, literalSuffixes,
-                    dataClass, dataComponents, initializerBlocks, declaredConstructorEffects, null);
+                    methods, List.of(), patterns, isPublic, isEffect, List.of(), derivedContracts,
+                    storedStateOrder, higherKindedContractUses, higherKindedImplementations,
+                    literalSuffixes, dataClass, dataComponents, initializerBlocks,
+                    declaredConstructorEffects, null);
+        }
+
+        public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                         List<ContractUse> contractUses, List<Field> fields, List<Property> properties,
+                         Constructor constructor, List<NamedConstructor> namedConstructors,
+                         List<Method> methods, List<Pattern> patterns,
+                         boolean isPublic, boolean isEffect, List<ContractUse> underEffects,
+                         List<Token> derivedContracts, List<Token> storedStateOrder,
+                         List<ContractUse> higherKindedContractUses,
+                         List<Witness> higherKindedImplementations,
+                         List<LiteralSuffix> literalSuffixes,
+                         boolean dataClass, List<ProductComponent> dataComponents,
+                         List<InitializerBlock> initializerBlocks,
+                         List<TypeDescriptor> declaredConstructorEffects,
+                         Token closingBrace) {
+            this(name, typeParameters, contractUses, fields, properties, constructor,
+                    namedConstructors, methods, List.of(), patterns, isPublic, isEffect,
+                    underEffects, derivedContracts, storedStateOrder, higherKindedContractUses,
+                    higherKindedImplementations, literalSuffixes, dataClass, dataComponents,
+                    initializerBlocks, declaredConstructorEffects, closingBrace);
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -491,7 +547,8 @@ public sealed interface Stmt {
                          boolean isPublic, boolean isEffect,
                          List<Token> derivedContracts, List<Token> storedStateOrder) {
             this(name, typeParameters, contractUses, fields, properties, constructor, namedConstructors,
-                    methods, patterns, isPublic, isEffect, derivedContracts, storedStateOrder, List.of(), List.of());
+                    methods, patterns, isPublic, isEffect, derivedContracts, storedStateOrder,
+                    List.of(), List.of());
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,

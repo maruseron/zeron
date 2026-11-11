@@ -47,6 +47,7 @@ public final class ProjectAnalysisWorkspace {
         private final Optional<ResolutionResult> resolution;
         private final Optional<PublicMemberCatalog> memberCatalog;
         private final Map<String, String> libraryDocumentation;
+        private final List<com.maruseron.zeron.domain.ZeronLibraryIndex> libraries;
         private final List<CompilationUnit> compilerUnits;
         private final JavaClassPath javaClassPath;
         private final List<Path> javaSourceRoots;
@@ -61,6 +62,7 @@ public final class ProjectAnalysisWorkspace {
                          final Optional<ResolutionResult> resolution,
                          final Optional<PublicMemberCatalog> memberCatalog,
                          final Map<String, String> libraryDocumentation,
+                         final List<com.maruseron.zeron.domain.ZeronLibraryIndex> libraries,
                          final List<CompilationUnit> compilerUnits,
                          final JavaClassPath javaClassPath,
                          final List<Path> javaSourceRoots,
@@ -74,6 +76,7 @@ public final class ProjectAnalysisWorkspace {
             this.resolution = resolution;
             this.memberCatalog = memberCatalog;
             this.libraryDocumentation = Map.copyOf(libraryDocumentation);
+            this.libraries = List.copyOf(libraries);
             this.compilerUnits = List.copyOf(compilerUnits);
             this.javaClassPath = javaClassPath;
             this.javaSourceRoots = List.copyOf(javaSourceRoots);
@@ -89,6 +92,7 @@ public final class ProjectAnalysisWorkspace {
         public Optional<ResolutionResult> resolution() { return resolution; }
         public Optional<PublicMemberCatalog> memberCatalog() { return memberCatalog; }
         public Map<String, String> libraryDocumentation() { return libraryDocumentation; }
+        public List<com.maruseron.zeron.domain.ZeronLibraryIndex> libraries() { return libraries; }
         public List<CompilationUnit> compilerUnits() { return compilerUnits; }
         public JavaClassPath javaClassPath() { return javaClassPath; }
         public List<Path> javaSourceRoots() { return javaSourceRoots; }
@@ -193,6 +197,7 @@ public final class ProjectAnalysisWorkspace {
 
     public Snapshot analyze(final Map<Path, Overlay> overlays) throws IOException {
         Objects.requireNonNull(overlays);
+        Zeron.clearWarnings();
         checkCancellation();
         final var normalizedOverlays = new HashMap<Path, Overlay>();
         for (final var entry : overlays.entrySet()) {
@@ -288,7 +293,7 @@ public final class ProjectAnalysisWorkspace {
         if (analysisUnit == null) {
             return new Snapshot(diagnostics, tokenLists, sourceText, filesByCompilerPath,
                     units, unassociatedDiagnostics, Optional.empty(), Optional.empty(),
-                    libraryDocumentation(), units, javaClassPath, javaSourceRoots,
+                    libraryDocumentation(), libraries, units, javaClassPath, javaSourceRoots,
                     javaSourceArchives);
         }
 
@@ -312,10 +317,16 @@ public final class ProjectAnalysisWorkspace {
             if (file == null) unassociatedDiagnostics.add(diagnostic);
             else diagnostics.computeIfAbsent(file, _ -> new ArrayList<>()).add(diagnostic);
         }
+        for (final var diagnostic : resolution.warnings()) {
+            final var file = diagnostic.primarySpan().sourcePath() == null
+                    ? null : filesByCompilerPath.get(diagnostic.primarySpan().sourcePath());
+            if (file == null) unassociatedDiagnostics.add(diagnostic);
+            else diagnostics.computeIfAbsent(file, _ -> new ArrayList<>()).add(diagnostic);
+        }
         final var catalog = PublicMemberCatalog.fromSource(resolution);
         return new Snapshot(diagnostics, tokenLists, sourceText, filesByCompilerPath,
                 units, unassociatedDiagnostics, Optional.of(resolution), Optional.of(catalog),
-                libraryDocumentation(), compilerUnits, javaClassPath, javaSourceRoots,
+                libraryDocumentation(), libraries, compilerUnits, javaClassPath, javaSourceRoots,
                 javaSourceArchives);
     }
 

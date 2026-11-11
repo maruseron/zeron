@@ -4,6 +4,7 @@ import com.maruseron.zeron.Zeron;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.EffectRowDescriptor;
 import com.maruseron.zeron.domain.EffectRows;
+import com.maruseron.zeron.domain.EffectSubtyping;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.TypeFormatter;
 import com.maruseron.zeron.domain.TypeParameterDescriptor;
@@ -22,6 +23,15 @@ final class RowInference {
     private final Map<TypeParameterDescriptor, EffectRowDescriptor> lowerBounds = new LinkedHashMap<>();
     private final Map<TypeParameterDescriptor, List<EffectRowDescriptor>> upperBounds =
             new LinkedHashMap<>();
+    private final EffectSubtyping subtyping;
+
+    RowInference() {
+        this(EffectSubtyping.exact());
+    }
+
+    RowInference(final EffectSubtyping subtyping) {
+        this.subtyping = subtyping;
+    }
 
     void addLowerBound(final TypeParameterDescriptor variable, final EffectRowDescriptor bound) {
         // Keep self-references so recursive calls do not default the enclosing row to empty.
@@ -73,7 +83,7 @@ final class RowInference {
         final var lower = lowerBounds.get(variable);
         if (lower == null) return;
         final var offender = EffectRows.firstUnpermitted(List.copyOf(lower.effects()),
-                List.copyOf(solution.effects()));
+                List.copyOf(solution.effects()), subtyping);
         if (offender != null) {
             error(variable, solution, offender, where);
         }
@@ -91,7 +101,7 @@ final class RowInference {
         if (upper == null) return;
         for (final var bound : upper) {
             final var offender = EffectRows.firstUnpermitted(List.copyOf(solution.effects()),
-                    List.copyOf(bound.effects()));
+                    List.copyOf(bound.effects()), subtyping);
             if (offender != null) {
                 Zeron.resolutionError(new ResolutionError(
                         DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,

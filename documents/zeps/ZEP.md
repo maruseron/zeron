@@ -136,8 +136,16 @@ release reference. The proposal lifecycle status and release state are separate.
 ## Release bundles
 
 The row-level release state above is authoritative. This section summarizes the current bundle plan;
-see [zep-tracker-review.md](../developer_guides/zep-tracker-review.md) for the rationale and
+see the [ZEP release plan](../developer_guides/zep-tracker-review.md) for the rationale and
 sequencing.
+
+### Bundle summary
+
+| Bundle | Theme | Current state | Contents |
+| --- | --- | --- | --- |
+| `0.6.0` | Stabilization | Shipped | 24 rows |
+| `0.7.0` | Type identity, reification, and type bounds | Candidate set recorded | 11 candidates; five-item acceptance queue |
+| `0.8.0` | Effect control and response typing | Proposed | No candidates; ZEP-0118 and ZEP-0110 headline the bundle |
 
 ### `0.7.0` — type identity, reification, and type bounds
 

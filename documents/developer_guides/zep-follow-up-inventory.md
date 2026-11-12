@@ -274,7 +274,7 @@ already `Implemented`. No file/tracker status mismatches remain.
 Use this order for the work after the post-`0.6.0` effect program.
 
 The immediate post-`0.6.0` slot is reserved for the effect semantics and runtime identity program
-recorded in the [tracker review](./zep-tracker-review.md): ZEP-0054 and ZEP-0013 first, then shared
+recorded in the [ZEP release plan](./zep-tracker-review.md): ZEP-0054 and ZEP-0013 first, then shared
 ZEP-0015, the bounded ZEP-0104 slice, and ZEP-0005; ZEP-0105 through ZEP-0109 are later research.
 The list below applies after that program's first bundle.
 

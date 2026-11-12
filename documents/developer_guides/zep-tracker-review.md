@@ -1,36 +1,42 @@
-# ZEP Tracker Review and Release Planning
+# ZEP Tracker and Release Plan
 
 | Field | Value |
 | ----- | ----- |
 | Date | 2026-11-12 |
-| Scope | Review of `documents/zeps/ZEP.md`, release planning, and near-term sequencing |
-| Purpose | Record the reconciled proposal/release state, the `0.7.0` and `0.8.0` bundles, and the remaining backlog order |
+| Scope | Current release state in `documents/zeps/ZEP.md` and near-term sequencing |
+| Purpose | Planning companion for bundle contents, acceptance gates, and backlog order |
 
-This is a planning record. It reflects the tracker and each ZEP file as of 2026-11-12. The
-[ZEP tracker](../zeps/ZEP.md) remains the source of truth for proposal status and release state;
-this document explains the plan and does not change either by itself.
+This is the current-state plan that accompanies the [ZEP tracker](../zeps/ZEP.md). The tracker
+remains the source of truth for proposal status and release state. This document explains the
+intended bundle shape, dependencies, and ordering; it does not change a row by itself. Update it
+when bundle scope or sequencing changes.
 
-## Release plan at a glance
+## Current state
 
-| Release | Theme | Current state |
-| --- | --- | --- |
-| `0.6.0` | Stabilization bundle of already implemented work | Shipped |
-| `0.7.0` | Type identity, reification, and the type-bound mechanism | Candidate set recorded; design acceptance and implementation continue |
-| `0.8.0` | Effect control and response typing | Proposed; no candidates until the designs are accepted |
+The tracker records 122 ZEPs: 62 shipped, 11 candidate, and 44 unscheduled. The remaining five rows
+are process entries, deferred work, or not applicable. `0.7.0` is the only bundle with recorded
+candidates; `0.8.0` is a proposed follow-on bundle with no candidates yet.
 
-The two planned bundles separate two different kinds of risk. `0.7.0` changes type identity,
-runtime descriptors, type-bound tests, and effect payload identity. `0.8.0` changes control flow:
-response-typed effects, resumption, and the async surface. Keeping them separate concentrates the
-API-index schema and standard-library version bumps in one release instead of mixing them with a new
-`raise` typing rule.
+### Bundle summary
+
+| Bundle | Theme | Current state | Contents |
+| --- | --- | --- | --- |
+| `0.6.0` | Stabilization of already implemented work | Shipped | 24 rows |
+| `0.7.0` | Type identity, reification, and type bounds | Candidate set recorded; implementation ongoing | 11 candidates; five-item acceptance queue |
+| `0.8.0` | Effect control and response typing | Proposed; no candidates until designs are accepted | ZEP-0118 and ZEP-0110 headline the bundle |
+
+`0.7.0` is the active release plan. Its candidates are existing `Candidate` rows; no row is
+`Planned` until release scope is approved. `0.8.0` is a planning target, not a scheduled release.
+The bundles stay separate because `0.7.0` changes type identity, runtime descriptors, type-bound
+tests, and effect payload identity, while `0.8.0` changes control flow through response-typed
+effects, resumption, and the async surface. Keeping them separate concentrates the API-index and
+standard-library version bumps in one release instead of mixing them with a new `raise` typing rule.
 
 ## `0.7.0` — Type identity, reification, and type bounds
 
-`0.7.0` is the type-identity release. It consolidates the work that changes runtime type
-descriptors, effect payload identity, exact type-bound tests, and existential opening, together with
-the already implemented supporting proposals that are already marked `Candidate`. The goal is to
-land one coherent identity story and validate it through one API-index and separate-compilation
-cycle.
+`0.7.0` bundles changes to runtime type descriptors, effect payload identity, exact type-bound
+tests, and existential opening with supporting proposals that are already implemented. The release
+validates one coherent identity story through one API-index and separate-compilation cycle.
 
 ### Candidates
 
@@ -54,9 +60,9 @@ ZEP-0052 is already `Shipped` in `0.5.0`; it is not part of this bundle.
 
 ### Acceptance queue for `0.7.0`
 
-The intent is for `0.7.0` to cover the remaining type-bound drafts as well. They cannot be marked
-`Candidate` yet: ZEP-0000 requires an Accepted design. They stay `Unscheduled` and join the
-candidate set only after acceptance.
+The remaining type-bound drafts are intended for this cycle but cannot be marked `Candidate` yet:
+ZEP-0000 requires an Accepted design. They stay `Unscheduled` and join the candidate set only after
+acceptance.
 
 | ZEP | Name | Dependency or scope |
 | --- | --- | --- |
@@ -86,13 +92,12 @@ it follow later; it must not hold the release open.
    compiler and library surface, and carry no new runtime mechanism. Bundling them is a versioning
    decision, not a design dependency.
 
-### Why this is large but coherent
+### Scope and risk
 
-`0.6.0` is not a size precedent. Its 24 rows were already implemented, so the release was a
-stabilization bundle. `0.7.0` is the first bundle in which several new mechanisms land, so depth
-matters more than length. It is still coherent because every item changes type identity, runtime
-descriptors, or type-bound tests. None of them changes control flow or introduces a new `raise`
-typing rule. The effect-control proposals belong to `0.8.0`.
+`0.7.0` is broad by mechanism, not by unrelated surface area. Every candidate changes type identity,
+runtime descriptors, or type-bound tests; none changes control flow or introduces a new `raise`
+typing rule. Bundle size is not the planning test: the release stays coherent because its items
+share the same identity machinery and validation cycle.
 
 ## `0.8.0` — Effect control and response typing
 
@@ -135,13 +140,21 @@ typing rule. The effect-control proposals belong to `0.8.0`.
   cannot serve, plus answers to the resource, mutation, handler-state, cancellation, and type-system
   questions in the proposal.
 
-### Why not one release
+### Scope and risk
 
 ZEP-0118 depends on the identity and payload work in `0.7.0`, but it also changes global `raise`
 typing and handler reachability. Bundling it with `0.7.0` would join two open designs and force
 response metadata plus `Yield`, `Ask`, and `Log` into the same API-index and standard-library bumps.
 ZEP-0119 is prototype-gated, ZEP-0120 depends on two other proposals, and ZEP-0121 is `Deferred`.
 None of those is a defensible `0.7.0` commitment.
+
+## Open planning decisions
+
+- Decide whether any acceptance-queue item is ready in time for `0.7.0`; none is a commitment.
+- Decide whether ZEP-0111 ships in `0.7.0` or falls back to `0.8.0`.
+- Resolve ZEP-0118's response syntax, generic response bounds, catch-all interaction, and carrier
+  policy before proposing `0.8.0` candidates.
+- Decide whether the ZEP-0112 scope/task spike is complete enough to schedule independently.
 
 ## Backlog after the planned bundles
 
@@ -169,7 +182,7 @@ and they follow the two planned bundles.
 
 ## Design decisions
 
-These are the decisions that shape the plan. Details live in each ZEP.
+These decisions shape the current plan. Details live in each ZEP.
 
 - **ZEP-0054:** full ordinary member model for effect payloads; canonical `new` plus delegating
   named constructors.
@@ -177,9 +190,9 @@ These are the decisions that shape the plan. Details live in each ZEP.
   also a value type; explicit `case Effect` catch-all; most-specific handler selection.
 - **ZEP-0015:** one shared internal applied-type descriptor; payload-carried for effects and a
   hidden parameter for existential hidden types and reified variables; API-index schema 13.
-- **ZEP-0005:** accepted 2026-11-10 with closed applied identity; invariant exact fully written
-  applications; generic effect declarations and closed applied `raises` entries need no schema
-  change; implementation pending.
+- **ZEP-0005:** accepted with closed applied identity; invariant exact fully written applications;
+  generic effect declarations and closed applied `raises` entries need no schema change;
+  implementation pending.
 - **ZEP-0072:** class static functions lower to companion namespace functions with no class
   type-parameter capture, `this`, or member-name collisions.
 - **ZEP-0100:** callable references carry static `owner + kind + name` identity; `F` carries the
@@ -187,12 +200,12 @@ These are the decisions that shape the plan. Details live in each ZEP.
 - **ZEP-0104:** star projections and parameter-position anonymous existentials replace the former
   `let T: Bound` binder and `?` wildcard; exact type-bound tests against closed applied types;
   bounded implementation landed.
-- **ZEP-0105:** branch-scoped opening and escape semantics; implemented 2026-11-11.
+- **ZEP-0105:** branch-scoped opening and escape semantics; implemented.
 - **ZEP-0106–ZEP-0109 and ZEP-0116:** stored existentials, ancestor-aware descriptors,
   contract-bound tests, rank-2 polymorphism, and remaining opening work; all `Draft`.
 - **ZEP-0110:** block form of `handle`; notation only, no semantic change.
 - **ZEP-0111:** `do` with `let x <- e` binds, mandatory final `yield`, and receiver-call lowering
-  through the `Monad` witness; implemented 2026-11-11.
+  through the `Monad` witness; implemented.
 - **ZEP-0112:** structured concurrency on virtual threads (`Scope`, `Task`, cancellation, timeouts,
   effect capture at task boundaries); blocking suspension is the mechanism.
 - **ZEP-0114:** named witnesses in a parallel namespace, explicit `import witness`, defaults beside
@@ -202,32 +215,7 @@ These are the decisions that shape the plan. Details live in each ZEP.
   continuations, the async surface, and multi-shot continuations respectively. ZEP-0118 through
   ZEP-0120 are `Draft`; ZEP-0121 is `Deferred`; ZEP-0007 is `Superseded`.
 
-## History
-
-- **2026-11-08.** Initial reconciliation of `documents/zeps/ZEP.md`. The `0.6.0` candidate set was
-  recorded and the last file/tracker status mismatches were removed. The post-`0.6.0` program was
-  identified as effect semantics and runtime identity.
-- **2026-11-09.** `0.6.0` shipped, moving its 24 rows to `Shipped` / `0.6.0`. `0.7.0` candidacy
-  began with ZEP-0054 and ZEP-0013; ZEP-0015 and the bounded ZEP-0104 slice were accepted and
-  implemented under the recorded prototype and descriptor conditions.
-- **2026-11-10.** ZEP-0005 was reopened and accepted with a narrower closed-applied-effect scope.
-  ZEP-0104's revision was approved. ZEP-0110 through ZEP-0112 were recorded, ZEP-0114 was accepted,
-  and ZEP-0111 was implemented.
-- **2026-11-12.** The resumption exploration was split. ZEP-0007 became `Superseded`; ZEP-0118
-  through ZEP-0120 carry the design direction, and ZEP-0121 becomes the `Deferred` multi-shot
-  record. ZEP-0112 was retitled "Structured Concurrency on Virtual Threads" and keeps blocking
-  suspension as its mechanism. ZEP-0005, ZEP-0105, ZEP-0111, ZEP-0114, and ZEP-0115 were added to
-  the `0.7.0` candidate set, and the `0.8.0` effect-control bundle was proposed.
-
-## `0.6.0` record
-
-`0.6.0` shipped with the 24 rows that were `Candidate` for that bundle: `0031`, `0060`, `0061`,
-`0065`, `0068`, `0069`, `0071`, `0073`, `0076`, `0077`, `0078`, `0079`, `0080`, `0081`, `0082`,
-`0083`, `0084`, `0086`, `0087`, `0088`, `0090`, `0092`, `0093`, and `0094`. ZEP-0068 remains
-`Accepted` after shipping; its external-name and adapter scope stays open under ZEP-0091, ZEP-0097,
-and ZEP-0098.
-
-## Notes
+## Planning rules
 
 - Proposal status and release state are independent. A row can be `Implemented` and still
   `Unscheduled`; that is not an error by itself.
@@ -235,6 +223,8 @@ and ZEP-0098.
 - `Candidate` is a proposed release target, not a commitment. `Planned` records an approved bundle.
 - The `0.7.0` and `0.8.0` descriptions are planning records. They become approved scope only when
   the relevant rows move to `Planned`.
+- `0.6.0` shipped with 24 rows. ZEP-0068 remains `Accepted` because its external-name and adapter
+  scope stays open under ZEP-0091, ZEP-0097, and ZEP-0098.
 - Do not reuse a ZEP number. The next available number is `0122`.
 - Routine fixes and contained changes do not need a ZEP.
 - `pom.xml` and `CHANGELOG.md` record `0.6.0`; the tracker rows for the shipped bundle read

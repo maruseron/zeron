@@ -4,6 +4,20 @@
 
 ### Compiler and language work
 
+- A `Codec<T, E>` bound is now satisfied by available `Encode<T, {E}>` and `Decode<T, {E}>`
+  evidence when no dedicated `Codec` witness exists. This makes the built-in directional codecs
+  for `Int`, `Boolean`, `String`, and `Float` usable through `Codec` directly, while the declared
+  `Codec` contract still requires both capabilities.
+- Added branch-scoped existential opening from ZEP-0105. A direct `if` or `while` condition may
+  use `C<let T>`, and every argument of the applied class or contract target must be a binder.
+  The true branch sees a fresh rigid `T` in local type annotations and generic calls; the tested
+  binding is refined to the opened application, and a source type already known to be that
+  application makes the pattern total so its false path is unreachable. Binders inherit bounds,
+  contract evidence, reified descriptors, or a known concrete argument from the source type,
+  while star views and raw `Any` tests invent no evidence. Returning or assigning a type that
+  mentions an opened binder outside the branch is rejected. Mixed, nested, composed, and `in`
+  openings are diagnosed, and the form adds no API-index or runtime ABI. Remaining opening,
+  escape, result-position, and variance work is tracked in ZEP-0116.
 - Added named witnesses, default witnesses, and explicit witness imports from ZEP-0114. A witness
   may be declared as `witness Name<T>: Contract for Target`, with normal `public` visibility and a
   separate package-scoped name namespace; `delegating` combines with either named or anonymous

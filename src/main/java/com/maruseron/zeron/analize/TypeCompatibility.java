@@ -75,6 +75,14 @@ final class TypeCompatibility implements TypeProjector {
     boolean canAssign(final TypeDescriptor expectedType, final TypeDescriptor resolvedType) {
         if (expectedType.equals(resolvedType)) return true;
         if (resolvedType instanceof NeverDescriptor) return true;
+        if (expectedType instanceof TypeParameterDescriptor expectedParameter
+                && expectedParameter.openedActualType() != null) {
+            return canAssign(expectedParameter.openedActualType(), resolvedType);
+        }
+        if (resolvedType instanceof TypeParameterDescriptor resolvedParameter
+                && resolvedParameter.openedActualType() != null) {
+            return canAssign(expectedType, resolvedParameter.openedActualType());
+        }
         final var resolvedReference = resolvedType instanceof ReferenceDescriptor reference
                 ? reference : null;
         final var expectedReference = expectedType instanceof ReferenceDescriptor reference

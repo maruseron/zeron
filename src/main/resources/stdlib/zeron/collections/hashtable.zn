@@ -191,7 +191,7 @@ class HashTable<K, V: mut> {
         let mut bucket = 0;
         while (bucket < this.buckets.length) {
             let mut entry = this.buckets[bucket];
-            while (true) {
+            loop {
                 if (entry is null) break;
                 let next = entry.next();
                 let index = this.bucketIndex(entry.hash(), capacity);

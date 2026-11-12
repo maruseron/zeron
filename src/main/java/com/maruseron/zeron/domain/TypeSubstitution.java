@@ -10,8 +10,12 @@ public final class TypeSubstitution {
     public static TypeDescriptor substitute(final TypeDescriptor type,
                                              final Map<TypeParameterDescriptor, TypeDescriptor> substitutions) {
         return switch (type) {
-            case TypeParameterDescriptor parameter ->
-                    substitutions.getOrDefault(parameter, parameter);
+            case TypeParameterDescriptor parameter -> {
+                final var substituted = substitutions.get(parameter);
+                yield substituted != null ? substituted
+                        : parameter.openedActualType() != null ? parameter.openedActualType()
+                        : parameter;
+            }
             case EffectRowDescriptor row -> {
                 final var effects = new ArrayList<TypeDescriptor>();
                 final var variables = new ArrayList<TypeParameterDescriptor>();
@@ -163,6 +167,39 @@ public final class TypeSubstitution {
                     || function.parameters().stream().anyMatch(TypeSubstitution::containsCapture)
                     || function.raisedEffects().stream().anyMatch(TypeSubstitution::containsCapture)
                     || function.handledEffects().stream().anyMatch(TypeSubstitution::containsCapture);
+            default -> false;
+        };
+    }
+
+    public static boolean containsAnyTypeParameter(final TypeDescriptor type,
+                                                   final java.util.Set<TypeParameterDescriptor> parameters) {
+        if (parameters.isEmpty()) return false;
+        return switch (type) {
+            case TypeParameterDescriptor parameter -> parameters.contains(parameter);
+            case EffectRowDescriptor row -> row.effects().stream()
+                    .anyMatch(effect -> containsAnyTypeParameter(effect, parameters))
+                    || row.variables().stream().anyMatch(parameters::contains);
+            case AppliedConstructorDescriptor applied -> containsAnyTypeParameter(applied.constructor(), parameters)
+                    || containsAnyTypeParameter(applied.argument(), parameters);
+            case TypeConstructorDescriptor constructor -> constructor.arguments().stream()
+                    .anyMatch(argument -> containsAnyTypeParameter(argument, parameters));
+            case NullableDescriptor nullable -> containsAnyTypeParameter(nullable.baseType(), parameters);
+            case ReferenceDescriptor reference -> containsAnyTypeParameter(reference.baseType(), parameters);
+            case ArrayDescriptor array -> containsAnyTypeParameter(array.elementType(), parameters);
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .anyMatch(argument -> containsAnyTypeParameter(argument, parameters));
+            case TypeProjectionDescriptor projection -> containsAnyTypeParameter(projection.bound(), parameters);
+            case CapturedTypeDescriptor capture -> containsAnyTypeParameter(capture.lowerBound(), parameters)
+                    || containsAnyTypeParameter(capture.upperBound(), parameters);
+            case FunctionDescriptor function -> (function.receiverType() != null
+                    && containsAnyTypeParameter(function.receiverType(), parameters))
+                    || containsAnyTypeParameter(function.returnType(), parameters)
+                    || function.parameters().stream()
+                            .anyMatch(parameter -> containsAnyTypeParameter(parameter, parameters))
+                    || function.raisedEffects().stream()
+                            .anyMatch(effect -> containsAnyTypeParameter(effect, parameters))
+                    || function.handledEffects().stream()
+                            .anyMatch(effect -> containsAnyTypeParameter(effect, parameters));
             default -> false;
         };
     }

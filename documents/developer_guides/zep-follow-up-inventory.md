@@ -25,10 +25,12 @@ It is a planning aid, not a proposal. It does not change any ZEP status or relea
 >
 > Effect notation and suspension follow-ups are tracked separately by
 > [ZEP-0110](../zeps/ZEP-0110.md) (block-bodied handlers), [ZEP-0111](../zeps/ZEP-0111.md)
-> (witness-dispatched do-notation), and [ZEP-0112](../zeps/ZEP-0112.md) (direct-style suspension and
-> structured concurrency). ZEP-0110 and ZEP-0112 are `Draft`; ZEP-0111 is `Implemented` as a
-> notation-only design; all three are `Unscheduled`. Resumption itself remains with
-> [ZEP-0007](../zeps/ZEP-0007.md), which stays `Deferred`.
+> (witness-dispatched do-notation), and [ZEP-0112](../zeps/ZEP-0112.md) (structured concurrency on
+> virtual threads). ZEP-0110 and ZEP-0112 are `Draft`; ZEP-0111 is `Implemented` as a
+> notation-only design; all three are `Unscheduled`. Resumption is split into
+> [ZEP-0118](../zeps/ZEP-0118.md), [ZEP-0119](../zeps/ZEP-0119.md), and
+> [ZEP-0120](../zeps/ZEP-0120.md); multi-shot remains `Deferred` in
+> [ZEP-0121](../zeps/ZEP-0121.md), and [ZEP-0007](../zeps/ZEP-0007.md) is `Superseded`.
 
 ## 1. Work already covered by an existing proposal
 
@@ -46,7 +48,7 @@ These are confirmed gaps, but they should extend an existing proposal rather tha
 | 64-bit hashing, mutable projections, unchecked casts | 0008, 0085, 0089 | ZEP-0084, 0085, 0089 |
 | Annotation consumption | 0031 | ZEP-0091 (Accepted) |
 | Annotation target for model mapping clauses | 0079 | ZEP-0097 (Accepted) |
-| Block handlers, `do` notation, suspension | 0007, 0058, 0019 | ZEP-0110, ZEP-0111, ZEP-0112 (Draft; ZEP-0111 Implemented) |
+| Block handlers, `do` notation, suspension | 0007, 0058, 0019 | ZEP-0110, ZEP-0111, ZEP-0112 (Draft; ZEP-0111 Implemented); resumption split across ZEP-0118–ZEP-0121 |
 | Generated serialization operations | 0068, 0069, 0094, 0099 | ZEP-0092 (Implemented; delivered) |
 
 **Important overlap:** ZEP-0092 is implemented and closed the generated serialization operations

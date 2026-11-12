@@ -110,8 +110,10 @@ public class LspProtocolTest {
             final var invalid = """
                     fn greet(): Int = 1;
                     fn main() {
+                        greet();
                         let value: String = "valid";
                         value;
+                        broken();
                     }
                     fn broken(): Int = "wrong";
                     """;

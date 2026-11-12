@@ -15,9 +15,9 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0002](./ZEP-0002.md) | Explicit Shared Mutable State in Lambdas | Implemented | Shipped | 0.3.0 |
 | [ZEP-0003](./ZEP-0003.md) | Constraint-Aware Let-Bound Lambda Generalization | Implemented | Shipped | 0.4.0 |
 | [ZEP-0004](./ZEP-0004.md) | Complete Generic Witness Overlap Checking | Implemented | Shipped | 0.2.0 |
-| [ZEP-0005](./ZEP-0005.md) | Generic Effect Payloads with Closed Applied Identity | Accepted | Unscheduled | — |
+| [ZEP-0005](./ZEP-0005.md) | Generic Effect Payloads with Closed Applied Identity | Accepted | Candidate | 0.7.0 |
 | [ZEP-0006](./ZEP-0006.md) | First-Class Reusable Typed-Effect Handlers | Superseded | Unscheduled | — |
-| [ZEP-0007](./ZEP-0007.md) | Resumable Algebraic Effects Exploration | Deferred | Unscheduled | — |
+| [ZEP-0007](./ZEP-0007.md) | Resumable Algebraic Effects Exploration | Superseded | Unscheduled | — |
 | [ZEP-0008](./ZEP-0008.md) | Explicit Contract Derivation | Implemented | Shipped | 0.3.0 |
 | [ZEP-0009](./ZEP-0009.md) | Public Member Discovery API | Implemented | Shipped | 0.3.0 |
 | [ZEP-0010](./ZEP-0010.md) | Generic Admissibility Markers | Implemented | Shipped | 0.5.0 |
@@ -115,14 +115,51 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0102](./ZEP-0102.md) | Generic Models through Model Factories | Draft | Unscheduled | — |
 | [ZEP-0103](./ZEP-0103.md) | Polymorphic Models for Closed Sum Types | Draft | Unscheduled | — |
 | [ZEP-0104](./ZEP-0104.md) | Wildcard Existentials and Type-Bound Pattern Matching | Accepted | Candidate | 0.7.0 |
-| [ZEP-0105](./ZEP-0105.md) | General Existential Types and Escape Semantics | Draft | Unscheduled | — |
+| [ZEP-0105](./ZEP-0105.md) | General Existential Types and Escape Semantics | Implemented | Candidate | 0.7.0 |
 | [ZEP-0106](./ZEP-0106.md) | Stored Existentials and Holder ABI | Draft | Unscheduled | — |
 | [ZEP-0107](./ZEP-0107.md) | Ancestor-Aware Runtime Type Descriptors | Draft | Unscheduled | — |
 | [ZEP-0108](./ZEP-0108.md) | Contract-Bound Runtime Tests | Draft | Unscheduled | — |
 | [ZEP-0109](./ZEP-0109.md) | Rank-2 Polymorphism: Polymorphic Function Types and Generic Lambdas | Draft | Unscheduled | — |
 | [ZEP-0110](./ZEP-0110.md) | Block-Bodied Handler Expressions | Draft | Unscheduled | — |
-| [ZEP-0111](./ZEP-0111.md) | Witness-Dispatched Do-Notation | Implemented | Unscheduled | — |
-| [ZEP-0112](./ZEP-0112.md) | Direct-Style Suspension and Structured Concurrency | Draft | Unscheduled | — |
+| [ZEP-0111](./ZEP-0111.md) | Witness-Dispatched Do-Notation | Implemented | Candidate | 0.7.0 |
+| [ZEP-0112](./ZEP-0112.md) | Structured Concurrency on Virtual Threads | Draft | Unscheduled | — |
 | [ZEP-0113](./ZEP-0113.md) | Declaration-Site Covariance for Sum and Product Types | Draft | Unscheduled | — |
-| [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Unscheduled | — |
-| [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Unscheduled | — |
+| [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Candidate | 0.7.0 |
+| [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Candidate | 0.7.0 |
+| [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Draft | Unscheduled | — |
+| [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Draft | Unscheduled | — |
+| [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Draft | Unscheduled | — |
+| [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Unscheduled | — |
+| [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Unscheduled | — |
+| [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Unscheduled | — |
+
+## Release bundles
+
+The row-level release state above is authoritative. This section summarizes the current bundle plan;
+see [zep-tracker-review.md](../developer_guides/zep-tracker-review.md) for the rationale and
+sequencing.
+
+### `0.7.0` — type identity, reification, and type bounds
+
+Candidates: [ZEP-0005](./ZEP-0005.md), [ZEP-0013](./ZEP-0013.md), [ZEP-0015](./ZEP-0015.md),
+[ZEP-0054](./ZEP-0054.md), [ZEP-0072](./ZEP-0072.md), [ZEP-0100](./ZEP-0100.md),
+[ZEP-0104](./ZEP-0104.md), [ZEP-0105](./ZEP-0105.md), [ZEP-0111](./ZEP-0111.md),
+[ZEP-0114](./ZEP-0114.md), and [ZEP-0115](./ZEP-0115.md).
+
+[ZEP-0106](./ZEP-0106.md), [ZEP-0107](./ZEP-0107.md), [ZEP-0108](./ZEP-0108.md),
+[ZEP-0109](./ZEP-0109.md), and [ZEP-0116](./ZEP-0116.md) are the acceptance queue. They remain
+`Unscheduled` and become candidates only after their designs are accepted.
+
+### `0.8.0` — effect control and response typing
+
+Proposed bundle: [ZEP-0118](./ZEP-0118.md) (response-typed effects and tail-resumptive handlers)
+first, then [ZEP-0110](./ZEP-0110.md) (block-bodied handlers).
+[ZEP-0111](./ZEP-0111.md) joins `0.8.0` only if it does not ship in `0.7.0`.
+
+[ZEP-0112](./ZEP-0112.md) is an independent library track. [ZEP-0120](./ZEP-0120.md) depends on
+ZEP-0118 and ZEP-0112. [ZEP-0119](./ZEP-0119.md) is prototype-gated, and
+[ZEP-0121](./ZEP-0121.md) is `Deferred`.
+
+There are no `0.8.0` candidates yet: ZEP-0118 and ZEP-0110 are `Draft`, and ZEP-0000 requires an
+Accepted design before a ZEP can be marked `Candidate` or `Planned`.
+

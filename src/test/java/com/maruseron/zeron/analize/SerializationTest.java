@@ -67,6 +67,23 @@ public final class SerializationTest {
     }
 
     @Test
+    public void resolvesBuiltinCodecFromDirectionalEvidence() {
+        final var source = """
+                import zeron.serialization.Codec;
+                fn requireCodec<T: mut + Codec<T, {}>>(value: T): Unit = ();
+                fn check(): Unit {
+                    requireCodec("value");
+                    requireCodec(1);
+                    requireCodec(true);
+                    requireCodec(1.5);
+                }
+                """;
+        CompilationService.forCompilationUnits(
+                java.util.List.of(parseUnit(source)), "BuiltinCompositeCodec", "", java.util.List.of(),
+                true, java.util.List.of()).resolve();
+    }
+
+    @Test
     public void resolvesBuiltinStringEncodeWitness() {
         final var source = """
                 import zeron.serialization.Encode;

@@ -59,27 +59,28 @@ public sealed interface Expr {
     static Token evidenceToken(final TypeParameterDescriptor parameter,
                                final int boundIndex,
                                final int constructorIndex) {
+        final var source = parameter.evidenceParameter();
         return new Token(TokenType.IDENTIFIER,
-                "$zeron$evidence$" + parameter.scopeId() + "$" + parameter.name()
+                "$zeron$evidence$" + source.scopeId() + "$" + source.name()
                         + "$" + boundIndex + "$" + constructorIndex,
                 null, -1);
     }
 
     static Token reifiedToken(final TypeParameterDescriptor parameter) {
+        final var source = parameter.reifiedParameter();
         return new Token(TokenType.IDENTIFIER,
-                "$zeron$reified$" + parameter.scopeId() + "$" + parameter.name(), null, -1);
+                "$zeron$reified$" + source.scopeId() + "$" + source.name(), null, -1);
     }
 
     static Token methodEvidenceToken(final TypeParameterDescriptor parameter,
                                     final int boundIndex,
                                     final int methodIndex) {
-        final var token = new Token(
+        final var source = parameter.evidenceParameter();
+        return new Token(
             TokenType.IDENTIFIER,
-            "$zeron$evidence$" + parameter.scopeId() + "$" + parameter.name()
+            "$zeron$evidence$" + source.scopeId() + "$" + source.name()
                     + "$" + boundIndex + "$method$" + methodIndex,
             null, -1);
-
-        return token;
     }
 
     TypeDescriptor getType();
@@ -641,26 +642,51 @@ public sealed interface Expr {
         public final Token operator;
         public final TypeDescriptor targetType;
         public final boolean nullTest;
+        private final List<TypeParameterDescriptor> openingBinders;
+        private boolean openingPatternTotal;
         private TypeDescriptor type = TypeDescriptor.ofBoolean();
         private TypeDescriptor resolvedTargetType;
         private boolean exactDescriptorTest;
 
         public TypeTest(final Expr value, final Token operator, final TypeDescriptor targetType) {
-            this(value, operator, targetType, false);
+            this(value, operator, targetType, false, List.of());
+        }
+
+        public TypeTest(final Expr value, final Token operator, final TypeDescriptor targetType,
+                        final List<TypeParameterDescriptor> openingBinders) {
+            this(value, operator, targetType, false, openingBinders);
         }
 
         public TypeTest(final Expr value, final Token operator) {
-            this(value, operator, TypeDescriptor.ofNull(), true);
+            this(value, operator, TypeDescriptor.ofNull(), true, List.of());
         }
 
         private TypeTest(final Expr value,
                          final Token operator,
                          final TypeDescriptor targetType,
-                         final boolean nullTest) {
+                         final boolean nullTest,
+                         final List<TypeParameterDescriptor> openingBinders) {
             this.value = value;
             this.operator = operator;
             this.targetType = targetType;
             this.nullTest = nullTest;
+            this.openingBinders = List.copyOf(openingBinders);
+        }
+
+        public List<TypeParameterDescriptor> openingBinders() {
+            return openingBinders;
+        }
+
+        public boolean isOpeningPattern() {
+            return !openingBinders.isEmpty();
+        }
+
+        public boolean openingPatternTotal() {
+            return openingPatternTotal;
+        }
+
+        public void setOpeningPatternTotal(final boolean total) {
+            openingPatternTotal = total;
         }
 
         public TypeDescriptor getType() {

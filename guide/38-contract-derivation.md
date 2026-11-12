@@ -147,7 +147,10 @@ codec whose body raises effects declares them in the contract rather than hiding
 
 `deriving Codec` is equivalent to `deriving Encode, Decode`. Listing `Codec` fills in whichever
 direction is not listed explicitly, and a type that derives both directions also receives the
-combined `Codec` evidence. `Shape<T>` is a separate, effect-free capability and is not implied by
+combined `Codec` evidence. Because `Codec<T, E>` only requires the two directional capabilities,
+a `Codec` bound is also satisfied when separate `Encode<T, {E}>` and `Decode<T, {E}>` evidence is
+available. This covers the built-in codecs for `Int`, `Boolean`, `String`, and `Float` without a
+third witness for each type. `Shape<T>` is a separate, effect-free capability and is not implied by
 `Codec`.
 
 ```zeron

@@ -174,6 +174,14 @@ Statement-form `if` branches and value-producing `if` expressions resolve their 
 corresponding true/false facts. An `if` expression joins the facts from both result branches after
 resolving them; facts established in only one branch do not escape the expression.
 
+A branch-scoped opening pattern such as `box is Box<let T>` is a direct `if` or `while` condition.
+On its true path the tested stable binding is refined to the opened application `Box<T>`, and `T`
+is a fresh rigid binder available to branch-local annotations and calls. The binder inherits facts
+and hidden evidence from the source type rather than from a runtime test. A source already known to
+be the opened application makes the pattern total and the false path unreachable. The binder and its
+refinement are discarded at the end of the branch or loop body; they do not participate in the
+outgoing flow join.
+
 ### Boolean composition
 
 Short-circuit operators use runtime lowering and matching condition-transfer rules:

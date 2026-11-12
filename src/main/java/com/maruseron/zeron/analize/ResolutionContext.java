@@ -13,6 +13,7 @@ final class ResolutionContext {
                                    Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
                                    Token where, List<List<TypeParameterDescriptor>> inferableScopes,
                                    Consumer<List<TypeDescriptor>> setter) {}
+    private record OpeningScope(Set<TypeParameterDescriptor> binders, Set<Token> locals) {}
     final ResolutionDiagnostics diagnostics = new ResolutionDiagnostics();
     final SymbolTable symbols = new SymbolTable();
     final Set<String> types = new HashSet<>();
@@ -42,6 +43,8 @@ final class ResolutionContext {
     final Set<Token> mutableUses = new java.util.LinkedHashSet<>();
     final Map<Token, TypeDescriptor> referenceTypes = new IdentityHashMap<>();
     final Map<Token, FunctionDescriptor> callSiteFunctionTypes = new IdentityHashMap<>();
+    private final Deque<OpeningScope> openingScopes = new ArrayDeque<>();
+    boolean resolvingOpeningCondition;
     Map<TypeParameterDescriptor, TypeDescriptor> activeTypeSubstitutions = Map.of();
     private final Deque<List<TypeParameterDescriptor>> inferableReifiedScopes = new ArrayDeque<>();
     private final Map<Expr, PendingReifiedSelection> pendingReifiedSelections =
@@ -103,6 +106,40 @@ final class ResolutionContext {
         frame.initializerVisibleFields = null;
         frame.dataInitializerOwner = null;
         frame.dataInitializerWritableFields = java.util.Map.of();
+        openingScopes.clear();
+        resolvingOpeningCondition = false;
+    }
+
+    void pushOpeningScope(final List<TypeParameterDescriptor> binders) {
+        openingScopes.push(new OpeningScope(new LinkedHashSet<>(binders), new LinkedHashSet<>()));
+    }
+
+    void popOpeningScope() {
+        openingScopes.pop();
+    }
+
+    Set<TypeParameterDescriptor> activeOpeningBinders() {
+        final var binders = new LinkedHashSet<TypeParameterDescriptor>();
+        for (final var scope : openingScopes) binders.addAll(scope.binders());
+        return binders;
+    }
+
+    boolean containsEscapingOpeningBinder(final TypeDescriptor type) {
+        final var escaping = new LinkedHashSet<TypeParameterDescriptor>();
+        for (final var scope : openingScopes) {
+            for (final var binder : scope.binders()) {
+                if (binder.openedActualType() == null) escaping.add(binder);
+            }
+        }
+        return TypeSubstitution.containsAnyTypeParameter(type, escaping);
+    }
+
+    boolean isOpeningLocal(final Token name) {
+        return openingScopes.stream().anyMatch(scope -> scope.locals().contains(name));
+    }
+
+    void recordOpeningLocal(final Token name) {
+        if (!openingScopes.isEmpty()) openingScopes.peek().locals().add(name);
     }
 
     void skipInvalidImportAlias(final String name) {

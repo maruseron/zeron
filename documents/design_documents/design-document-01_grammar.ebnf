@@ -324,7 +324,14 @@ bitwiseOr = bitwiseXor, { "|", bitwiseXor } ;
 bitwiseXor = bitwiseAnd, { "^", bitwiseAnd } ;
 bitwiseAnd = equality, { "&", equality } ;
 equality = typeTest, { ( "!=" | "==" | "===" ), typeTest } ;
-typeTest = comparison, [ "is", [ "not" ], ( type | "null" ) | 'matches', matchPattern ] ;
+typeTest = comparison, [ "is", [ "not" ], ( openingPatternTarget | type | "null" )
+                                                    | 'matches', matchPattern ] ;
+
+(* [NEW] ZEP-0105: branch-scoped opening. Every argument of the applied class or contract target
+   is a `let` binder. This target is accepted only as the direct condition of an `if` or `while`;
+   the grammar leaves that position restriction and the branch scope to the parser and resolver. *)
+openingPatternTarget = qualifiedName, "<", letTypeArgument, { ",", letTypeArgument }, ">" ;
+letTypeArgument = "let", IDENTIFIER ;
 comparison = shift, { ( ">" | ">=" | "<" | "<=" ), shift } ;
 shift = term, { ( "<<" | ">>" | ">>>" ), term } ;
 term = factor, { ( "-" | "+" ), factor } ;

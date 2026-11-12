@@ -181,10 +181,14 @@ final class StatementResolver {
                 context.frame.flowState = conditionFlows.whenTrue().copy();
                 final var matchBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(
                         context, condition, true);
+                ExpressionFlowResolver.beginOpeningPatternScope(context, condition, true);
                 final FlowState thenFlow;
                 try {
                     resolve(thenBranch);
                 } finally {
+                    ExpressionFlowResolver.discardOpeningPatternRefinement(
+                            context, condition, context.frame.flowState);
+                    ExpressionFlowResolver.endOpeningPatternScope(context, condition, true);
                     ExpressionFlowResolver.endSuccessfulSumCaseTestScope(context, matchBindings);
                 }
                 thenFlow = context.frame.flowState.copy();
@@ -215,6 +219,11 @@ final class StatementResolver {
                 final var returnType = value == null
                         ? TypeDescriptor.ofUnit()
                         : MemberInteropResolver.resolveArgument(context, value, expectedReturnType);
+                if (context.containsEscapingOpeningBinder(returnType)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, location,
+                            "A type bound to an opening pattern escapes its branch through the return type."));
+                }
                 if (!context.frame.expectedReturnTypes.isEmpty()) {
                     Resolver.ensureAssignable(context, context.frame.expectedReturnTypes.peek(),
                             returnType, location);
@@ -288,6 +297,11 @@ final class StatementResolver {
                     "Cannot infer type from declaration."));
         }
         context.recordDeclarationType(var.name(), resolvedType);
+        if (!context.activeOpeningBinders().isEmpty()
+                && context.symbols.containsSymbol(var.name())
+                && context.symbols.getSymbol(var.name()).lvt() != SymbolTable.GLOBAL) {
+            context.recordOpeningLocal(var.name());
+        }
 
         if (!(var.type() instanceof InferDescriptor)) {
             Zeron.debug(" resolved variable " + var.name().lexeme() + " "
@@ -346,15 +360,21 @@ final class StatementResolver {
                 context.frame.flowState = conditionFlows.whenTrue().copy();
                 final var matchBindings = ExpressionFlowResolver.beginSuccessfulSumCaseTestScope(
                         context, condition, true);
+                ExpressionFlowResolver.beginOpeningPatternScope(context, condition, true);
                 try {
                     resolve(body);
                 } finally {
+                    ExpressionFlowResolver.discardOpeningPatternRefinement(
+                            context, condition, context.frame.flowState);
+                    ExpressionFlowResolver.endOpeningPatternScope(context, condition, true);
                     ExpressionFlowResolver.endSuccessfulSumCaseTestScope(context, matchBindings);
                     for (final var state : loopFlow.continueStates) {
                         matchBindings.forEach(state::remove);
+                        ExpressionFlowResolver.discardOpeningPatternRefinement(context, condition, state);
                     }
                     for (final var state : loopFlow.breakStates) {
                         matchBindings.forEach(state::remove);
+                        ExpressionFlowResolver.discardOpeningPatternRefinement(context, condition, state);
                     }
                 }
             } finally {
@@ -375,7 +395,9 @@ final class StatementResolver {
         }
         var exitState = conditionFlows.whenFalse().copy();
         for (final var breakState : stableLoopFlow.breakStates) {
-            exitState = FlowState.join(exitState, breakState.copy());
+            final var reachableBreak = breakState.copy();
+            ExpressionFlowResolver.discardOpeningPatternRefinement(context, condition, reachableBreak);
+            exitState = FlowState.join(exitState, reachableBreak);
         }
         context.frame.flowState = exitState;
     }

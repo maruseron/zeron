@@ -354,6 +354,11 @@ Other follow-up areas:
    ([ZEP-0110](../zeps/ZEP-0110.md)), witness-dispatched `do` notation at library level
    ([ZEP-0111](../zeps/ZEP-0111.md)), and direct-style suspension with structured concurrency
    ([ZEP-0112](../zeps/ZEP-0112.md)). None of them changes `raise` or `handle` semantics.
+   The scoped resumption design is now [ZEP-0118](../zeps/ZEP-0118.md) (response types and
+   tail-resumptive handlers), [ZEP-0119](../zeps/ZEP-0119.md) (one-shot continuations and
+   cancellation), and [ZEP-0120](../zeps/ZEP-0120.md) (async/task surface). Multi-shot continuations
+   remain deferred in [ZEP-0121](../zeps/ZEP-0121.md); [ZEP-0007](../zeps/ZEP-0007.md) is superseded
+   and remains the mechanism comparison.
 
 Effect-set polymorphism is implemented in [ZEP-0086](../zeps/ZEP-0086.md); its design and
 validation coverage are recorded there. `Result<T, E>` remains ordinary and is not a migration

@@ -207,8 +207,39 @@ fn isReifiedIntBox(box: Box<: reified>): Boolean = box is Box<Int>;
 An exact test compares applied type descriptors, including array elements and nullable or mutable
 markers. A null source is false. The test is available only when the source actually carries a
 descriptor; an erased or projected source keeps the existing static generic test rules. Stored and
-result-position existentials, scoped opening, and runtime contract-bound tests are separate
-proposals.
+result-position existentials and runtime contract-bound tests are separate proposals.
+
+## Opening an anonymous argument
+
+A star view or anonymous existential hides a type argument. To use that argument by name inside a
+branch, open it with `let` in a direct `if` or `while` type test:
+
+```zeron
+public fn readSize(box: Box<*>): Int {
+    if (box is Box<let T>) {
+        let value: T = box.value;
+        return sizeOf(box);
+    }
+    return 0;
+}
+```
+
+`T` is a fresh branch-scoped type, not a recovered runtime type. On the true path the tested
+binding has type `Box<T>`, and `T` can appear in branch-local annotations and generic calls. The
+binder inherits what the source already carries: a bounded anonymous existential contributes its
+bound and contract evidence, a reified anonymous existential contributes its descriptor, and a
+known application such as `Box<Int>` makes `T` that argument. A star view or a raw `Any` test does
+not invent evidence or a descriptor.
+
+When the source is already the opened application, the pattern is total and the false branch is
+unreachable. Otherwise the compiler performs the ordinary raw class test and both branches remain
+possible.
+
+The first version requires the opening test to be the direct condition, with every target argument
+written as `let`. Mixed patterns such as `Pair<Int, let V>`, nested openings, composed conditions,
+and `in` projections are rejected. The binder cannot escape the branch: returning it or assigning a
+type that mentions it to an outer binding is an error. Remaining opening forms, escape contexts,
+result-position existentials, and variance are tracked in ZEP-0116.
 
 ## Runtime type descriptors
 

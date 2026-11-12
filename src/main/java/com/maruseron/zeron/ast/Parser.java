@@ -67,6 +67,9 @@ public final class Parser {
     /// Non-null only while parsing a declared parameter type. Each anonymous existential found
     /// there is lowered to a hidden type parameter appended to the declared signature.
     private List<TypeParameterDescriptor> pendingAnonymousTypeParameters;
+    /// Non-null only while parsing the target of an `is` type test. Opening binders are collected
+    /// here so the parser can expose their names in the true branch only.
+    private List<TypeParameterDescriptor> pendingOpeningTypeParameters;
     private boolean stopQualifiedTypeAtNamedPattern;
 
     private record LoopMarker(LoopMarker enclosing) {}
@@ -2491,6 +2494,30 @@ public final class Parser {
     private List<TypeDescriptor> collectTypeArguments(final boolean allowProjections) {
         final var typeArgs = new ArrayList<TypeDescriptor>();
         do {
+            if (match(LET)) {
+                final var keyword = previous();
+                if (pendingOpeningTypeParameters == null) {
+                    throw error(keyword, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            "An opening binder is allowed only in a direct if or while type-test pattern.");
+                }
+                final var name = consume(IDENTIFIER, "Expect a type name after 'let' in an opening pattern.");
+                if (match(COLON)) {
+                    throw error(previous(), DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                            "An opening binder cannot declare bounds or markers; the source type carries them.");
+                }
+                if (activeTypeParameters.containsKey(name.lexeme())
+                        || pendingOpeningTypeParameters.stream()
+                                .anyMatch(parameter -> parameter.name().equals(name.lexeme()))) {
+                    throw error(name, DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                            "An opening binder cannot shadow another type parameter or repeat in one pattern.");
+                }
+                final var parameter = new TypeParameterDescriptor(
+                        TYPE_PARAMETER_SCOPES.incrementAndGet(), name.lexeme());
+                parameter.markOpeningBinder();
+                pendingOpeningTypeParameters.add(parameter);
+                typeArgs.add(parameter);
+                continue;
+            }
             if (match(STAR)) {
                 if (!allowProjections) {
                     throw error(previous(), DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
@@ -2778,13 +2805,30 @@ public final class Parser {
         final var condition = expression();
         consume(RIGHT_PAREN, "Expect ')' after if condition.");
 
-        final var thenBranch = statement();
+        final var openingBinders = directOpeningBinders(condition);
+        final var enclosingTypeParameters = activeTypeParameters;
+        if (!openingBinders.isEmpty()) {
+            activeTypeParameters = new LinkedHashMap<>(enclosingTypeParameters);
+            for (final var binder : openingBinders) activeTypeParameters.put(binder.name(), binder);
+        }
+        final Stmt thenBranch;
+        try {
+            thenBranch = statement();
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
+        }
         Stmt elseBranch = null;
         if (match(ELSE)) {
             elseBranch = statement();
         }
 
         return new Stmt.If(paren, condition, thenBranch, elseBranch);
+    }
+
+    private List<TypeParameterDescriptor> directOpeningBinders(final Expr expression) {
+        var condition = expression;
+        while (condition instanceof Expr.Grouping grouping) condition = grouping.expression;
+        return condition instanceof Expr.TypeTest test ? test.openingBinders() : List.of();
     }
 
     private Stmt unboundLoopStatement() {
@@ -2819,7 +2863,18 @@ public final class Parser {
             com.maruseron.zeron.Zeron.warning(keyword, DiagnosticCatalog.WHILE_TRUE_LOOP,
                     "'while (true)' can be written as 'loop'.");
         }
-        final var body = statement();
+        final var openingBinders = directOpeningBinders(condition);
+        final var enclosingTypeParameters = activeTypeParameters;
+        if (!openingBinders.isEmpty()) {
+            activeTypeParameters = new LinkedHashMap<>(enclosingTypeParameters);
+            for (final var binder : openingBinders) activeTypeParameters.put(binder.name(), binder);
+        }
+        final Stmt body;
+        try {
+            body = statement();
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
+        }
         // unwrap into enclosing
         this.loopMarker = loopMarker.enclosing();
         return new Stmt.While(keyword, condition, body);
@@ -3061,9 +3116,21 @@ public final class Parser {
         if (match(IS)) {
             final var operator = previous();
             final var negation = match(NOT) ? previous() : null;
-            final var test = match(NULL)
-                    ? new Expr.TypeTest(value, operator)
-                    : new Expr.TypeTest(value, operator, collectType());
+            final Expr.TypeTest test;
+            if (match(NULL)) {
+                test = new Expr.TypeTest(value, operator);
+            } else {
+                final var previousOpeningParameters = pendingOpeningTypeParameters;
+                final var openingParameters = new ArrayList<TypeParameterDescriptor>();
+                pendingOpeningTypeParameters = openingParameters;
+                final TypeDescriptor targetType;
+                try {
+                    targetType = collectType();
+                } finally {
+                    pendingOpeningTypeParameters = previousOpeningParameters;
+                }
+                test = new Expr.TypeTest(value, operator, targetType, openingParameters);
+            }
             return negation == null
                     ? test
                     : new Expr.Unary(negation, test, TypeDescriptor.ofBoolean());
@@ -3484,7 +3551,18 @@ public final class Parser {
             final var condition = expression();
             consume(RIGHT_PAREN, "Expect ')' after condition.");
             consume(THEN, "Expect 'then' after ')'.");
-            final var thenExpr = expression();
+            final var openingBinders = directOpeningBinders(condition);
+            final var enclosingTypeParameters = activeTypeParameters;
+            if (!openingBinders.isEmpty()) {
+                activeTypeParameters = new LinkedHashMap<>(enclosingTypeParameters);
+                for (final var binder : openingBinders) activeTypeParameters.put(binder.name(), binder);
+            }
+            final Expr thenExpr;
+            try {
+                thenExpr = expression();
+            } finally {
+                activeTypeParameters = enclosingTypeParameters;
+            }
             consume(ELSE, "'Expect 'else' after expression.");
             final var elseExpr = expression();
             return new Expr.If(paren, condition, thenExpr, elseExpr, TypeDescriptor.ofInfer());

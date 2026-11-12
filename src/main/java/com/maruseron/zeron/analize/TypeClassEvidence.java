@@ -1288,7 +1288,9 @@ final class TypeClassEvidence {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
                         "Ambiguous witness for contract '" + contractType + "' and type '" + actualType + "'."));
             }
-            return matchingWitnesses == 1 || isBuiltInDisplay(contractType, actual)
+            return matchingWitnesses == 1
+                    || hasCompositeCodecEvidence(context, contractType, actualType, where, resolving)
+                    || isBuiltInDisplay(contractType, actual)
                     || isBuiltInEq(contractType, actual) || isBuiltInHashable(contractType, actual);
         } finally {
             resolving.remove(evidenceKey);
@@ -1297,6 +1299,26 @@ final class TypeClassEvidence {
 
     private static boolean isSerializationContract(final TypeDescriptor type, final String simpleName) {
         return nominalName(type).equals("zeron.serialization." + simpleName);
+    }
+
+    /// `Codec<T, E>` is a composite capability: it requires `Encode<T, {E}>` and
+    /// `Decode<T, {E}>` but declares no operations of its own. A type whose two directional
+    /// capabilities are available therefore satisfies a `Codec` bound even when it has no
+    /// dedicated `Codec` witness. This is what makes the built-in primitive codecs work without
+    /// duplicating each declaration as a third witness.
+    private static boolean hasCompositeCodecEvidence(
+            final ResolutionContext context, final TypeDescriptor contractType,
+            final TypeDescriptor actualType, final com.maruseron.zeron.scan.Token where,
+            final Set<String> resolving) {
+        if (!isSerializationContract(contractType, "Codec")) return false;
+        final var arguments = typeArguments(contractType);
+        if (arguments.size() != 2) return false;
+        final var encode = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName("zeron.serialization.Encode"), arguments);
+        final var decode = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName("zeron.serialization.Decode"), arguments);
+        return hasEvidence(context, encode, actualType, where, resolving)
+                && hasEvidence(context, decode, actualType, where, resolving);
     }
 
     private static TypeDescriptor applyHigherKindedBound(final ResolutionContext context,
@@ -2120,10 +2142,10 @@ final class TypeClassEvidence {
 
     private static boolean isActive(final ResolutionContext context, final WitnessEntry entry) {
         final var witness = entry.declaration();
-        // Class-scoped implementation blocks are canonical evidence for their owner type, even
-        // though they are not written with `default`. They activate with the owner type instead of
-        // requiring a package star import.
-        if (witness.isDefault() || isClassHktImplementation(context, witness)) {
+        // Derived witnesses, class-scoped implementation blocks, and unnamed defaults are
+        // canonical evidence for their target type. They activate with that type rather than
+        // requiring a witness import or a package star import.
+        if (witness.isDefault() || witness.derived() || isClassHktImplementation(context, witness)) {
             return isDefaultActive(context, witness);
         }
         if (entry.packageName().equals(context.packageName)) return true;

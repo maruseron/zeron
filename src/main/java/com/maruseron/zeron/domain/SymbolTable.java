@@ -7,6 +7,7 @@ import com.maruseron.zeron.analize.Width;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -203,7 +204,9 @@ public final class SymbolTable {
         final var lvt = locals.size();
         final var previous = symbols.get(name.lexeme());
         if (previous != null) {
-            if (!name.lexeme().equals("_")) {
+            // Implicit receivers (`this`) are compiler-generated and cannot be renamed, so a nested
+            // receiver shadowing an outer one is not actionable for the user.
+            if (!name.lexeme().equals("_") && name.type() != TokenType.THIS) {
                 Zeron.warning(name, DiagnosticCatalog.SHADOWED_LOCAL,
                         "Local '" + name.lexeme() + "' shadows an outer declaration.");
             }

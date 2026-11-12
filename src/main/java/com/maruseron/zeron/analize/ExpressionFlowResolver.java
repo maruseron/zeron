@@ -118,6 +118,7 @@ final class ExpressionFlowResolver {
         final var conditionFlows = resolveCondition(context, iff.condition, incoming, iff.paren);
         context.frame.flowState = conditionFlows.whenTrue().copy();
         final var matchBindings = beginSuccessfulSumCaseTestScope(context, iff.condition, true);
+        beginOpeningPatternScope(context, iff.condition, true);
         final TypeDescriptor thenType;
         final FlowState thenFlow;
         try {
@@ -125,6 +126,8 @@ final class ExpressionFlowResolver {
                     ? resolve(context, iff.thenExpr)
                     : MemberInteropResolver.resolveArgument(context, iff.thenExpr, expectedType);
         } finally {
+            discardOpeningPatternRefinement(context, iff.condition, context.frame.flowState);
+            endOpeningPatternScope(context, iff.condition, true);
             endSuccessfulSumCaseTestScope(context, matchBindings);
         }
         thenFlow = context.frame.flowState.copy();
@@ -633,6 +636,12 @@ final class ExpressionFlowResolver {
                 }
                 final var expectedType = binding.type();
                 final var resolvedType = MemberInteropResolver.resolveArgument(context, assignment.value, expectedType);
+                if (context.containsEscapingOpeningBinder(resolvedType)
+                        && !context.isOpeningLocal(symbolName)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, assignment.name,
+                            "A type bound to an opening pattern escapes its branch through this assignment."));
+                }
                 ensureAssignable(context, expectedType, resolvedType, assignment.name);
 
                 if (context.frame.flowState.isReachable()) {
@@ -2530,6 +2539,12 @@ final class ExpressionFlowResolver {
             return TypeDescriptor.ofBoolean();
         }
         final var targetType = resolveSumCaseTestType(context, test.targetType, sourceType, test.operator);
+        if (test.isOpeningPattern()) {
+            resolveOpeningPatternTarget(context, test, sourceType, targetType);
+            test.setResolvedTargetType(targetType);
+            test.setType(TypeDescriptor.ofBoolean());
+            return TypeDescriptor.ofBoolean();
+        }
         final var exactDescriptorTest = isExactDescriptorTestTarget(sourceType, targetType);
         if (exactDescriptorTest) {
             TypeResolver.validateType(context, targetType, test.operator);
@@ -2545,6 +2560,176 @@ final class ExpressionFlowResolver {
         test.setResolvedTargetType(targetType);
         test.setType(TypeDescriptor.ofBoolean());
         return TypeDescriptor.ofBoolean();
+    }
+
+    private static void resolveOpeningPatternTarget(final ResolutionContext context,
+                                                    final Expr.TypeTest test,
+                                                    final TypeDescriptor sourceType,
+                                                    final TypeDescriptor targetType) {
+        if (!context.resolvingOpeningCondition) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                    test.operator, "An opening pattern must be the direct condition of an if or while."));
+        }
+        if (!(targetType instanceof GenericDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                    test.operator, "An opening pattern requires an applied generic class or contract type."));
+        }
+        final var generic = (GenericDescriptor) targetType;
+        if (generic.typeParameters().isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                    test.operator, "An opening pattern requires an applied generic class or contract type."));
+        }
+        final var targetName = TypeResolver.resolveTypeName(context, generic.baseType().name(), test.operator);
+        generic.baseType().resolveName(targetName);
+        final var classDeclaration = context.classes.get(targetName);
+        final var contractDeclaration = context.contracts.get(targetName);
+        if (classDeclaration == null && contractDeclaration == null) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, test.operator,
+                    "Unknown opening-pattern type '" + targetName + "'."));
+        }
+        final var declaredParameters = classDeclaration != null
+                ? classDeclaration.typeParameters()
+                : contractDeclaration.typeParameters();
+        if (declaredParameters.size() != generic.typeParameters().size()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    test.operator, "Opening pattern '" + targetName + "' expects "
+                            + declaredParameters.size() + " type arguments, found "
+                            + generic.typeParameters().size() + "."));
+        }
+        final var binders = test.openingBinders();
+        for (final var argument : generic.typeParameters()) {
+            if (!(argument instanceof TypeParameterDescriptor binder) || !binder.isOpeningBinder()
+                    || !binders.contains(binder)) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        test.operator, binders.size() > generic.typeParameters().size()
+                                ? "Nested opening patterns are not supported yet."
+                                : "Every type argument of an opening pattern must be a 'let' binder."));
+            }
+        }
+        if (binders.size() != generic.typeParameters().size()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    test.operator, "Every type argument of an opening pattern must be a direct 'let' binder."));
+        }
+
+        var source = sourceType;
+        while (source instanceof NullableDescriptor nullable) source = nullable.baseType();
+        while (source instanceof ReferenceDescriptor reference) source = reference.baseType();
+        final var sourceNullable = sourceType instanceof NullableDescriptor
+                || sourceType instanceof NullDescriptor;
+        if (source instanceof GenericDescriptor sourceGeneric
+                && TypeResolver.resolveTypeName(context, sourceGeneric.baseType().name(), test.operator)
+                        .equals(targetName)) {
+            if (sourceGeneric.typeParameters().size() != binders.size()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                        test.operator, "The opening pattern does not match the source type's arity."));
+            }
+            for (int index = 0; index < binders.size(); index++) {
+                initializeOpeningBinder(context, binders.get(index),
+                        sourceGeneric.typeParameters().get(index), sourceNullable,
+                        declaredParameters.get(index), test.operator);
+            }
+            test.setOpeningPatternTotal(true);
+            return;
+        }
+        if (source instanceof AnyDescriptor) {
+            for (int index = 0; index < binders.size(); index++) {
+                final var declared = declaredParameters.get(index);
+                binders.get(index).initializeOpening(null, declared.bounds(),
+                        sourceNullable || declared.admitsNullableArguments(),
+                        declared.admitsMutableArguments());
+            }
+            test.setOpeningPatternTotal(false);
+            return;
+        }
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                test.operator, "Opening pattern is impossible between " + sourceType + " and "
+                        + targetType + "."));
+    }
+
+    private static void initializeOpeningBinder(final ResolutionContext context,
+                                                final TypeParameterDescriptor binder,
+                                                final TypeDescriptor sourceArgument,
+                                                final boolean sourceNullable,
+                                                final TypeParameterDescriptor declared,
+                                                final Token where) {
+        if (sourceArgument instanceof TypeProjectionDescriptor projection) {
+            if (projection.kind() == TypeProjectionDescriptor.Kind.IN) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                        "An 'in' projection cannot be opened in this version."));
+            }
+            final var bound = projection.bound();
+            binder.initializeOpening(null, contractBounds(context, bound),
+                    sourceNullable || bound.isNullable() && declared.admitsNullableArguments(),
+                    false);
+            return;
+        }
+        if (sourceArgument instanceof TypeParameterDescriptor parameter) {
+            final var actual = parameter.openedActualType();
+            if (actual != null) {
+                binder.initializeOpening(actual, List.of(), actual.isNullable(), false);
+                return;
+            }
+            binder.initializeOpening(null, parameter.bounds(),
+                    parameter.admitsNullableArguments(), parameter.admitsMutableArguments());
+            if (!parameter.bounds().isEmpty()) binder.inheritOpeningEvidence(parameter);
+            binder.inheritOpeningReified(parameter);
+            return;
+        }
+        binder.initializeOpening(sourceArgument, List.of(),
+                sourceNullable || sourceArgument.isNullable(), false);
+    }
+
+    private static List<TypeDescriptor> contractBounds(final ResolutionContext context,
+                                                       final TypeDescriptor bound) {
+        var base = bound;
+        while (base instanceof NullableDescriptor nullable) base = nullable.baseType();
+        final var name = base instanceof GenericDescriptor generic
+                ? generic.baseType().name() : base.name();
+        final var resolved = TypeResolver.resolveTypeName(context, name, null);
+        return context.contracts.containsKey(resolved) ? List.of(bound) : List.of();
+    }
+
+    private static Expr.TypeTest directOpeningTypeTest(final Expr expression) {
+        var condition = expression;
+        while (condition instanceof Expr.Grouping grouping) condition = grouping.expression;
+        return condition instanceof Expr.TypeTest test && test.isOpeningPattern() ? test : null;
+    }
+
+    private static boolean containsOpeningTypeTest(final Expr expression) {
+        return switch (expression) {
+            case Expr.TypeTest test -> test.isOpeningPattern();
+            case Expr.Grouping grouping -> containsOpeningTypeTest(grouping.expression);
+            case Expr.Logical logical -> containsOpeningTypeTest(logical.left)
+                    || containsOpeningTypeTest(logical.right);
+            case Expr.Unary unary -> containsOpeningTypeTest(unary.right);
+            default -> false;
+        };
+    }
+
+    static void beginOpeningPatternScope(final ResolutionContext context,
+                                         final Expr condition,
+                                         final boolean trueBranch) {
+        if (!trueBranch) return;
+        final var test = directOpeningTypeTest(condition);
+        if (test != null) context.pushOpeningScope(test.openingBinders());
+    }
+
+    static void endOpeningPatternScope(final ResolutionContext context,
+                                       final Expr condition,
+                                       final boolean trueBranch) {
+        if (trueBranch && directOpeningTypeTest(condition) != null) context.popOpeningScope();
+    }
+
+    static void discardOpeningPatternRefinement(final ResolutionContext context,
+                                                final Expr condition,
+                                                final FlowState state) {
+        final var test = directOpeningTypeTest(condition);
+        if (test == null) return;
+        final var variable = directVariable(context, test.value);
+        if (variable != null && context.symbols.containsSymbol(variable.name)) {
+            state.remove(context.symbols.getSymbol(variable.name).name());
+        }
     }
 
     private static TypeDescriptor resolveSumCaseTestType(final ResolutionContext context,
@@ -2769,12 +2954,25 @@ final class ExpressionFlowResolver {
     static StatementResolver.ConditionFlows resolveCondition(final ResolutionContext context, final Expr expression,
                                                               final FlowState incoming,
                                                               final Token where) {
+        return resolveCondition(context, expression, incoming, where, true);
+    }
+
+    private static StatementResolver.ConditionFlows resolveCondition(final ResolutionContext context,
+                                                                     final Expr expression,
+                                                                     final FlowState incoming,
+                                                                     final Token where,
+                                                                     final boolean openingAllowed) {
         final var enclosingFlow = context.frame.flowState;
         try {
             final var condition = ungroupCondition(expression);
             if (containsSumCaseTest(expression) && directSumCaseTest(expression) == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         where, "'matches' cannot be composed with other condition operators yet."));
+            }
+            if (openingAllowed && containsOpeningTypeTest(expression)
+                    && directOpeningTypeTest(expression) == null) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                        where, "An opening pattern must be the direct condition of an if or while."));
             }
             if (expression instanceof Expr.Literal literal && literal.value instanceof Boolean value) {
                 final var whenTrue = incoming.copy();
@@ -2784,25 +2982,25 @@ final class ExpressionFlowResolver {
                 return new StatementResolver.ConditionFlows(whenTrue, whenFalse);
             }
             if (expression instanceof Expr.Grouping grouping) {
-                final var result = resolveCondition(context, grouping.expression, incoming, where);
+                final var result = resolveCondition(context, grouping.expression, incoming, where, openingAllowed);
                 grouping.setType(TypeDescriptor.ofBoolean());
                 return result;
             }
             if (expression instanceof Expr.Unary unary
                     && unary.operator.type() == TokenType.NOT) {
-                final var result = resolveCondition(context, unary.right, incoming, unary.operator);
+                final var result = resolveCondition(context, unary.right, incoming, unary.operator, false);
                 unary.setType(TypeDescriptor.ofBoolean());
                 return new StatementResolver.ConditionFlows(result.whenFalse(), result.whenTrue());
             }
             if (expression instanceof Expr.Logical logical) {
-                final var left = resolveCondition(context, logical.left, incoming, logical.operator);
+                final var left = resolveCondition(context, logical.left, incoming, logical.operator, false);
                 final StatementResolver.ConditionFlows result;
                 if (logical.operator.type() == TokenType.AND) {
-                    final var right = resolveCondition(context, logical.right, left.whenTrue(), logical.operator);
+                    final var right = resolveCondition(context, logical.right, left.whenTrue(), logical.operator, false);
                     result = new StatementResolver.ConditionFlows(right.whenTrue(),
                             FlowState.join(left.whenFalse(), right.whenFalse()));
                 } else {
-                    final var right = resolveCondition(context, logical.right, left.whenFalse(), logical.operator);
+                    final var right = resolveCondition(context, logical.right, left.whenFalse(), logical.operator, false);
                     result = new StatementResolver.ConditionFlows(FlowState.join(left.whenTrue(), right.whenTrue()),
                             right.whenFalse());
                 }
@@ -2812,11 +3010,14 @@ final class ExpressionFlowResolver {
 
             context.frame.flowState = incoming.copy();
             final var previousSumCaseCondition = context.frame.resolvingSumCaseCondition;
+            final var previousOpeningCondition = context.resolvingOpeningCondition;
             context.frame.resolvingSumCaseCondition = directSumCaseTest(expression) != null;
+            context.resolvingOpeningCondition = openingAllowed && directOpeningTypeTest(expression) != null;
             try {
                 ensureBoolean(context, resolve(context, expression), where);
             } finally {
                 context.frame.resolvingSumCaseCondition = previousSumCaseCondition;
+                context.resolvingOpeningCondition = previousOpeningCondition;
             }
             final var evaluated = context.frame.flowState.copy();
             final var whenTrue = evaluated.copy();
@@ -2842,10 +3043,14 @@ final class ExpressionFlowResolver {
                         if (mayBeNonNull) whenFalse.put(binding.name(), nonNull);
                     }
                 } else if (variable != null && isRefinable(context, variable.name)) {
-                    whenTrue.put(context.symbols.getSymbol(variable.name).name(),
-                            refineTypeFact(context, context.symbols.getSymbol(variable.name).type(),
-                                    evaluated.get(context.symbols.getSymbol(variable.name).name()),
-                                    test.resolvedTargetType()));
+                    final var binding = context.symbols.getSymbol(variable.name);
+                    if (test.isOpeningPattern()) {
+                        whenTrue.put(binding.name(), new FlowFact(false, Set.of(test.resolvedTargetType())));
+                        if (test.openingPatternTotal()) whenFalse.markUnreachable();
+                    } else {
+                        whenTrue.put(binding.name(), refineTypeFact(context, binding.type(),
+                                evaluated.get(binding.name()), test.resolvedTargetType()));
+                    }
                 }
             } else if (expression instanceof Expr.SumCaseTest test) {
                 final var variable = directVariable(context, test.value);

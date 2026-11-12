@@ -52,7 +52,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 final class ZeronTextDocumentService implements TextDocumentService, AutoCloseable {
     private record OpenDocument(int version, String text, String uri) {}
-    private record RevisionSnapshot(long revision, ProjectAnalysisWorkspace.Snapshot snapshot) {}
+    private record RevisionSnapshot(long revision, ProjectAnalysisWorkspace.Snapshot snapshot,
+                                    Map<Path, OpenDocument> documents) {}
 
     private final ProjectAnalysisWorkspace workspace;
     private final ExecutorService analysisExecutor = Executors.newSingleThreadExecutor(task -> {
@@ -326,14 +327,20 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
     private CompletableFuture<RevisionSnapshot> startAnalysis(final long requestedRevision) {
         cancelCurrentAnalysis();
         final Map<Path, ProjectAnalysisWorkspace.Overlay> overlays;
+        final Map<Path, OpenDocument> analyzedDocuments;
         final var copy = new HashMap<Path, ProjectAnalysisWorkspace.Overlay>();
-        openDocuments.forEach((path, document) -> copy.put(path,
-                new ProjectAnalysisWorkspace.Overlay(document.version(), document.text())));
+        final var documentCopy = new HashMap<Path, OpenDocument>();
+        openDocuments.forEach((path, document) -> {
+            copy.put(path, new ProjectAnalysisWorkspace.Overlay(document.version(), document.text()));
+            documentCopy.put(path, document);
+        });
         overlays = Map.copyOf(copy);
+        analyzedDocuments = Map.copyOf(documentCopy);
         final var future = new CompletableFuture<RevisionSnapshot>();
         final var task = new FutureTask<Void>(() -> {
             try {
-                future.complete(new RevisionSnapshot(requestedRevision, workspace.analyze(overlays)));
+                future.complete(new RevisionSnapshot(requestedRevision, workspace.analyze(overlays),
+                        analyzedDocuments));
             } catch (final IOException | RuntimeException | Error exception) {
                 future.completeExceptionally(exception);
                 throw exception;
@@ -350,7 +357,7 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
                     log("Project analysis failed: " + cause.getMessage());
                 }
             } else if (requestedRevision == revision.get()) {
-                publishDiagnostics(result.snapshot());
+                publishDiagnostics(result.snapshot(), result.documents());
             }
         });
         analysisExecutor.execute(task);
@@ -365,7 +372,8 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
         if (task != null) task.cancel(true);
     }
 
-    private void publishDiagnostics(final ProjectAnalysisWorkspace.Snapshot snapshot) {
+    private void publishDiagnostics(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                    final Map<Path, OpenDocument> analyzedDocuments) {
         final var languageClient = client;
         if (languageClient == null) return;
         for (final var diagnostic : snapshot.unassociatedDiagnostics()) {
@@ -373,19 +381,21 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
                     + ": " + diagnostic.message();
             if (reportedUnassociatedDiagnostics.add(message)) log("Project analysis: " + message);
         }
-        final List<Map.Entry<Path, OpenDocument>> documents;
-        synchronized (lock) {
-            documents = List.copyOf(openDocuments.entrySet());
-        }
-        for (final var entry : documents) {
+        for (final var entry : analyzedDocuments.entrySet()) {
             final var path = entry.getKey();
+            final var analyzed = entry.getValue();
+            final OpenDocument current;
+            synchronized (lock) {
+                current = openDocuments.get(path);
+            }
+            if (current == null || current.version() != analyzed.version()) continue;
             final var text = snapshot.sourceText().get(path);
             if (text == null) continue;
             final var diagnostics = snapshot.diagnostics().getOrDefault(path, List.of()).stream()
                     .map(diagnostic -> toLspDiagnostic(diagnostic, text))
                     .toList();
             languageClient.publishDiagnostics(new PublishDiagnosticsParams(
-                    entry.getValue().uri(), diagnostics, entry.getValue().version()));
+                    analyzed.uri(), diagnostics, analyzed.version()));
         }
     }
 

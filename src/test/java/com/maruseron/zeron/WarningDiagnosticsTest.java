@@ -85,6 +85,28 @@ public final class WarningDiagnosticsTest {
     }
 
     @Test
+    public void doesNotReportShadowingForImplicitReceivers() {
+        final var warnings = resolve("""
+                package warnings;
+                contract Reader {
+                    read(): Int;
+                }
+                class Box {
+                    public property value: Int;
+                    public constructor new;
+                    public peek(): Int {
+                        let reader = object: Reader {
+                            public read(): Int = 1;
+                        };
+                        return reader.read();
+                    }
+                }
+                fn main(): Int = Box.new(1).peek();
+                """);
+        assertFalse(warnings.toString(), warnings.contains("ZR3017"));
+    }
+
+    @Test
     public void anonymousWitnessWarnsWithoutFailingParsing() {
         Zeron.beginReplSubmission();
         final var parsed = Parser.of(Scanner.from("""

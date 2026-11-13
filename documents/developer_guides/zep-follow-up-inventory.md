@@ -132,10 +132,13 @@ Source: ZEP-0090, ZEP-0093.
 
 Source: ZEP-0019, ZEP-0076, ZEP-0078.
 
-- Class-side methods on HKT contracts `[E]`.
+- Class-side methods on HKT contracts `[E]` — receiverless structural satisfaction proposed by
+  [ZEP-0125](../zeps/ZEP-0125.md).
 - Static and class-side default operations `[E]`.
-- Delegating static requirements through companion types `[E]`.
-- Note that ZEP-0072 (class-scoped static functions) is the existing draft for part of this space.
+- Delegating static requirements through companion types `[E]` — nominal static implementation
+  proposed by [ZEP-0124](../zeps/ZEP-0124.md).
+- Note that [ZEP-0072](../zeps/ZEP-0072.md) (class-scoped static functions) is implemented and
+  supplies the companion surface for ZEP-0124.
 
 #### K. Annotation value and relationship extensions
 

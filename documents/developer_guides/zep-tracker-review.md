@@ -252,6 +252,12 @@ These decisions shape the current plan. Details live in each ZEP.
 - **ZEP-0118–ZEP-0121:** response-typed effects and tail-resumptive handlers, one-shot
   continuations, the async surface, and multi-shot continuations respectively. ZEP-0118 through
   ZEP-0120 are `Draft`; ZEP-0121 is `Deferred`; ZEP-0007 is `Superseded`.
+- **ZEP-0124:** nominal static contract implementation; public class static functions satisfy
+  type-position requirements, with implementation-block static entries for generic-class cases.
+  Draft and unscheduled.
+- **ZEP-0125:** optional HKT implementation blocks; `is` conformance plus public members supplies
+  receiver-marked and receiverless operations, with explicit blocks retained for overrides and
+  non-member implementations. Draft and unscheduled.
 
 ## Planning rules
 

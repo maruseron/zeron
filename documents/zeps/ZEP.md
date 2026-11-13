@@ -134,6 +134,8 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Unscheduled | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Planned | 0.7.0 |
 | [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Explicit Effect Responses | Draft | Unscheduled | — |
+| [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Draft | Unscheduled | — |
+| [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Draft | Unscheduled | — |
 
 ## Release bundles
 

@@ -107,6 +107,28 @@ The script reads the POM version and both index versions, then:
 If you add a top-level distribution file or change the archive layout, update both the staging
 copies and the required-entry checks in the script.
 
+## GitHub release workflow
+
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the archive when a
+release tag is pushed. The workflow runs on `windows-latest` because `release.ps1` uses the Windows
+launcher and PowerShell path conventions, and it installs JDK 25 with Maven caching.
+
+The workflow:
+
+1. Accepts tags such as `0.7.0` or `v0.7.0`, and rejects `*-program-bundle` tags.
+2. Checks that the tag, with an optional leading `v`, exactly matches the `pom.xml` version.
+3. Runs `scripts/release.ps1`, so the full Maven test suite and archive smoke tests remain the
+   publication gate.
+4. Extracts the matching `## [<version>]` section from `CHANGELOG.md` and fails if that section is
+   missing or empty. The section, rather than GitHub's generated summary, becomes the release body.
+5. Creates the GitHub Release with `--notes-file`, or refreshes the notes and uploads replacements
+   with `--clobber` when the release already exists. The uploaded assets are
+   `zeron-<version>.zip` and its `.sha256` sidecar. Prerelease versions are marked as GitHub
+   prereleases.
+
+The workflow uses the repository's `GITHUB_TOKEN` with `contents: write`; no additional publishing
+secret is required for GitHub Releases.
+
 ## Failure signatures
 
 | Symptom | Likely cause |

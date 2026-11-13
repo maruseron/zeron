@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+      - '!*program-bundle*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Validate release tag
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Tag '$tag' is not a supported release version."
+          }
+          [xml]$pom = Get-Content -LiteralPath pom.xml -Raw
+          $projectVersion = $pom.project.version
+          if ($version -ne $projectVersion) {
+            throw "Tag '$tag' does not match pom.xml version '$projectVersion'."
+          }
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build tested release archive
+        shell: pwsh
+        run: ./scripts/release.ps1
+
+      - name: Extract changelog release notes
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_VERSION
+          $changelog = Get-Content -LiteralPath CHANGELOG.md -Raw
+          $escaped = [regex]::Escape($version)
+          $pattern = "(?ms)^## \[$escaped\][^\r\n]*\r?\n(.*?)(?=^## \[|\z)"
+          $match = [regex]::Match($changelog, $pattern)
+          if (-not $match.Success) {
+            throw "No CHANGELOG.md section found for release $version."
+          }
+          $notes = $match.Groups[1].Value.Trim()
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            throw "The CHANGELOG.md section for release $version is empty."
+          }
+          $notesPath = Join-Path $env:RUNNER_TEMP "release-notes-$version.md"
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
+          "RELEASE_NOTES=$notesPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $version = $env:RELEASE_VERSION
+          $notes = $env:RELEASE_NOTES
+          $archive = "target/releases/zeron-$version.zip"
+          $checksum = "$archive.sha256"
+          if (-not (Test-Path -LiteralPath $notes -PathType Leaf)) {
+            throw "Release notes were not produced: $notes"
+          }
+          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+            throw "Release archive was not produced: $archive"
+          }
+          if (-not (Test-Path -LiteralPath $checksum -PathType Leaf)) {
+            throw "Release checksum was not produced: $checksum"
+          }
+
+          gh release view $tag --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --notes-file $notes --title "Zeron $version"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update release notes for $tag." }
+            gh release upload $tag $archive $checksum --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update release assets for $tag." }
+          } else {
+            if ($version -match '-') {
+              gh release create $tag $archive $checksum --verify-tag `
+                --title "Zeron $version" --notes-file $notes --prerelease
+            } else {
+              gh release create $tag $archive $checksum --verify-tag `
+                --title "Zeron $version" --notes-file $notes
+            }
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create release $tag." }
+          }

@@ -1570,7 +1570,7 @@ public class LspWorkspaceTest {
 
         assertNotNull(hover);
         assertTrue("Unexpected echo hover: " + hover.getContents().getRight().getValue(),
-                hover.getContents().getRight().getValue().contains("fn echo<T>(value: Int) -> Int"));
+                hover.getContents().getRight().getValue().contains("fn echo(value: Int) -> Int"));
     }
 
     @Test

@@ -13,6 +13,8 @@ public final class FunctionDescriptor implements TypeDescriptor {
     private final List<TypeDescriptor> raisedEffects;
     private final List<TypeDescriptor> handledEffects;
     private final boolean handlerShape;
+    private int hiddenEvidenceCount;
+    private int hiddenDescriptorCount;
 
     FunctionDescriptor(String name, TypeDescriptor returnType, List<TypeDescriptor> parameters) {
         this(name, returnType, parameters, List.of(), List.of(), List.of());
@@ -98,6 +100,33 @@ public final class FunctionDescriptor implements TypeDescriptor {
         return typeParameters;
     }
 
+    /// Number of hidden evidence slots the polymorphic adapter invocation receives after its
+    /// source parameters. Zero for ordinary functions and rank-2 values without bounds.
+    public int hiddenEvidenceCount() {
+        return hiddenEvidenceCount;
+    }
+
+    /// Number of hidden AppliedTypeDescriptor slots the polymorphic adapter invocation receives
+    /// after the evidence slots.
+    public int hiddenDescriptorCount() {
+        return hiddenDescriptorCount;
+    }
+
+    public boolean hasHiddenSlots() {
+        return hiddenEvidenceCount > 0 || hiddenDescriptorCount > 0;
+    }
+
+    /// Records the hidden invocation slots for a rank-2 function type. The counts are ABI metadata;
+    /// they do not participate in descriptor equality because the source binder list already does.
+    public FunctionDescriptor withHiddenSlots(final int evidenceCount, final int descriptorCount) {
+        if (evidenceCount < 0 || descriptorCount < 0) {
+            throw new IllegalArgumentException("Hidden slot counts cannot be negative.");
+        }
+        hiddenEvidenceCount = evidenceCount;
+        hiddenDescriptorCount = descriptorCount;
+        return this;
+    }
+
     /// Type parameters a caller may write explicitly. Lowered anonymous existentials are part of
     /// the signature and ABI, but they are inferred from arguments rather than supplied by the
     /// caller.
@@ -140,7 +169,7 @@ public final class FunctionDescriptor implements TypeDescriptor {
 
     public FunctionDescriptor toReturnType(final TypeDescriptor returnType) {
         return new FunctionDescriptor(name, receiverType, returnType, parameters, typeParameters, raisedEffects,
-                handledEffects, handlerShape);
+                handledEffects, handlerShape).withHiddenSlots(hiddenEvidenceCount, hiddenDescriptorCount);
     }
 
     @Override

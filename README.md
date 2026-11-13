@@ -113,8 +113,8 @@ there are rough edges, the guide and design documents say so.
 
 The implemented language includes:
 
-- Functions, default and variadic parameters, function values, lambdas, and generic functions and
-  methods.
+- Functions, default and variadic parameters, function values, lambdas, generic functions and
+  methods, polymorphic function types, and generic lambdas.
 - Classes, properties, constructors, contracts, contract composition, and statically dispatched
   extensions.
 - Generic bounds and witnesses, higher-kinded abstractions, checked covariance, and use-site
@@ -138,7 +138,7 @@ Zeron is currently **alpha**. Some areas are intentionally partial: the Java int
 curated rather than general, generic inference and variance have documented boundaries, and generic
 type arguments are erased at runtime. Witness-overlap analysis and pattern exhaustiveness also have
 documented limits. The guide and design documents describe feature-specific rules and limitations.
-Zeron 0.6.0 targets stable Java 25 or later.
+Zeron 0.7.0 targets stable Java 25 or later.
 
 ## Get started
 

@@ -375,7 +375,12 @@ typeArgument = type | '_' ;
    `~>` to be adjacent. A handler, nullable or parenthesized type can also be the input of the
    unary shorthand; the shorthand itself declares no raised effects. *)
 
-type = effectSet | [ "&" ], compoundType ;
+type = effectSet | [ "&" ], compoundType | polymorphicFunctionType ;
+(* [NEW] ZEP-0109: a leading binder list makes the function type rank-2. Binder bounds use the
+   same type-parameter grammar as declarations. A polymorphic function type used as a type argument
+   is parenthesized, as in `List<(<T> (T) -> T)>`. *)
+polymorphicFunctionType = "<", typeParameter, { ",", typeParameter }, ">",
+                          "(", [ type, { ",", type } ], ")", "->", type, [ raisesClause ] ;
 compoundType = receiverFunctionType
              | typeAtom,
                [ "~>", effectSet, [ "raises", effectSet ] ],
@@ -474,8 +479,12 @@ forResult = 'yield', expression | 'collect', expression, 'into', expression ;
 doExpr = "do", [ "<", type, ">" ], "{", doClause, { doClause }, "yield", expression, ";", "}" ;
 doClause = "let", IDENTIFIER, "<-", expression, ";"
          | "let", IDENTIFIER, "=", expression, ";" ;
+(* [NEW] ZEP-0109: a leading binder list makes a generic lambda; generic lambdas use the
+   parenthesized parameter form. *)
 lambda = IDENTIFIER, "->", lambdaBody
-       | "(", [ lambdaParameter, { ",", lambdaParameter } ], ")", "->", lambdaBody ;
+       | "(", [ lambdaParameter, { ",", lambdaParameter } ], ")", "->", lambdaBody
+       | "<", typeParameter, { ",", typeParameter }, ">",
+         "(", [ lambdaParameter, { ",", lambdaParameter } ], ")", "->", lambdaBody ;
 lambdaParameter = IDENTIFIER, [ ":", type ] ;
 lambdaBody = expression | block ;
 anonymousObjectExpr = "object", ":", contractUse, { "+", contractUse }, "{",

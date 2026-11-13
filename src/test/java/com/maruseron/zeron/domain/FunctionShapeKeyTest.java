@@ -31,6 +31,22 @@ public final class FunctionShapeKeyTest {
     }
 
     @Test
+    public void distinguishesHiddenSlotsFromOrdinaryShapes() {
+        final var ordinary = function("ordinary", TypeDescriptor.ofString(), TypeDescriptor.ofInt());
+        final var evidence = function("evidence", TypeDescriptor.ofString(), TypeDescriptor.ofInt())
+                .withHiddenSlots(1, 0);
+        final var twoDescriptors = function("descriptors", TypeDescriptor.ofString(), TypeDescriptor.ofInt())
+                .withHiddenSlots(0, 2);
+
+        assertNotEquals(FunctionShapeKey.of(ordinary), FunctionShapeKey.of(evidence));
+        assertNotEquals(FunctionShapeKey.of(evidence), FunctionShapeKey.of(twoDescriptors));
+        assertTrue(FunctionShapeKey.of(evidence).canonicalEncoding()
+                .startsWith("zeron-function-shape-v2-e1-d0;"));
+        assertNotEquals(FunctionShapeNames.interfaceName(ordinary),
+                FunctionShapeNames.interfaceName(evidence));
+    }
+
+    @Test
     public void distinguishesParameterOrderAndReturnType() {
         final var intThenString = function("a", TypeDescriptor.ofBoolean(),
                 TypeDescriptor.ofInt(), TypeDescriptor.ofString());

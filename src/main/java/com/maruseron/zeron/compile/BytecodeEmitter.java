@@ -724,6 +724,10 @@ final class BytecodeEmitter {
                 final var captureTypes = context.lambdaPlan.captureTypes(lambda);
                 final var implementationParameters = new ArrayList<>(captureTypes);
                 implementationParameters.addAll(functionType.invocationParameters());
+                implementationParameters.addAll(Collections.nCopies(functionType.hiddenEvidenceCount(),
+                        TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
+                implementationParameters.addAll(Collections.nCopies(functionType.hiddenDescriptorCount(),
+                        RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE));
                 for (int i = 0; i < captures.size(); i++) {
                     emitVariable(context, composer, captures.get(i));
                     emitConversion(context, composer, context.lastEmittedType, captureTypes.get(i));
@@ -919,6 +923,7 @@ final class BytecodeEmitter {
                     context.lastEmittedType = variable.getType();
                 } else {
                     if (variable.storedFunctionType() != null
+                            && !variable.storedFunctionType().hasHiddenSlots()
                             && LambdaCompilationPlan.hasInferredContractBounds(variable.storedFunctionType())) {
                         emitLambdaTemplateSpecialization(context, composer,
                                 variable.resolvedSymbolToken(), variable.storedFunctionType(),
@@ -1582,7 +1587,9 @@ final class BytecodeEmitter {
         final var runtimeType = functionType.isGeneric()
                 ? (FunctionDescriptor) TypeSubstitution.erase(functionType)
                 : functionType;
-        if (LambdaCompilationPlan.hasInferredContractBounds(functionType)) {
+        final var constrainedTemplate = LambdaCompilationPlan.hasInferredContractBounds(functionType)
+                && isInferredConstrainedLambdaBinding(binding);
+        if (constrainedTemplate) {
             final var specializedType = call.specializedFunctionType();
             if (specializedType == null) {
                 throw new IllegalStateException("Constrained lambda call has no specialized function type.");
@@ -1601,6 +1608,9 @@ final class BytecodeEmitter {
                 emitConversion(context, composer, context.lastEmittedType, runtimeType.parameters().get(i));
             }
         }
+        if (!constrainedTemplate && runtimeType.hasHiddenSlots()) {
+            emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
+        }
 
         composer.invokeinterface(TypeDescriptor.toJavaClassDesc(runtimeType), "invoke",
                 toJavaMethodDescriptor(runtimeType));
@@ -1611,6 +1621,12 @@ final class BytecodeEmitter {
         } else {
             context.lastEmittedType = functionType.returnType();
         }
+    }
+
+    private static boolean isInferredConstrainedLambdaBinding(final com.maruseron.zeron.analize.Bind binding) {
+        return binding.declaration() instanceof Stmt.Var variable
+                && variable.initializer() instanceof Expr.Lambda lambda
+                && lambda.typeParameters().isEmpty();
     }
 
     private static void emitLambdaTemplateValue(final CompilationContext context,
@@ -3894,7 +3910,8 @@ final class BytecodeEmitter {
         final var returnType = TypeDescriptor.toJavaClassDesc(type.returnType());
         final var paramTypes = type.invocationParameters().stream()
                 .map(TypeDescriptor::toJavaClassDesc).toList();
-        return MethodTypeDesc.of(returnType, paramTypes);
+        return withHiddenParameters(MethodTypeDesc.of(returnType, paramTypes),
+                type.hiddenEvidenceCount(), type.hiddenDescriptorCount());
     }
 
     static void beginScope(CompilationContext context ){

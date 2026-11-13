@@ -2750,7 +2750,7 @@ final class ExpressionFlowResolver {
                                                     final TypeDescriptor targetType) {
         if (!context.resolvingOpeningCondition) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
-                    test.operator, "An opening pattern must be the direct condition of an if or while."));
+                    test.operator, "An opening pattern must be a direct condition of an if, an else-if, or a value-producing if."));
         }
         if (!(targetType instanceof GenericDescriptor)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
@@ -2761,12 +2761,49 @@ final class ExpressionFlowResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                     test.operator, "An opening pattern requires an applied generic class or contract type."));
         }
-        final var targetName = TypeResolver.resolveTypeName(context, generic.baseType().name(), test.operator);
+        final var targetName = resolveOpeningTargetName(context, generic, test.operator);
+        final var declaredParameters = openingDeclaredParameters(context, targetName, generic, test.operator);
+        final var initialized = new LinkedHashSet<TypeParameterDescriptor>();
+        final var source = unwrapOpeningSource(sourceType);
+        if (source instanceof GenericDescriptor) {
+            resolveOpeningGenericArguments(context, test, generic, targetName, declaredParameters,
+                    sourceType, true, initialized);
+            test.setOpeningPatternTotal(true);
+        } else if (source instanceof AnyDescriptor) {
+            resolveOpeningGenericArguments(context, test, generic, targetName, declaredParameters,
+                    sourceType, true, initialized);
+            test.setOpeningPatternTotal(false);
+        } else {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
+                    test.operator, "Opening pattern is impossible between " + sourceType + " and "
+                            + targetType + "."));
+        }
+        for (final var binder : test.openingBinders()) {
+            if (!initialized.contains(binder)) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, test.operator,
+                        "Opening binder '" + binder.name() + "' is not reachable from the pattern."));
+            }
+        }
+    }
+
+    private static String resolveOpeningTargetName(final ResolutionContext context,
+                                                   final GenericDescriptor generic,
+                                                   final Token where) {
+        final var targetName = TypeResolver.resolveTypeName(context, generic.baseType().name(), where);
         generic.baseType().resolveName(targetName);
+        return targetName;
+    }
+
+    private static List<TypeParameterDescriptor> openingDeclaredParameters(
+            final ResolutionContext context,
+            final String targetName,
+            final GenericDescriptor generic,
+            final Token where) {
         final var classDeclaration = context.classes.get(targetName);
         final var contractDeclaration = context.contracts.get(targetName);
         if (classDeclaration == null && contractDeclaration == null) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, test.operator,
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, where,
                     "Unknown opening-pattern type '" + targetName + "'."));
         }
         final var declaredParameters = classDeclaration != null
@@ -2774,58 +2811,184 @@ final class ExpressionFlowResolver {
                 : contractDeclaration.typeParameters();
         if (declaredParameters.size() != generic.typeParameters().size()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                    test.operator, "Opening pattern '" + targetName + "' expects "
+                    where, "Opening pattern '" + targetName + "' expects "
                             + declaredParameters.size() + " type arguments, found "
                             + generic.typeParameters().size() + "."));
         }
-        final var binders = test.openingBinders();
-        for (final var argument : generic.typeParameters()) {
-            if (!(argument instanceof TypeParameterDescriptor binder) || !binder.isOpeningBinder()
-                    || !binders.contains(binder)) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                        test.operator, binders.size() > generic.typeParameters().size()
-                                ? "Nested opening patterns are not supported yet."
-                                : "Every type argument of an opening pattern must be a 'let' binder."));
+        return declaredParameters;
+    }
+
+    /// Resolves one applied level of an opening pattern. Each target argument is either an opening
+    /// binder or a statically justified exact type. A nested generic argument is recursed into when
+    /// it contains a binder; otherwise it is compared as an exact type.
+    private static void resolveOpeningGenericArguments(
+            final ResolutionContext context,
+            final Expr.TypeTest test,
+            final GenericDescriptor targetGeneric,
+            final String targetName,
+            final List<TypeParameterDescriptor> declaredParameters,
+            final TypeDescriptor sourceType,
+            final boolean invariantPath,
+            final Set<TypeParameterDescriptor> initialized) {
+        final var source = unwrapOpeningSource(sourceType);
+        final var sourceNullable = sourceType instanceof NullableDescriptor
+                || sourceType instanceof NullDescriptor;
+        final var targetArguments = targetGeneric.typeParameters();
+        final var declaredCount = Math.min(declaredParameters.size(), targetArguments.size());
+
+        if (source instanceof AnyDescriptor) {
+            for (int index = 0; index < targetArguments.size(); index++) {
+                final var targetArgument = targetArguments.get(index);
+                final var declared = index < declaredCount ? declaredParameters.get(index) : null;
+                if (targetArgument instanceof TypeParameterDescriptor binder && binder.isOpeningBinder()) {
+                    if (declared != null && !declared.bounds().isEmpty()) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, test.operator,
+                                "Opening from a raw 'Any' test cannot provide evidence for binder '"
+                                        + binder.name() + "' with bound '"
+                                        + TypeFormatter.format(declared.bound()) + "'."));
+                    }
+                    binder.initializeOpening(null, List.of(), sourceNullable, false);
+                    initialized.add(binder);
+                } else if (containsOpeningBinder(targetArgument)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, test.operator,
+                            "Nested opening requires a statically known source application."));
+                } else {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST, test.operator,
+                            "The exact type argument '" + targetArgument
+                                    + "' cannot be justified by a raw 'Any' test."));
+                }
             }
-        }
-        if (binders.size() != generic.typeParameters().size()) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                    test.operator, "Every type argument of an opening pattern must be a direct 'let' binder."));
+            return;
         }
 
+        if (!(source instanceof GenericDescriptor sourceGeneric)
+                || sourceGeneric.typeParameters().size() != targetArguments.size()
+                || !resolveOpeningTargetName(context, sourceGeneric, test.operator).equals(targetName)) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST, test.operator,
+                    "Opening pattern is impossible between " + sourceType + " and "
+                            + targetGeneric + "."));
+            return;
+        }
+
+        for (int index = 0; index < targetArguments.size(); index++) {
+            final var targetArgument = targetArguments.get(index);
+            final var sourceArgument = sourceGeneric.typeParameters().get(index);
+            final var declared = index < declaredCount ? declaredParameters.get(index) : null;
+            resolveOpeningArgument(context, test, targetArgument, sourceArgument, declared,
+                    sourceNullable, invariantPath, initialized);
+        }
+    }
+
+    private static void resolveOpeningArgument(
+            final ResolutionContext context,
+            final Expr.TypeTest test,
+            final TypeDescriptor targetArgument,
+            final TypeDescriptor sourceArgument,
+            final TypeParameterDescriptor declared,
+            final boolean sourceNullable,
+            final boolean invariantPath,
+            final Set<TypeParameterDescriptor> initialized) {
+        if (targetArgument instanceof TypeParameterDescriptor binder && binder.isOpeningBinder()) {
+            if (declared == null) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, test.operator,
+                        "Opening binder '" + binder.name() + "' has no declared type parameter."));
+                return;
+            }
+            if (!invariantPath || declared.variance() != TypeParameterDescriptor.Variance.INVARIANT) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, test.operator,
+                        "Opening binder '" + binder.name()
+                                + "' is only allowed in an invariant type-argument position."));
+            }
+            initializeOpeningBinder(context, binder, sourceArgument,
+                    sourceNullable || sourceArgument.isNullable(), declared, test.operator);
+            initialized.add(binder);
+            return;
+        }
+        if (targetArgument instanceof TypeProjectionDescriptor) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, test.operator,
+                    "An opening pattern type argument must be an exact type or a direct 'let' binder."));
+            return;
+        }
+        if (targetArgument instanceof GenericDescriptor targetGeneric
+                && containsOpeningBinder(targetArgument)) {
+            final var targetName = resolveOpeningTargetName(context, targetGeneric, test.operator);
+            final var declaredParameters = openingDeclaredParameters(
+                    context, targetName, targetGeneric, test.operator);
+            resolveOpeningGenericArguments(context, test, targetGeneric, targetName, declaredParameters,
+                    sourceArgument, invariantPath, initialized);
+            return;
+        }
+        if (!openingExactArgumentMatches(context, sourceArgument, targetArgument, test.operator)) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST, test.operator,
+                    "The exact type argument '" + targetArgument
+                            + "' is not statically justified by the source type."));
+        }
+    }
+
+    private static boolean containsOpeningBinder(final TypeDescriptor type) {
+        return switch (type) {
+            case TypeParameterDescriptor parameter -> parameter.isOpeningBinder();
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .anyMatch(ExpressionFlowResolver::containsOpeningBinder);
+            case NullableDescriptor nullable -> containsOpeningBinder(nullable.baseType());
+            case ReferenceDescriptor reference -> containsOpeningBinder(reference.baseType());
+            case TypeProjectionDescriptor projection -> containsOpeningBinder(projection.bound());
+            default -> false;
+        };
+    }
+
+    private static boolean openingExactArgumentMatches(final ResolutionContext context,
+                                                       final TypeDescriptor source,
+                                                       final TypeDescriptor target,
+                                                       final Token where) {
+        if (source instanceof TypeParameterDescriptor parameter
+                && parameter.openedActualType() != null) {
+            return openingExactArgumentMatches(context, parameter.openedActualType(), target, where);
+        }
+        if (target instanceof NullableDescriptor targetNullable) {
+            return source instanceof NullableDescriptor sourceNullable
+                    && openingExactArgumentMatches(context, sourceNullable.baseType(),
+                            targetNullable.baseType(), where);
+        }
+        if (source instanceof NullableDescriptor) return false;
+        if (target instanceof ReferenceDescriptor targetReference) {
+            return source instanceof ReferenceDescriptor sourceReference
+                    && openingExactArgumentMatches(context, sourceReference.baseType(),
+                            targetReference.baseType(), where);
+        }
+        if (source instanceof ReferenceDescriptor) return false;
+        if (target instanceof GenericDescriptor targetGeneric) {
+            if (!(source instanceof GenericDescriptor sourceGeneric)
+                    || sourceGeneric.typeParameters().size() != targetGeneric.typeParameters().size()) {
+                return false;
+            }
+            final var targetName = resolveOpeningTargetName(context, targetGeneric, where);
+            final var sourceName = resolveOpeningTargetName(context, sourceGeneric, where);
+            if (!sourceName.equals(targetName)) return false;
+            for (int index = 0; index < targetGeneric.typeParameters().size(); index++) {
+                if (!openingExactArgumentMatches(context,
+                        sourceGeneric.typeParameters().get(index),
+                        targetGeneric.typeParameters().get(index), where)) return false;
+            }
+            return true;
+        }
+        if (target instanceof TypeProjectionDescriptor) return false;
+        return source.equals(target);
+    }
+
+    private static TypeDescriptor unwrapOpeningSource(final TypeDescriptor sourceType) {
         var source = sourceType;
         while (source instanceof NullableDescriptor nullable) source = nullable.baseType();
         while (source instanceof ReferenceDescriptor reference) source = reference.baseType();
-        final var sourceNullable = sourceType instanceof NullableDescriptor
-                || sourceType instanceof NullDescriptor;
-        if (source instanceof GenericDescriptor sourceGeneric
-                && TypeResolver.resolveTypeName(context, sourceGeneric.baseType().name(), test.operator)
-                        .equals(targetName)) {
-            if (sourceGeneric.typeParameters().size() != binders.size()) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
-                        test.operator, "The opening pattern does not match the source type's arity."));
-            }
-            for (int index = 0; index < binders.size(); index++) {
-                initializeOpeningBinder(context, binders.get(index),
-                        sourceGeneric.typeParameters().get(index), sourceNullable,
-                        declaredParameters.get(index), test.operator);
-            }
-            test.setOpeningPatternTotal(true);
-            return;
-        }
-        if (source instanceof AnyDescriptor) {
-            for (int index = 0; index < binders.size(); index++) {
-                final var declared = declaredParameters.get(index);
-                binders.get(index).initializeOpening(null, declared.bounds(),
-                        sourceNullable || declared.admitsNullableArguments(),
-                        declared.admitsMutableArguments());
-            }
-            test.setOpeningPatternTotal(false);
-            return;
-        }
-        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
-                test.operator, "Opening pattern is impossible between " + sourceType + " and "
-                        + targetType + "."));
+        return source;
     }
 
     private static void initializeOpeningBinder(final ResolutionContext context,

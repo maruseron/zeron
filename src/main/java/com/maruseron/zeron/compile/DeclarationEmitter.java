@@ -189,9 +189,12 @@ final class DeclarationEmitter {
                     final var evidenceFields = BytecodeEmitter.evidenceFields(
                             context, functionType.typeParameters(), "lambda",
                             context.lambdaPlan.lambdaMethodName(lambda));
+                    implementationParameters.addAll(functionType.invocationParameters());
                     implementationParameters.addAll(Collections.nCopies(evidenceFields.size(),
                             TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
-                    implementationParameters.addAll(functionType.invocationParameters());
+                    implementationParameters.addAll(Collections.nCopies(
+                            functionType.hiddenDescriptorCount(),
+                            RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE));
                     classBuilder.withMethodBody(
                         context.lambdaPlan.lambdaMethodName(lambda),
                         toJavaMethodDescriptor(functionType, implementationParameters),

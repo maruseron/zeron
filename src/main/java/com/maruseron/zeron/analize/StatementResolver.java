@@ -261,14 +261,28 @@ final class StatementResolver {
         }
 
         if (var.initializer() != null) {
-            final var constrainedLambda = globalToken == null
+            if (var.initializer() instanceof Expr.Lambda lambda
+                    && !lambda.typeParameters().isEmpty()
+                    && var.mutability().isReassignable()) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, var.name(),
+                        "Polymorphic function values require an immutable binding."));
+            }
+            final var explicitGenericLambda = var.mutability() == BindingMutability.IMMUTABLE
+                    && var.initializer() instanceof Expr.Lambda lambda
+                    && !lambda.typeParameters().isEmpty()
+                    ? LambdaResolver.resolveExplicitGenericLambda(context, lambda)
+                    : null;
+            final var constrainedLambda = explicitGenericLambda == null
+                    && globalToken == null
                     && var.type() instanceof InferDescriptor
                     && var.mutability() == BindingMutability.IMMUTABLE
                     && var.initializer() instanceof Expr.Lambda lambda
                     ? LambdaResolver.resolveConstrainedLambda(context, lambda)
                     : null;
             resolvedType = var.type() instanceof InferDescriptor
-                    ? constrainedLambda == null ? resolve(var.initializer()) : constrainedLambda
+                    ? explicitGenericLambda != null ? explicitGenericLambda
+                            : constrainedLambda == null ? resolve(var.initializer()) : constrainedLambda
                     : MemberInteropResolver.resolveArgument(context, var.initializer(), var.type());
             if (var.type() instanceof InferDescriptor
                     && var.mutability() == BindingMutability.IMMUTABLE

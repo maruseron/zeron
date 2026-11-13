@@ -71,19 +71,24 @@ public final class TypeSubstitution {
                     substitute(capture.lowerBound(), substitutions),
                     substitute(capture.upperBound(), substitutions));
             case FunctionDescriptor function -> {
-                final var typeParameters = function.typeParameters().stream()
-                        .map(parameter -> {
-                            final var copy = new TypeParameterDescriptor(parameter.scopeId(), parameter.name(),
-                                    parameter.bounds().stream()
-                                            .map(bound -> substitute(bound, substitutions))
-                                            .toList(), parameter.isHigherKinded(), parameter.variance(),
-                                    parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                                    parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
-                                    parameter.isReified());
-                            if (parameter.isStoredExistential()) copy.markStoredExistential();
-                            return copy;
-                        })
-                        .toList();
+                final var typeParameters = new java.util.ArrayList<TypeParameterDescriptor>();
+                for (final var parameter : function.typeParameters()) {
+                    final var replacement = substitutions.get(parameter);
+                    if (replacement instanceof TypeParameterDescriptor replacementParameter) {
+                        typeParameters.add(replacementParameter);
+                        continue;
+                    }
+                    if (substitutions.containsKey(parameter)) continue;
+                    final var copy = new TypeParameterDescriptor(parameter.scopeId(), parameter.name(),
+                            parameter.bounds().stream()
+                                    .map(bound -> substitute(bound, substitutions))
+                                    .toList(), parameter.isHigherKinded(), parameter.variance(),
+                            parameter.admitsNullableArguments(), parameter.isEffectKind(),
+                            parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
+                            parameter.isReified());
+                    if (parameter.isStoredExistential()) copy.markStoredExistential();
+                    typeParameters.add(copy);
+                }
                 final var returnType = substitute(function.returnType(), substitutions);
                 final var parameters = function.parameters().stream()
                         .map(parameter -> substitute(parameter, substitutions)).toList();
@@ -97,10 +102,12 @@ public final class TypeSubstitution {
                 if (function.receiverType() != null) {
                     yield TypeDescriptor.receiverFunctionOf(function.name(),
                             substitute(function.receiverType(), substitutions), returnType,
-                            parameters, typeParameters, effects);
+                            parameters, typeParameters, effects)
+                            .withHiddenSlots(function.hiddenEvidenceCount(), function.hiddenDescriptorCount());
                 }
                 yield TypeDescriptor.functionWithEffectsOf(function.name(), returnType,
-                        parameters, typeParameters, effects);
+                        parameters, typeParameters, effects)
+                        .withHiddenSlots(function.hiddenEvidenceCount(), function.hiddenDescriptorCount());
             }
             default -> type;
         };
@@ -142,10 +149,12 @@ public final class TypeSubstitution {
                                     erase(function.returnType()),
                                     function.parameters().stream().map(TypeSubstitution::erase).toList(),
                                     List.of(), function.raisedEffects().stream().map(TypeSubstitution::erase).toList())
+                                    .withHiddenSlots(function.hiddenEvidenceCount(), function.hiddenDescriptorCount())
                             : TypeDescriptor.functionWithEffectsOf(
                                     function.name(), erase(function.returnType()),
                                     function.parameters().stream().map(TypeSubstitution::erase).toList(),
-                                    List.of(), function.raisedEffects().stream().map(TypeSubstitution::erase).toList());
+                                    List.of(), function.raisedEffects().stream().map(TypeSubstitution::erase).toList())
+                                    .withHiddenSlots(function.hiddenEvidenceCount(), function.hiddenDescriptorCount());
             default -> type;
         };
     }

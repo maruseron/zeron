@@ -16,7 +16,7 @@ From a Zeron source checkout, build with JDK 25 or later and Maven:
 
 ```powershell
 mvn package
-java -jar target/zeron-0.6.0.jar init
+java -jar target/zeron-0.7.0.jar init
 ```
 
 The JAR filename includes the project version from `pom.xml`.

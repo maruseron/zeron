@@ -231,6 +231,33 @@ Without either source of type arguments, the reference is rejected. Bound refere
 callable references; write a lambda instead. A callable reference is a constant, so a model can
 assign a constructor reference to a parent-contract property.
 
+## Polymorphic function values
+
+A function type can quantify its own type parameters. A leading binder list makes it **rank-2**:
+the receiver may apply the same function value at several types.
+
+```zeron
+fn applyTwice(f: <T> (T) -> T, value: Int): Int = f(f(value));
+
+let identity = <T> (value: T) -> value;
+let result = applyTwice(identity, 21);
+```
+
+A generic lambda infers its binders from annotated parameters when it is assigned to an immutable
+`let` or passed where a polymorphic function type is expected. Bounds and `reified` markers work as
+they do on function declarations:
+
+```zeron
+let describe: <T: Display> (T) -> String =
+    <T: Display> (value: T) -> value.toString();
+```
+
+A generic named function can also be used directly where a fully constraining polymorphic type is
+expected; each application instantiates its binders. Polymorphic function values cannot be stored
+in fields or mutable bindings, and a generic lambda cannot implement a contract whose single
+method is generic. Effect-kinded binders and binder-dependent effect rows are not supported in
+this version.
+
 ## Receiver functions
 
 A receiver function adds a typed receiver context to a function value. Write the receiver type

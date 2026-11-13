@@ -2362,7 +2362,9 @@ public final class Parser {
             return parseEffectRowType();
         }
 
-        if (match(LEFT_PAREN)) {
+        if (check(LESS)) {
+            type = rank2FunctionType();
+        } else if (match(LEFT_PAREN)) {
             final var previousStored = allowStoredAnonymousTypeParameters;
             allowStoredAnonymousTypeParameters = false;
             try {
@@ -2472,6 +2474,40 @@ public final class Parser {
         }
 
         return type;
+    }
+
+    /// Parses the leading binder list of a polymorphic function type, for example
+    /// {@code <T: Display> (T) -> String}.
+    private TypeDescriptor rank2FunctionType() {
+        final var binders = typeParameterDeclaration(peek(), true, true);
+        final var enclosingTypeParameters = activeTypeParameters;
+        activeTypeParameters = new LinkedHashMap<>(enclosingTypeParameters);
+        activeTypeParameters.putAll(binders);
+        try {
+            if (!match(LEFT_PAREN)) {
+                throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX,
+                        "Expect '(' after polymorphic function type parameters.");
+            }
+            final var previousStored = allowStoredAnonymousTypeParameters;
+            allowStoredAnonymousTypeParameters = false;
+            try {
+                final var parameters = new ArrayList<TypeDescriptor>();
+                if (!check(RIGHT_PAREN)) {
+                    do {
+                        parameters.add(collectType());
+                    } while (match(COMMA));
+                }
+                consume(RIGHT_PAREN, "Expect ')' after polymorphic function parameter types.");
+                consume(ARROW, "Expect '->' after polymorphic function parameter types.");
+                final var returnType = collectType();
+                return TypeDescriptor.functionWithEffectsOf("", returnType, parameters,
+                        List.copyOf(binders.values()), parseRaisedEffects());
+            } finally {
+                allowStoredAnonymousTypeParameters = previousStored;
+            }
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
+        }
     }
 
     private List<TypeDescriptor> parseEffectTypeSet() {
@@ -3606,6 +3642,10 @@ public final class Parser {
             return doExpression(previous());
         }
 
+        if (check(LESS)) {
+            return genericLambda();
+        }
+
         if (match(IDENTIFIER)) {
             // `a -> ...` lambda
             final var ident = previous();
@@ -4176,6 +4216,33 @@ public final class Parser {
         return new Expr.Do(keyword, declaredConstructor, lowered);
     }
 
+    /// Parses a binder-prefixed lambda such as {@code <T> (value: T) -> value}.
+    private Expr.Lambda genericLambda() {
+        final var binders = typeParameterDeclaration(peek(), true, true);
+        final var enclosingTypeParameters = activeTypeParameters;
+        activeTypeParameters = new LinkedHashMap<>(enclosingTypeParameters);
+        activeTypeParameters.putAll(binders);
+        try {
+            consume(LEFT_PAREN, "Expect '(' after generic lambda parameters.");
+            final var params = new ArrayList<Token>();
+            final var parameterTypes = new ArrayList<TypeDescriptor>();
+            if (!check(RIGHT_PAREN)) {
+                do {
+                    if (params.size() >= 254) {
+                        error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                                "Can't have more than 254 parameters.");
+                    }
+                    params.add(consume(IDENTIFIER, "Expect parameter name."));
+                    parameterTypes.add(match(COLON) ? collectType(false) : TypeDescriptor.ofInfer());
+                } while (match(COMMA));
+            }
+            consume(RIGHT_PAREN, "Expect ')' after generic lambda parameters.");
+            return finishLambda(params, parameterTypes, List.copyOf(binders.values()));
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
+        }
+    }
+
     private boolean looksLikeParenthesizedLambda() {
         var index = current;
         while (index < tokens.size()) {
@@ -4208,6 +4275,11 @@ public final class Parser {
     }
 
     private Expr.Lambda finishLambda(final List<Token> params, final List<TypeDescriptor> parameterTypes) {
+        return finishLambda(params, parameterTypes, List.of());
+    }
+
+    private Expr.Lambda finishLambda(final List<Token> params, final List<TypeDescriptor> parameterTypes,
+                                     final List<TypeParameterDescriptor> typeParameters) {
         final var arrow = consume(ARROW, "Expect '->' after parameters.");
         final var enclosingLevelMarker = levelMarker;
         final var wasParsingInitializer = parsingDataClassInitializer;
@@ -4227,8 +4299,11 @@ public final class Parser {
         final var inferredParameters = params.stream()
                 .map(_ -> TypeDescriptor.ofInfer())
                 .toArray(TypeDescriptor[]::new);
-        return new Expr.Lambda(arrow, params, parameterTypes, body,
-                TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), inferredParameters));
+        final var lambdaType = typeParameters.isEmpty()
+                ? TypeDescriptor.functionOf("", TypeDescriptor.ofInfer(), inferredParameters)
+                : TypeDescriptor.functionWithEffectsOf("", TypeDescriptor.ofInfer(),
+                        List.of(inferredParameters), typeParameters, List.of());
+        return new Expr.Lambda(arrow, params, parameterTypes, body, lambdaType, null, typeParameters);
     }
 
     private Expr.Lambda trailingLambda() {

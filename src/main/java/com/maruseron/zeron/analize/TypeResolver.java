@@ -197,6 +197,20 @@ final class TypeResolver {
     }
 
     static void validateFunctionTypes(final ResolutionContext context, final FunctionDescriptor function, final Token where) {
+        for (final var parameter : function.typeParameters()) {
+            validateTypeParameterBound(context, parameter, where);
+            if (function.name().isEmpty() && !parameter.isAnonymousExistential()
+                    && (parameter.isEffectKind() || parameter.isEffectRowKind())) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        where, "Polymorphic function type binder '" + parameter.name()
+                                + " uses an effect binder; binder-dependent effect rows are not"
+                                + " implemented yet."));
+            }
+        }
+        if (function.name().isEmpty()) {
+            function.withHiddenSlots(hiddenEvidenceCount(context, function.typeParameters()),
+                    (int) function.typeParameters().stream().filter(TypeParameterDescriptor::isReified).count());
+        }
         if (function.receiverType() != null) validateType(context, function.receiverType(), where);
         for (final var parameter : function.parameters()) validateType(context, parameter, where);
         validateType(context, function.returnType(), where);
@@ -241,6 +255,19 @@ final class TypeResolver {
                 }
             }
         }
+    }
+
+    private static int hiddenEvidenceCount(final ResolutionContext context,
+                                           final List<TypeParameterDescriptor> typeParameters) {
+        var count = 0;
+        for (final var parameter : typeParameters) {
+            for (final var bound : parameter.bounds()) {
+                final var contractUse = ContractComposition.fromType(bound);
+                if (contractUse == null) continue;
+                count += ContractComposition.methods(context.contracts, contractUse).size();
+            }
+        }
+        return count;
     }
 
     static void validateTypeParameterBound(final ResolutionContext context, final TypeParameterDescriptor parameter, final Token where) {

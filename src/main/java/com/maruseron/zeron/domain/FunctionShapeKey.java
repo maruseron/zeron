@@ -5,6 +5,7 @@ import java.util.Objects;
 
 public final class FunctionShapeKey {
     private static final String ENCODING_VERSION = "zeron-function-shape-v1;";
+    private static final String POLYMORPHIC_ENCODING_VERSION = "zeron-function-shape-v2-e";
     private static final int MAX_READABLE_SIGNATURE_LENGTH = 64;
 
     private final String canonicalEncoding;
@@ -20,9 +21,18 @@ public final class FunctionShapeKey {
         if (functionType.isHandler()) {
             return of(TypeDescriptor.functionOf("", functionType.returnType(), TypeDescriptor.ofAny()));
         }
-        final var encoding = new StringBuilder(ENCODING_VERSION);
+        final var encoding = new StringBuilder(functionType.hasHiddenSlots()
+                ? POLYMORPHIC_ENCODING_VERSION : ENCODING_VERSION);
+        if (functionType.hasHiddenSlots()) {
+            encoding.append(functionType.hiddenEvidenceCount()).append("-d")
+                    .append(functionType.hiddenDescriptorCount()).append(';');
+        }
         appendFunction(encoding, functionType);
-        return new FunctionShapeKey(encoding.toString(), readableSignature(functionType));
+        final var readable = (functionType.hasHiddenSlots()
+                ? "Rank2E" + functionType.hiddenEvidenceCount()
+                        + "D" + functionType.hiddenDescriptorCount() + "$" : "")
+                + readableSignature(functionType);
+        return new FunctionShapeKey(encoding.toString(), readable);
     }
 
     public String canonicalEncoding() {

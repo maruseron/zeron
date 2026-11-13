@@ -49,9 +49,17 @@ This avoids a split personality between ordinary methods and lambdas: methods do
 
 Generic top-level functions have explicit return types and are instantiated at direct call sites by
 inference or explicit type arguments. Type variables are erased to `Object` in the JVM method
-descriptor, with primitive boxing and unboxing at call boundaries. Generic functions are not
-first-class values without specialization. Contextually typed lambdas remain monomorphic; safe
-immutable let-bound lambdas support a limited rank-1 scheme.
+descriptor, with primitive boxing and unboxing at call boundaries. Rank-1 generic functions are
+first-class only after explicit specialization or a fully constraining expected type. Contextually
+typed lambdas remain monomorphic unless they use the ZEP-0109 binder-prefixed form.
+
+ZEP-0109 adds rank-2 polymorphic function types (`<T> (T) -> T`) and generic lambdas. An immutable
+`let`-bound generic lambda or a contextual generic-lambda argument is checked against the expected
+polymorphic type; a bare generic named function reference eta-expands when the expected type is
+fully known. Each application instantiates the value's binders at the call site. Unbounded,
+non-reified values reuse the ordinary erased SAM shape; values whose binders require contract
+evidence or `reified` descriptors use the hidden-slot adapter described below. Effect-kinded
+binders and binder-dependent effect rows remain rejected.
 
 When a generic signature contains a callback such as `(T) -> R`, its runtime SAM shape uses erased
 parameter and return descriptors. The compiler emits public static synthetic adapter helpers at call sites
@@ -77,9 +85,10 @@ registers the conversion before code generation. Public synthetic static adapter
 generated nominal bridge methods call back into the generated program class. Runtime and ABI tests
 cover primitive/reference shapes, callback arguments/results, field reads/writes, contract bridges,
 nested callbacks, nullable callbacks, and mutable function views. Generic named function references
-are separately specialized to monomorphic SAM values with generated erased-boundary bridges; this
-does not introduce polymorphic lambdas. Broader shape combinations and adapter reuse remain test
-coverage work.
+are separately specialized to monomorphic SAM values with generated erased-boundary bridges. The
+separate ZEP-0109 eta path can instead retain a polymorphic function type when the expected type is
+polymorphic; it does not change monomorphic nominal callback adaptation. Broader shape combinations
+and adapter reuse remain test coverage work.
 
 ### First-class lambda typing
 
@@ -102,9 +111,45 @@ evidence is reported at that use and names the lambda binding that introduced th
 generated template captures the lexical environment, then specializes to a monomorphic erased closure
 with the selected evidence bound into its helper. Within each dynamic activation of the `let`,
 repeated uses with the same erased function shape and evidence reuse one closure; different shapes or
-evidence produce distinct closure variants. The cache is local to the template instance. This is not
-higher-rank polymorphism: nested schemes and polymorphic lambdas in arbitrary positions remain
-unsupported.
+evidence produce distinct closure variants. The cache is local to the template instance.
+
+ZEP-0109's rank-2 support is separate from that rank-1 template path. A lambda may carry an
+explicit binder list, such as `<T> (value: T) -> value`, and is accepted as an immutable `let`
+initializer or as an inline argument whose expected type is polymorphic. Explicit binders are
+matched positionally to the expected binders up to alpha-renaming, with identical bounds and
+markers. When the lambda has no expected type, its annotated parameters determine the polymorphic
+type. The runtime value uses the existing erased SAM shape when every binder is unbounded and
+non-reified; a call instantiates the binders at the use site. Bounded and `reified` binders use the
+hidden-slot ABI: evidence slots first, then one `AppliedTypeDescriptor` per reified binder, appended
+after the erased source parameters. Effect-kinded binders and binder-dependent effect rows remain
+diagnosed. Nested schemes and rank-3 values remain unsupported.
+
+The hidden-slot ABI is implemented for lambda values, function references, and calls:
+
+- `FunctionDescriptor` carries hidden evidence and descriptor counts, preserved by substitution,
+  erasure, and resolved lambda/eta types. `FunctionShapeKey` encodes the counts in a distinct
+  `zeron-function-shape-v2-e<evidence>-d<descriptors>;` key, so a polymorphic adapter cannot collide
+  with an ordinary SAM shape; `FunctionShapeNames` and `toJavaClassDesc` inherit the distinction.
+- The `LambdaMetafactory` implementation helper signature is captures, erased source parameters,
+  evidence `MethodHandle`s, then reified descriptors. `samMethodType` and the generated interface
+  method use the same order, and lambda implementations declare the hidden locals after their
+  source parameters.
+- A call through a binding with hidden slots emits the source arguments and then the selected
+  evidence and reified descriptors before invoking the hidden-slot interface descriptor. Rank-1
+  `LambdaTemplateSupport` specialization remains restricted to inferred, non-hidden-slot lambdas.
+- Generic named-function eta-expansion forwards each application's evidence and descriptors to the
+  source generic method instead of capturing them in the function object.
+- The library API index already records function type binders, their bounds, and their `reified`
+  markers. Imported function types are validated before lambda checking, which restores hidden
+  counts from the bound and marker metadata, so rank-2 callback signatures survive separate
+  compilation without a new wire record.
+
+Remaining rank-2 work is separate from the hidden-slot ABI:
+
+- Fixed `raises` clauses are checked on polymorphic function types, but binder-dependent effect
+  rows and generic effect evidence are not part of this slice.
+- Generic SAM implementations, mutable polymorphic bindings, nested schemes, and rank-3 values are
+  still unsupported.
 
 This is an initial, intentionally constrained generalization rule. Reassignable bindings, nested
 polymorphic schemes, explicit `forall`, and unresolved parameters used by operators are not
@@ -160,12 +205,16 @@ Address the remaining work in this order:
   freshly at each use; operator-constrained lambdas retain monomorphic contextual inference.
 3. **Add multi-parameter lambdas: implemented.** The AST, parser, resolver, and lowering logic now support zero-argument, single-argument, and multi-argument lambda forms, and they lower each shape to the appropriate generated functional interface.
 4. **Specify capture semantics before classes: implemented.** Captures are immutable by default: a lambda may close over immutable values, but it must not implicitly capture and mutate stack-scoped locals. Mutation must happen through explicitly shared heap state such as objects or a dedicated cell/reference abstraction.
-5. **Extend polymorphic lambda inference: constrained rank-1 generalization implemented.**
-  Direct immutable-let lambdas infer applied-contract bounds from body member use and bounded
-  generic callees. Each use resolves evidence independently; the generated template specializes and
-  caches erased closures per activation. Explicit `forall`, nested schemes, and generalization of
-  operator-constrained lambdas remain separate work; the implementation does not provide higher-rank
-  polymorphism.
+5. **Extend polymorphic lambda inference: rank-1 generalization and rank-2 support
+  implemented.** Direct immutable-let lambdas infer applied-contract bounds from body member use and
+  bounded generic callees. Each use resolves evidence independently; the generated template
+  specializes and caches erased closures per activation. ZEP-0109 adds explicit binder-prefixed
+  lambdas, polymorphic function types, alpha-equivalent checking, eta-expansion, and per-application
+  instantiation. Unbounded non-reified rank-2 values use the erased SAM shape; bounded and
+  `reified` values use the hidden-slot adapter key and per-application evidence/descriptor slots.
+  Polymorphic callback signatures survive the library API index and separate compilation. Generic
+  SAM implementations, binder-dependent effect rows, nested schemes, rank-3 values, and a measured
+  polymorphic-application cost comparison remain separate work.
 6. **Specify and implement capture lowering: implemented.** Immutable captured values are passed through the `invokedynamic` factory descriptor and bound to the runtime function object; static helpers receive captures before the lambda's declared parameters. Explicit shared mutable state is available through the ordinary `zeron.lang.Cell<T>` library type; capturing a mutable cell reference preserves the existing by-value reference-capture model.
 7. **Unify artifact output: implemented baseline.** Generated programs are emitted under `dist/`; source classes follow their declared package paths, while generated lambda interfaces remain in the default package. Stale-artifact handling is implemented by clearing the output directory after successful resolution and before emission; configurable output directories and a staging/atomic-swap policy remain future work if incremental or multi-project compilation requires them.
 8. **Expand behavior tests: broader baseline implemented.** Tests cover same-shape lambdas with different bodies, zero and multiple parameters, the complete `Int`/`Float`/`Boolean`/`String` callback input-output matrix, stored and returned callbacks, conditional lambdas under expected function types, nested lambdas, immutable captures across generic boundaries, adapter reuse, and deterministic repeated compilation. Continue with incremental/multi-project compilation and additional nominal/nested shape combinations; verify both program output and emitted descriptors/call instructions.

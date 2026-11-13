@@ -116,24 +116,27 @@ final class TypeCompatibility implements TypeProjector {
             return true;
         }
         if (expectedType instanceof FunctionDescriptor expectedFunction
-                && resolvedType instanceof FunctionDescriptor resolvedFunction
-                && expectedFunction.arity() == resolvedFunction.arity()
-                && (expectedFunction.receiverType() == null) == (resolvedFunction.receiverType() == null)
-                && (expectedFunction.receiverType() == null
-                    || canAssign(resolvedFunction.receiverType(), expectedFunction.receiverType()))
-                && expectedFunction.isHandler() == resolvedFunction.isHandler()
-                && (!expectedFunction.isHandler()
-                    || new java.util.HashSet<>(expectedFunction.handledEffects())
-                            .equals(new java.util.HashSet<>(resolvedFunction.handledEffects()))
-                    && new java.util.HashSet<>(expectedFunction.raisedEffects())
-                            .equals(new java.util.HashSet<>(resolvedFunction.raisedEffects()))
-                    && expectedFunction.returnType().equals(resolvedFunction.returnType()))
-                && functionParametersAccept(expectedFunction, resolvedFunction)
-                && canAssign(expectedFunction.returnType(), resolvedFunction.returnType())
-                && (expectedFunction.isHandler()
-                    || EffectRows.includedIn(resolvedFunction.raisedEffects(),
-                            expectedFunction.raisedEffects(), effects))) {
-            return true;
+                && resolvedType instanceof FunctionDescriptor resolvedFunction) {
+            final var comparedFunction = alphaRenamedFunction(expectedFunction, resolvedFunction);
+            if (comparedFunction != null
+                    && expectedFunction.arity() == comparedFunction.arity()
+                    && (expectedFunction.receiverType() == null) == (comparedFunction.receiverType() == null)
+                    && (expectedFunction.receiverType() == null
+                        || canAssign(comparedFunction.receiverType(), expectedFunction.receiverType()))
+                    && expectedFunction.isHandler() == comparedFunction.isHandler()
+                    && (!expectedFunction.isHandler()
+                        || new java.util.HashSet<>(expectedFunction.handledEffects())
+                                .equals(new java.util.HashSet<>(comparedFunction.handledEffects()))
+                        && new java.util.HashSet<>(expectedFunction.raisedEffects())
+                                .equals(new java.util.HashSet<>(comparedFunction.raisedEffects()))
+                        && expectedFunction.returnType().equals(comparedFunction.returnType()))
+                    && functionParametersAccept(expectedFunction, comparedFunction)
+                    && canAssign(expectedFunction.returnType(), comparedFunction.returnType())
+                    && (expectedFunction.isHandler()
+                        || EffectRows.includedIn(comparedFunction.raisedEffects(),
+                                expectedFunction.raisedEffects(), effects))) {
+                return true;
+            }
         }
         if (expectedType instanceof GenericDescriptor expectedGeneric
                 && resolvedType instanceof GenericDescriptor resolvedGeneric
@@ -241,6 +244,40 @@ final class TypeCompatibility implements TypeProjector {
             }
         }
         return null;
+    }
+
+    /// Returns the resolved function type with its binders renamed to the expected binders, or
+    /// {@code null} when the binder lists differ. This implements alpha-equivalence for
+    /// polymorphic function types.
+    private FunctionDescriptor alphaRenamedFunction(final FunctionDescriptor expectedFunction,
+                                                     final FunctionDescriptor resolvedFunction) {
+        final var expectedParameters = expectedFunction.typeParameters();
+        final var resolvedParameters = resolvedFunction.typeParameters();
+        if (expectedParameters.size() != resolvedParameters.size()) return null;
+        final var substitutions = new java.util.LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int index = 0; index < expectedParameters.size(); index++) {
+            final var expected = expectedParameters.get(index);
+            final var resolved = resolvedParameters.get(index);
+            if (expected.isHigherKinded() != resolved.isHigherKinded()
+                    || expected.admitsNullableArguments() != resolved.admitsNullableArguments()
+                    || expected.admitsMutableArguments() != resolved.admitsMutableArguments()
+                    || expected.isReified() != resolved.isReified()
+                    || expected.isEffectKind() != resolved.isEffectKind()
+                    || expected.isEffectRowKind() != resolved.isEffectRowKind()) return null;
+            substitutions.put(resolved, expected);
+        }
+        for (int index = 0; index < expectedParameters.size(); index++) {
+            final var expected = expectedParameters.get(index);
+            final var resolved = resolvedParameters.get(index);
+            if (expected.bounds().size() != resolved.bounds().size()) return null;
+            for (int boundIndex = 0; boundIndex < expected.bounds().size(); boundIndex++) {
+                final var resolvedBound = TypeSubstitution.substitute(
+                        resolved.bounds().get(boundIndex), substitutions);
+                if (!expected.bounds().get(boundIndex).equals(resolvedBound)) return null;
+            }
+        }
+        if (substitutions.isEmpty()) return resolvedFunction;
+        return (FunctionDescriptor) TypeSubstitution.substitute(resolvedFunction, substitutions);
     }
 
     private boolean functionParametersAccept(final FunctionDescriptor expectedFunction,

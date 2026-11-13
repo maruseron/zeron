@@ -1,9 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0] - 2026, 13 NOV
 
 ### Compiler and language work
 
+- Added ZEP-0109 rank-2 polymorphism. Function types and lambdas accept a leading binder list
+  (`<T: Bound, U> (T, U) -> R`), generic lambdas check bidirectionally against expected polymorphic
+  types and infer their own binders from annotated parameters, and polymorphic function types
+  compare up to alpha-renaming. Bare generic named function references eta-expand to a fully
+  constraining polymorphic type, and each application instantiates the value's binders. Unbounded,
+  non-reified values use the existing erased function shape; bounded and `reified` values use a
+  distinct `FunctionShapeKey` with hidden evidence and descriptor slots supplied at each
+  application. Effect-kinded binders and binder-dependent effect rows remain follow-up work. The
+  2026-11-13 benchmark records 3.63–3.81 ns/field for an `Int`-returning bounded callback and
+  4.17–5.09 ns/field for the model-shaped `Unit` callback, both at 15.5 B/field, against 0.52–0.72
+  ns/field direct; polymorphic callback signatures, including bounded and `reified` binders,
+  survive the library API index and separate compilation.
 - Added the first ZEP-0106 stored-existential slice. Fields, locals, array elements, collection
   elements, and nested type arguments accept `<: Bound>` and `reified` anonymous existentials,
   using the conditional `Exists1`–`Exists3`/`ExistsN` holder ABI when a descriptor or evidence
@@ -13,7 +25,8 @@
   mutation, reads, iteration, nested collections, and separately compiled collection fields retain
   per-element holders. An array-backed model-field prototype stores one evidence group per field;
   its 2026-11-13 cost pass records 24 B/field and sub-nanosecond traversal overhead, so the model
-  API stays unchanged. The remaining rank-2 callback comparison is tracked by ZEP-0109.
+  API stays unchanged. The ZEP-0109 callback comparison is also recorded at 4.17–5.09 ns/field for
+  the model-shaped callback, still slower than holder traversal, so no `Model` change is warranted.
 - Added generic effect payloads with closed applied identity from ZEP-0005. `effect Failure<T>` may
   be declared and used as `Failure<Int>` in `raise`, `raises`, and handler cases; applications are
   invariant, fully written, and closed. Generic payloads carry one cached ZEP-0015 descriptor
@@ -44,10 +57,20 @@
   binding is refined to the opened application, and a source type already known to be that
   application makes the pattern total so its false path is unreachable. Binders inherit bounds,
   contract evidence, reified descriptors, or a known concrete argument from the source type,
-  while star views and raw `Any` tests invent no evidence. Returning or assigning a type that
-  mentions an opened binder outside the branch is rejected. Mixed, nested, composed, and `in`
-  openings are diagnosed, and the form adds no API-index or runtime ABI. Remaining opening,
-  escape, result-position, and variance work is tracked in ZEP-0116.
+  while star views and raw `Any` tests invent no evidence.   Returning or assigning a type that
+  mentions an opened binder outside the branch is rejected. Composed and `in` openings are
+  diagnosed, mixed and nested forms are implemented by ZEP-0116, and the form adds no API-index or
+  runtime ABI. Remaining opening, escape, result-position, and variance work is tracked in
+  ZEP-0116.
+- Extended branch-scoped existential opening with ZEP-0116. Opening patterns now accept mixed
+  exact/open arguments such as `Pair<Int, let V>`, nested applications such as `Box<Box<let T>>`,
+  and the `else if` and value-producing `if` placements. Exact arguments must be statically
+  justified by the source application, binders are restricted to invariant positions, and a raw
+  `Any` test cannot invent bounds or evidence. Returns, outer assignments, and raised-effect types
+  that mention an escaping binder are rejected. Mixed and nested patterns reuse the descriptors
+  already required by the pattern and add no runtime or API-index ABI; composed `and`/`or`
+  openings, binder-declared bounds, `in` projections, result positions, escape approximation, and
+  variance changes remain unsupported.
 - Added named witnesses, default witnesses, and explicit witness imports from ZEP-0114. A witness
   may be declared as `witness Name<T>: Contract for Target`, with normal `public` visibility and a
   separate package-scoped name namespace; `delegating` combines with either named or anonymous

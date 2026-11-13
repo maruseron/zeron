@@ -241,27 +241,145 @@ public final class OpeningPatternsTest {
     }
 
     @Test
-    public void rejectsMixedAndNestedOpeningArguments() {
+    public void opensMixedExactAndOpenArguments() throws Exception {
+        assertCompiledResult("mixed", """
+                package %s;
+                public class Pair<K, V> {
+                    public property first: K;
+                    public property second: V;
+                    public constructor new;
+                }
+                public fn read(pair: Pair<Int, String>): Int {
+                    if (pair is Pair<Int, let V>) {
+                        let second: V = pair.second;
+                        return pair.first;
+                    }
+                    return 0;
+                }
+                fn use(): Int = read(Pair.new(4, "value"));
+                """, "use", 4);
+    }
+
+    @Test
+    public void opensNestedGenericArguments() throws Exception {
+        assertCompiledResult("nested", """
+                package %s;
+                public class Box<T: nullable> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public fn read(box: Box<Box<Int>>): Int {
+                    if (box is Box<Box<let T>>) {
+                        let value: T = box.value.value;
+                        return value;
+                    }
+                    return 0;
+                }
+                fn use(): Int = read(Box.new(Box.new(6)));
+                """, "use", 6);
+    }
+
+    @Test
+    public void opensInAnElseIfBranch() throws Exception {
+        assertCompiledResult("elseIf", """
+                package %s;
+                public class Box<T: nullable> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public class Pair<K, V> {
+                    public property first: K;
+                    public property second: V;
+                    public constructor new;
+                }
+                public fn classify(value: Any): Int {
+                    if (value is Box<let T>) {
+                        return 1;
+                    } else if (value is Pair<let K, let V>) {
+                        return 2;
+                    }
+                    return 0;
+                }
+                fn use(): Int = classify(Pair.new(1, "value"));
+                """, "use", 2);
+    }
+
+    @Test
+    public void opensInAValueProducingIf() throws Exception {
+        assertCompiledResult("valueIf", """
+                package %s;
+                public class Box<T: nullable> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public fn size<T: nullable>(box: Box<T>): Int = 1;
+                public fn classify(value: Any): Int =
+                        if (value is Box<let T>) then size(value) else 0;
+                fn use(): Int = classify(Box.new(7));
+                """, "use", 1);
+    }
+
+    @Test
+    public void rejectsAnUnjustifiedExactArgument() {
         assertRejected("""
                 public class Pair<K, V> {
                     public property first: K;
                     public property second: V;
                     public constructor new;
                 }
-                public fn bad(pair: Pair<*, *>): Int {
+                public fn bad(pair: Pair<*, String>): Int {
                     if (pair is Pair<Int, let V>) {
                         return 1;
                     }
                     return 0;
                 }
                 """);
+    }
+
+    @Test
+    public void rejectsNestedOpeningThroughRawAny() {
         assertRejected("""
                 public class Box<T> {
                     public property value: T;
                     public constructor new;
                 }
-                public fn bad(box: Box<Box<*>>): Int {
-                    if (box is Box<Box<let T>>) {
+                public fn bad(value: Any): Int {
+                    if (value is Box<Box<let T>>) {
+                        return 1;
+                    }
+                    return 0;
+                }
+                """);
+    }
+
+    @Test
+    public void rejectsRawAnyOpeningWithUnavailableEvidence() {
+        assertRejected("""
+                public contract Render {
+                    render(): String;
+                }
+                public class Box<T: Render> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public fn bad(value: Any): Int {
+                    if (value is Box<let T>) {
+                        return 1;
+                    }
+                    return 0;
+                }
+                """);
+    }
+
+    @Test
+    public void rejectsOpeningACovariantArgument() {
+        assertRejected("""
+                public class Box<out T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public fn bad(box: Box<Int>): Int {
+                    if (box is Box<let T>) {
                         return 1;
                     }
                     return 0;

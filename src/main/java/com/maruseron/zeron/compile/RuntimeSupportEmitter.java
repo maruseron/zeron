@@ -903,12 +903,17 @@ final class RuntimeSupportEmitter {
                             objectParameters, java.util.List.of(), java.util.List.of());
             final var objectShapeKey = FunctionShapeKey.of(objectShape);
             final var objectInterface = ClassDesc.of(FunctionShapeNames.interfaceName(objectShapeKey));
-            if (!methodDescriptor(type).equals(methodDescriptor(objectShape))) {
+            final var polymorphic = type.hasHiddenSlots();
+            final var methodDescriptor = polymorphic
+                    ? BytecodeEmitter.withHiddenParameters(methodDescriptor(type),
+                            type.hiddenEvidenceCount(), type.hiddenDescriptorCount())
+                    : methodDescriptor(type);
+            if (!polymorphic && !methodDescriptor.equals(methodDescriptor(objectShape))) {
                 builder.withInterfaceSymbols(java.util.List.of(objectInterface));
             }
-            builder.withMethod("invoke", methodDescriptor(type),
+            builder.withMethod("invoke", methodDescriptor,
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_ABSTRACT, _ -> {});
-            if (!methodDescriptor(type).equals(methodDescriptor(objectShape))) {
+            if (!polymorphic && !methodDescriptor.equals(methodDescriptor(objectShape))) {
                 builder.withMethod("invoke", methodDescriptor(objectShape), ClassFile.ACC_PUBLIC,
                         methodBuilder -> methodBuilder.withCode(code -> {
                             code.aload(0);
@@ -917,7 +922,7 @@ final class RuntimeSupportEmitter {
                                 final var parameter = type.invocationParameters().get(index);
                                 emitObjectToFunctionType(code, parameter);
                             }
-                            code.invokeinterface(classDesc, "invoke", methodDescriptor(type));
+                            code.invokeinterface(classDesc, "invoke", methodDescriptor);
                             if (type.returnType() instanceof NeverDescriptor) {
                                 code.aconst_null();
                             } else {

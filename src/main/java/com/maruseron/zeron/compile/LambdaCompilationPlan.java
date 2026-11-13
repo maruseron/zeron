@@ -273,15 +273,17 @@ final class LambdaCompilationPlan {
                         : TypeDescriptor.receiverFunctionOf(erasedFunction.name(),
                                 TypeDescriptor.ofName("java.lang.Object"),
                                 TypeDescriptor.ofName("java.lang.Object"), erasedParameters, List.of(), List.of());
-                final var objectShapeKey = FunctionShapeKey.of(objectShape);
-                final var objectInterfaceName = FunctionShapeNames.interfaceName(objectShapeKey);
-                final var previousObjectKey = functionShapeNames.putIfAbsent(
-                        objectInterfaceName, objectShapeKey);
-                if (previousObjectKey != null && !previousObjectKey.equals(objectShapeKey)) {
-                    throw new IllegalStateException(
-                            "Function shape digest collision for " + objectInterfaceName);
+                if (!erasedFunction.hasHiddenSlots()) {
+                    final var objectShapeKey = FunctionShapeKey.of(objectShape);
+                    final var objectInterfaceName = FunctionShapeNames.interfaceName(objectShapeKey);
+                    final var previousObjectKey = functionShapeNames.putIfAbsent(
+                            objectInterfaceName, objectShapeKey);
+                    if (previousObjectKey != null && !previousObjectKey.equals(objectShapeKey)) {
+                        throw new IllegalStateException(
+                                "Function shape digest collision for " + objectInterfaceName);
+                    }
+                    functionShapes.putIfAbsent(objectShapeKey, objectShape);
                 }
-                functionShapes.putIfAbsent(objectShapeKey, objectShape);
                 if (erasedFunction.receiverType() != null) collectFunctionShapes(erasedFunction.receiverType());
                 for (final var parameter : erasedFunction.parameters()) collectFunctionShapes(parameter);
                 collectFunctionShapes(erasedFunction.returnType());
@@ -379,7 +381,7 @@ final class LambdaCompilationPlan {
                         lambdaMethodNames.put(lambda, "$lambda$" + lambdaMethodNames.size());
                         lambdaImplementations.add(lambda);
                     }
-                    if (hasInferredContractBounds(functionType)) {
+                    if (lambda.typeParameters().isEmpty() && hasInferredContractBounds(functionType)) {
                         lambdaTemplateFactoryNames.putIfAbsent(lambda,
                                 "$lambdaTemplateFactory$" + lambdaTemplateFactoryNames.size());
                     }
@@ -1187,6 +1189,7 @@ final class LambdaCompilationPlan {
 
     private boolean registerFunctionAdapter(final FunctionDescriptor source,
                                             final FunctionDescriptor target) {
+        if (source.hasHiddenSlots() || target.hasHiddenSlots()) return false;
         final var erasedSource = (FunctionDescriptor) TypeSubstitution.erase(source);
         final var erasedTarget = (FunctionDescriptor) TypeSubstitution.erase(target);
         if (TypeDescriptor.toJavaClassDesc(erasedSource).equals(TypeDescriptor.toJavaClassDesc(erasedTarget))) {

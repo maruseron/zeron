@@ -15,6 +15,17 @@ final class LambdaResolver {
     static FunctionDescriptor instantiateLambdaScheme(final ResolutionContext context, final FunctionDescriptor scheme,
                                                         final FunctionDescriptor expectedType,
                                                         final Expr.Variable reference, final Token where) {
+        if (!expectedType.typeParameters().isEmpty()) {
+            final var mappedBinders = lambdaBinderSubstitutions(
+                    context, scheme.typeParameters(), expectedType.typeParameters(), where);
+            final var substituted = (FunctionDescriptor) TypeSubstitution.substitute(scheme, mappedBinders);
+            final var polymorphic = TypeDescriptor.functionWithEffectsOf(scheme.name(),
+                    substituted.returnType(), substituted.parameters(), expectedType.typeParameters(),
+                    substituted.raisedEffects()).withHiddenSlots(
+                            expectedType.hiddenEvidenceCount(), expectedType.hiddenDescriptorCount());
+            ensureAssignable(context, expectedType, polymorphic, where);
+            return polymorphic;
+        }
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         if (TypeSubstitution.containsTypeParameter(expectedType)) {
             unifyFunctionReferenceType(context, scheme, expectedType, substitutions, where);
@@ -122,6 +133,24 @@ final class LambdaResolver {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                         reference.name,
                         "A generic function value needs explicit type arguments or an expected function type."));
+            }
+            if (!expectedFunction.typeParameters().isEmpty()) {
+                final var mappedBinders = lambdaBinderSubstitutions(context,
+                        sourceType.typeParameters(), expectedFunction.typeParameters(), reference.name);
+                final var substituted = (FunctionDescriptor) TypeSubstitution.substitute(
+                        sourceType, mappedBinders);
+                final var polymorphic = TypeDescriptor.functionWithEffectsOf(sourceType.name(),
+                        substituted.returnType(), substituted.parameters(),
+                        expectedFunction.typeParameters(), substituted.raisedEffects()).withHiddenSlots(
+                                expectedFunction.hiddenEvidenceCount(),
+                                expectedFunction.hiddenDescriptorCount());
+                ensureAssignable(context, expectedFunction, polymorphic, reference.name);
+                reference.setResolvedFunctionName(functionName);
+                reference.setResolvedFunctionDeclaration(selectedDeclaration);
+                reference.setSourceFunctionType(sourceType);
+                reference.setSpecializedFunctionType(polymorphic);
+                reference.setType(polymorphic);
+                return polymorphic;
             }
             if (TypeSubstitution.containsTypeParameter(expectedFunction)) {
                 unifyFunctionReferenceType(context, sourceType, expectedFunction, substitutions, reference.name);
@@ -305,6 +334,76 @@ final class LambdaResolver {
         final var expectedType = TypeDescriptor.functionWithEffectsOf("", TypeDescriptor.ofInfer(),
                 scheme.parameterTypes(), scheme.typeParameters(), List.of());
         return resolveLambda(context, lambda, expectedType, true);
+    }
+
+    /// Maps a generic lambda's own binders onto the expected polymorphic function's binders. The
+    /// two lists are matched positionally, so binder names may be alpha-renamed.
+    private static Map<TypeParameterDescriptor, TypeDescriptor> lambdaBinderSubstitutions(
+            final ResolutionContext context,
+            final List<TypeParameterDescriptor> declared,
+            final List<TypeParameterDescriptor> expected,
+            final Token where) {
+        if (declared.isEmpty()) return Map.of();
+        if (expected.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    where, "A generic lambda cannot be used where a monomorphic function type is expected."));
+        }
+        if (declared.size() != expected.size()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                    where, "Expected " + expected.size() + " lambda type parameters, found "
+                            + declared.size() + "."));
+        }
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (var index = 0; index < declared.size(); index++) {
+            final var declaredParameter = declared.get(index);
+            final var expectedParameter = expected.get(index);
+            if (declaredParameter.isHigherKinded() || expectedParameter.isHigherKinded()
+                    || declaredParameter.admitsNullableArguments() != expectedParameter.admitsNullableArguments()
+                    || declaredParameter.admitsMutableArguments() != expectedParameter.admitsMutableArguments()
+                    || declaredParameter.isReified() != expectedParameter.isReified()
+                    || declaredParameter.isEffectKind() != expectedParameter.isEffectKind()
+                    || declaredParameter.isEffectRowKind() != expectedParameter.isEffectRowKind()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                        where, "Lambda type parameters do not match the expected function type."));
+            }
+            substitutions.put(declaredParameter, expectedParameter);
+        }
+        for (var index = 0; index < declared.size(); index++) {
+            final var declaredParameter = declared.get(index);
+            final var expectedParameter = expected.get(index);
+            if (declaredParameter.bounds().size() != expectedParameter.bounds().size()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                        where, "Lambda type-parameter bounds do not match the expected function type."));
+            }
+            for (var boundIndex = 0; boundIndex < declaredParameter.bounds().size(); boundIndex++) {
+                final var substituted = TypeSubstitution.substitute(
+                        declaredParameter.bounds().get(boundIndex), substitutions);
+                if (!substituted.equals(expectedParameter.bounds().get(boundIndex))) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
+                            where, "Lambda type-parameter bound "
+                                    + TypeFormatter.format(substituted)
+                                    + " does not match the expected bound "
+                                    + TypeFormatter.format(expectedParameter.bounds().get(boundIndex)) + "."));
+                }
+            }
+        }
+        return substitutions;
+    }
+
+    /// Resolves an explicitly binder-prefixed lambda. Its parameter annotations determine the
+    /// parameter types; the return type is inferred from the body.
+    static FunctionDescriptor resolveExplicitGenericLambda(final ResolutionContext context,
+                                                           final Expr.Lambda lambda) {
+        if (lambda.typeParameters().isEmpty()) return null;
+        if (lambda.parameterTypes().stream().anyMatch(type -> type instanceof InferDescriptor)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    lambda.arrow,
+                    "Every parameter of an explicitly polymorphic lambda needs a type annotation."));
+        }
+        final var expectedType = TypeDescriptor.functionWithEffectsOf("", TypeDescriptor.ofInfer(),
+                lambda.parameterTypes(), lambda.typeParameters(), List.of());
+        TypeResolver.validateFunctionTypes(context, expectedType, lambda.arrow);
+        return resolveLambda(context, lambda, expectedType);
     }
 
     static FunctionDescriptor generalizeLambda(final ResolutionContext context, final Expr.Lambda lambda,
@@ -556,7 +655,16 @@ final class LambdaResolver {
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
-        final var lambdaTypeParameters = expectedType.typeParameters();
+        TypeResolver.validateType(context, expectedType, lambda.arrow);
+        final var expectedBinders = expectedType.typeParameters();
+        final var declaredBinders = lambda.typeParameters();
+        for (final var parameter : declaredBinders) {
+            TypeResolver.resolveTypeNames(context, parameter, lambda.arrow);
+        }
+        final var binderSubstitutions = lambdaBinderSubstitutions(
+                context, declaredBinders, expectedBinders, lambda.arrow);
+        final var lambdaTypeParameters = declaredBinders.isEmpty()
+                ? expectedBinders : declaredBinders;
         context.enterInferableReifiedScope(false, lambdaTypeParameters);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
@@ -578,12 +686,13 @@ final class LambdaResolver {
                 final var parameter = lambdaParameters.get(i);
                 final var annotation = i < lambda.parameterTypes().size()
                         ? lambda.parameterTypes().get(i) : TypeDescriptor.ofInfer();
+                final var substitutedAnnotation = TypeSubstitution.substitute(annotation, binderSubstitutions);
                 final var parameterType = annotation instanceof InferDescriptor
                         ? expectedType.parameters().get(i)
                         : annotation;
                 if (!(annotation instanceof InferDescriptor)) {
                     TypeResolver.validateType(context, annotation, parameter);
-                    if (!annotation.equals(expectedType.parameters().get(i))) {
+                    if (!substitutedAnnotation.equals(expectedType.parameters().get(i))) {
                         Zeron.resolutionError(new ResolutionError(
                                 DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, parameter,
                                 "Lambda parameter type " + TypeFormatter.format(annotation)
@@ -619,11 +728,13 @@ final class LambdaResolver {
             final var raisedEffects = inferRaisedEffects || inferRows
                     ? List.copyOf(context.frame.raisedEffects)
                     : expectedType.raisedEffects();
-            final var resolvedType = expectedType.receiverType() == null
+            final var resolvedType = (expectedType.receiverType() == null
                     ? TypeDescriptor.functionWithEffectsOf(expectedType.name(), resolvedReturn,
-                            parameterTypes, expectedType.typeParameters(), raisedEffects)
+                            parameterTypes, lambdaTypeParameters, raisedEffects)
                     : TypeDescriptor.receiverFunctionOf(expectedType.name(), expectedType.receiverType(),
-                            resolvedReturn, parameterTypes, expectedType.typeParameters(), raisedEffects);
+                            resolvedReturn, parameterTypes, lambdaTypeParameters, raisedEffects))
+                    .withHiddenSlots(expectedType.hiddenEvidenceCount(),
+                            expectedType.hiddenDescriptorCount());
             if (lambda.codeModelType() != null) {
                 validateCodeModelLambda(context, lambda, lambdaParameters);
             }

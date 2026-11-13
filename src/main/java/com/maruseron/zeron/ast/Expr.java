@@ -1574,6 +1574,7 @@ public sealed interface Expr {
         private final List<TypeDescriptor> parameterTypes;
         public final List<Stmt> body;
         private final Token implicitParameter;
+        private final List<TypeParameterDescriptor> typeParameters;
         private TypeDescriptor type;
         private TypeDescriptor codeModelType;
         private Token receiverSymbolToken;
@@ -1590,15 +1591,23 @@ public sealed interface Expr {
 
         public Lambda(Token arrow, List<Token> params, List<TypeDescriptor> parameterTypes,
                       List<Stmt> body, TypeDescriptor type, Token implicitParameter) {
+            this(arrow, params, parameterTypes, body, type, implicitParameter, List.of());
+        }
+
+        public Lambda(Token arrow, List<Token> params, List<TypeDescriptor> parameterTypes,
+                      List<Stmt> body, TypeDescriptor type, Token implicitParameter,
+                      List<TypeParameterDescriptor> typeParameters) {
             this.arrow = arrow;
             this.params = params == null ? List.of() : params;
             this.parameterTypes = List.copyOf(parameterTypes);
             this.body = body;
             this.type = type;
             this.implicitParameter = implicitParameter;
+            this.typeParameters = List.copyOf(typeParameters);
         }
 
         public List<TypeDescriptor> parameterTypes() { return parameterTypes; }
+        public List<TypeParameterDescriptor> typeParameters() { return typeParameters; }
         public Token implicitParameter() { return implicitParameter; }
         public Token receiverSymbolToken() { return receiverSymbolToken; }
         public void setReceiverSymbolToken(final Token token) { receiverSymbolToken = token; }
@@ -1630,11 +1639,12 @@ public sealed interface Expr {
                     Objects.equals(this.params, that.params) &&
                     Objects.equals(this.body,  that.body)  &&
                     Objects.equals(this.implicitParameter, that.implicitParameter) &&
+                    Objects.equals(this.typeParameters, that.typeParameters) &&
                     Objects.equals(this.type,  that.type)  ;
         }
 
         public int hashCode() {
-            return Objects.hash(arrow, params, body, implicitParameter, type);
+            return Objects.hash(arrow, params, body, implicitParameter, typeParameters, type);
         }
 
         public String toString() {

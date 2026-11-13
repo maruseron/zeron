@@ -89,10 +89,19 @@ final class LambdaSupportEmitter {
             composer.aload(reifiedSlot);
             reifiedSlot++;
         }
+        final var targetEvidenceBase = slot;
+        for (int index = 0; index < targetType.hiddenEvidenceCount(); index++) {
+            composer.aload(targetEvidenceBase + index);
+        }
+        final var targetDescriptorBase = targetEvidenceBase + targetType.hiddenEvidenceCount();
+        for (int index = 0; index < targetType.hiddenDescriptorCount(); index++) {
+            composer.aload(targetDescriptorBase + index);
+        }
         composer.invokestatic(ClassDesc.of(owner),
             reference.functionName().substring(reference.functionName().lastIndexOf('.') + 1),
             withHiddenParameters(toJavaMethodDescriptor(sourceType),
-                    reference.evidenceArguments().size(), reference.reifiedArguments().size()));
+                    reference.evidenceArguments().size() + targetType.hiddenEvidenceCount(),
+                    reference.reifiedArguments().size() + targetType.hiddenDescriptorCount()));
         emitConversion(context, composer, sourceType.returnType(), targetType.returnType());
         composer.return_(TypeKind.fromDescriptor(
             TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));
@@ -108,6 +117,12 @@ final class LambdaSupportEmitter {
             parameters.add(RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE);
         }
         parameters.addAll(reference.targetType().parameters());
+        for (int index = 0; index < reference.targetType().hiddenEvidenceCount(); index++) {
+            parameters.add(TypeDescriptor.ofName("java.lang.invoke.MethodHandle"));
+        }
+        for (int index = 0; index < reference.targetType().hiddenDescriptorCount(); index++) {
+            parameters.add(RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE);
+        }
         return toJavaMethodDescriptor(reference.targetType(), parameters);
     }
 
@@ -125,10 +140,12 @@ final class LambdaSupportEmitter {
         final var methodHandleType = TypeDescriptor.ofName("java.lang.invoke.MethodHandle");
         final var allParameters = new ArrayList<TypeDescriptor>();
         allParameters.addAll(context.lambdaPlan.captureTypes(lambda));
-        allParameters.addAll(Collections.nCopies(evidenceFields.size(), methodHandleType));
         for (final var parameter : functionType.invocationParameters()) {
             allParameters.add(parameter);
         }
+        allParameters.addAll(Collections.nCopies(evidenceFields.size(), methodHandleType));
+        allParameters.addAll(Collections.nCopies(functionType.hiddenDescriptorCount(),
+                RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE));
         final var previousOffset = context.localSlotOffset;
         final var previousReturnType = context.currentReturnType;
         final var previousLambdaImplementation = context.emittingLambdaImplementation;
@@ -142,11 +159,6 @@ final class LambdaSupportEmitter {
                 final var captureType = context.lambdaPlan.captureTypes(lambda).get(i);
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, capture, captureType, BindingMutability.IMMUTABLE);
                 context.symbols.define(capture);
-            }
-            for (final var evidenceField : evidenceFields) {
-                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceField.token(),
-                        methodHandleType, BindingMutability.IMMUTABLE);
-                context.symbols.define(evidenceField.token());
             }
             if (functionType.receiverType() != null) {
                 final var receiverToken = lambda.receiverSymbolToken();
@@ -163,6 +175,18 @@ final class LambdaSupportEmitter {
                 final var parameterType = functionType.parameters().get(i);
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, param, parameterType, BindingMutability.IMMUTABLE);
                 context.symbols.define(param);
+            }
+            for (final var evidenceField : evidenceFields) {
+                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceField.token(),
+                        methodHandleType, BindingMutability.IMMUTABLE);
+                context.symbols.define(evidenceField.token());
+            }
+            for (final var parameter : functionType.typeParameters()) {
+                if (!parameter.isReified()) continue;
+                final var token = Expr.reifiedToken(parameter);
+                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, token,
+                        RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE, BindingMutability.IMMUTABLE);
+                context.symbols.define(token);
             }
 
             if (lambda.body.size() == 1 && lambda.body.getFirst() instanceof Stmt.Return ret) {

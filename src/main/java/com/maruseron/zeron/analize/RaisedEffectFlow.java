@@ -63,6 +63,13 @@ final class RaisedEffectFlow {
 
     static void add(final ResolutionContext context, final Set<TypeDescriptor> effects, final Token where) {
         if (effects.isEmpty()) return;
+        for (final var effect : effects) {
+            if (context.containsEscapingOpeningBinder(effect)) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                        "A raised effect type bound to an opening pattern escapes its branch."));
+            }
+        }
         if (context.frame.raisedEffects == null) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     where, "Raised effects are not permitted in top-level initializers."));

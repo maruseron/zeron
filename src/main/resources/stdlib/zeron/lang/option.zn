@@ -1,7 +1,6 @@
 package zeron.lang;
 
 import zeron.control.Foldable;
-import zeron.control.Functor;
 import zeron.control.Monad;
 
 /// A value that may be absent.
@@ -20,8 +19,8 @@ public extension<T: nullable + mut> Option<T> {
     /// Whether this option holds a value.
     public fn isSome(): Boolean =
         match (this) {
-            case Option.Some(_) -> true;
-            case Option.None() -> false;
+            case Some(_) -> true;
+            case None() -> false;
         };
 
     /// Returns the contained value, or `other` when this option is `None`.
@@ -36,15 +35,15 @@ public extension<T: nullable + mut> Option<T> {
     /// `ifSome` receives the contained value; `ifNone` receives no arguments.
     public fn fold<R: mut>(ifSome: (T) -> R, ifNone: () -> R): R =
         match (this) {
-            case Option.Some(value) -> ifSome(value);
-            case Option.None() -> ifNone();
+            case Some(value) -> ifSome(value);
+            case None() -> ifNone();
         };
 
     /// Transforms the contained value, if any, leaving `None` unchanged.
     public fn map<B: mut>(f: (T) -> B): Option<B> =
         match (this) {
-            case Option.Some(value) -> Option.Some(f(value));
-            case Option.None() -> Option<B>.None();
+            case Some(value) -> Option.Some(f(value));
+            case None() -> Option<B>.None();
         };
 
     /// Keeps this option only when it holds a value that satisfies `p`; otherwise returns `None`.
@@ -52,8 +51,8 @@ public extension<T: nullable + mut> Option<T> {
     /// `p` is not called when this option is already `None`.
     public fn filter(p: (T) -> Boolean): Option<T> =
         match (this) {
-            case Option.Some(value) -> if (p(value)) then this else Option<T>.None();
-            case Option.None() -> this;
+            case Some(value) -> if (p(value)) then this else Option<T>.None();
+            case None() -> this;
         };
 }
 
@@ -65,24 +64,24 @@ default witness Monad<Option<_>> for Option<_> {
 
     fn ap<A: mut, B: mut>(this: Option<A>, function: Option<(A) -> B>): Option<B> =
         match (this) {
-            case Option.Some(value) -> match (function) {
-                case Option.Some(f) -> Option.Some(f(value));
-                case Option.None() -> Option<B>.None();
+            case Some(value) -> match (function) {
+                case Some(f) -> Option.Some(f(value));
+                case None() -> Option<B>.None();
             };
-            case Option.None() -> Option<B>.None();
+            case None() -> Option<B>.None();
         };
 
     fn flatMap<A: mut, B: mut>(this: Option<A>, transform: (A) -> Option<B>): Option<B> =
         match (this) {
-            case Option.Some(value) -> transform(value);
-            case Option.None() -> Option<B>.None();
+            case Some(value) -> transform(value);
+            case None() -> Option<B>.None();
         };
 }
 
 default witness Foldable<Option<_>> for Option<_> {
     fn foldLeft<A: mut, B: mut>(this: Option<A>, initial: B, combine: (B, A) -> B): B =
         match (this) {
-            case Option.Some(value) -> combine(initial, value);
-            case Option.None() -> initial;
+            case Some(value) -> combine(initial, value);
+            case None() -> initial;
         };
 }

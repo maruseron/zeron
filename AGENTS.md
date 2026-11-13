@@ -17,13 +17,25 @@
 
 ## Code Navigation
 
-See [NAVIGATION.md](./NAVIGATION.md) for the compiler pipeline and resolver/compiler module
-responsibilities.
+Start with
+[`documents/developer_guides/change-surface-map.md`](./documents/developer_guides/change-surface-map.md)
+to route a change to the files that must move together. See [NAVIGATION.md](./NAVIGATION.md) for the
+repository map and the compiler pipeline.
 
-For common implementation workflows, see
-[`documents/developer_guides/compiler-changes.md`](./documents/developer_guides/compiler-changes.md)
-and
-[`documents/developer_guides/registries-and-modules.md`](./documents/developer_guides/registries-and-modules.md).
+Workflow guides:
+
+- [`compiler-changes.md`](./documents/developer_guides/compiler-changes.md) — statements,
+  declarations, expressions.
+- [`syntax-surface-checklist.md`](./documents/developer_guides/syntax-surface-checklist.md) —
+  grammar, formatter, highlighters, and LSP surfaces.
+- [`registries-and-modules.md`](./documents/developer_guides/registries-and-modules.md) — bindings,
+  intrinsics, and standard-library modules.
+- [`diagnostics-and-error-codes.md`](./documents/developer_guides/diagnostics-and-error-codes.md) —
+  catalog, explanation resources, and severities.
+- [`testing-and-verification.md`](./documents/developer_guides/testing-and-verification.md) — test
+  layout, focused runs, and `dist/` handling.
+- [`generated-artifacts-and-release.md`](./documents/developer_guides/generated-artifacts-and-release.md) —
+  generated output, API index versions, and release packaging.
 
 ## Feature Roadmap and Shipping
 

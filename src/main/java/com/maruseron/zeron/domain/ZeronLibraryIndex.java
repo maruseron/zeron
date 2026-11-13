@@ -41,6 +41,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             Path.of("META-INF", "zeron", LEGACY_API_INDEX_FILE_NAME);
     private static final int MAX_ENTRIES = 1_000_000;
     private static final AtomicInteger READ_SCOPE_IDS = new AtomicInteger(-1);
+    private static final ThreadLocal<Integer> READ_VERSION =
+            ThreadLocal.withInitial(() -> VERSION);
 
     public ZeronLibraryIndex {
         declarations = List.copyOf(declarations);
@@ -1606,7 +1608,13 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         final var standardLibraryApiVersion = input.readInt();
         final var count = readCount(input);
         final var declarations = new ArrayList<ExportedDeclaration>(count);
-        for (int i = 0; i < count; i++) declarations.add(readDeclaration(input, version));
+        final var previousVersion = READ_VERSION.get();
+        READ_VERSION.set(version);
+        try {
+            for (int i = 0; i < count; i++) declarations.add(readDeclaration(input, version));
+        } finally {
+            READ_VERSION.set(previousVersion);
+        }
         if (input.read() != -1) throw new IOException("Trailing data in Zeron library index.");
         return new ZeronLibraryIndex(standardLibraryApiVersion, declarations);
     }
@@ -2260,6 +2268,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             output.writeBoolean(parameter.isEffectRowKind());
             output.writeBoolean(parameter.admitsMutableArguments());
             output.writeBoolean(parameter.isReified());
+            output.writeBoolean(parameter.isStoredExistential());
         }
         for (final var parameter : parameters) {
             output.writeInt(parameter.bounds().size());
@@ -2279,6 +2288,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         final var effectRowKinds = new ArrayList<Boolean>(count);
         final var mutableArguments = new ArrayList<Boolean>(count);
         final var reified = new ArrayList<Boolean>(count);
+        final var stored = new ArrayList<Boolean>(count);
         final var parameters = new ArrayList<TypeParameterDescriptor>(count);
         for (int i = 0; i < count; i++) {
             names.add(input.readUTF());
@@ -2295,12 +2305,14 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             effectRowKinds.add(input.readBoolean());
             mutableArguments.add(input.readBoolean());
             reified.add(input.readBoolean());
+            stored.add(READ_VERSION.get() >= 14 && input.readBoolean());
         }
         for (int i = 0; i < count; i++) {
             final var parameter = new TypeParameterDescriptor(context.runtimeScope(scopes.get(i)),
                     names.get(i), List.of(), higherKinded.get(i), variances.get(i),
                     nullableArguments.get(i), effectKinds.get(i), effectRowKinds.get(i),
                     mutableArguments.get(i), reified.get(i));
+            if (stored.get(i)) parameter.markStoredExistential();
             parameters.add(parameter);
             context.parameters.put(new WireTypeParameter(scopes.get(i), names.get(i)), parameter);
         }
@@ -2315,6 +2327,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         old.isHigherKinded(), old.variance(),
                         old.admitsNullableArguments(), old.isEffectKind(),
                         old.isEffectRowKind(), old.admitsMutableArguments(), old.isReified());
+                if (old.isStoredExistential()) parameter.markStoredExistential();
                 parameters.set(i, parameter);
                 context.parameters.put(new WireTypeParameter(scopes.get(i), names.get(i)), parameter);
             }
@@ -2380,9 +2393,19 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 writeType(output, reference.baseType(), context);
             }
             case TypeParameterDescriptor parameter -> {
-                output.writeByte(13);
-                output.writeInt(context.wireScope(parameter.scopeId()));
-                output.writeUTF(parameter.name());
+                if (parameter.isStoredExistential()) {
+                    output.writeByte(24);
+                    output.writeUTF(parameter.name());
+                    output.writeBoolean(parameter.admitsNullableArguments());
+                    output.writeBoolean(parameter.admitsMutableArguments());
+                    output.writeBoolean(parameter.isReified());
+                    output.writeInt(parameter.bounds().size());
+                    for (final var bound : parameter.bounds()) writeType(output, bound, context);
+                } else {
+                    output.writeByte(13);
+                    output.writeInt(context.wireScope(parameter.scopeId()));
+                    output.writeUTF(parameter.name());
+                }
             }
             case AppliedConstructorDescriptor applied -> {
                 output.writeByte(18);
@@ -2446,6 +2469,24 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var name = input.readUTF();
                 final var parameter = context.parameters.get(new WireTypeParameter(scope, name));
                 if (parameter == null) throw new IOException("Unbound type parameter in library index: " + name);
+                yield parameter;
+            }
+            case 24 -> {
+                final var name = input.readUTF();
+                final var nullable = input.readBoolean();
+                final var mutable = input.readBoolean();
+                final var reified = input.readBoolean();
+                final var bounds = new ArrayList<TypeDescriptor>();
+                for (int i = 0, count = readCount(input); i < count; i++) {
+                    bounds.add(readType(input, context));
+                }
+                // Stored binders are declaration-local and are not part of an enclosing
+                // type-parameter list. Derive a stable scope from the generated source name so
+                // repeated exports and separate reads of the same position compare equal.
+                final var parameter = new TypeParameterDescriptor(name.hashCode(),
+                        name, bounds, false, TypeParameterDescriptor.Variance.INVARIANT,
+                        nullable, false, false, mutable, reified);
+                parameter.markStoredExistential();
                 yield parameter;
             }
             case 14 -> readFunction(input, context);

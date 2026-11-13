@@ -153,11 +153,12 @@ final class BytecodeEmitter {
             return;
         }
         final var owner = nominalName(context, property.receiver.getType());
-        final var erasedFieldType = TypeSubstitution.erase(
-                declarationFieldType(context, owner, property.name.lexeme()));
+        final var fieldType = declarationFieldType(context, owner, property.name.lexeme());
+        final var erasedFieldType = TypeSubstitution.erase(fieldType);
         emitExpr(context, composer, property.receiver);
         emitExpr(context, composer, assignment.value);
-        emitConversion(context, composer, context.lastEmittedType, erasedFieldType);
+        emitConversion(context, composer, context.lastEmittedType, fieldType);
+        emitConversion(context, composer, fieldType, erasedFieldType);
         if (retainResult) duplicateValueUnderReceiver(composer, erasedFieldType);
         if (context.emittingLambdaImplementation && !isSamePackage(owner, context.mainClassName)) {
             composer.invokestatic(ClassDesc.of(owner), NominalTypeEmitter.lambdaFieldWriteBridge(property.name.lexeme()),
@@ -373,9 +374,7 @@ final class BytecodeEmitter {
     private static void emitArrayLiteral(CompilationContext context, final CodeBuilder composer,
                                   final Expr.ArrayLiteral literal,
                                   final ResolvedIntrinsicOperation operation ){
-        final var elementType = operation.parameterTypes().isEmpty()
-                ? arrayElementType(operation.resultType())
-                : operation.parameterTypes().getFirst();
+        final var elementType = arrayElementType(operation.resultType());
         composer.ldc(literal.elements.size());
         composer.anewarray(ClassDesc.of("java.lang.Object"));
         for (int i = 0; i < literal.elements.size(); i++) {
@@ -412,6 +411,9 @@ final class BytecodeEmitter {
         } else {
             composer.aaload();
             emitArrayReadConversion(context, composer, operation.resultType());
+            if (StoredExistentialSupport.requiresHolder(operation.resultType())) {
+                emitStoredUnpack(context, composer, operation.resultType());
+            }
         }
     }
 
@@ -672,8 +674,9 @@ final class BytecodeEmitter {
                 composer.dup();
                 for (int index = 0; index < model.assignments.size(); index++) {
                     emitExpr(context, composer, model.assignments.get(index).value());
-                    emitConversion(context, composer, context.lastEmittedType,
-                            TypeSubstitution.erase(constructorTypes.get(index)));
+                    final var parameterType = constructorTypes.get(index);
+                    emitConversion(context, composer, context.lastEmittedType, parameterType);
+                    emitConversion(context, composer, parameterType, TypeSubstitution.erase(parameterType));
                 }
                 composer.invokespecial(classDesc, "<init>",
                         MethodTypeDesc.of(ConstantDescs.CD_void, constructorParameters));
@@ -699,8 +702,9 @@ final class BytecodeEmitter {
                 composer.dup();
                 for (int index = 0; index < object.initializers().size(); index++) {
                     emitExpr(context, composer, object.initializers().get(index));
-                    emitConversion(context, composer, context.lastEmittedType,
-                            TypeSubstitution.erase(constructorTypes.get(index)));
+                    final var parameterType = constructorTypes.get(index);
+                    emitConversion(context, composer, context.lastEmittedType, parameterType);
+                    emitConversion(context, composer, parameterType, TypeSubstitution.erase(parameterType));
                 }
                 composer.invokespecial(classDesc, "<init>",
                         MethodTypeDesc.of(ConstantDescs.CD_void, constructorParameters));
@@ -1752,6 +1756,15 @@ final class BytecodeEmitter {
         return methodType.insertParameterTypes(methodType.parameterCount(), parameters);
     }
 
+    /// A generic effect payload constructor carries one hidden application descriptor after every
+    /// other hidden parameter. Non-generic effects keep their existing descriptor-free ABI.
+    static MethodTypeDesc withEffectDescriptorParameter(final MethodTypeDesc methodType,
+                                                        final boolean genericEffect) {
+        if (!genericEffect) return methodType;
+        return methodType.insertParameterTypes(methodType.parameterCount(),
+                RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS);
+    }
+
     static List<Token> reifiedSlots(final FunctionDescriptor functionType) {
         return RuntimeTypeDescriptorEmitter.reifiedSlots(functionType.typeParameters());
     }
@@ -1772,6 +1785,34 @@ final class BytecodeEmitter {
     static void emitReifiedArguments(final CompilationContext context, final CodeBuilder composer,
                                      final List<TypeDescriptor> arguments) {
         RuntimeTypeDescriptorEmitter.emitArguments(context, composer, arguments);
+    }
+
+    /// Forwards a generic effect payload's application descriptor. Inside a named constructor the
+    /// hidden descriptor parameter is forwarded unchanged; at any other closed site the cached
+    /// structural descriptor of the constructed application is emitted.
+    private static void emitEffectDescriptorArgument(final CompilationContext context,
+                                                     final CodeBuilder composer,
+                                                     final Expr.MemberCall call) {
+        if (context.currentEffectDescriptorToken != null
+                && java.util.Objects.equals(context.currentEffectDescriptorOwner,
+                        call.resolvedClassName())) {
+            emitVariable(context, composer, context.currentEffectDescriptorToken);
+            context.lastEmittedType = RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE;
+            return;
+        }
+        final var application = payloadApplication(call.getType());
+        if (!(application instanceof GenericDescriptor)) {
+            throw new IllegalStateException("A generic effect constructor call lost its applied type.");
+        }
+        RuntimeTypeDescriptorEmitter.emit(context, composer, application);
+        context.lastEmittedType = RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE;
+    }
+
+    private static TypeDescriptor payloadApplication(final TypeDescriptor type) {
+        var current = type;
+        while (current instanceof ReferenceDescriptor reference) current = reference.baseType();
+        while (current instanceof NullableDescriptor nullable) current = nullable.baseType();
+        return current;
     }
 
     static void emitHiddenArguments(final CompilationContext context, final CodeBuilder composer,
@@ -2052,13 +2093,21 @@ final class BytecodeEmitter {
             return;
         }
         if (call.witnessEvidenceToken() != null) {
-            emitVariable(context, composer, call.witnessEvidenceToken());
             final var factoryType = call.witnessFactoryType();
             final var receiverOffset = call.witnessEvidenceHasReceiver() ? 1 : 0;
             if (call.witnessEvidenceHasReceiver() && !receiverOnStack) {
+                // A stored receiver initializes its evidence tokens while it is unpacked, so it
+                // must be evaluated before the token they provide is loaded.
                 emitExpr(context, composer, call.receiver);
                 emitConversion(context, composer, context.lastEmittedType,
                         TypeSubstitution.erase(factoryType.parameters().getFirst()));
+                emitVariable(context, composer, call.witnessEvidenceToken());
+                composer.swap();
+            } else {
+                emitVariable(context, composer, call.witnessEvidenceToken());
+                if (call.witnessEvidenceHasReceiver()) {
+                    composer.swap();
+                }
             }
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(context, composer, call.arguments.get(i));
@@ -2121,8 +2170,9 @@ final class BytecodeEmitter {
                 composer.dup();
                 for (int i = 0; i < call.arguments.size(); i++) {
                     emitExpr(context, composer, call.arguments.get(i));
-                    emitConversion(context, composer, context.lastEmittedType,
-                            TypeSubstitution.erase(constructorTypes.get(i)));
+                    final var parameterType = constructorTypes.get(i);
+                    emitConversion(context, composer, context.lastEmittedType, parameterType);
+                    emitConversion(context, composer, parameterType, TypeSubstitution.erase(parameterType));
                 }
                 composer.invokespecial(classDesc, "<init>",
                         MethodTypeDesc.of(ConstantDescs.CD_void, parameters));
@@ -2138,23 +2188,30 @@ final class BytecodeEmitter {
             final var parameters = constructorTypes.stream()
                     .map(type -> TypeDescriptor.toJavaClassDesc(TypeSubstitution.erase(type)))
                     .toList();
-            if (declaration.isEffect()
+            if (declaration.isEffect() && declaration.typeParameters().isEmpty()
                     && context.resolution.isStatelessEffect(call.resolvedClassName())) {
                 composer.invokestatic(classDesc, "new", MethodTypeDesc.of(classDesc), true);
                 context.lastEmittedType = call.getType();
                 return;
             }
+            final var genericEffect = NominalTypeEmitter.isGenericEffect(declaration);
             composer.new_(classDesc);
             composer.dup();
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(context, composer, call.arguments.get(i));
-                emitConversion(context, composer, context.lastEmittedType,
-                        TypeSubstitution.erase(constructorTypes.get(i)));
+                final var parameterType = constructorTypes.get(i);
+                emitConversion(context, composer, context.lastEmittedType, parameterType);
+                emitConversion(context, composer, parameterType, TypeSubstitution.erase(parameterType));
             }
             emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
+            if (genericEffect) {
+                emitEffectDescriptorArgument(context, composer, call);
+            }
             composer.invokespecial(classDesc, "<init>",
-                    withHiddenParameters(MethodTypeDesc.of(ConstantDescs.CD_void, parameters),
-                            call.evidenceArguments().size(), call.reifiedArguments().size()));
+                    withEffectDescriptorParameter(
+                            withHiddenParameters(MethodTypeDesc.of(ConstantDescs.CD_void, parameters),
+                                    call.evidenceArguments().size(), call.reifiedArguments().size()),
+                            genericEffect));
             context.lastEmittedType = call.getType();
             return;
         }
@@ -2172,10 +2229,12 @@ final class BytecodeEmitter {
                     final var resolvedFactory = call.resolvedDescriptor() == null
                             ? namedConstructor.typeDescriptor()
                             : call.resolvedDescriptor();
+                    final var resolvedElement = resolvedFactory.parameters().getLast()
+                            instanceof ArrayDescriptor array
+                            ? array.elementType() : call.variadicElementType();
                     emitVariadicArguments(context, composer, call.arguments,
                             (FunctionDescriptor) TypeSubstitution.erase(resolvedFactory),
-                            call.variadicFixedArity(),
-                            TypeSubstitution.erase(call.variadicElementType()));
+                            call.variadicFixedArity(), resolvedElement);
                 } else {
                     for (int i = 0; i < call.arguments.size(); i++) {
                         emitExpr(context, composer, call.arguments.get(i));
@@ -2183,10 +2242,16 @@ final class BytecodeEmitter {
                             TypeSubstitution.erase(namedConstructor.typeDescriptor().parameters().get(i)));
                     }
                 }
+                final var genericEffect = declaration != null && NominalTypeEmitter.isGenericEffect(declaration);
                 emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
+                if (genericEffect) {
+                    emitEffectDescriptorArgument(context, composer, call);
+                }
                 composer.invokestatic(ClassDesc.of(call.resolvedClassName()), call.name.lexeme(),
-                    withHiddenParameters(toJavaMethodDescriptor(erasedFactory),
-                            call.evidenceArguments().size(), call.reifiedArguments().size()));
+                    withEffectDescriptorParameter(
+                            withHiddenParameters(toJavaMethodDescriptor(erasedFactory),
+                                    call.evidenceArguments().size(), call.reifiedArguments().size()),
+                            genericEffect));
                 final var erasedReturnType = TypeSubstitution.erase(namedConstructor.typeDescriptor().returnType());
                 emitConversion(context, composer, erasedReturnType, call.getType());
                 context.lastEmittedType = call.getType();
@@ -2226,12 +2291,20 @@ final class BytecodeEmitter {
         final var runtimeType = (FunctionDescriptor) TypeSubstitution.erase(descriptor);
         if (call.variadicElementType() != null) {
             emitVariadicArguments(context, composer, call.arguments, runtimeType,
-                    call.variadicFixedArity(), TypeSubstitution.erase(call.variadicElementType()));
+                    call.variadicFixedArity(), call.variadicElementType());
         } else {
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(context, composer, call.arguments.get(i));
-                emitConversion(context, composer, context.lastEmittedType,
-                    TypeSubstitution.erase(descriptor.parameters().get(i)));
+                final var parameterType = resolvedDescriptor.parameters().get(i);
+                final var erasedParameterType = TypeSubstitution.erase(
+                        descriptor.parameters().get(i));
+                if (StoredExistentialSupport.requiresHolder(parameterType)) {
+                    emitConversion(context, composer, context.lastEmittedType, parameterType);
+                    emitConversion(context, composer, parameterType, erasedParameterType);
+                } else {
+                    emitConversion(context, composer, context.lastEmittedType,
+                            erasedParameterType);
+                }
             }
         }
         emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
@@ -2388,8 +2461,7 @@ final class BytecodeEmitter {
                     sourceType.parameters().subList(1, sourceType.arity()).toArray(TypeDescriptor[]::new));
             emitVariadicArguments(context, composer, call.arguments,
                     (FunctionDescriptor) TypeSubstitution.erase(callableArguments),
-                    call.variadicFixedArity(),
-                    TypeSubstitution.erase(call.variadicElementType()));
+                    call.variadicFixedArity(), call.variadicElementType());
         } else {
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(context, composer, call.arguments.get(i));
@@ -3060,7 +3132,11 @@ final class BytecodeEmitter {
                         composer.getstatic(owner, globalFieldName(binding, name),
                                 TypeDescriptor.toJavaClassDesc(binding.type()));
                     }
-                    context.lastEmittedType = binding.type();
+                    if (StoredExistentialSupport.requiresHolder(binding.type())) {
+                        emitStoredUnpack(context, composer, binding.type());
+                    } else {
+                        context.lastEmittedType = binding.type();
+                    }
                     return;
                 }
             }
@@ -3090,7 +3166,11 @@ final class BytecodeEmitter {
                 default -> composer.aload(binding.lvt() + context.localSlotOffset);
             }
         }
-        context.lastEmittedType = binding.type();
+        if (StoredExistentialSupport.requiresHolder(binding.type())) {
+            emitStoredUnpack(context, composer, binding.type());
+        } else {
+            context.lastEmittedType = binding.type();
+        }
     }
 
     private static String globalFieldName(final Bind binding, final Token fallback) {
@@ -3137,9 +3217,388 @@ final class BytecodeEmitter {
         }
     }
 
+    private static void emitStoredPack(final CompilationContext context,
+                                      final CodeBuilder composer,
+                                      final TypeDescriptor sourceType,
+                                      final TypeDescriptor targetType) {
+        var target = unnullable(targetType);
+        while (target instanceof ReferenceDescriptor reference) target = reference.baseType();
+        if (!(target instanceof GenericDescriptor targetGeneric)) {
+            throw new IllegalStateException("A holder target must be an applied type: " + targetType);
+        }
+        var source = unnullable(sourceType);
+        while (source instanceof ReferenceDescriptor reference) source = reference.baseType();
+        final var sourceArguments = source instanceof GenericDescriptor sourceGeneric
+                && sourceGeneric.baseType().equals(targetGeneric.baseType())
+                && sourceGeneric.typeParameters().size() == targetGeneric.typeParameters().size()
+                ? sourceGeneric.typeParameters() : null;
+        final var payloadSlot = declareStoredTemporary(context, "packPayload", TypeDescriptor.ofAny());
+        composer.storeLocal(TypeKind.REFERENCE, payloadSlot + context.localSlotOffset);
+        final var slots = new ArrayList<StoredSlot>();
+        for (int index = 0; index < targetGeneric.typeParameters().size(); index++) {
+            final var argument = targetGeneric.typeParameters().get(index);
+            if (!(argument instanceof TypeParameterDescriptor binder)
+                    || !StoredExistentialSupport.needsHolder(binder)) continue;
+            final var actual = sourceArguments == null ? null : sourceArguments.get(index);
+            if (actual instanceof TypeParameterDescriptor actualBinder
+                    && actualBinder.isStoredExistential()) {
+                if (binder.isReified()) {
+                    slots.add(new StoredSlot.OfToken(Expr.reifiedToken(actualBinder)));
+                }
+                for (int boundIndex = 0; boundIndex < binder.bounds().size(); boundIndex++) {
+                    final var methods = storedBoundMethods(context, binder, boundIndex);
+                    if (methods.isEmpty()) {
+                        slots.add(new StoredSlot.Null());
+                    } else if (methods.size() == 1) {
+                        slots.add(new StoredSlot.OfToken(Expr.methodEvidenceToken(actualBinder,
+                                boundIndex, 0)));
+                    } else {
+                        final var tokens = new ArrayList<Token>();
+                        for (int methodIndex = 0; methodIndex < methods.size(); methodIndex++) {
+                            tokens.add(Expr.methodEvidenceToken(actualBinder, boundIndex, methodIndex));
+                        }
+                        slots.add(new StoredSlot.TokenGroup(tokens));
+                    }
+                }
+                continue;
+            }
+            if (actual == null) {
+                throw new IllegalStateException("Cannot pack a stored existential without a source argument: "
+                        + TypeFormatter.format(targetType));
+            }
+            if (binder.isReified()) {
+                slots.add(new StoredSlot.Descriptor(actual));
+            }
+                            for (int boundIndex = 0; boundIndex < binder.bounds().size(); boundIndex++) {
+                    if (storedBoundMethods(context, binder, boundIndex).isEmpty()) {
+                        slots.add(new StoredSlot.Null());
+                    } else {
+                        slots.add(new StoredSlot.Evidence(context, binder, boundIndex, actual));
+                    }
+                }
+        }
+        if (slots.isEmpty()) {
+            throw new IllegalStateException("A holder was requested with no slots: " + targetType);
+        }
+        final var holder = ClassDesc.of(StoredExistentialSupport.holderClassName(slots.size()));
+        if (slots.size() <= 3) {
+            composer.aload(payloadSlot + context.localSlotOffset);
+            for (final var slot : slots) emitStoredSlot(context, composer, slot);
+            final var parameters = new ArrayList<ClassDesc>();
+            parameters.add(ConstantDescs.CD_Object);
+            slots.forEach(_ -> parameters.add(ConstantDescs.CD_Object));
+            composer.invokestatic(holder, "of", MethodTypeDesc.of(holder, parameters));
+        } else {
+            composer.ldc(slots.size());
+            composer.anewarray(ConstantDescs.CD_Object);
+            for (int index = 0; index < slots.size(); index++) {
+                composer.dup();
+                composer.ldc(index);
+                emitStoredSlot(context, composer, slots.get(index));
+                composer.aastore();
+            }
+            composer.aload(payloadSlot + context.localSlotOffset);
+            composer.swap();
+            composer.invokestatic(holder, "of", MethodTypeDesc.of(holder,
+                    ConstantDescs.CD_Object, ConstantDescs.CD_Object.arrayType()));
+        }
+        context.lastEmittedType = targetType;
+    }
+
+    private static void emitStoredPayload(final CompilationContext context,
+                                          final CodeBuilder composer,
+                                          final TypeDescriptor targetType,
+                                          final TypeDescriptor holderType) {
+        final var holderClass = TypeDescriptor.toJavaClassDesc(holderType);
+        composer.checkcast(holderClass);
+        final var holder = declareStoredTemporary(context, "holder", holderType);
+        composer.storeLocal(TypeKind.REFERENCE, holder + context.localSlotOffset);
+        composer.aload(holder + context.localSlotOffset);
+        composer.invokevirtual(holderClass, "payload",
+                MethodTypeDesc.of(ConstantDescs.CD_Object));
+        emitUnboxOrCast(context, composer, targetType);
+        context.lastEmittedType = targetType;
+    }
+
+    static void emitStoredUnpack(final CompilationContext context,
+                                 final CodeBuilder composer,
+                                 final TypeDescriptor sourceType) {
+        final var source = unnullable(sourceType);
+        var slotCount = 0;
+        if (source instanceof GenericDescriptor generic) {
+            for (final var argument : generic.typeParameters()) {
+                if (argument instanceof TypeParameterDescriptor binder
+                        && StoredExistentialSupport.needsHolder(binder)) {
+                    slotCount += (binder.isReified() ? 1 : 0) + binder.bounds().size();
+                }
+            }
+        }
+        final var holderClass = StoredExistentialSupport.holderClassName(slotCount);
+        composer.checkcast(ClassDesc.of(holderClass));
+        final var holder = declareStoredTemporary(context, "holder",
+                TypeDescriptor.ofName(holderClass));
+        composer.storeLocal(TypeKind.REFERENCE, holder + context.localSlotOffset);
+        if (source instanceof GenericDescriptor generic) {
+            var slot = 0;
+            for (final var argument : generic.typeParameters()) {
+                if (!(argument instanceof TypeParameterDescriptor binder)
+                        || !StoredExistentialSupport.needsHolder(binder)) continue;
+                if (binder.isReified()) {
+                    storeStoredSlot(context, composer, holder, holderClass, slot++,
+                            Expr.reifiedToken(binder), RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE);
+                }
+                for (int boundIndex = 0; boundIndex < binder.bounds().size(); boundIndex++) {
+                    storeStoredEvidenceGroup(context, composer, holder, holderClass, slot++,
+                            binder, boundIndex);
+                }
+            }
+        }
+        composer.aload(holder + context.localSlotOffset);
+        composer.invokevirtual(ClassDesc.of(holderClass), "payload",
+                MethodTypeDesc.of(ConstantDescs.CD_Object));
+        composer.checkcast(TypeDescriptor.toJavaClassDesc(payloadBase(sourceType)));
+        context.lastEmittedType = sourceType;
+    }
+
+    private static TypeDescriptor payloadBase(final TypeDescriptor type) {
+        var base = unnullable(type);
+        if (base instanceof ReferenceDescriptor reference) base = reference.baseType();
+        if (base instanceof GenericDescriptor generic) return generic.baseType();
+        return base;
+    }
+
+    private static TypeDescriptor unnullable(final TypeDescriptor type) {
+        return type instanceof NullableDescriptor nullable ? nullable.baseType() : type;
+    }
+
+    private static int declareStoredTemporary(final CompilationContext context, final String hint,
+                                               final TypeDescriptor type) {
+        final var token = new Token(TokenType.IDENTIFIER,
+                "$zeron$stored$" + hint + "$" + (context.propertyTemporaryCount++), null, -1);
+        return context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, token, type,
+                BindingMutability.IMMUTABLE);
+    }
+
+    private static void storeStoredEvidenceGroup(final CompilationContext context,
+                                                 final CodeBuilder composer,
+                                                 final int holderSlot,
+                                                 final String holderClass,
+                                                 final int slotIndex,
+                                                 final TypeParameterDescriptor binder,
+                                                 final int boundIndex) {
+        final var methods = storedBoundMethods(context, binder, boundIndex);
+        if (methods.size() == 1) {
+            storeStoredSlot(context, composer, holderSlot, holderClass, slotIndex,
+                    Expr.methodEvidenceToken(binder, boundIndex, 0),
+                    TypeDescriptor.ofName("java.lang.invoke.MethodHandle"));
+            return;
+        }
+        final var groupType = TypeDescriptor.arrayOf(
+                TypeDescriptor.ofName("java.lang.invoke.MethodHandle"));
+        final var groupSlot = declareStoredTemporary(context, "evidenceGroup", groupType);
+        emitStoredSlotLoad(context, composer, holderSlot, holderClass, slotIndex);
+        composer.checkcast(ClassDesc.of("java.lang.invoke.MethodHandle").arrayType());
+        composer.storeLocal(TypeKind.REFERENCE, groupSlot + context.localSlotOffset);
+        for (int methodIndex = 0; methodIndex < methods.size(); methodIndex++) {
+            final var token = Expr.methodEvidenceToken(binder, boundIndex, methodIndex);
+            ensureStoredToken(context, token, TypeDescriptor.ofName("java.lang.invoke.MethodHandle"));
+            final var binding = context.symbols.getSymbol(token);
+            composer.aload(groupSlot + context.localSlotOffset);
+            composer.ldc(methodIndex);
+            composer.aaload();
+            composer.checkcast(ClassDesc.of("java.lang.invoke.MethodHandle"));
+            composer.storeLocal(TypeKind.REFERENCE, binding.lvt() + context.localSlotOffset);
+        }
+    }
+
+    private static void storeStoredSlot(final CompilationContext context,
+                                        final CodeBuilder composer,
+                                        final int holderSlot,
+                                        final String holderClass,
+                                        final int slotIndex,
+                                        final Token token,
+                                        final TypeDescriptor type) {
+        ensureStoredToken(context, token, type);
+        final var binding = context.symbols.getSymbol(token);
+        emitStoredSlotLoad(context, composer, holderSlot, holderClass, slotIndex);
+        emitUnboxOrCast(context, composer, type);
+        composer.storeLocal(TypeKind.REFERENCE, binding.lvt() + context.localSlotOffset);
+    }
+
+    private static void ensureStoredToken(final CompilationContext context, final Token token,
+                                          final TypeDescriptor type) {
+        if (!context.symbols.containsSymbol(token)) {
+            context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, token, type,
+                    BindingMutability.IMMUTABLE);
+            context.symbols.define(token);
+        }
+    }
+
+    private static void emitStoredSlotLoad(final CompilationContext context,
+                                           final CodeBuilder composer,
+                                           final int holderSlot,
+                                           final String holderClass,
+                                           final int slotIndex) {
+        composer.aload(holderSlot + context.localSlotOffset);
+        if (holderClass.equals(StoredExistentialSupport.HOLDER_CLASS)) {
+            composer.ldc(slotIndex);
+            composer.invokevirtual(ClassDesc.of(holderClass), "slot",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_int));
+        } else {
+            composer.invokevirtual(ClassDesc.of(holderClass), "slot" + slotIndex,
+                    MethodTypeDesc.of(ConstantDescs.CD_Object));
+        }
+    }
+
+    private static void emitStoredSlot(final CompilationContext context,
+                                       final CodeBuilder composer,
+                                       final StoredSlot slot) {
+        switch (slot) {
+            case StoredSlot.Null ignored -> composer.aconst_null();
+            case StoredSlot.Descriptor descriptor -> RuntimeTypeDescriptorEmitter.emit(
+                    context, composer, descriptor.actualType());
+            case StoredSlot.OfToken ofToken -> emitVariable(context, composer, ofToken.token());
+            case StoredSlot.TokenGroup group -> {
+                composer.ldc(group.tokens().size());
+                composer.anewarray(ClassDesc.of("java.lang.invoke.MethodHandle"));
+                for (int index = 0; index < group.tokens().size(); index++) {
+                    composer.dup();
+                    composer.ldc(index);
+                    emitVariable(context, composer, group.tokens().get(index));
+                    composer.aastore();
+                }
+            }
+            case StoredSlot.Evidence evidence -> emitStoredEvidenceGroup(context, composer, evidence);
+        }
+    }
+
+    private static void emitStoredEvidenceGroup(final CompilationContext context,
+                                                final CodeBuilder composer,
+                                                final StoredSlot.Evidence evidence) {
+        final var methods = storedBoundMethods(context, evidence.binder(), evidence.boundIndex());
+        if (methods.size() == 1) {
+            emitStoredEvidenceHandle(context, composer, evidence, 0);
+            return;
+        }
+        composer.ldc(methods.size());
+        composer.anewarray(ClassDesc.of("java.lang.invoke.MethodHandle"));
+        for (int index = 0; index < methods.size(); index++) {
+            composer.dup();
+            composer.ldc(index);
+            emitStoredEvidenceHandle(context, composer, evidence, index);
+            composer.aastore();
+        }
+    }
+
+    private static void emitStoredEvidenceHandle(final CompilationContext context,
+                                                 final CodeBuilder composer,
+                                                 final StoredSlot.Evidence evidence,
+                                                 final int methodIndex) {
+        final var methods = storedBoundMethods(context, evidence.binder(), evidence.boundIndex());
+        final var methodSlot = methods.get(methodIndex);
+        final var bound = evidence.binder().bounds().get(evidence.boundIndex());
+        final var use = ContractComposition.fromType(bound);
+        if (use == null) {
+            throw new IllegalStateException("A stored evidence slot has no contract bound: " + bound);
+        }
+        final var actualBase = payloadBase(evidence.actualType());
+        final var actualName = actualBase instanceof NominalDescriptor nominal
+                ? nominal.name() : null;
+        final var classDeclaration = actualName == null ? null
+                : context.resolution.classes().get(actualName);
+        final Stmt.Method implementation = classDeclaration == null ? null
+                : classDeclaration.methods().stream()
+                        .filter(method -> method.name().lexeme().equals(
+                                methodSlot.method().name().lexeme()))
+                        .findFirst().orElse(null);
+        final var ownerName = implementation == null ? use.name().lexeme() : actualName;
+        final var signature = implementation == null
+                ? (FunctionDescriptor) TypeSubstitution.substitute(methodSlot.method().typeDescriptor(),
+                        methodSlot.applied().substitutions())
+                : implementation.typeDescriptor();
+        final var erased = (FunctionDescriptor) TypeSubstitution.erase(signature);
+        final var methodType = toJavaMethodDescriptor(erased);
+        final var owner = ClassDesc.of(ownerName);
+        final var kind = implementation == null
+                ? DirectMethodHandleDesc.Kind.INTERFACE_VIRTUAL
+                : DirectMethodHandleDesc.Kind.VIRTUAL;
+        composer.ldc(MethodHandleDesc.of(kind, owner,
+                methodSlot.method().name().lexeme(), methodType.descriptorString()));
+    }
+
+    private static List<ContractComposition.MethodSlot> storedBoundMethods(
+            final CompilationContext context,
+            final TypeParameterDescriptor binder,
+            final int boundIndex) {
+        final var use = ContractComposition.fromType(binder.bounds().get(boundIndex));
+        return use == null ? List.of() : ContractComposition.methods(context.resolution.contracts(), use);
+    }
+
+    private sealed interface StoredSlot {
+        record Descriptor(TypeDescriptor actualType) implements StoredSlot {}
+        record Null() implements StoredSlot {}
+        record OfToken(Token token) implements StoredSlot {}
+        record TokenGroup(List<Token> tokens) implements StoredSlot {}
+        record Evidence(CompilationContext context, TypeParameterDescriptor binder,
+                        int boundIndex, TypeDescriptor actualType)
+                implements StoredSlot {}
+    }
+
     static void emitConversion(CompilationContext context, final CodeBuilder composer,
                                 final TypeDescriptor sourceType,
                                 final TypeDescriptor targetType ){
+        emitConversion(context, composer, sourceType, targetType, sourceType);
+    }
+
+    /**
+     * Converts a value whose declared source type may have been erased through a generic boundary.
+     * {@code sourceRepresentation} records whether the value on the stack is already a holder even
+     * when its JVM signature is {@code Object}.
+     */
+    static void emitConversion(CompilationContext context, final CodeBuilder composer,
+                                final TypeDescriptor sourceType,
+                                final TypeDescriptor targetType,
+                                final TypeDescriptor sourceRepresentation ){
+        emitConversion(context, composer, sourceType, targetType, sourceRepresentation, sourceType);
+    }
+
+    static void emitConversion(CompilationContext context, final CodeBuilder composer,
+                                       final TypeDescriptor sourceType,
+                                       final TypeDescriptor targetType,
+                                       final TypeDescriptor sourceRepresentation,
+                                       final TypeDescriptor sourceValueType ){
+        if (StoredExistentialSupport.isHolderType(targetType)) {
+            context.lastEmittedType = targetType;
+            return;
+        }
+        final var targetNeedsHolder = StoredExistentialSupport.requiresHolder(targetType);
+        if (StoredExistentialSupport.isHolderType(sourceRepresentation)) {
+            if (targetNeedsHolder) {
+                if (StoredExistentialSupport.isHolderType(sourceType)) {
+                    emitStoredUnpack(context, composer, targetType);
+                    return;
+                }
+                if (unnullable(sourceValueType).equals(unnullable(targetType))) {
+                    composer.checkcast(TypeDescriptor.toJavaClassDesc(sourceRepresentation));
+                    context.lastEmittedType = targetType;
+                    return;
+                }
+                emitStoredUnpack(context, composer, sourceValueType);
+                emitStoredPack(context, composer, sourceValueType, targetType);
+                return;
+            }
+            emitStoredPayload(context, composer, targetType, sourceRepresentation);
+            return;
+        }
+        if (StoredExistentialSupport.isHolderType(sourceType)
+                && targetNeedsHolder) {
+            emitStoredUnpack(context, composer, targetType);
+            return;
+        }
+        if (targetNeedsHolder) {
+            emitStoredPack(context, composer, sourceType, targetType);
+            return;
+        }
         if (context.resolution.isArrayIterableProjection(targetType, sourceType)) {
             composer.invokestatic(ClassDesc.of("zeron.runtime.ArrayIterable"), "wrap",
                     MethodTypeDesc.of(ClassDesc.of("zeron.collections.Iterable"),

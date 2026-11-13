@@ -67,6 +67,8 @@ public final class Parser {
     /// Non-null only while parsing a declared parameter type. Each anonymous existential found
     /// there is lowered to a hidden type parameter appended to the declared signature.
     private List<TypeParameterDescriptor> pendingAnonymousTypeParameters;
+    /// True while parsing a field, property, or local type where ZEP-0106 storage is allowed.
+    private boolean allowStoredAnonymousTypeParameters;
     /// Non-null only while parsing the target of an `is` type test. Opening binders are collected
     /// here so the parser can expose their names in the true branch only.
     private List<TypeParameterDescriptor> pendingOpeningTypeParameters;
@@ -989,7 +991,7 @@ public final class Parser {
 
         TypeDescriptor type = TypeDescriptor.ofInfer();
         if (match(COLON)) {
-            type = collectType();
+            type = collectStoredType();
         }
 
         Expr initializer = null;
@@ -1515,10 +1517,6 @@ public final class Parser {
                                             final boolean isDataClass) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect class name."));
         final var typeParameters = typeParameterDeclaration(name, true, false, true);
-        if (isEffect && !typeParameters.isEmpty()) {
-            error(name, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                    "Effect declarations cannot be generic.");
-        }
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
@@ -1748,7 +1746,7 @@ public final class Parser {
                         final var fieldName = consume(IDENTIFIER,
                                 "Expect field name or method name.");
                         consume(COLON, "Expect ':' after field name.");
-                        final var fieldType = collectType();
+                        final var fieldType = collectStoredType();
                         final var initializer = match(EQUAL) ? expression() : null;
                         consume(SEMICOLON, "Expect ';' after field declaration.");
                         fields.add(new Stmt.Field(fieldName, fieldType, initializer));
@@ -1956,7 +1954,7 @@ public final class Parser {
     private Stmt.Property classProperty(final Token name,
                                         final boolean isPublic,
                                         final boolean isMutating) {
-        final var type = collectType();
+        final var type = collectStoredType();
         final var initializer = match(EQUAL) ? expression() : null;
         List<Stmt> getterBody = null;
         List<Stmt> setterBody = null;
@@ -2156,7 +2154,7 @@ public final class Parser {
                             "Contract properties cannot have default implementations.");
                     final var propertyName = consume(IDENTIFIER, "Expect property name.");
                     consume(COLON, "Expect ':' after property name.");
-                    final var propertyType = collectType();
+                    final var propertyType = collectStoredType();
                     properties.add(new Stmt.ContractProperty(propertyName, propertyType, isMutating));
                     recordAnnotationSite(Stmt.AnnotationTarget.PROPERTY,
                             name.lexeme() + "." + propertyName.lexeme(), propertyType.descriptor(), -1,
@@ -2340,6 +2338,18 @@ public final class Parser {
         return collectType(true);
     }
 
+    /// Parses a type in a storing position. Anonymous existentials are permitted here and are
+    /// marked as stored instead of becoming hidden parameters of an enclosing callable.
+    private TypeDescriptor collectStoredType() {
+        final var previous = allowStoredAnonymousTypeParameters;
+        allowStoredAnonymousTypeParameters = true;
+        try {
+            return collectType();
+        } finally {
+            allowStoredAnonymousTypeParameters = previous;
+        }
+    }
+
     private TypeDescriptor collectType(final boolean allowUnaryFunctionArrow) {
         final var isMutable = match(AMPERSAND);
         TypeDescriptor type;
@@ -2353,24 +2363,30 @@ public final class Parser {
         }
 
         if (match(LEFT_PAREN)) {
-            final var parameters = new ArrayList<TypeDescriptor>();
-            if (!check(RIGHT_PAREN)) {
-                do {
-                    parameters.add(collectType());
-                } while (match(COMMA));
-            }
-            consume(RIGHT_PAREN, "Expect ')' after lambda parameter types.");
-            if (match(ARROW)) {
-                final var returnType = collectType();
-                final var raisedEffects = parseRaisedEffects();
-                type = TypeDescriptor.functionWithEffectsOf("", returnType, parameters,
-                        List.of(), raisedEffects);
-            } else if (parameters.size() == 1) {
-                type = parameters.getFirst();
-            } else {
-                error(previous(), DiagnosticCatalog.EXPECTED_SYNTAX,
-                        "Expect '->' after function parameter types.");
-                type = TypeDescriptor.ofInfer();
+            final var previousStored = allowStoredAnonymousTypeParameters;
+            allowStoredAnonymousTypeParameters = false;
+            try {
+                final var parameters = new ArrayList<TypeDescriptor>();
+                if (!check(RIGHT_PAREN)) {
+                    do {
+                        parameters.add(collectType());
+                    } while (match(COMMA));
+                }
+                consume(RIGHT_PAREN, "Expect ')' after lambda parameter types.");
+                if (match(ARROW)) {
+                    final var returnType = collectType();
+                    final var raisedEffects = parseRaisedEffects();
+                    type = TypeDescriptor.functionWithEffectsOf("", returnType, parameters,
+                            List.of(), raisedEffects);
+                } else if (parameters.size() == 1) {
+                    type = parameters.getFirst();
+                } else {
+                    error(previous(), DiagnosticCatalog.EXPECTED_SYNTAX,
+                            "Expect '->' after function parameter types.");
+                    type = TypeDescriptor.ofInfer();
+                }
+            } finally {
+                allowStoredAnonymousTypeParameters = previousStored;
             }
         } else {
             final var firstTypeName = consume(IDENTIFIER, "Expect bind name.");
@@ -2417,17 +2433,23 @@ public final class Parser {
             if (isMutable) type = new ReferenceDescriptor(type);
             advance();
             advance();
-            final var parameters = new ArrayList<TypeDescriptor>();
-            if (!check(RIGHT_PAREN)) {
-                do {
-                    parameters.add(collectType());
-                } while (match(COMMA));
+            final var previousStored = allowStoredAnonymousTypeParameters;
+            allowStoredAnonymousTypeParameters = false;
+            try {
+                final var parameters = new ArrayList<TypeDescriptor>();
+                if (!check(RIGHT_PAREN)) {
+                    do {
+                        parameters.add(collectType());
+                    } while (match(COMMA));
+                }
+                consume(RIGHT_PAREN, "Expect ')' after receiver function parameter types.");
+                consume(ARROW, "Expect '->' after receiver function parameter types.");
+                final var returnType = collectType();
+                return TypeDescriptor.receiverFunctionOf("", type, returnType, parameters,
+                        List.of(), parseRaisedEffects());
+            } finally {
+                allowStoredAnonymousTypeParameters = previousStored;
             }
-            consume(RIGHT_PAREN, "Expect ')' after receiver function parameter types.");
-            consume(ARROW, "Expect '->' after receiver function parameter types.");
-            final var returnType = collectType();
-            return TypeDescriptor.receiverFunctionOf("", type, returnType, parameters,
-                    List.of(), parseRaisedEffects());
         }
 
         if (match(TILDE)) {
@@ -2440,7 +2462,13 @@ public final class Parser {
         if (isMutable) type = new ReferenceDescriptor(type);
         if (match(HUH)) type = type.toNullable();
         if (allowUnaryFunctionArrow && match(ARROW)) {
-            type = TypeDescriptor.functionOf("", collectType(), type);
+            final var previousStored = allowStoredAnonymousTypeParameters;
+            allowStoredAnonymousTypeParameters = false;
+            try {
+                type = TypeDescriptor.functionOf("", collectType(), type);
+            } finally {
+                allowStoredAnonymousTypeParameters = previousStored;
+            }
         }
 
         return type;
@@ -2555,11 +2583,12 @@ public final class Parser {
     }
 
     private TypeParameterDescriptor anonymousExistential(final Token where) {
-        if (pendingAnonymousTypeParameters == null) {
+        if (pendingAnonymousTypeParameters == null && !allowStoredAnonymousTypeParameters) {
             throw error(where, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                    "An anonymous existential is allowed only as a direct type argument of "
-                            + "a declared function, method, or contract-method parameter.");
+                    "An anonymous existential is allowed only in a parameter type or a stored "
+                            + "field, property, or local type.");
         }
+        final var storing = pendingAnonymousTypeParameters == null;
         var nullable = false;
         var mutable = false;
         var reified = false;
@@ -2613,7 +2642,11 @@ public final class Parser {
                 TypeParameterDescriptor.ANONYMOUS_EXISTENTIAL_PREFIX + id, bounds,
                 false, TypeParameterDescriptor.Variance.INVARIANT,
                 nullable, effectKind, effectRowKind, mutable, reified);
-        previousSink.add(parameter);
+        if (storing) {
+            parameter.markStoredExistential();
+        } else {
+            previousSink.add(parameter);
+        }
         return parameter;
     }
 
@@ -2736,7 +2769,7 @@ public final class Parser {
             consume(LET, "Expect 'let' before each resource binding.");
             final var name = consume(IDENTIFIER, "Expect resource binding name.");
             TypeDescriptor type = TypeDescriptor.ofInfer();
-            if (match(COLON)) type = collectType();
+            if (match(COLON)) type = collectStoredType();
             consume(EQUAL, "Expect '=' before resource initializer.");
             resources.add(new Stmt.UsingResource(
                     new Stmt.Var(name, type, expression(), BindingMutability.IMMUTABLE)));
@@ -3737,7 +3770,7 @@ public final class Parser {
                 }
                 final var fieldName = consume(IDENTIFIER, "Expect field name, property, or method.");
                 consume(COLON, "Expect ':' after field name.");
-                final var fieldType = collectType();
+                final var fieldType = collectStoredType();
                 if (!match(EQUAL)) {
                     throw error(fieldName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                             "An anonymous object field requires an initializer.");
@@ -3791,7 +3824,7 @@ public final class Parser {
         final var arms = new ArrayList<Expr.HandleArm>();
         while (match(CASE)) {
             final var caseKeyword = previous();
-            var pattern = matchPattern(true);
+            var pattern = matchPattern(true, false, true);
             final var alias = match(AS)
                     ? consume(IDENTIFIER, "Expect binding name after 'as'.")
                     : null;
@@ -3846,10 +3879,10 @@ public final class Parser {
             error(where, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                     "An effect handler pattern must begin with an effect type.");
         }
-        if (pattern.type() instanceof GenericDescriptor || pattern.type() instanceof ReferenceDescriptor
+        if (pattern.type() instanceof ReferenceDescriptor
                 || pattern.type() instanceof NullableDescriptor) {
             error(where, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                    "Handler cases must name a non-generic effect type.");
+                    "Handler cases must name an effect type.");
         }
         return pattern.type();
     }

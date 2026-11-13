@@ -64,6 +64,136 @@ public final class ExistentialGenericsTest {
     }
 
     @Test
+    public void storedLocalCarriesEvidenceForBoundMembers() throws Exception {
+        assertCompiledResult("storedLocal", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let concrete: Box<Text> = Box.new(Text.new());
+                    let box: Box<: Render> = concrete;
+                    return box.value.render();
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedLocalInfersFromAConcreteInitializer() throws Exception {
+        assertCompiledResult("storedLocalInference", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let box: Box<: Render> = Box.new(Text.new());
+                    return box.value.render();
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedFieldCarriesEvidenceForBoundMembers() throws Exception {
+        assertCompiledResult("storedField", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public class Holder {
+                    public property box: Box<: Render>;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let concrete: Box<Text> = Box.new(Text.new());
+                    let holder = Holder.new(concrete);
+                    return holder.box.value.render();
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedArrayElementsAreIndependent() throws Exception {
+        assertCompiledResult("storedArray", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let values: Array<Box<: Render>> = [Box.new(Text.new())];
+                    return values[0].value.render();
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedReifiedFieldKeepsItsDescriptor() throws Exception {
+        assertCompiledResult("storedReified", """
+                package %s;
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public class Holder {
+                    public property box: Box<: reified>;
+                    public constructor new;
+                }
+                fn use(): Boolean {
+                    let concrete: Box<Int> = Box.new(7);
+                    let holder = Holder.new(concrete);
+                    return holder.box is Box<Int>;
+                }
+                """, "use", true);
+    }
+
+    @Test
+    public void markerOnlyStoredExistentialIsErased() throws Exception {
+        assertCompiledResult("storedErased", """
+                package %s;
+                public class Box<T: nullable> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): Any? {
+                    let concrete: Box<String> = Box.new("value");
+                    let box: Box<: nullable> = concrete;
+                    return box.value;
+                }
+                """, "use", "value");
+    }
+
+    @Test
     public void anonymousExistentialSignaturesRoundTripThroughLibraryIndex() throws Exception {
         final var packageName = "zep0104Index" + suffix();
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-zep0104-index-");
@@ -101,6 +231,448 @@ public final class ExistentialGenericsTest {
             assertEquals(1, reified.typeParameters().size());
             assertTrue(reified.typeParameters().getFirst().isAnonymousExistential());
             assertTrue(reified.typeParameters().getFirst().isReified());
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void storedHolderCarriesADescriptorAndEvidenceTogether() throws Exception {
+        assertCompiledResult("storedTwoSlots", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public class Holder {
+                    public property box: Box<: reified + Render>;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let concrete: Box<Text> = Box.new(Text.new());
+                    let holder = Holder.new(concrete);
+                    if (holder.box is Box<Text>) {
+                        return holder.box.value.render();
+                    }
+                    return "wrong";
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedHolderUsesTheErasedFamilyBeyondThreeSlots() throws Exception {
+        assertCompiledResult("storedFourSlots", """
+                package %s;
+                public contract A {
+                    a(): String;
+                }
+                public contract B {
+                    b(): String;
+                }
+                public contract C {
+                    c(): String;
+                }
+                public class Text is A, B, C {
+                    public constructor new;
+                    public a(): String = "a";
+                    public b(): String = "b";
+                    public c(): String = "c";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public class Holder {
+                    public property box: Box<: reified + A + B + C>;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let concrete: Box<Text> = Box.new(Text.new());
+                    let holder = Holder.new(concrete);
+                    if (holder.box is Box<Text>) {
+                        return holder.box.value.a() + holder.box.value.b() + holder.box.value.c();
+                    }
+                    return "wrong";
+                }
+                """, "use", "abc");
+    }
+
+    @Test
+    public void storedBoundEvidenceGroupKeepsEveryMethod() throws Exception {
+        assertCompiledResult("storedEvidenceGroup", """
+                package %s;
+                public contract Both {
+                    first(): String;
+                    second(): String;
+                }
+                public class Text is Both {
+                    public constructor new;
+                    public first(): String = "first";
+                    public second(): String = "second";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let box: Box<: Both> = Box.new(Text.new());
+                    return box.value.first() + box.value.second();
+                }
+                """, "use", "firstsecond");
+    }
+
+    @Test
+    public void nestedStoredArrayElementsOwnTheirHolders() throws Exception {
+        assertCompiledResult("storedNestedArray", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let values: Array<Array<Box<: Render>>> = [[Box.new(Text.new())]];
+                    return values[0][0].value.render();
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedValueCanBePassedToAnExistentialParameter() throws Exception {
+        assertCompiledResult("storedForward", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn describe(box: Box<: Render>): String = box.value.render();
+                fn use(): String {
+                    let box: Box<: Render> = Box.new(Text.new());
+                    return describe(box);
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedExistentialFieldWorksAcrossSeparateCompilation() throws Exception {
+        final var libraryPackage = "zep0106Separate" + suffix();
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"),
+                "zeron-zep0106-library-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"),
+                "zeron-zep0106-client-");
+        final var libraryUnit = parse("Library.zn", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public class Holder {
+                    public property box: Box<: Render>;
+                    public constructor new;
+                }
+                """.formatted(libraryPackage));
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(libraryUnit), libraryPackage + ".Library", libraryPackage,
+                    List.of(), true, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+
+            final var clientPackage = "zep0106Client" + suffix();
+            final var clientUnit = parse("Client.zn", """
+                    package %s;
+                    import %s.*;
+                    fn use(): String {
+                        let concrete: Box<Text> = Box.new(Text.new());
+                        let holder = Holder.new(concrete);
+                        return holder.box.value.render();
+                    }
+                    """.formatted(clientPackage, libraryPackage));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(clientUnit), clientPackage + ".Client", clientPackage,
+                    List.of(index), false, List.of(libraryOutput), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    clientOutput.toUri().toURL(), libraryOutput.toUri().toURL()},
+                    ExistentialGenericsTest.class.getClassLoader())) {
+                assertEquals("text", loader.loadClass(clientPackage + ".Client")
+                        .getMethod("use").invoke(null));
+            }
+        } finally {
+            deleteTree(libraryOutput);
+            deleteTree(clientOutput);
+        }
+    }
+
+    @Test
+    public void storedCollectionElementsOwnTheirHolders() throws Exception {
+        assertCompiledResult("storedCollection", """
+                package %s;
+                import zeron.collections.*;
+                import zeron.lang.*;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let values: ArrayList<Box<: Render>> = ArrayList.of(Box.new(Text.new()));
+                    return match (values.at(0)) {
+                        case Some(box) -> box.value.render();
+                        case None() -> "none";
+                    };
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedCollectionElementsSurviveMutationAndIteration() throws Exception {
+        assertCompiledResult("storedCollectionMutation", """
+                package %s;
+                import zeron.collections.*;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let mut values: &ArrayList<Box<: Render>> = ArrayList.of(Box.new(Text.new()));
+                    values.add(Box.new(Text.new()));
+                    let mut result = "";
+                    for (let box in values) {
+                        result = result + box.value.render();
+                    }
+                    return result;
+                }
+                """, "use", "texttext");
+    }
+
+    @Test
+    public void storedModelFieldArrayCarriesPerElementEvidence() throws Exception {
+        assertCompiledResult("storedModelFields", """
+                package %s;
+                public contract Show {
+                    show(): String;
+                }
+                public class Text is Show {
+                    public constructor new;
+                    public show(): String = "text";
+                }
+                public class User {
+                    public constructor new;
+                }
+                public class Column<T, V: Show> {
+                    public property value: V;
+                    public constructor new;
+                    public show(): String = this.value.show();
+                }
+                fn use(): String {
+                    let fields: Array<Column<User, : Show>> =
+                            [Column<User, Text>.new(Text.new())];
+                    return fields[0].show();
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void nestedStoredCollectionElementsKeepIndependentHolders() throws Exception {
+        assertCompiledResult("storedNestedCollection", """
+                package %s;
+                import zeron.collections.*;
+                import zeron.lang.*;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): String {
+                    let inner: ArrayList<Box<: Render>> =
+                            ArrayList.of(Box.new(Text.new()));
+                    let outer = ArrayList.of(inner);
+                    return match (outer.at(0)) {
+                        case Some(items) -> match (items.at(0)) {
+                            case Some(box) -> box.value.render();
+                            case None() -> "none";
+                        };
+                        case None() -> "none";
+                    };
+                }
+                """, "use", "text");
+    }
+
+    @Test
+    public void storedCollectionFieldWorksAcrossSeparateCompilation() throws Exception {
+        final var libraryPackage = "zep0106CollectionLibrary" + suffix();
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"),
+                "zeron-zep0106-collection-library-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"),
+                "zeron-zep0106-collection-client-");
+        final var libraryUnit = parse("Library.zn", """
+                package %s;
+                import zeron.collections.*;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public class Store {
+                    public property values: ArrayList<Box<: Render>>;
+                    public constructor new;
+                    public first(): String = match (this.values.at(0)) {
+                        case Option.Some(box) -> box.value.render();
+                        case Option.None() -> "none";
+                    };
+                }
+                public fn make(): Store = Store.new(ArrayList.of(Box.new(Text.new())));
+                """.formatted(libraryPackage));
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(libraryUnit), libraryPackage + ".Library", libraryPackage,
+                    List.of(), true, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+
+            final var clientPackage = "zep0106CollectionClient" + suffix();
+            final var clientUnit = parse("Client.zn", """
+                    package %s;
+                    import %s.*;
+                    fn use(): String = make().first();
+                    """.formatted(clientPackage, libraryPackage));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(clientUnit), clientPackage + ".Client", clientPackage,
+                    List.of(index), false, List.of(libraryOutput), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    clientOutput.toUri().toURL(), libraryOutput.toUri().toURL()},
+                    ExistentialGenericsTest.class.getClassLoader())) {
+                assertEquals("text", loader.loadClass(clientPackage + ".Client")
+                        .getMethod("use").invoke(null));
+            }
+        } finally {
+            deleteTree(libraryOutput);
+            deleteTree(clientOutput);
+        }
+    }
+
+    @Test
+    public void storedHolderIdentityUsesThePayload() throws Exception {
+        assertCompiledResult("storedIdentity", """
+                package %s;
+                public contract Render {
+                    render(): String;
+                }
+                public class Text is Render {
+                    public constructor new;
+                    public render(): String = "text";
+                }
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                fn use(): Boolean {
+                    let first: Box<: Render> = Box.new(Text.new());
+                    let second: Box<: Render> = first;
+                    return first === second;
+                }
+                """, "use", true);
+    }
+
+    @Test
+    public void storedExistentialFieldMetadataRoundTripsThroughLibraryIndex() throws Exception {
+        final var packageName = "zep0106Index" + suffix();
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-zep0106-index-");
+        final var unit = parse("Library.zn", """
+                package %s;
+                public class Box<T> {
+                    public property value: T;
+                    public constructor new;
+                }
+                public class Holder {
+                    public property box: Box<: reified>;
+                    public constructor new;
+                }
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(unit), packageName + ".Library", packageName, List.of(), true,
+                    List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+
+            final var index = ZeronLibraryIndex.readFromDirectory(output);
+            final var holder = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.ClassExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ClassExport.class::cast)
+                    .filter(export -> export.qualifiedName().equals(packageName + ".Holder"))
+                    .findFirst().orElseThrow();
+            final var property = holder.properties().stream()
+                    .filter(candidate -> candidate.name().equals("box"))
+                    .findFirst().orElseThrow();
+            assertTrue(property.type() instanceof com.maruseron.zeron.domain.GenericDescriptor);
+            final var argument = ((com.maruseron.zeron.domain.GenericDescriptor) property.type())
+                    .typeParameters().getFirst();
+            assertTrue(argument instanceof com.maruseron.zeron.domain.TypeParameterDescriptor);
+            final var binder = (com.maruseron.zeron.domain.TypeParameterDescriptor) argument;
+            assertTrue(binder.isStoredExistential());
+            assertTrue(binder.isReified());
+            assertEquals(ZeronLibraryIndex.VERSION, 14);
         } finally {
             deleteTree(output);
         }
@@ -205,15 +777,11 @@ public final class ExistentialGenericsTest {
                 }
                 """;
         final var sources = List.of(
-                prefix + "fn bad(box: Box<Box<: Any>>): Unit = ();",
-                prefix + "fn bad(): Unit { let value: Box<: Any> = Box.new(1); }",
                 prefix + "fn bad(): Box<: Any> = Box.new(1);",
-                prefix + "class Holder { public property value: Box<: Any>; }",
                 prefix + "fn bad(this: Box<: Any>): Unit = ();",
                 prefix + "fn bad(callback: (Box<: Any>) -> Unit): Unit = ();",
                 prefix + "fn bad(values: Array<: Any>): Unit = ();",
-                prefix + "fn bad(): Unit { let callback: (Box<: Any>) -> Unit = (box) -> (); }",
-                prefix + "fn bad(box: Box<: Any>) = box;");
+                prefix + "fn bad(): Unit { let callback: (Box<: Any>) -> Unit = (box) -> (); }");
         for (int index = 0; index < sources.size(); index++) {
             assertInvalidSource(sources.get(index), "position " + index);
         }

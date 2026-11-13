@@ -115,6 +115,7 @@ final class CliParser {
         var manifest = Paths.get("zeron.toml");
         var debug = false;
         var denyWarnings = false;
+        var noWarnings = false;
         for (var index = 1; index < args.length; index++) {
             final var argument = args[index];
             if (argument.equals("--debug") || argument.equals("-d")) {
@@ -124,6 +125,11 @@ final class CliParser {
                     return invalid("The --deny-warnings option may only be specified once.");
                 }
                 denyWarnings = true;
+            } else if (argument.equals("--no-warnings")) {
+                if (noWarnings) {
+                    return invalid("The --no-warnings option may only be specified once.");
+                }
+                noWarnings = true;
             } else if (argument.equals("--manifest")) {
                 if (++index >= args.length) {
                     return invalid(args[0] + " --manifest requires a TOML file.");
@@ -148,7 +154,7 @@ final class CliParser {
         }
         final var projectPathError = projectPathError(project);
         if (projectPathError.isPresent()) return invalid(projectPathError.get());
-        return parsed(new ProjectCommand(launch, manifest, debug, denyWarnings, project));
+        return parsed(new ProjectCommand(launch, manifest, debug, denyWarnings, noWarnings, project));
     }
 
     private static ParseResult parseLspCommand(final String[] args) {
@@ -220,6 +226,7 @@ final class CliParser {
         var standardLibraryMode = StandardLibraryMode.DEFAULT;
         var debug = false;
         var denyWarnings = false;
+        var noWarnings = false;
 
         for (var index = 0; index < args.length; index++) {
             final var argument = args[index];
@@ -230,6 +237,11 @@ final class CliParser {
                     return invalid("The --deny-warnings option may only be specified once.");
                 }
                 denyWarnings = true;
+            } else if (argument.equals("--no-warnings")) {
+                if (noWarnings) {
+                    return invalid("The --no-warnings option may only be specified once.");
+                }
+                noWarnings = true;
             } else if (argument.equals("--root")) {
                 if (++index >= args.length) return invalid("--root requires a directory.");
                 sourceRoots.add(Paths.get(args[index]));
@@ -266,6 +278,7 @@ final class CliParser {
         }
 
         if (standardLibraryOutput != null) {
+            if (noWarnings) return invalid("--no-warnings requires compilation input.");
             if (entry != null || !sourceRoots.isEmpty() || !sourceFiles.isEmpty()
                     || !libraryRoots.isEmpty() || !javaClassPathRoots.isEmpty()) {
                 return invalid("--build-stdlib cannot be combined with source or library inputs.");
@@ -285,6 +298,7 @@ final class CliParser {
 
         if (entry == null && sourceRoots.isEmpty() && sourceFiles.isEmpty()) {
             if (denyWarnings) return invalid("--deny-warnings requires compilation input.");
+            if (noWarnings) return invalid("--no-warnings requires compilation input.");
             if (jarOutput != null) return invalid("--jar-output requires compilation input.");
             if (!libraryRoots.isEmpty() || !javaClassPathRoots.isEmpty()
                     || standardLibraryMode == StandardLibraryMode.COMPILED) {
@@ -344,7 +358,7 @@ final class CliParser {
             if (collision.isPresent()) return invalid(collision.get());
         }
         return parsed(new Compile(sourceFiles, sourceRoots, entry, libraryRoots, javaClassPathRoots,
-                standardLibraryMode, jarOutput, debug, denyWarnings));
+                standardLibraryMode, jarOutput, debug, denyWarnings, noWarnings));
     }
 
     private static Optional<String> readableFileError(final Path path, final String description) {
@@ -509,7 +523,7 @@ final class CliParser {
     }
 
     record ProjectCommand(boolean launch, Path manifest, boolean debug, boolean denyWarnings,
-                          ProjectManifest project)
+                          boolean noWarnings, ProjectManifest project)
             implements Invocation {}
 
     record LspCommand(Optional<Path> manifest) implements Invocation {
@@ -544,7 +558,7 @@ final class CliParser {
     record Compile(List<String> sourceFiles, List<Path> sourceRoots, Path entry,
                    List<Path> libraries, List<Path> javaClassPathRoots,
                    StandardLibraryMode standardLibraryMode, Path jarOutput, boolean debug,
-                   boolean denyWarnings)
+                   boolean denyWarnings, boolean noWarnings)
             implements Invocation {
         Compile {
             sourceFiles = List.copyOf(sourceFiles);

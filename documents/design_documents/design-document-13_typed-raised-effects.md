@@ -7,7 +7,8 @@ raised effects. The feature is intentionally separate from `Result<T, E>`: a `Re
 value that callers inspect, while a raised effect transfers control to a matching handler or to the
 caller.
 
-The implementation supports nominal, non-generic `effect` declarations; `raises` clauses on
+The implementation supports nominal `effect` declarations, including generic effect payloads with
+closed applied identity; `raises` clauses on
 functions, class methods, extension methods, named constructors, and function type annotations;
 `raise` expressions; inline expression handlers; named reusable handlers; and first-class structural
 handler types. Effects and handler shapes are checked by the resolver and represented in
@@ -16,8 +17,9 @@ whole payload with `as`, and can include Boolean guards.
 
 The implementation supports effect-row polymorphism through declaration-level `effect...` type
 parameters. It also supports explicit effect-only subtyping with `under` and the denotable top
-`Effect`; the relation is independent of ordinary contract conformance. Effect payload declarations
-remain non-generic. There is no implicit wildcard case, though an unguarded `case Effect` is an
+`Effect`; the relation is independent of ordinary contract conformance. Generic effect payloads use
+closed, invariant applications and a payload-carried ZEP-0015 descriptor for exact handler
+matching. There is no implicit wildcard case, though an unguarded `case Effect` is an
 explicit catch-all, and no asynchronous effects. Java checked exceptions can be mapped only through
 explicit interop declarations and configured bindings described below; there is no automatic
 translation.
@@ -122,8 +124,9 @@ handler composition and effect subtyping are not supported.
 
 ### Effect declarations
 
-An effect is a class-backed, nominal payload type. It is non-generic and takes the ordinary class
-member model: payload properties (public or private), methods, contract conformances, and named
+An effect is a class-backed, nominal payload type. It may declare type parameters used by its
+payload and takes the ordinary class member model: payload properties (public or private), methods,
+contract conformances, and named
 constructors, with the canonical `new` derived from the complete payload. The effect marker is
 independent of ordinary contract conformance, so implementing a contract neither makes a class
 raisable nor widens handler matching. Fields and constructors follow class construction rules; the
@@ -131,11 +134,13 @@ effect class itself is exported as an ordinary class record plus an effect marke
 index, and methods, contract conformances, named constructors, and non-public payload state
 round-trip through that record without a schema change.
 
-Effect types in `raises` clauses and handler cases must resolve to a declared, non-generic effect.
-Ordinary classes, contracts, generic types, nullable types, and mutable-reference types are not
-effect types. Effect identity is nominal: two declared effects are related only by the reflexive and
-transitive closure of their `under` edges, and every declared effect is implicitly a subtype of the
-library top `Effect`.
+Effect types in `raises` clauses and handler cases must resolve to a declared effect, either a
+non-generic name or a fully applied closed generic effect. Ordinary classes, contracts, raw generic
+types, nullable types, and mutable-reference types are not effect types. Applications are
+invariant and exact: `Failure<Int>` and `Failure<String>` are different identities. Effect identity
+is nominal plus exact application: generic effects have no applied `under` edges, while non-generic
+effects are related only by the reflexive and transitive closure of their `under` edges, and every
+declared effect is implicitly a subtype of the library top `Effect`.
 
 An effect may name direct effect supertypes with `under`. The relation is independent of ordinary
 class inheritance and `is` conformance. Cycles, self-edges, and naming `Effect` as an `under`
@@ -324,10 +329,11 @@ Other follow-up areas:
 3. [ZEP-0013](../zeps/ZEP-0013.md) adds effect subtyping and a denotable top `Effect` type, with
    inherited payload, most-specific handler selection, runtime ambiguity reporting, and direct
    `under` edges in the library index; implemented 2026-11-09.
-4. Generic effect payload declarations are designed by the accepted
-   [ZEP-0005](../zeps/ZEP-0005.md) and depend on the implemented ZEP-0015 runtime identity model:
-   closed, invariant applications carry a payload descriptor, and handlers compare it before
-   binding. Applied ancestry and generic propagation remain deferred, and nothing is implemented.
+4. Generic effect payload declarations are implemented from
+   [ZEP-0005](../zeps/ZEP-0005.md) on the ZEP-0015 runtime identity model: closed, invariant
+   applications carry a payload descriptor, and handlers compare it before binding. Applied
+   ancestry, generic propagation through type variables, effect-variable handlers, omitted
+   arguments, and wildcard applications remain deferred.
 5. Extend explicit checked-exception mappings only as concrete interop needs arise; they remain an
    opt-in boundary and do not alter ordinary Java exception propagation.
 6. [Effect-row polymorphism](../zeps/ZEP-0086.md) is implemented with declaration-level row

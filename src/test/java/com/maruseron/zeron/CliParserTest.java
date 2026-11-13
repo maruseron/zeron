@@ -29,10 +29,11 @@ public final class CliParserTest {
     public void parsesExistingProjectCommandsAndOptions() throws Exception {
         final var manifest = createProjectManifest("project.toml", "project-src");
         final var build = (CliParser.ProjectCommand) parse(
-                "build", "--manifest", manifest.toString(), "-d");
+                "build", "--manifest", manifest.toString(), "-d", "--no-warnings");
         assertFalse(build.launch());
         assertEquals(manifest, build.manifest());
         assertTrue(build.debug());
+        assertTrue(build.noWarnings());
 
         final var run = (CliParser.ProjectCommand) parse("run", "--manifest", manifest.toString());
         assertTrue(run.launch());
@@ -69,13 +70,14 @@ public final class CliParserTest {
         final var output = temporaryFolder.getRoot().toPath().resolve("program.jar");
         final var files = (CliParser.Compile) parse(
                 source.toString(), "--library", library.toString(), "--java-classpath", host.toString(),
-                "--stdlib", "compiled", "--jar-output", output.toString(), "--debug");
+                "--stdlib", "compiled", "--jar-output", output.toString(), "--debug", "--no-warnings");
         assertEquals(List.of(source.toString()), files.sourceFiles());
         assertEquals(List.of(library), files.libraries());
         assertEquals(List.of(host), files.javaClassPathRoots());
         assertEquals(StandardLibraryMode.COMPILED, files.standardLibraryMode());
         assertEquals(output, files.jarOutput());
         assertTrue(files.debug());
+        assertTrue(files.noWarnings());
 
         final var sourceRoot = createDirectory("src");
         final var entry = Path.of("app", "Main.zn");
@@ -173,7 +175,7 @@ public final class CliParserTest {
     }
 
     @Test
-    public void rejectsUnknownOptionsAndMissingOptionValues() {
+    public void rejectsUnknownOptionsAndMissingOptionValues() throws Exception {
         assertTrue(invalid("Main.zn", "--debgu").message().contains("Unknown option"));
         invalid("--root");
         invalid("build", "--manifest");
@@ -189,6 +191,10 @@ public final class CliParserTest {
         invalid("dump", "--stdlib", "zeron.collections", "extra");
         invalid("fmt", "--unknown");
         invalid("fmt", "--check", "--check");
+        assertTrue(invalid("--no-warnings").message().contains("requires compilation input"));
+        final var source = createFile("NoWarnings.zn");
+        assertTrue(invalid(source.toString(), "--no-warnings", "--no-warnings")
+                .message().contains("only be specified once"));
     }
 
     @Test

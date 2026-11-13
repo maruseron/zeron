@@ -215,6 +215,8 @@ final class TypeResolver {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         where, "A raises clause must name a declared effect type, an effect-kinded "
                                 + "parameter, or an effect-row parameter."));
+            } else {
+                validateEffectApplication(context, effect, where);
             }
             if (!seenEffects.add(effect)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
@@ -229,6 +231,8 @@ final class TypeResolver {
                     Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, where,
                             "A handler type must name concrete effect types."));
+                } else {
+                    validateEffectApplication(context, effect, where);
                 }
                 if (!handledEffects.add(effect)) {
                     Zeron.resolutionError(new ResolutionError(
@@ -457,8 +461,52 @@ final class TypeResolver {
         if (!isEffectType(context, type)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     where, "Expected a declared effect type or an effect-kinded type parameter."));
+        } else {
+            validateEffectApplication(context, type, where);
         }
         return type;
+    }
+
+    /// A generic effect application is accepted only when every argument is a closed source type.
+    /// Open applications are deferred to a later proposal; this slice keeps runtime identity exact.
+    private static void validateEffectApplication(final ResolutionContext context,
+                                                  final TypeDescriptor type, final Token where) {
+        if (!(type instanceof GenericDescriptor generic)) return;
+        final var declaration = context.classes.get(generic.baseType().name());
+        if (declaration == null || !declaration.isEffect()) return;
+        if (generic.typeParameters().size() != declaration.typeParameters().size()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    where, "Effect `" + declaration.name().lexeme() + "` expects "
+                            + declaration.typeParameters().size() + " type arguments, found "
+                            + generic.typeParameters().size() + "."));
+            return;
+        }
+        for (final var argument : generic.typeParameters()) {
+            if (!isClosedEffectArgument(argument)) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                        "Effect application `" + TypeFormatter.format(generic)
+                                + "` must be closed; `" + TypeFormatter.format(argument)
+                                + "` is not a closed type argument."));
+            }
+        }
+    }
+
+    private static boolean isClosedEffectArgument(final TypeDescriptor type) {
+        return switch (type) {
+            case TypeParameterDescriptor ignored -> false;
+            case TypeProjectionDescriptor ignored -> false;
+            case CapturedTypeDescriptor ignored -> false;
+            case FunctionDescriptor ignored -> false;
+            case EffectRowDescriptor ignored -> false;
+            case InferDescriptor ignored -> false;
+            case NullableDescriptor nullable -> isClosedEffectArgument(nullable.baseType());
+            case ReferenceDescriptor reference -> isClosedEffectArgument(reference.baseType());
+            case ArrayDescriptor array -> isClosedEffectArgument(array.elementType());
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .allMatch(TypeResolver::isClosedEffectArgument);
+            default -> true;
+        };
     }
 
     static TypeDescriptor validateTypeArgument(final ResolutionContext context,
@@ -496,6 +544,8 @@ final class TypeResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     where, "Type parameter '" + parameter.name()
                             + "' requires an effect type argument."));
+        } else if (parameter.isEffectKind()) {
+            validateEffectApplication(context, actual, where);
         }
         return parameter.isEffectKind() ? actual : argument;
     }
@@ -510,9 +560,13 @@ final class TypeResolver {
 
     private static boolean isEffectType(final ResolutionContext context, final TypeDescriptor type) {
         if (type instanceof TypeParameterDescriptor parameter) return parameter.isEffectKind();
+        if (type instanceof GenericDescriptor generic) {
+            final var declaration = context.classes.get(generic.baseType().name());
+            return declaration != null && declaration.isEffect();
+        }
         if (!(type instanceof NominalDescriptor nominal)) return false;
         final var declaration = context.classes.get(nominal.name());
-        return declaration != null && declaration.isEffect();
+        return declaration != null && declaration.isEffect() && declaration.typeParameters().isEmpty();
     }
 
     private static boolean isEffectRowType(final ResolutionContext context, final TypeDescriptor type) {

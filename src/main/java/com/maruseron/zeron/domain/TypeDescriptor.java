@@ -186,6 +186,41 @@ public sealed interface TypeDescriptor
                 : new TypeDescriptor[]{parameterType});
     }
 
+    /// Whether a value of this static type carries enough ZEP-0015 identity to compare an exact
+    /// applied pattern. Closed applications are describable; a type variable is only describable
+    /// when it is reified. Erased views, projections, and function types are not.
+    static boolean hasRuntimeDescriptorSource(final TypeDescriptor type) {
+        return switch (type) {
+            case TypeParameterDescriptor parameter -> parameter.isReified();
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .allMatch(TypeDescriptor::hasRuntimeDescriptorSource);
+            case NullableDescriptor nullable -> hasRuntimeDescriptorSource(nullable.baseType());
+            case ReferenceDescriptor reference -> hasRuntimeDescriptorSource(reference.baseType());
+            case ArrayDescriptor array -> hasRuntimeDescriptorSource(array.elementType());
+            case AnyDescriptor _, TypeProjectionDescriptor _, CapturedTypeDescriptor _,
+                 FunctionDescriptor _, TypeConstructorDescriptor _, AppliedConstructorDescriptor _,
+                 InferDescriptor _ -> false;
+            default -> true;
+        };
+    }
+
+    /// Whether this type contains no type variables or erased projections and can therefore be
+    /// emitted as a constant runtime descriptor. A target that is not closed is still accepted
+    /// only when it is statically identical to the source application.
+    static boolean isClosedDescriptorType(final TypeDescriptor type) {
+        return switch (type) {
+            case TypeParameterDescriptor _, AnyDescriptor _, TypeProjectionDescriptor _,
+                 CapturedTypeDescriptor _, FunctionDescriptor _, TypeConstructorDescriptor _,
+                 AppliedConstructorDescriptor _, InferDescriptor _ -> false;
+            case GenericDescriptor generic -> generic.typeParameters().stream()
+                    .allMatch(TypeDescriptor::isClosedDescriptorType);
+            case NullableDescriptor nullable -> isClosedDescriptorType(nullable.baseType());
+            case ReferenceDescriptor reference -> isClosedDescriptorType(reference.baseType());
+            case ArrayDescriptor array -> isClosedDescriptorType(array.elementType());
+            default -> true;
+        };
+    }
+
     static ClassDesc toJavaClassDesc(final TypeDescriptor td) {
         return switch (td) {
             case InferDescriptor         _ ->
@@ -223,7 +258,10 @@ public sealed interface TypeDescriptor
                 default -> toJavaClassDesc(nd.baseType());
             };
             case NullDescriptor _ -> ConstantDescs.CD_Object;
-            case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
+            case GenericDescriptor generic -> StoredExistentialSupport.requiresHolder(generic)
+                    ? ClassDesc.of(StoredExistentialSupport.holderClassName(
+                            StoredExistentialSupport.holderSlotCount(generic)))
+                    : ClassDesc.of(generic.baseType().name());
             case TypeProjectionDescriptor projection -> toJavaClassDesc(projection.bound());
             case CapturedTypeDescriptor capture -> toJavaClassDesc(capture.upperBound());
             case EffectRowDescriptor _ ->

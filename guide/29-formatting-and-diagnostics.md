@@ -73,6 +73,15 @@ compilation to report the warnings and then fail the invocation if any were prod
 zeron build --deny-warnings
 ```
 
+Pass `--no-warnings` to hide warning output while keeping errors and the exit status unchanged:
+
+```text
+zeron build --no-warnings
+```
+
+`--no-warnings` only controls display. Warnings are still collected, so combining it with
+`--deny-warnings` hides the text but still fails the invocation when a warning was produced.
+
 The language server publishes warnings with warning severity, so editors can distinguish them from
 errors without changing whether the document resolves.
 

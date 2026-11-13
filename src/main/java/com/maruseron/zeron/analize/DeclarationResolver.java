@@ -371,6 +371,12 @@ final class DeclarationResolver {
                             "Effect supertype `" + target + "` is not an effect type."));
                     return;
                 }
+                if (!hierarchy.declaration(target).typeParameters().isEmpty()) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, use.name(),
+                            "Generic effect `" + target + "` cannot be an effect supertype."));
+                    return;
+                }
                 if (hierarchy.ancestors(target).contains(ownName)) {
                     Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, use.name(),
@@ -452,12 +458,6 @@ final class DeclarationResolver {
         for (final var parameter : declaration.typeParameters()) {
             Resolver.attemptMember(context,
                     () -> TypeResolver.validateTypeParameterBound(context, parameter, declaration.name()));
-        }
-        if (declaration.isEffect() && !declaration.typeParameters().isEmpty()) {
-            Resolver.attemptMember(context, () -> Zeron.resolutionError(new ResolutionError(
-                    DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                    declaration.name(),
-                    "Effect declarations cannot be generic.")));
         }
         validateEffectSupertypes(context, declaration);
         final var fieldNames = new HashSet<String>();

@@ -241,7 +241,10 @@ final class StatementResolver {
 
     private void resolveVariable(final Stmt.Var var) {
         Zeron.debug("resolving variable       " + var.name().lexeme() + " " + var.type());
-        if (!(var.type() instanceof InferDescriptor)) TypeResolver.validateType(context, var.type(), var.name());
+        if (!(var.type() instanceof InferDescriptor)) {
+            TypeResolver.resolveTypeNames(context, var.type(), var.name());
+            TypeResolver.validateType(context, var.type(), var.name());
+        }
 
         final var globalToken = context.topLevelTokensByDeclaration.get(var);
         final var symbolName = globalToken == null ? var.name() : globalToken;

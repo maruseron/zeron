@@ -34,6 +34,34 @@ the function's type.
 Effects are useful when a failure should interrupt the current operation and be handled at a
 meaningful level above it, rather than being checked and transformed after every call.
 
+## Generic effects and exact applied identity
+
+An effect may declare type parameters used by its payload. Applications are invariant and must be
+fully written with closed arguments; `Failure<T>` inside generic code and wildcard applications
+such as `Failure<_>` or `Failure<?>` are not accepted in this slice:
+
+```zeron
+public effect Failure<T: nullable> {
+    public property value: T;
+}
+
+fn load(id: Int): String raises Failure<Int> =
+    raise Failure<Int>(id);
+
+fn recovered(): String = handle (load(7)) with {
+    case Failure<Int> as failure -> "missing " + failure.value.toString();
+    case Failure<String>(_) -> "bad request";
+};
+```
+
+A handler case for `Failure<Int>` matches only `Failure<Int>`: the erased payload class must match
+and the payload's exact application descriptor must equal the case's descriptor. `Failure<String>`,
+`Failure<Int?>`, and `Failure<Array<Int>>` are different identities. A generic effect payload
+carries one descriptor through canonical and named constructors; non-generic effects remain
+descriptor-free. `case Effect` still catches any application without exposing the applied payload
+type. Applied `under` ancestry, omitted handler arguments, and generic propagation through
+`E: effect` applications are deferred work.
+
 ## Effect subtyping and the top `Effect`
 
 Effects can form an explicit effect-only hierarchy with `under`. Every effect is implicitly a
@@ -241,9 +269,11 @@ Ordinary Java exceptions are not caught by effect handlers and keep their usual 
 when an external-class method explicitly maps a declared checked exception to an effect at its call
 boundary.
 
-Effect payload declarations remain synchronous, nominal, and non-generic. Generic effect rows and
-explicit `under` subtyping are supported, but there is no implicit wildcard handler, asynchronous
-effect propagation, handler composition, or automatic Java-exception translation. An unhandled effect escaping
+Effect payload declarations remain synchronous and nominal. Non-generic effects keep their
+descriptor-free payload ABI; generic effects add a descriptor for exact application identity.
+Generic effect rows and explicit `under` subtyping are supported, but there is no implicit wildcard
+handler, asynchronous effect propagation, handler composition, or automatic Java-exception
+translation. An unhandled effect escaping
 generated `main` propagates across the host boundary; the compiler does not currently add a launcher
 that formats it.
 

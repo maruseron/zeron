@@ -24,6 +24,7 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
     private final boolean effectRowKind;
     private boolean mutableArguments;
     private boolean reified;
+    private boolean storedExistential;
     private boolean openingBinder;
     private TypeDescriptor openedActualType;
     private TypeParameterDescriptor openedEvidenceSource;
@@ -155,6 +156,7 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
         if (!nullableArguments) return this;
         final var copy = new TypeParameterDescriptor(scopeId, name, bounds, higherKinded, variance,
                 false, effectKind, effectRowKind, mutableArguments, reified);
+        copy.storedExistential = storedExistential;
         copy.openingBinder = openingBinder;
         copy.openedActualType = openedActualType;
         copy.openedEvidenceSource = openedEvidenceSource;
@@ -226,6 +228,17 @@ public final class TypeParameterDescriptor implements TypeDescriptor {
     /// as explicit call-site type arguments.
     public boolean isAnonymousExistential() {
         return name.startsWith(ANONYMOUS_EXISTENTIAL_PREFIX);
+    }
+
+    /// An anonymous existential in a storing position. Unlike a parameter-position existential it
+    /// is not part of the enclosing callable's hidden-parameter signature; its runtime facts are
+    /// carried by a holder when they are needed after storage.
+    public boolean isStoredExistential() {
+        return storedExistential;
+    }
+
+    public void markStoredExistential() {
+        storedExistential = true;
     }
 
     /// Whether the callee receives a runtime descriptor for this type parameter as a hidden

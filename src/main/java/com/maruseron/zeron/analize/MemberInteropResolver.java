@@ -1752,6 +1752,18 @@ final class MemberInteropResolver {
         if (!(expectedType instanceof GenericDescriptor || expectedType instanceof NominalDescriptor)
                 || !expectedType.name().equals(declaration.name().lexeme())) return;
         final var pattern = classType(declaration);
+        if (pattern instanceof GenericDescriptor patternGeneric
+                && expectedType instanceof GenericDescriptor expectedGeneric
+                && patternGeneric.typeParameters().size() == expectedGeneric.typeParameters().size()) {
+            for (int index = 0; index < patternGeneric.typeParameters().size(); index++) {
+                final var expectedArgument = expectedGeneric.typeParameters().get(index);
+                if (expectedArgument instanceof TypeParameterDescriptor parameter
+                        && parameter.isStoredExistential()) continue;
+                TypeUnifier.unify(patternGeneric.typeParameters().get(index), expectedArgument,
+                        substitutions, where, projector);
+            }
+            return;
+        }
         if (pattern instanceof GenericDescriptor) TypeUnifier.unify(pattern, expectedType, substitutions, where, projector);
     }
 
@@ -3024,8 +3036,26 @@ final class MemberInteropResolver {
         if (argument instanceof Expr.MemberCall call) {
             return resolveMemberCall(context, call, expectedType);
         }
-        if (argument instanceof Expr.ArrayLiteral literal && literal.elements.isEmpty()) {
-            return ExpressionFlowResolver.resolveEmptyArrayLiteral(context, literal, expectedType);
+        if (argument instanceof Expr.ArrayLiteral literal) {
+            var expectedArrayType = expectedType instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : expectedType;
+            if (expectedArrayType instanceof ArrayDescriptor expectedArray
+                    && !literal.elements.isEmpty()) {
+                final var expectedElement = expectedArray.elementType();
+                final var elementTypes = new ArrayList<TypeDescriptor>();
+                for (final var element : literal.elements) {
+                    elementTypes.add(resolveArgument(context, element, expectedElement));
+                }
+                final var operation = IntrinsicResolver.resolveIntrinsic(context,
+                        IntrinsicId.ARRAY_LITERAL, List.of(expectedElement), elementTypes,
+                        SYNTHETIC_IDENTIFIER);
+                literal.setIntrinsicOperation(operation);
+                literal.setType(expectedType);
+                return expectedType;
+            }
+            if (literal.elements.isEmpty()) {
+                return ExpressionFlowResolver.resolveEmptyArrayLiteral(context, literal, expectedType);
+            }
         }
         if (argument instanceof Expr.Variable variable && context.symbols.containsSymbol(variable.name)) {
             final var binding = context.symbols.getSymbol(variable.name);

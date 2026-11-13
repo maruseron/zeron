@@ -15,8 +15,8 @@ final class CliHelp {
               zeron <source.zn>... [flags]  Compile source files
               zeron --root <dir> --entry <source.zn> [flags]
               zeron init
-              zeron build [--manifest <file>] [--debug] [--deny-warnings]
-              zeron run [--manifest <file>] [--debug] [--deny-warnings]
+              zeron build [--manifest <file>] [--debug] [--deny-warnings] [--no-warnings]
+              zeron run [--manifest <file>] [--debug] [--deny-warnings] [--no-warnings]
               zeron fmt [--check] [<file-or-directory>...]
               zeron lsp [--manifest <file>]
               zeron explain <ZR0000>
@@ -29,6 +29,7 @@ final class CliHelp {
               --manifest <file>       Select a project manifest for build/run
               --debug, -d             Print compiler traces
               --deny-warnings         Fail the build when warnings are reported
+              --no-warnings           Hide warning diagnostics; errors still print
               --root <dir>            Add a standalone project source root (repeatable)
               --entry <source.zn>     Select the standalone project entry source
               --library <path>        Add a Zeron library directory or JAR (repeatable)
@@ -59,13 +60,13 @@ final class CliHelp {
                     Refuses to overwrite either file if it already exists.
                     """),
             Map.entry("build", """
-                    Usage: zeron build [--manifest <file>] [--debug] [--deny-warnings]
+                    Usage: zeron build [--manifest <file>] [--debug] [--deny-warnings] [--no-warnings]
 
                     Compile the project described by zeron.toml without launching it.
                     The manifest defaults to ./zeron.toml.
                     """),
             Map.entry("run", """
-                    Usage: zeron run [--manifest <file>] [--debug] [--deny-warnings]
+                    Usage: zeron run [--manifest <file>] [--debug] [--deny-warnings] [--no-warnings]
 
                     Compile the project described by zeron.toml and launch its entry point.
                     The manifest defaults to ./zeron.toml.
@@ -125,6 +126,13 @@ final class CliHelp {
 
                     Report warnings normally, then fail the invocation when any warning was
                     produced. Without this flag, warnings do not affect the exit status.
+                    """),
+            Map.entry("--no-warnings", """
+                    Usage: zeron build|run|<source.zn> --no-warnings
+
+                    Hide warning diagnostics from the output. Errors are still reported.
+                    Warnings are still collected, so --deny-warnings still fails the build
+                    when one is produced.
                     """),
             Map.entry("--root", """
                     Usage: zeron --root <dir>... --entry <source.zn>

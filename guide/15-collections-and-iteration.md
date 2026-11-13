@@ -190,6 +190,42 @@ Values are requested when an operation consumes the stream, such as `toList()`, 
 `for` loop. Use a stream to express a sequence of transformations, and use a list when you need to
 store the resulting values and change or revisit them.
 
+## Collections of anonymous existential elements
+
+A collection element type can be a stored anonymous existential. Each element then keeps its own
+hidden contract evidence or `reified` descriptor:
+
+```zeron
+import zeron.collections.ArrayList;
+
+public contract Render {
+    render(): String;
+}
+
+public class Text is Render {
+    public constructor new;
+    public render(): String = "text";
+}
+
+public class Box<T> {
+    public property value: T;
+    public constructor new;
+}
+
+let mut boxes: &ArrayList<Box<: Render>> =
+        ArrayList.of(Box.new(Text.new()));
+boxes.add(Box.new(Text.new()));
+for (let box in boxes) {
+    let rendered = box.value.render();
+}
+```
+
+`ArrayList` stores one holder per element; construction, `add`, `at`, iteration, nested
+collections, and separately compiled collection fields pack and unpack those holders. A
+marker-only element existential keeps the erased payload. Callback operations such as `map` and
+`filter` are not part of this first slice because their callback parameter would itself carry a
+stored existential.
+
 Both are designed to be used with iteration, but they do not have the same purpose: a list is
 storage, while a stream describes a way to produce values. The next chapter introduces
 [for-expressions](16-for-expressions.md), which combine iteration with transformations and

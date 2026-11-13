@@ -2,6 +2,7 @@ package com.maruseron.zeron.analize;
 
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.EffectSubtyping;
+import com.maruseron.zeron.domain.GenericDescriptor;
 import com.maruseron.zeron.domain.NominalDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
 
@@ -43,11 +44,23 @@ final class EffectHierarchy implements EffectSubtyping {
     @Override
     public boolean isSubtype(final TypeDescriptor effect, final TypeDescriptor superEffect) {
         if (effect.equals(superEffect)) return true;
-        if (!(effect instanceof NominalDescriptor subtype)
-                || !(superEffect instanceof NominalDescriptor supertype)) return false;
-        if (!isEffect(subtype.name()) || !isEffect(supertype.name())) return false;
-        if (supertype.name().equals(TOP_EFFECT)) return true;
-        return !subtype.name().equals(TOP_EFFECT) && ancestors(subtype.name()).contains(supertype.name());
+        final var subtypeName = effectName(effect);
+        final var supertypeName = effectName(superEffect);
+        if (subtypeName == null || supertypeName == null) return false;
+        if (!isEffect(subtypeName) || !isEffect(supertypeName)) return false;
+        if (supertypeName.equals(TOP_EFFECT)) return true;
+        // An applied generic effect has no applied ancestry in this slice. It still reaches its
+        // non-generic nominal `under` parents, but two different applications are unrelated.
+        if (effect instanceof GenericDescriptor && superEffect instanceof GenericDescriptor) return false;
+        return !subtypeName.equals(TOP_EFFECT) && ancestors(subtypeName).contains(supertypeName);
+    }
+
+    private static String effectName(final TypeDescriptor type) {
+        return switch (type) {
+            case NominalDescriptor nominal -> nominal.name();
+            case GenericDescriptor generic -> generic.baseType().name();
+            default -> null;
+        };
     }
 
     /** Transitive {@code under} ancestors, excluding the effect itself. */

@@ -63,8 +63,10 @@ fn describe(value: Int): String = match (value) {
 The first case matches an integer literal; the final `case _` is a wildcard for the rest of the
 integer values. The `Any` type is useful with `is`, but it is not a valid `match` root. Likewise,
 a wildcard does not make a non-sealed contract or an open class type a valid root.
-An ordinary concrete class root currently requires a supported literal test; the planned public-
-pattern opt-in for direct class roots is described below.
+A generic class or product root can also use exact applied patterns when its applied identity is
+available at runtime; see [Matching applied types](#matching-applied-types) below. An ordinary
+concrete class root still requires a supported literal test; the planned public-pattern opt-in for
+direct class roots is described below.
 
 The value being matched is evaluated once, and only the selected result is evaluated. Every case
 must produce a compatible result type. Sealed contracts and sum types have a known set of
@@ -107,6 +109,41 @@ fn location(point: Point): String = match (point) {
 A product case covers the root only if all its component patterns are total. Thus `Point(0, 0)`
 alone is not exhaustive; a total pattern such as `Point(x, y)` or a wildcard is needed. Product
 patterns can also be nested inside sum payloads and class-pattern outputs.
+
+## Matching applied types
+
+When a value's applied type identity is available at runtime, an applied class or product pattern
+can distinguish its type arguments instead of testing only the erased class. The identity comes
+from a closed application, a `reified` type parameter, or a reified anonymous existential:
+
+```zeron
+class Box<T> {
+    public property value: T;
+    public constructor new;
+}
+
+fn classify<T: reified>(box: Box<T>): String = match (box) {
+    case Box<Int> as boxed -> "integer: " + boxed.value;
+    case Box<String>(value) -> "string: " + value;
+    case _ -> "other box";
+};
+```
+
+The erased `Box` test runs first, then the complete applied identity is compared before any cast or
+binding. A failed identity test continues with the next case. An alias receives the matched
+application, and a positional class pattern reads the class's public properties in declaration
+order; product patterns read their components in the same order.
+
+A target that is statically identical to the scrutinee application is total and needs no runtime
+test. A different closed target is rejected as impossible. Reified roots are open-ended, so an
+unguarded `case _` or a statically total applied case is required for a complete match; listing
+`Box<Int>` and `Box<String>` is not exhaustive over every possible `Box<T>`. Duplicate exact cases
+are rejected.
+
+The distinction is available only when a descriptor exists. `Any`, a non-reified type parameter,
+a star view such as `Box<*>`, a projection such as `Box<out Int>`, and a wildcard or projection in
+the target cannot be used for applied discrimination. Nested applied patterns remain static in
+this slice; only the top-level pattern selects by descriptor.
 
 ## Ignoring a part of a value
 

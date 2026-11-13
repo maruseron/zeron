@@ -117,11 +117,11 @@ Returning `Option<T>` is not color in this sense: the wrapper is data someone ch
 fn doAsync<T>(callback: () -> T): Future<T> = ...
 
 fn main() {
-  let i = do<Future<_>> {
-    let x <- doAsync { 5 };
-    yield x;               // await
-  };
-  println(i);
+    let i = do<Future<_>> {
+        let x <- doAsync { 5 };
+        yield x;               // await
+    };
+    println(i);
 }
 ```
 

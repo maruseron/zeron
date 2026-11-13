@@ -31,7 +31,32 @@ final class CallResolver {
         return call.getType();
     }
 
+    /// ZEP-0005 spells closed construction as `Failure<Int>(payload)`. The parser represents that
+    /// as a plain call with explicit type arguments; route it through the ordinary canonical
+    /// constructor path so it shares arity, inference, evidence, and descriptor emission.
+    private TypeDescriptor resolveGenericEffectConstructorShorthand(final Expr.Call call) {
+        final var ownerName = MemberInteropResolver.resolveClassName(context,
+                call.callee.lexeme(), call.callee);
+        final var declaration = ownerName == null ? null : context.classes.get(ownerName);
+        if (declaration == null || !declaration.isEffect() || declaration.typeParameters().isEmpty()) {
+            return null;
+        }
+        final var receiver = new Expr.Variable(call.callee, TypeDescriptor.ofInfer());
+        final var constructor = new Expr.MemberCall(receiver,
+                new Token(TokenType.IDENTIFIER, "new", null, call.callee.span()),
+                call.paren, call.arguments, List.of(), TypeDescriptor.ofInfer());
+        constructor.setExplicitOwnerTypeArguments(call.explicitTypeArguments);
+        final var result = MemberInteropResolver.resolveMemberCall(context, constructor);
+        call.setImplicitMemberCall(constructor);
+        call.setType(result);
+        return result;
+    }
+
     private TypeDescriptor resolve(final Expr.Call call, final String forcedFunctionName) {
+        if (forcedFunctionName == null && !call.explicitTypeArguments.isEmpty()) {
+            final var constructor = resolveGenericEffectConstructorShorthand(call);
+            if (constructor != null) return constructor;
+        }
         FunctionDescriptor descriptor;
         final var callableSymbol = forcedFunctionName == null
                 ? context.symbols.containsSymbol(call.callee)

@@ -587,13 +587,14 @@ final class ExpressionFlowEmitter {
             loadPipelineValue(context, composer, scrutinee, match.scrutinee.getType());
             composer.ifnull(noMatch);
         }
+        final var appliedSource = matchAppliedSource(match);
         for (final var arm : match.arms) {
             final var next = composer.newLabel();
             beginScope(context);
             try {
                 declareMatchBindings(context, arm.pattern());
                 if (!arm.pattern().wildcard()) {
-                    emitMatchPattern(context, composer, arm.pattern(), scrutinee, next);
+                    emitMatchPattern(context, composer, arm.pattern(), scrutinee, next, appliedSource);
                 }
                 if (arm.guard() != null) {
                     emitExpr(context, composer, arm.guard());
@@ -644,17 +645,69 @@ final class ExpressionFlowEmitter {
         context.symbols.define(name);
     }
 
+    /// A generic effect case is selected by the erased payload class and the exact application
+    /// descriptor carried by that payload. A null or foreign descriptor simply falls through to
+    /// the next case, so `case Effect` remains a safe catch-all.
+    private static void emitExactEffectMatchTest(final CompilationContext context,
+                                                 final CodeBuilder composer,
+                                                 final Bind payload,
+                                                 final TypeDescriptor effectType,
+                                                 final Label failure) {
+        if (!(effectType instanceof GenericDescriptor generic)) return;
+        final var targetClass = TypeDescriptor.toJavaClassDesc(generic);
+        loadPipelineValue(context, composer, payload, payload.type());
+        composer.instanceOf(targetClass);
+        composer.ifeq(failure);
+        emitExactDescriptorEquality(context, composer, generic, failure, () -> {
+            loadPipelineValue(context, composer, payload, payload.type());
+            composer.checkcast(targetClass);
+            composer.invokevirtual(targetClass, NominalTypeEmitter.EFFECT_DESCRIPTOR_ACCESSOR,
+                    MethodTypeDesc.of(RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS));
+        });
+    }
+
+    /// Emits the ZEP-0015 identity comparison shared by handler cases and applied `match` arms.
+    /// The source supplier must leave the source descriptor on the stack; the target descriptor
+    /// is always a closed constant or a closed composition.
+    private static void emitExactDescriptorEquality(final CompilationContext context,
+                                                    final CodeBuilder composer,
+                                                    final TypeDescriptor target,
+                                                    final Label failure,
+                                                    final Runnable pushSource) {
+        final var descriptor = emitMatchTemporary(context, "descriptor",
+                RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE);
+        pushSource.run();
+        storePipelineValue(context, composer, descriptor, RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE);
+        loadPipelineValue(context, composer, descriptor, descriptor.type());
+        composer.ifnull(failure);
+        loadPipelineValue(context, composer, descriptor, descriptor.type());
+        RuntimeTypeDescriptorEmitter.emit(context, composer, target);
+        composer.invokevirtual(RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS, "equals",
+                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
+        composer.ifeq(failure);
+    }
+
     private static void emitMatchPattern(final CompilationContext context,
                                          final CodeBuilder composer,
                                          final Expr.MatchPattern pattern,
                                          final Bind value,
                                          final Label failure) {
+        emitMatchPattern(context, composer, pattern, value, failure, null);
+    }
+
+    private static void emitMatchPattern(final CompilationContext context,
+                                         final CodeBuilder composer,
+                                         final Expr.MatchPattern pattern,
+                                         final Bind value,
+                                         final Label failure,
+                                         final TypeDescriptor appliedSource) {
         if (!pattern.alternatives().isEmpty()) {
             final var matched = composer.newLabel();
             for (int i = 0; i < pattern.alternatives().size(); i++) {
                 final var alternativeFailure = i == pattern.alternatives().size() - 1
                         ? failure : composer.newLabel();
-                emitMatchPattern(context, composer, pattern.alternatives().get(i), value, alternativeFailure);
+                emitMatchPattern(context, composer, pattern.alternatives().get(i), value,
+                        alternativeFailure, appliedSource);
                 composer.goto_(matched);
                 if (i != pattern.alternatives().size() - 1) {
                     composer.labelBinding(alternativeFailure);
@@ -678,6 +731,10 @@ final class ExpressionFlowEmitter {
         loadPipelineValue(context, composer, value, value.type());
         composer.instanceOf(targetClass);
         composer.ifeq(failure);
+        if (!pattern.sumCase() && shouldEmitAppliedDescriptor(appliedSource, matchType)) {
+            emitExactDescriptorEquality(context, composer, matchType, failure,
+                    () -> RuntimeTypeDescriptorEmitter.emit(context, composer, appliedSource));
+        }
 
         final var matchedValue = emitMatchTemporary(context, "value", matchType);
         loadPipelineValue(context, composer, value, value.type());
@@ -689,17 +746,24 @@ final class ExpressionFlowEmitter {
         if (pattern.sumCase()) {
             final var caseDeclaration = context.resolution.classes().get(matchType.name());
             if (caseDeclaration == null) throw new IllegalStateException("Resolved sum case class not found.");
+            final var substitutions = TypeSubstitution.substitutionsFor(
+                    caseDeclaration.typeParameters(), matchType);
             for (int index = 0; index < pattern.arguments().size(); index++) {
                 final var argument = pattern.arguments().get(index);
                 if (argument.wildcard()) continue;
                 final var payloadType = argument.resolvedType();
-                final var erasedPayloadType = TypeSubstitution.erase(
-                        caseDeclaration.fields().get(index).type());
+                final var declaredPayloadType = caseDeclaration.fields().get(index).type();
+                final var erasedPayloadType = TypeSubstitution.erase(declaredPayloadType);
+                final var sourcePayloadType = TypeSubstitution.substitute(
+                        declaredPayloadType, substitutions);
+                final var sourceRepresentation = StoredExistentialSupport.runtimeRepresentation(
+                        sourcePayloadType);
                 final var output = emitMatchTemporary(context, "sumPayload", payloadType);
                 loadPipelineValue(context, composer, matchedValue, matchType);
                 composer.invokevirtual(targetClass, "$zeron$payload$" + index,
                         MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedPayloadType)));
-                emitConversion(context, composer, erasedPayloadType, payloadType);
+                emitConversion(context, composer, erasedPayloadType, payloadType,
+                        sourceRepresentation, sourcePayloadType);
                 storePipelineValue(context, composer, output, payloadType);
                 emitMatchPattern(context, composer, argument, output, failure);
             }
@@ -710,17 +774,24 @@ final class ExpressionFlowEmitter {
             if (productDeclaration == null) {
                 throw new IllegalStateException("Resolved product class not found.");
             }
+            final var substitutions = TypeSubstitution.substitutionsFor(
+                    productDeclaration.typeParameters(), matchType);
             for (int index = 0; index < pattern.arguments().size(); index++) {
                 final var argument = pattern.arguments().get(index);
                 if (argument.wildcard()) continue;
                 final var component = productDeclaration.properties().get(index);
                 final var erasedComponentType = TypeSubstitution.erase(component.type());
+                final var sourceComponentType = TypeSubstitution.substitute(
+                        component.type(), substitutions);
+                final var sourceRepresentation = StoredExistentialSupport.runtimeRepresentation(
+                        sourceComponentType);
                 final var componentType = argument.resolvedType();
                 final var output = emitMatchTemporary(context, "productComponent", componentType);
                 loadPipelineValue(context, composer, matchedValue, matchType);
                 composer.invokevirtual(targetClass, Stmt.propertyGetterName(component.name().lexeme()),
                         MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedComponentType)));
-                emitConversion(context, composer, erasedComponentType, componentType);
+                emitConversion(context, composer, erasedComponentType, componentType,
+                        sourceRepresentation, sourceComponentType);
                 storePipelineValue(context, composer, output, componentType);
                 emitMatchPattern(context, composer, argument, output, failure);
             }
@@ -774,13 +845,35 @@ final class ExpressionFlowEmitter {
         }
     }
 
+    private static TypeDescriptor matchAppliedSource(final Expr.Match match) {
+        final var type = match.scrutinee.getType() instanceof ReferenceDescriptor reference
+                ? reference.baseType() : match.scrutinee.getType();
+        return TypeDescriptor.hasRuntimeDescriptorSource(type) ? type : null;
+    }
+
+    /// Only an arm whose erased class agrees with the scrutinee can be an exact applied arm. A
+    /// reified type parameter is the one exception: its concrete value may be any class, so the
+    /// target class test supplies the erased part and the descriptor supplies the argument identity.
+    /// Sum-case and sealed-contract patterns keep their erased static behavior.
+    private static boolean shouldEmitAppliedDescriptor(final TypeDescriptor source,
+                                                       final TypeDescriptor target) {
+        if (source == null || !(target instanceof GenericDescriptor)) return false;
+        if (target.equals(source)) return false;
+        if (!TypeDescriptor.hasRuntimeDescriptorSource(source)) return false;
+        return source instanceof TypeParameterDescriptor
+                || source.name().equals(target.name());
+    }
+
     private static void storeMatchBinding(final CompilationContext context,
                                           final CodeBuilder composer,
                                           final Token name,
                                           final TypeDescriptor type,
                                           final Bind value) {
         loadPipelineValue(context, composer, value, value.type());
-        emitConversion(context, composer, value.type(), type);
+        emitConversion(context, composer, value.type(), type,
+                StoredExistentialSupport.requiresHolder(value.type())
+                        ? StoredExistentialSupport.runtimeRepresentation(value.type())
+                        : value.type());
         final var binding = context.symbols.getSymbol(name);
         composer.storeLocal(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(type).descriptorString()),
                 binding.lvt() + context.localSlotOffset);
@@ -880,6 +973,7 @@ final class ExpressionFlowEmitter {
             beginScope(context);
             try {
                 declareMatchBindings(context, arm.pattern());
+                emitExactEffectMatchTest(context, composer, payload, arm.resolvedEffectType(), next);
                 emitMatchPattern(context, composer, arm.pattern(), payload, next);
                 if (arm.suppressedBinding() != null) {
                     final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());
@@ -1031,6 +1125,7 @@ final class ExpressionFlowEmitter {
             beginScope(context);
             try {
                 declareMatchBindings(context, arm.pattern());
+                emitExactEffectMatchTest(context, composer, payload, arm.resolvedEffectType(), next);
                 emitMatchPattern(context, composer, arm.pattern(), payload, next);
                 if (arm.suppressedBinding() != null) {
                     final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());

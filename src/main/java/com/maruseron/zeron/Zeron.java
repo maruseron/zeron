@@ -43,6 +43,7 @@ public class Zeron {
     static boolean hadCompilationError = false;
     private static boolean hadWarning = false;
     private static boolean denyWarnings = false;
+    private static boolean suppressWarnings = false;
     private static final List<Diagnostic> warnings = new java.util.ArrayList<>();
     private static final java.util.Set<String> warningKeys = new java.util.HashSet<>();
     private static boolean debugEnabled;
@@ -60,6 +61,7 @@ public class Zeron {
         hadCompilationError = false;
         hadWarning = false;
         denyWarnings = false;
+        suppressWarnings = false;
         warnings.clear();
         warningKeys.clear();
         debugEnabled = false;
@@ -85,6 +87,8 @@ public class Zeron {
         debugEnabled = invocation.debug();
         denyWarnings = invocation instanceof CliParser.ProjectCommand project && project.denyWarnings()
                 || invocation instanceof CliParser.Compile compilation && compilation.denyWarnings();
+        suppressWarnings = invocation instanceof CliParser.ProjectCommand project && project.noWarnings()
+                || invocation instanceof CliParser.Compile compilation && compilation.noWarnings();
         return switch (invocation) {
             case CliParser.Version _ -> {
                 System.out.println("zeron " + ZeronVersion.current());
@@ -639,6 +643,7 @@ public class Zeron {
         hadResolutionError = false;
         hadCompilationError = false;
         hadWarning = false;
+        suppressWarnings = false;
         warnings.clear();
         warningKeys.clear();
         sourceLines.clear();
@@ -688,11 +693,13 @@ public class Zeron {
     }
 
     public static void reportResolutionDiagnostic(final Diagnostic diagnostic) {
+        if (suppressWarnings && diagnostic.severity() == Severity.WARNING) return;
         reportStageDiagnostic(diagnostic);
         if (diagnostic.severity() == Severity.ERROR) hadResolutionError = true;
     }
 
     public static void reportCompilationDiagnostic(final Diagnostic diagnostic) {
+        if (suppressWarnings && diagnostic.severity() == Severity.WARNING) return;
         reportStageDiagnostic(diagnostic);
         if (diagnostic.severity() == Severity.ERROR) hadCompilationError = true;
     }
@@ -710,7 +717,7 @@ public class Zeron {
         if (!warningKeys.add(key)) return;
         warnings.add(diagnostic);
         hadWarning = true;
-        reportStageDiagnostic(diagnostic);
+        if (!suppressWarnings) reportStageDiagnostic(diagnostic);
     }
 
     public static List<Diagnostic> warnings() {

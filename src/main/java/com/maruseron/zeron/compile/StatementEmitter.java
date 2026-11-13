@@ -357,7 +357,8 @@ final class StatementEmitter {
         composer.checkcast(yieldClass);
         composer.invokevirtual(yieldClass, "$zeron$payload$0",
                 MethodTypeDesc.of(ConstantDescs.CD_Object));
-        emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), elementType);
+        emitConversion(context, composer, TypeDescriptor.ofName("java.lang.Object"), elementType,
+                StoredExistentialSupport.runtimeRepresentation(elementType), elementType);
         composer.storeLocal(TypeKind.fromDescriptor(
                 TypeDescriptor.toJavaClassDesc(elementType).descriptorString()),
                 valueLocal.lvt() + context.localSlotOffset);
@@ -409,6 +410,9 @@ final class StatementEmitter {
         composer.iload(indexLocal.lvt() + context.localSlotOffset);
         composer.aaload();
         emitArrayReadConversion(context, composer, arrayType.elementType());
+        if (StoredExistentialSupport.requiresHolder(arrayType.elementType())) {
+            emitStoredUnpack(context, composer, arrayType.elementType());
+        }
         composer.storeLocal(TypeKind.fromDescriptor(
                 TypeDescriptor.toJavaClassDesc(arrayType.elementType()).descriptorString()),
                 valueLocal.lvt() + context.localSlotOffset);

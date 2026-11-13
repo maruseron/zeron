@@ -117,6 +117,44 @@ public final class CompilationDiagnosticsTest {
     }
 
     @Test
+    public void cliNoWarningsHidesWarningsButPreservesDenyWarnings() throws IOException {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var source = Path.of("target", "NoWarnings" + suffix + ".zn");
+        final var errorSource = Path.of("target", "NoWarningsError" + suffix + ".zn");
+        final var previousOutput = System.out;
+        final var output = new ByteArrayOutputStream();
+        try {
+            Files.writeString(source, """
+                    fn main(): Int {
+                        let unused: Int = 1;
+                        return 2;
+                    }
+                    """);
+            deleteTree(Path.of("dist"));
+            System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+
+            assertEquals(0, Zeron.runCli(source.toString(), "--no-warnings"));
+            final var quietOutput = output.toString(StandardCharsets.UTF_8);
+            assertFalse(quietOutput.contains("warning[ZR3011]"));
+            assertFalse(quietOutput.contains("unused"));
+
+            output.reset();
+            assertEquals(71, Zeron.runCli(source.toString(), "--no-warnings", "--deny-warnings"));
+            assertFalse(output.toString(StandardCharsets.UTF_8).contains("warning[ZR3011]"));
+
+            Files.writeString(errorSource, "fn main(): Int = missing;");
+            output.reset();
+            assertEquals(71, Zeron.runCli(errorSource.toString(), "--no-warnings"));
+            assertTrue(output.toString(StandardCharsets.UTF_8).contains("error["));
+        } finally {
+            System.setOut(previousOutput);
+            Files.deleteIfExists(source);
+            Files.deleteIfExists(errorSource);
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
     public void cliReportsUnresolvedLambdaTypesInsteadOfCrashingInBytecodePlanning() throws IOException {
         final var source = Path.of("target", "UnresolvedLambda" + UUID.randomUUID().toString().replace("-", "") + ".zn");
         final var previousOutput = System.out;

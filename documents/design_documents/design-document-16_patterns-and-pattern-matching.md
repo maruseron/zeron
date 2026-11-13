@@ -2,11 +2,12 @@
 
 ## Status
 
-Class-defined extractor patterns, nested patterns, OR-patterns, literal patterns, and built-in
-product destructuring are implemented. Match roots must be non-null sealed-contract values,
-products, supported literal types, or concrete non-open classes matched with a literal somewhere
-in the patterns. Direct class roots without a literal test are not yet implemented; the accepted
-opt-in design is described below. Pattern declarations have typed outputs, optional Boolean
+Class-defined extractor patterns, nested patterns, OR-patterns, literal patterns, built-in
+product destructuring, and descriptor-backed exact applied patterns are implemented. Match roots
+must be non-null sealed-contract values, products, supported literal types, concrete non-open
+classes matched with a literal somewhere in the patterns, or descriptor-backed generic
+applications with a top-level applied pattern. Direct class roots without a literal or applied
+target are not yet implemented; the accepted opt-in design is described below. Pattern declarations have typed outputs, optional Boolean
 refutation conditions, and immutable receivers. Nested patterns short-circuit; OR-patterns require
 equivalent binding sets. The implementation retains the legacy single-public-property extraction
 spelling as a compatibility fallback when it does not resolve to a class pattern.
@@ -58,6 +59,14 @@ must be justified by one of these modes:
    values, either directly or at leaves reached through a destructuring pattern. This is an explicit
    value test, not general matching over the root's runtime type. `Any`, non-sealed contracts, and
    type variables whose bounds do not establish a closed type are not eligible for this mode.
+4. **Applied matching.** Implemented by ZEP-0122. A generic class or product root with a
+   descriptor-backed static type may use top-level applied patterns such as `Box<Int>` and
+   `Box<String>`. The erased class test runs first, then the shared ZEP-0015 descriptor is compared
+   before casting or binding. A statically identical target is total; a different closed target is
+   rejected as impossible; and an unguarded wildcard or statically total applied case is required
+   for an open-ended root. `Any`, non-reified type parameters, star views, projections, and
+   wildcard/erased targets are not eligible. Sealed-contract and sum-case applied patterns keep
+   their existing static semantics.
 
 Literal patterns are restricted to integer, Boolean, and String literals of the statically known
 type. They do not include arbitrary expressions, variable references, or implicit calls to `Eq<T>`
@@ -94,7 +103,9 @@ wildcard. Product patterns are also available recursively in sum payloads and cl
 outputs.
 
 Concrete class roots use class-defined patterns for destructuring; at least one literal test must
-occur in the match to opt into literal mode. Refutable patterns, including those containing a
+occur in the match to opt into literal mode. A descriptor-backed generic class root may instead
+use top-level applied patterns; a positional applied class pattern reads public properties in
+declaration order after the identity test. Refutable patterns, including those containing a
 literal, do not count as total class coverage. These rules keep destructuring distinct from an
 open-ended runtime type test.
 

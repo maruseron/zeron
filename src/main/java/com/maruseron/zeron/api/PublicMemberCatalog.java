@@ -979,12 +979,16 @@ public final class PublicMemberCatalog {
 
     private static TypeDescriptor copyType(final TypeDescriptor type) {
         return switch (type) {
-            case TypeParameterDescriptor parameter -> new TypeParameterDescriptor(parameter.scopeId(),
-                    parameter.name(), parameter.bounds().stream().map(PublicMemberCatalog::copyType).toList(),
-                    parameter.isHigherKinded(), parameter.variance(),
-                    parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                    parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
-                    parameter.isReified());
+            case TypeParameterDescriptor parameter -> {
+                final var copy = new TypeParameterDescriptor(parameter.scopeId(),
+                        parameter.name(), parameter.bounds().stream().map(PublicMemberCatalog::copyType).toList(),
+                        parameter.isHigherKinded(), parameter.variance(),
+                        parameter.admitsNullableArguments(), parameter.isEffectKind(),
+                        parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
+                        parameter.isReified());
+                if (parameter.isStoredExistential()) copy.markStoredExistential();
+                yield copy;
+            }
             case AppliedConstructorDescriptor applied -> new AppliedConstructorDescriptor(
                     (TypeParameterDescriptor) copyType(applied.constructor()), copyType(applied.argument()));
             case TypeConstructorDescriptor constructor -> new TypeConstructorDescriptor(

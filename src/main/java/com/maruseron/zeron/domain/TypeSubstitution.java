@@ -72,13 +72,17 @@ public final class TypeSubstitution {
                     substitute(capture.upperBound(), substitutions));
             case FunctionDescriptor function -> {
                 final var typeParameters = function.typeParameters().stream()
-                        .map(parameter -> new TypeParameterDescriptor(parameter.scopeId(), parameter.name(),
-                                parameter.bounds().stream()
-                                        .map(bound -> substitute(bound, substitutions))
-                                        .toList(), parameter.isHigherKinded(), parameter.variance(),
-                                parameter.admitsNullableArguments(), parameter.isEffectKind(),
-                                parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
-                                parameter.isReified()))
+                        .map(parameter -> {
+                            final var copy = new TypeParameterDescriptor(parameter.scopeId(), parameter.name(),
+                                    parameter.bounds().stream()
+                                            .map(bound -> substitute(bound, substitutions))
+                                            .toList(), parameter.isHigherKinded(), parameter.variance(),
+                                    parameter.admitsNullableArguments(), parameter.isEffectKind(),
+                                    parameter.isEffectRowKind(), parameter.admitsMutableArguments(),
+                                    parameter.isReified());
+                            if (parameter.isStoredExistential()) copy.markStoredExistential();
+                            return copy;
+                        })
                         .toList();
                 final var returnType = substitute(function.returnType(), substitutions);
                 final var parameters = function.parameters().stream()
@@ -102,6 +106,20 @@ public final class TypeSubstitution {
         };
     }
 
+    /** Maps a declaration's type parameters to the arguments of an applied use of that declaration. */
+    public static Map<TypeParameterDescriptor, TypeDescriptor> substitutionsFor(
+            final List<TypeParameterDescriptor> parameters, final TypeDescriptor appliedType) {
+        final var base = appliedType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : appliedType;
+        if (!(base instanceof GenericDescriptor generic)
+                || generic.typeParameters().size() != parameters.size()) return Map.of();
+        final var substitutions = new java.util.LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (int index = 0; index < parameters.size(); index++) {
+            substitutions.put(parameters.get(index), generic.typeParameters().get(index));
+        }
+        return substitutions;
+    }
+
     public static TypeDescriptor erase(final TypeDescriptor type) {
         return switch (type) {
             case TypeParameterDescriptor _ -> TypeDescriptor.ofName("java.lang.Object");
@@ -110,7 +128,8 @@ public final class TypeSubstitution {
             case NullableDescriptor nullable -> erase(nullable.baseType()).toNullable();
             case ReferenceDescriptor reference -> new ReferenceDescriptor(erase(reference.baseType()));
             case ArrayDescriptor array -> TypeDescriptor.arrayOf(erase(array.elementType()));
-            case GenericDescriptor generic -> generic.baseType();
+            case GenericDescriptor generic -> StoredExistentialSupport.requiresHolder(generic)
+                    ? StoredExistentialSupport.holderType(generic) : generic.baseType();
             case TypeProjectionDescriptor projection -> erase(projection.bound());
             case CapturedTypeDescriptor capture -> erase(capture.upperBound());
             case EffectRowDescriptor _ -> EffectRowDescriptor.empty();

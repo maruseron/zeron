@@ -425,7 +425,7 @@ final class NominalTypeEmitter {
                         | ClassFile.ACC_STATIC;
                 builder.withMethodBody(constructor.name().lexeme(),
                         toJavaMethodDescriptor(factoryType), flags,
-                        code -> emitNamedConstructor(context, code, constructor, List.of()));
+                        code -> emitNamedConstructor(context, code, constructor, List.of(), false, null));
             }
         });
         final var implementationPath = outputPath(context, implementationName);
@@ -443,12 +443,21 @@ final class NominalTypeEmitter {
         });
     }
 
+    static final String EFFECT_DESCRIPTOR_FIELD = "$zeron$effectDescriptor";
+    static final String EFFECT_DESCRIPTOR_ACCESSOR = "$zeron$effectDescriptor";
+
+    static boolean isGenericEffect(final Stmt.ClassDecl declaration) {
+        return declaration.isEffect() && !declaration.typeParameters().isEmpty();
+    }
+
     private static void generateNominalClass(CompilationContext context, final Stmt.ClassDecl declaration) throws IOException {
         final var className = declaration.name().lexeme();
-        if (declaration.isEffect() && context.resolution.isStatelessEffect(className)) {
+        if (declaration.isEffect() && declaration.typeParameters().isEmpty()
+                && context.resolution.isStatelessEffect(className)) {
             generateStatelessEffect(context, declaration);
             return;
         }
+        final var genericEffect = isGenericEffect(declaration);
         final var generatedSumCase = className.contains("$$sum$");
         final var product = productDeclaration(context, className);
         final var newtype = newtypeDeclaration(context, className);
@@ -507,6 +516,19 @@ final class NominalTypeEmitter {
                                 ClassDesc.of("java.lang.invoke.MethodHandle"),
                                 ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL | ClassFile.ACC_SYNTHETIC);
                     }
+                    if (genericEffect) {
+                        builder.withField(EFFECT_DESCRIPTOR_FIELD, RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS,
+                                ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL | ClassFile.ACC_SYNTHETIC);
+                        builder.withMethodBody(EFFECT_DESCRIPTOR_ACCESSOR,
+                                MethodTypeDesc.of(RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS),
+                                ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL | ClassFile.ACC_SYNTHETIC,
+                                code -> {
+                                    code.aload(0);
+                                    code.getfield(classDesc, EFFECT_DESCRIPTOR_FIELD,
+                                            RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS);
+                                    code.areturn();
+                                });
+                    }
                     if (generatedSumCase && declaration.fields().isEmpty()) {
                         builder.withField("$zeron$singleton", classDesc,
                                 ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL);
@@ -531,9 +553,10 @@ final class NominalTypeEmitter {
                     final var constructorFlags = declaration.constructor().isPublic()
                             ? ClassFile.ACC_PUBLIC
                             : ClassFile.ACC_PRIVATE;
-                    builder.withMethodBody("<init>",
+                    final var hiddenConstructorType = BytecodeEmitter.withEffectDescriptorParameter(
                             BytecodeEmitter.withEvidenceParameters(constructorType, classEvidenceSlots.size()),
-                            constructorFlags,
+                            genericEffect);
+                    builder.withMethodBody("<init>", hiddenConstructorType, constructorFlags,
                             code -> emitCanonicalConstructor(context, code, declaration, classDesc,
                                     classEvidenceSlots));
                     if (className.equals(SyntheticNames.PROPERTY_REF_TYPE)) {
@@ -554,8 +577,9 @@ final class NominalTypeEmitter {
                                 SyntheticNames.CONSTRUCTOR_REF_FACTORY);
                     }
                     if (!classEvidenceSlots.isEmpty()) {
-                        builder.withMethodBody("<init>", constructorType, constructorFlags,
-                                BytecodeEmitter::emitEvidenceUnavailable);
+                        builder.withMethodBody("<init>",
+                                BytecodeEmitter.withEffectDescriptorParameter(constructorType, genericEffect),
+                                constructorFlags, BytecodeEmitter::emitEvidenceUnavailable);
                     }
                     if (generatedSumCase && declaration.fields().isEmpty()) {
                         builder.withMethodBody("<clinit>", MethodTypeDesc.of(ConstantDescs.CD_void),
@@ -650,17 +674,21 @@ final class NominalTypeEmitter {
                     for (final var constructor : declaration.namedConstructors()) {
                         final var factoryType = (FunctionDescriptor) TypeSubstitution.erase(
                                 constructor.typeDescriptor());
-                        final var evidenceType = BytecodeEmitter.withEvidenceParameters(
-                                toJavaMethodDescriptor(factoryType), classEvidenceSlots.size());
+                        final var evidenceType = BytecodeEmitter.withEffectDescriptorParameter(
+                                BytecodeEmitter.withEvidenceParameters(
+                                        toJavaMethodDescriptor(factoryType), classEvidenceSlots.size()),
+                                genericEffect);
                         final var flags = (constructor.isPublic() ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE)
                                 | ClassFile.ACC_STATIC;
                         builder.withMethodBody(constructor.name().lexeme(),
                                 evidenceType, flags,
-                                code -> emitNamedConstructor(context, code, constructor, classEvidenceSlots));
+                        code -> emitNamedConstructor(context, code, constructor, classEvidenceSlots,
+                                        genericEffect, genericEffect ? className : null));
                         if (!classEvidenceSlots.isEmpty()) {
                             builder.withMethodBody(constructor.name().lexeme(),
-                                    toJavaMethodDescriptor(factoryType), flags,
-                                    BytecodeEmitter::emitEvidenceUnavailable);
+                                    BytecodeEmitter.withEffectDescriptorParameter(
+                                            toJavaMethodDescriptor(factoryType), genericEffect),
+                                    flags, BytecodeEmitter::emitEvidenceUnavailable);
                         }
                     }
 
@@ -1478,6 +1506,7 @@ final class NominalTypeEmitter {
                                           final Stmt.ClassDecl declaration,
                                           final ClassDesc classDesc,
                                           final List<BytecodeEmitter.EvidenceField> classEvidenceSlots){
+        final var genericEffect = isGenericEffect(declaration);
         final var payloadParentName = declaration.isEffect()
                 ? context.resolution.effectPayloadParent(declaration.name().lexeme()) : null;
         final var inheritedPayloadNames = payloadParentName == null
@@ -1539,6 +1568,12 @@ final class NominalTypeEmitter {
                 BytecodeEmitter.emitVariable(context, code, evidenceSlot.token());
                 code.putfield(classDesc, evidenceSlot.fieldName(),
                         ClassDesc.of("java.lang.invoke.MethodHandle"));
+            }
+            if (genericEffect) {
+                code.aload(0);
+                code.aload(effectDescriptorSlot(declaration, classEvidenceSlots.size()));
+                code.putfield(classDesc, EFFECT_DESCRIPTOR_FIELD,
+                        RuntimeTypeDescriptorEmitter.DESCRIPTOR_CLASS);
             }
             var slot = 1;
             for (final var component : declaration.dataComponents()) {
@@ -2041,9 +2076,13 @@ final class NominalTypeEmitter {
 
     private static void emitNamedConstructor(CompilationContext context, final CodeBuilder code,
                                       final Stmt.NamedConstructor constructor,
-                                      final List<BytecodeEmitter.EvidenceField> classEvidenceSlots){
+                                      final List<BytecodeEmitter.EvidenceField> classEvidenceSlots,
+                                      final boolean genericEffect,
+                                      final String effectOwner){
         final var previousReturnType = context.currentReturnType;
         final var previousOffset = context.localSlotOffset;
+        final var previousDescriptorToken = context.currentEffectDescriptorToken;
+        final var previousDescriptorOwner = context.currentEffectDescriptorOwner;
         context.currentReturnType = constructor.typeDescriptor().returnType();
         context.localSlotOffset = 0;
         beginScope(context);
@@ -2058,13 +2097,35 @@ final class NominalTypeEmitter {
                     TypeDescriptor.ofName("java.lang.invoke.MethodHandle"), BindingMutability.IMMUTABLE);
             context.symbols.define(evidenceSlot.token());
         }
+        if (genericEffect) {
+            final var descriptorToken = effectDescriptorToken(constructor.name());
+            context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, descriptorToken,
+                    RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE, BindingMutability.IMMUTABLE);
+            context.symbols.define(descriptorToken);
+            context.currentEffectDescriptorToken = descriptorToken;
+            context.currentEffectDescriptorOwner = effectOwner;
+        }
         try {
             StatementEmitter.emitStmts(context, code, constructor.body());
         } finally {
+            context.currentEffectDescriptorToken = previousDescriptorToken;
+            context.currentEffectDescriptorOwner = previousDescriptorOwner;
             endScope(context);
             context.localSlotOffset = previousOffset;
             context.currentReturnType = previousReturnType;
         }
+    }
+
+    private static Token effectDescriptorToken(final Token where) {
+        return new Token(TokenType.IDENTIFIER, EFFECT_DESCRIPTOR_FIELD, null, where.span());
+    }
+
+    private static int effectDescriptorSlot(final Stmt.ClassDecl declaration, final int evidenceCount) {
+        var slot = 1 + evidenceCount;
+        for (final var type : declaration.canonicalConstructorTypes()) {
+            slot += TypeSubstitution.erase(type).isDoubleWidth() ? 2 : 1;
+        }
+        return slot;
     }
 
     private static void declareClassEvidenceSlots(final CompilationContext context,

@@ -1,5 +1,10 @@
 # Code Organization
 
+Task-first routing lives in
+[`documents/developer_guides/change-surface-map.md`](./documents/developer_guides/change-surface-map.md):
+start there when you know the change but not the files. This page describes the shape of the
+system; the developer guides describe workflows.
+
 ## Compiler pipeline
 
 The pipeline is scanner ([`scan/`](./src/main/java/com/maruseron/zeron/scan/)) ->
@@ -88,3 +93,65 @@ before changing this behavior.
 
 `target/` contains Maven build output, and `dist/` contains generated Zeron program artifacts. Do
 not edit generated class files as source; regenerate them from Java/Zeron sources.
+
+## Repository map
+
+| Path | Contents |
+| --- | --- |
+| `src/main/java/com/maruseron/zeron/` | Compiler phases, CLI, formatter, project and standard-library handling |
+| `src/main/resources/stdlib/` | Bundled standard-library Zeron sources; package path must match the file path |
+| `src/main/resources/errorcode/` | One explanation file per diagnostic code, plus `errors.md` |
+| `src/main/resources/style.toml` | Canonical formatter rules keyed by grammar production |
+| `src/test/java/com/maruseron/zeron/` | Tests mirroring compiler phases, plus Java interop fixtures |
+| `documents/design_documents/` | Authoritative design notes and the implemented grammar |
+| `documents/zeps/` | Proposals, tracker, and release-bundle state |
+| `documents/developer_guides/` | Workflow guides: change surfaces, testing, diagnostics, artifacts |
+| `guide/` | User-facing tutorial; chapter order is in `guide/README.md`, not the file numbers |
+| `sample_programs/` | Runnable example projects (`jsonmodel`, `list_monad`, `query_engine`) |
+| `editors/vscode/` | VS Code extension, TextMate grammar, language client, and grammar tests |
+| `scripts/` | Release automation |
+| `distribution/bin/` | Launcher scripts staged into release archives |
+| `target/`, `dist/` | Generated output; never edit as source |
+
+The bundled standard-library source index is generated during the Maven build from the files under
+`src/main/resources/stdlib/`; adding a `.zn` file updates it automatically.
+
+## Tests
+
+Tests are organized by phase and layer: `scan`, `ast`/root, `analize`, `compile`, `diagnostic`,
+`domain`, `lsp`, `runtime`, and `api`, with Java interop fixtures in `fixtures/`. Surefire runs four
+forks in isolated directories, so tests that read the repository use `TestPaths`. See
+[`testing-and-verification.md`](./documents/developer_guides/testing-and-verification.md).
+
+## Editor and tooling
+
+The VS Code extension launches the language server from `target/classes` when it finds a built
+checkout, otherwise it runs `zeron lsp` from `PATH`. Run `mvn compile` after compiler changes to
+refresh it, and `npm --prefix editors/vscode test` after grammar changes. Syntax highlighting is a
+lightweight editor grammar, not a second scanner; semantics come from the language server.
+
+## Documentation sets
+
+Each set has a different job. Keep them separate:
+
+- `documents/zeps/` — proposals, decisions, and release state. Not a tutorial.
+- `documents/design_documents/` — semantics and rationale for implemented behavior.
+- `documents/developer_guides/` — task workflows and checklists. Link to the above instead of
+  restating semantics.
+- `guide/` — user-facing explanation of how to use the language.
+
+## Change workflows
+
+- [`change-surface-map.md`](./documents/developer_guides/change-surface-map.md) — task to files.
+- [`compiler-changes.md`](./documents/developer_guides/compiler-changes.md) — statements,
+  declarations, expressions.
+- [`syntax-surface-checklist.md`](./documents/developer_guides/syntax-surface-checklist.md) — every
+  surface a syntax change touches.
+- [`registries-and-modules.md`](./documents/developer_guides/registries-and-modules.md) — bindings,
+  intrinsics, and standard-library modules.
+- [`diagnostics-and-error-codes.md`](./documents/developer_guides/diagnostics-and-error-codes.md) —
+  adding or changing a diagnostic.
+- [`testing-and-verification.md`](./documents/developer_guides/testing-and-verification.md) — test
+  layout and focused runs.
+- [`generated-artifacts-and-release.md`](./documents/developer_guides/generated-artifacts-and-release.md) —
+  `dist/`, API index, and release packaging.

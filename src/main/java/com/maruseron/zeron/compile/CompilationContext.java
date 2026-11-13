@@ -17,7 +17,6 @@ import java.lang.classfile.Label;
 import java.lang.constant.ClassDesc;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -50,6 +49,10 @@ final class CompilationContext {
     SymbolTable symbols;
     TypeDescriptor lastEmittedType;
     TypeDescriptor currentReturnType;
+    /// Inside a generic effect's named constructor the hidden application descriptor is a local
+    /// parameter; constructing the canonical payload forwards it unchanged.
+    Token currentEffectDescriptorToken;
+    String currentEffectDescriptorOwner;
     int localSlotOffset;
     boolean emittingLambdaImplementation;
     int loopTemporaryCount;

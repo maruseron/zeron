@@ -125,7 +125,7 @@ final class TypeUnifier {
         }
         // Capability is not part of the type structure inference compares. A mutable argument
         // unifies with a read-only pattern by dropping its outer reference; assignability still
-        // checks the direction afterwards, so this cannot admit a read-only-to-mutable upgrade.
+        // checks the direction afterward, so this cannot admit a read-only-to-mutable upgrade.
         if (!(pattern instanceof ReferenceDescriptor)
                 && actual instanceof ReferenceDescriptor(var baseType)) {
             actual = baseType;

@@ -4,6 +4,36 @@
 
 ### Compiler and language work
 
+- Added the first ZEP-0106 stored-existential slice. Fields, locals, array elements, collection
+  elements, and nested type arguments accept `<: Bound>` and `reified` anonymous existentials,
+  using the conditional `Exists1`–`Exists3`/`ExistsN` holder ABI when a descriptor or evidence
+  must survive storage and keeping marker-only storage erased. Packing resolves descriptors and
+  evidence, stored reads restore the hidden tokens, holders compare by payload identity, and
+  API-index schema 14 records the stored binder and its slot metadata. `ArrayList` construction,
+  mutation, reads, iteration, nested collections, and separately compiled collection fields retain
+  per-element holders. An array-backed model-field prototype stores one evidence group per field;
+  its 2026-11-13 cost pass records 24 B/field and sub-nanosecond traversal overhead, so the model
+  API stays unchanged. The remaining rank-2 callback comparison is tracked by ZEP-0109.
+- Added generic effect payloads with closed applied identity from ZEP-0005. `effect Failure<T>` may
+  be declared and used as `Failure<Int>` in `raise`, `raises`, and handler cases; applications are
+  invariant, fully written, and closed. Generic payloads carry one cached ZEP-0015 descriptor
+  through canonical and named constructors, and handlers compare the erased payload class plus the
+  exact descriptor before binding. `case Effect` still catches any application, while non-generic
+  effects remain descriptor-free. Separately compiled libraries preserve applied identities through
+  the existing schema-13 index. Generic propagation through type variables, effect-variable
+  handlers, omitted handler arguments, wildcards, applied ancestry, and generic `external` effects
+  remain deferred.
+- Added runtime applied-type match patterns from ZEP-0122. A `match` over a descriptor-backed
+  value now distinguishes closed class and product applications such as `Box<Int>` and
+  `Box<String>` instead of stopping at the erased class test. Roots may be closed applications,
+  reified type parameters, or reified anonymous existentials; non-reified parameters, `Any`, star
+  views, projections, and wildcard targets are rejected. A statically identical target remains
+  total without a descriptor test, a different closed target is rejected as statically impossible,
+  and refutable applied roots require a wildcard or statically total fallback. Matching compares
+  the shared ZEP-0015 descriptor before casting, binding, or destructuring, supports aliases and
+  class/product component patterns, and keys coverage by the full applied identity. Sum-case and
+  sealed-contract patterns keep their existing static semantics, and no descriptor field is added
+  to ordinary classes.
 - A `Codec<T, E>` bound is now satisfied by available `Encode<T, {E}>` and `Decode<T, {E}>`
   evidence when no dedicated `Codec` witness exists. This makes the built-in directional codecs
   for `Int`, `Boolean`, `String`, and `Float` usable through `Codec` directly, while the declared
@@ -46,7 +76,8 @@
   rather than as callable members.
 - Added warning-severity compiler diagnostics from ZEP-0115. Warnings share the existing catalog,
   formatter, and source spans but do not block a build; `--deny-warnings` turns them into a failed
-  invocation after the stage completes. The initial set reports unused local variables, imports,
+  invocation after the stage completes, and `--no-warnings` hides warning output without changing
+  the exit status. The initial set reports unused local variables, imports,
   and private functions, unreachable statements, unnecessary mutable projections, `while (true)`
   loops, shadowed locals, and deprecated anonymous witness declarations. Compiler results expose
   warnings separately from errors, and the language server publishes them with warning severity.

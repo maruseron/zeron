@@ -191,10 +191,18 @@ argument. Since `describe` chooses a different hidden type for each call, its se
 parameter would be unrelated unless it shares a named type parameter: `fn compare(a: Box<: Render>,
 ordered: Box<: Render>)` does not say the two arguments contain the same type.
 
-Anonymous existentials are limited to direct arguments of the outermost applied parameter type of
-a declared function, method, or contract method. They are rejected in variables, fields, results,
-receivers, arrays, nested arguments, lambda parameters, and function-type parameters. `Array<*>` is
-also rejected because arrays do not accept projections.
+Anonymous existentials are allowed in direct parameter positions and in stored positions: fields,
+properties, locals, array and collection element types, and nested type arguments. A stored
+existential keeps its hidden argument after the introducing call returns. The compiler uses a
+holder only when there is runtime state to preserve, such as contract evidence or a `reified`
+descriptor; marker-only storage keeps the erased payload. For example, each element of a
+`ArrayList<Box<: Render>>` carries its own evidence, and the array and collection paths pack and
+unpack that holder at their boundaries.
+
+Stored existentials are rejected in results, receivers, lambda parameters, and function-type
+parameters. `Array<*>` is also rejected because arrays do not accept projections. The model-field
+API is unchanged; `AnyField`, `Model`, and property references do not expose stored existential
+fields directly.
 
 Add `reified` when the hidden argument needs a runtime descriptor. Reified type parameters and
 hidden arguments support exact applied-type tests:
@@ -206,8 +214,8 @@ fn isReifiedIntBox(box: Box<: reified>): Boolean = box is Box<Int>;
 
 An exact test compares applied type descriptors, including array elements and nullable or mutable
 markers. A null source is false. The test is available only when the source actually carries a
-descriptor; an erased or projected source keeps the existing static generic test rules. Stored and
-result-position existentials and runtime contract-bound tests are separate proposals.
+descriptor; an erased or projected source keeps the existing static generic test rules.
+Result-position existentials and runtime contract-bound tests are separate proposals.
 
 ## Opening an anonymous argument
 

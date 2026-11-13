@@ -545,6 +545,11 @@ final class TypeCompatibility implements TypeProjector {
         for (int index = 0; index < expectedArguments.size(); index++) {
             final var expectedArgument = expectedArguments.get(index);
             final var actualArgument = actualArguments.get(index);
+            if (expectedArgument instanceof TypeParameterDescriptor existential
+                    && existential.isStoredExistential()) {
+                if (!storedExistentialAccepts(existential, actualArgument)) return false;
+                continue;
+            }
             if (expectedArgument instanceof TypeProjectionDescriptor expectedProjection) {
                 if (actualArgument instanceof TypeProjectionDescriptor actualProjection) {
                     if (expectedProjection.kind() != actualProjection.kind()) return false;
@@ -568,6 +573,22 @@ final class TypeCompatibility implements TypeProjector {
             } else if (!expectedArgument.equals(actualArgument)) {
                 return false;
             }
+        }
+        return true;
+    }
+
+    private boolean storedExistentialAccepts(final TypeParameterDescriptor binder,
+                                             final TypeDescriptor actualArgument) {
+        var actual = actualArgument;
+        if (actual instanceof ReferenceDescriptor reference) actual = reference.baseType();
+        if (actual instanceof NullDescriptor) {
+            if (!binder.admitsNullableArguments()) return false;
+        } else if (actual instanceof NullableDescriptor nullable) {
+            if (!binder.admitsNullableArguments()) return false;
+            actual = nullable.baseType();
+        }
+        for (final var bound : binder.bounds()) {
+            if (!isContractProjection(bound, actual) && !canAssign(bound, actual)) return false;
         }
         return true;
     }

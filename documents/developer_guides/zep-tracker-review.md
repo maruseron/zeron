@@ -13,24 +13,30 @@ when bundle scope or sequencing changes.
 
 ## Current state
 
-The tracker records 124 ZEPs: 62 shipped, 15 planned, and 41 unscheduled. The remaining six rows
-are process entries, deferred work, or not applicable. `0.7.0` is the active release bundle;
-`0.8.0` is a proposed follow-on bundle with no candidates yet.
+The tracker records 127 ZEPs: 62 shipped, 15 planned, 4 candidates, and 40 unscheduled. The
+remaining six rows are process entries, deferred work, or not applicable. `0.7.0` is release-ready;
+`0.8.0` is the normalization bundle with four candidates and an open acceptance queue, and `0.9.0`
+is the proposed effect-control follow-on.
 
 ### Bundle summary
 
 | Bundle | Theme | Current state | Contents |
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization of already implemented work | Shipped | 24 rows |
-| `0.7.0` | Type identity, reification, and type bounds | Planned; implementation complete | 15 planned; acceptance queue closed |
-| `0.8.0` | Effect control and response typing | Proposed; no candidates | ZEP-0118 and ZEP-0110 headline the bundle |
+| `0.7.0` | Type identity, reification, and type bounds | Planned; release-ready | 15 planned; acceptance queue closed |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 4 candidates | ZEP-0117, ZEP-0124, ZEP-0125, ZEP-0126 |
+| `0.9.0` | Effect control and response typing | Proposed; no candidates | ZEP-0118 and ZEP-0110 headline the bundle |
 
-`0.7.0` is the active release plan. Its 15 rows are `Planned`; release scope is approved.
-`0.8.0` is a planning target with no candidates yet, not a scheduled release.
+`0.7.0` is the active release plan and is ready to publish. Its 15 rows are `Planned`; release scope
+is approved. `0.8.0` is the next target: its four candidates are accepted designs and cover
+normalization rather than control flow. `0.9.0` is a planning target with no candidates yet, not a
+scheduled release.
+
 The bundles stay separate because `0.7.0` changes type identity, runtime descriptors, type-bound
-tests, and effect payload identity, while `0.8.0` changes control flow through response-typed
-effects, resumption, and the async surface. Keeping them separate concentrates the API-index and
-standard-library version bumps in one release instead of mixing them with a new `raise` typing rule.
+tests, and effect payload identity, while `0.9.0` changes control flow through response-typed
+effects, resumption, and the async surface. `0.8.0` sits between them as a bounded normalization
+release so the identity work and the new `raise` typing rule do not force response metadata plus
+`Yield`, `Ask`, and `Log` into the same API-index and standard-library bumps.
 
 ## `0.7.0` — Type identity, reification, and type bounds
 
@@ -73,6 +79,9 @@ The `0.7.0` acceptance queue is closed. ZEP-0109 and ZEP-0116 have implemented d
 and is `Unscheduled`; ZEP-0108 remains `Deferred` and outside the bundle. No acceptance-queue item
 remains, and no further row joins `0.7.0` without a new, explicit bundle decision.
 
+The implementation is complete and the bundle is release-ready. The rows stay `Planned` until the
+release is published and then move to `Shipped` / `0.7.0`.
+
 ZEP-0116's accepted scope is mixed and nested opening, the `else if` and value-producing `if`
 placements, and complete escape rejection. Binder-declared bounds and markers, `C<in B>` opening,
 result-position existentials, escape approximation, and variance changes remain outside the design,
@@ -108,11 +117,71 @@ release stays coherent because its items share the same identity machinery and v
 ZEP-0116 deliberately leaves escape approximation and result-position existentials out so it does
 not add a second ABI alongside ZEP-0106.
 
-## `0.8.0` — Effect control and response typing
+## `0.8.0` — Normalization and nominal implementation
 
-`0.8.0` is the proposed effect-control release. It is not scheduled: the headline proposals remain
-`Draft`, and the bundle has no candidates yet. ZEP-0107 is `Accepted` but has been removed from the
-program bundle and is `Unscheduled`.
+`0.8.0` is the proposed normalization release. Its four candidates are accepted and cover project
+configuration and documentation, nominal static evidence, optional HKT blocks, and the entry-point
+contract. None changes `raise` or `handle` typing, and none introduces a new runtime control-flow
+mechanism.
+
+### Candidate set
+
+| ZEP | Name | Status | Role |
+| --- | --- | --- | --- |
+| ZEP-0117 | Declarative Project Targets and Generated CLI/Manifest Reference | Accepted | Tooling and configuration: `[build]`, `[targets]`, and generated CLI/manifest references; no runtime ABI |
+| ZEP-0124 | Nominal Static Contract Implementation | Accepted | Nominal static evidence through public class static functions and first-order block entries |
+| ZEP-0125 | Optional Higher-Kinded Implementation Blocks | Accepted | Header `is` conformance plus public members replaces the mandatory block |
+| ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Accepted | Entry values are interpreted through `Main<A>` evidence; standard witnesses for `Unit`, `Int`, and `Result` |
+
+ZEP-0117 is independent. It should land in two stages: first extract command, option, and
+manifest-schema metadata and generate the reference pages with a staleness test; then add `[build]`,
+`[targets]`, default-target selection, inheritance and precedence, and target-aware compilation and
+launch. It changes the CLI and manifest surface but not language semantics, the runtime, the
+standard library, or the API index.
+
+ZEP-0124 and ZEP-0125 are independently decidable but share one static/receiverless matcher.
+Implement ZEP-0124 first, then reuse the matcher for receiverless HKT operations in ZEP-0125.
+Validate both through the same resolver, emitter, API-index, separate-compilation, LSP, and
+formatter cycle. ZEP-0124 removes the blanket witness-only diagnostic; ZEP-0125 replaces the
+mandatory-block diagnostic. Both changes need their tests and guide examples updated together.
+
+ZEP-0126 depends on the static-requirement matcher for nominal `Main<A>` conformance, so it should
+land after ZEP-0124. Its witness-only form is independently implementable, but shipping the entry
+rule before the matcher exists would require rewriting the entry resolution a second time. It also
+touches the launch path that ZEP-0117 parameterizes per target, so its entry tests must run against
+the target-aware build rather than a single default entry.
+
+### Acceptance queue for `0.8.0`
+
+The queue is open for further normalization items. ZEP-0126 was the first entry and has been
+promoted:
+
+| ZEP | Name | Status | Role |
+| --- | --- | --- | --- |
+| ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Accepted / `Candidate` | Formalize `main` return values, entry evidence, and effectful entry interpretation |
+
+ZEP-0126 was accepted on 2026-11-13. The review settled the `Main.run` effect row (`raises Effect`,
+with pure witnesses allowed by row subtyping), the placement of the standard witnesses (ordinary
+`default` witnesses in `zeron.lang`, with no new intrinsic kind), `Main<Int>` semantics (`0` returns
+normally, anything else exits), and the `Result` policy (one non-zero status in the first release,
+message text deferred). What remains open is implementation detail: the exact failure text, the
+`System.err` binding, `main` visibility, and future async or response-typed entry behavior.
+
+### Scope and risk
+
+The bundle is small by mechanism. None of its rows adds runtime dispatch, continuation support, or a
+new effect typing rule. The main risk is consistency across surfaces: ZEP-0124 and ZEP-0125 must not
+diverge on static matching, diagnostics, or separate-compilation resolution, ZEP-0117 makes
+generated documentation part of the tested build, and ZEP-0126 changes the entry rule that every
+other row's examples and integration tests go through. An API-index schema bump is not assumed;
+ZEP-0124 and ZEP-0125 should prefer deterministic re-matching unless a concrete export gap justifies
+one, and ZEP-0126 needs only the existing witness metadata.
+
+## `0.9.0` — Effect control and response typing
+
+The effect-control bundle moves to `0.9.0` now that `0.8.0` carries normalization. It is not
+scheduled: the headline proposals remain `Draft`, and the bundle has no candidates yet. ZEP-0107 is
+`Accepted` but has been removed from the program bundle and is `Unscheduled`.
 
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
@@ -128,7 +197,7 @@ ZEP-0123 is a Draft syntax companion: it proposes the `admits` clause and respon
 markers, and its `effect<R>` form depends on ZEP-0118. It remains `Unscheduled` and is not a
 candidate.
 
-### Path to a `0.8.0` candidate set
+### Path to a `0.9.0` candidate set
 
 1. **Resolve ZEP-0118's open design points and accept it.** The remaining blockers are response
    syntax and generic response bounds, the interaction with ZEP-0013's explicit `case Effect`
@@ -138,9 +207,9 @@ candidate.
    ZEP-0118.
 2. **Accept ZEP-0110 as the notation companion.** It adds a block form to `handle` without changing
    semantics.
-3. **Mark ZEP-0118 and ZEP-0110 `Candidate` for `0.8.0` after acceptance**, not before.
+3. **Mark ZEP-0118 and ZEP-0110 `Candidate` for `0.9.0` after acceptance**, not before.
 4. **Ship ZEP-0111 in `0.7.0` if possible.** It is already implemented and notation-only. If it
-   slips, it can join `0.8.0`.
+   slips, it can join `0.9.0`.
 
 ZEP-0107 is outside this plan. If it returns, it first needs the generic-effect propagation slice
 that ZEP-0005 leaves deferred: applications containing type parameters, forwarding through generic
@@ -153,7 +222,7 @@ calls, and omitted handler arguments.
 - **ZEP-0120 waits for ZEP-0118 and ZEP-0112.** Its first backend is blocking `await` over
   `Task.value()`, so it cannot precede the runtime primitive.
 - **ZEP-0119 stays research.** Acceptance is gated on the backend prototype and the continuation
-  ABI questions recorded in the proposal. It is not a `0.8.0` commitment.
+  ABI questions recorded in the proposal. It is not a `0.9.0` commitment.
 - **ZEP-0121 stays `Deferred`.** Multi-shot resumption needs a concrete use case that `do`-notation
   cannot serve, plus answers to the resource, mutation, handler-state, cancellation, and type-system
   questions in the proposal.
@@ -161,24 +230,28 @@ calls, and omitted handler arguments.
 ### Scope and risk
 
 ZEP-0118 depends on the identity and payload work in `0.7.0`, but it also changes global `raise`
-typing and handler reachability. Bundling it with `0.7.0` would join two open designs and force
-response metadata plus `Yield`, `Ask`, and `Log` into the same API-index and standard-library bumps.
-ZEP-0119 is prototype-gated, ZEP-0120 depends on two other proposals, and ZEP-0121 is `Deferred`.
-None of those is a defensible `0.7.0` commitment.
+typing and handler reachability. `0.8.0` is intentionally limited to normalization, so response
+metadata plus `Yield`, `Ask`, and `Log` do not share its API-index and standard-library validation
+cycle. ZEP-0119 is prototype-gated, ZEP-0120 depends on two other proposals, and ZEP-0121 is
+`Deferred`. None of those is a defensible `0.9.0` commitment.
 
 ## Open planning decisions
 
-- The `0.7.0` acceptance queue is closed; decide only whether an existing planned item slips, not
-  whether a new row joins the bundle.
-- Decide whether ZEP-0111 ships in `0.7.0` or falls back to `0.8.0`.
+- Publish `0.7.0`, then move its 15 rows to `Shipped` / `0.7.0`. Its acceptance queue is closed;
+  decide only whether an existing planned item slips.
+- Decide whether ZEP-0111 ships in `0.7.0` or falls back to `0.9.0`.
+- The initial `0.8.0` candidate set is ZEP-0117, ZEP-0124, ZEP-0125, and ZEP-0126. Decide whether
+  further small normalization items join the bundle before its scope is approved.
+- Settle the ZEP-0126 implementation detail before coding begins: the exact `Result` failure text,
+  whether it uses a new `System.err` binding, and whether `main` must be `public`.
 - Resolve ZEP-0118's response syntax, generic response bounds, catch-all interaction, and carrier
-  policy before proposing `0.8.0` candidates.
+  policy before proposing `0.9.0` candidates.
 - Decide whether the ZEP-0112 scope/task spike is complete enough to schedule independently.
 
 ## Backlog after the planned bundles
 
-These items are not in `0.7.0` or `0.8.0`. They close already shipped gaps or start new subsystems,
-and they follow the two planned bundles.
+These items are not in `0.7.0`, `0.8.0`, or `0.9.0`. They close already shipped gaps or start new
+subsystems, and they follow the three planned bundles.
 
 1. **ZEP-0091 — Annotation consumption.** Accepted and unscheduled. Deliver Direction B
    (compiler-recognized annotations) first, then Direction A (contract-directed `from` bindings).
@@ -241,6 +314,10 @@ These decisions shape the current plan. Details live in each ZEP.
   `Planned` for `0.7.0`. Mixed and nested patterns, `else if` and value-producing `if`
   placements, and branch escape rejection landed; binder bounds, `in` opening, result-position
   existentials, escape approximation, and variance changes are out.
+- **ZEP-0117:** declarative project targets and generated references; `[build]`, `[targets]`, a
+  positional target for `build`/`run`, `--deny-warnings`/`--no-deny-warnings` precedence, and
+  generated command and manifest reference pages. Accepted and `Candidate` for `0.8.0`; no
+  language, runtime, standard-library, or API-index change.
 - **ZEP-0110:** block form of `handle`; notation only, no semantic change.
 - **ZEP-0111:** `do` with `let x <- e` binds, mandatory final `yield`, and receiver-call lowering
   through the `Monad` witness; implemented.
@@ -254,10 +331,14 @@ These decisions shape the current plan. Details live in each ZEP.
   ZEP-0120 are `Draft`; ZEP-0121 is `Deferred`; ZEP-0007 is `Superseded`.
 - **ZEP-0124:** nominal static contract implementation; public class static functions satisfy
   type-position requirements, with implementation-block static entries for generic-class cases.
-  Draft and unscheduled.
+  Accepted 2026-11-13 and `Candidate` for `0.8.0`.
 - **ZEP-0125:** optional HKT implementation blocks; `is` conformance plus public members supplies
   receiver-marked and receiverless operations, with explicit blocks retained for overrides and
-  non-member implementations. Draft and unscheduled.
+  non-member implementations. Accepted 2026-11-13 and `Candidate` for `0.8.0`.
+- **ZEP-0126:** compiler-owned `Main<A>` entry contract; `main` returns a closed entry value and
+  the compiler calls `Main<A>.run`. `Unit`, `Int`, and `Result<Unit, E>` entry behavior is supplied
+  by ordinary `default` witnesses in `zeron.lang`, and `Main.run` is declared `raises Effect`.
+  Accepted 2026-11-13 and `Candidate` for `0.8.0`.
 
 ## Planning rules
 
@@ -265,16 +346,17 @@ These decisions shape the current plan. Details live in each ZEP.
   `Unscheduled`; that is not an error by itself.
 - A ZEP cannot move to `Candidate` while it is `Draft` or `Deferred`; accept the design first.
 - `Candidate` is a proposed release target, not a commitment. `Planned` records an approved bundle.
-- The `0.7.0` description is approved scope: its 15 rows are `Planned`. The `0.8.0` description
-  remains a planning record.
+- The `0.7.0` description is approved scope: its 15 rows are `Planned` and release-ready. The
+  `0.8.0` description has four accepted candidates; the `0.9.0` description remains a planning
+  record.
 - The `0.7.0` acceptance queue is closed. The 15 planned rows are the release set; ZEP-0107 and
   ZEP-0108 are outside the program bundle.
 - `0.6.0` shipped with 24 rows. ZEP-0068 remains `Accepted` because its external-name and adapter
   scope stays open under ZEP-0091, ZEP-0097, and ZEP-0098.
-- Do not reuse a ZEP number. The next available number is `0123`.
+- Do not reuse a ZEP number. The next available number is `0127`.
 - Routine fixes and contained changes do not need a ZEP.
 - `pom.xml` records `0.7.0`; `CHANGELOG.md` retains the `0.6.0` history and releases `0.7.0` from
-  the current entry. The tracker rows for the shipped bundle read `Shipped` / `0.6.0`.
+  the current entry. The `0.7.0` rows move from `Planned` to `Shipped` / `0.7.0` after publication.
 
 ## References
 

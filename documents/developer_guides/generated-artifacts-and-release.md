@@ -86,7 +86,8 @@ backward-compatibility behavior for older indexes.
 
 The script reads the POM version and both index versions, then:
 
-1. Runs `mvn clean package`.
+1. Builds a temporary test installation and runs `mvn clean package` with it on `PATH` and `zeron.home`
+   set, so the test suite does not depend on a system-wide Zeron installation.
 2. Stages `target/release-work/zeron-<version>/` with `bin/`, `lib/`, `share/zeron/errorcode/`, and
    `share/zeron/stdlib/`.
 3. Copies the shaded compiler JAR, launcher scripts, explanation resources, and all standard-library

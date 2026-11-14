@@ -127,15 +127,16 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Planned | 0.7.0 |
 | [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Planned | 0.7.0 |
 | [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Planned | 0.7.0 |
-| [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Draft | Unscheduled | — |
+| [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Accepted | Candidate | 0.8.0 |
 | [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Draft | Unscheduled | — |
 | [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Unscheduled | — |
 | [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Unscheduled | — |
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Unscheduled | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Planned | 0.7.0 |
 | [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Explicit Effect Responses | Draft | Unscheduled | — |
-| [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Draft | Unscheduled | — |
-| [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Draft | Unscheduled | — |
+| [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Accepted | Candidate | 0.8.0 |
+| [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Accepted | Candidate | 0.8.0 |
+| [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Accepted | Candidate | 0.8.0 |
 
 ## Release bundles
 
@@ -148,8 +149,9 @@ sequencing.
 | Bundle | Theme | Current state | Contents |
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization | Shipped | 24 rows |
-| `0.7.0` | Type identity, reification, and type bounds | Planned | Release scope approved; 15 planned; acceptance queue closed |
-| `0.8.0` | Effect control and response typing | Proposed | No candidates; ZEP-0118 and ZEP-0110 headline the bundle |
+| `0.7.0` | Type identity, reification, and type bounds | Planned; release-ready | 15 planned; acceptance queue closed |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 4 candidates | ZEP-0117, ZEP-0124, ZEP-0125, and ZEP-0126 |
+| `0.9.0` | Effect control and response typing | Proposed | No candidates; ZEP-0118 and ZEP-0110 headline the bundle |
 
 ### `0.7.0` — type identity, reification, and type bounds
 
@@ -171,26 +173,58 @@ approximation, and variance changes remain outside the design.
 
 The `0.7.0` acceptance queue is closed. [ZEP-0107](./ZEP-0107.md) remains `Accepted` but has been
 removed from the program bundle and is `Unscheduled`; [ZEP-0108](./ZEP-0108.md) remains `Deferred`
-and is likewise outside the bundle.
+and is likewise outside the bundle. The bundle is release-ready; its rows move to `Shipped` /
+`0.7.0` only after the release is published.
 
-### `0.8.0` — effect control and response typing
+### `0.8.0` — normalization and nominal implementation
 
-No row is a candidate yet. The bundle is proposed around the effect-control work, and its headline
-proposals remain `Draft`. ZEP-0107 is `Accepted` but has been removed from the program bundle and
-stays `Unscheduled`. Its implementation would require the generic-effect propagation work that
-ZEP-0005 leaves deferred: applications containing type parameters, forwarding through generic
-calls, and omitted handler arguments.
+The bundle targets smaller normalization work rather than new control-flow semantics. Its four
+candidates are:
+
+- [ZEP-0117](./ZEP-0117.md) — declarative project targets and generated CLI/manifest reference.
+  A tooling and configuration change with no language, runtime, standard-library, compiled-library,
+  or API-index compatibility impact.
+- [ZEP-0124](./ZEP-0124.md) — nominal static contract implementation. Public class static functions
+  and first-order `implementation` block entries satisfy static requirements directly.
+- [ZEP-0125](./ZEP-0125.md) — optional higher-kinded implementation blocks. An `is` conformance plus
+  public members supplies HKT operations when no explicit block is present.
+- [ZEP-0126](./ZEP-0126.md) — compiler-owned `Main<A>` entry-point contract. A launchable `main`
+  returns a closed entry value, and the generated launcher interprets it through `Main<A>` evidence
+  after the user function returns.
+
+ZEP-0124 and ZEP-0125 are implementation-coupled through one static/receiverless matcher, even
+though they are independently decidable designs. They should be implemented and validated together
+so the matcher, diagnostics, and separate-compilation behavior stay consistent. ZEP-0117 is
+independent: it is the only candidate that changes the CLI and manifest surface, and it adds no
+runtime ABI. ZEP-0126 is the only candidate that changes the entry-point rule; it depends on the
+static-requirement work in ZEP-0124 for nominal `Main<A>` conformance, but its witness-only form can
+ship independently. The bundle does not change `raise` or `handle` typing.
+
+Further small normalization items may join `0.8.0` as additional candidates; these four are the
+initial target.
+
+The `0.8.0` acceptance queue remains open for further normalization items. [ZEP-0126](./ZEP-0126.md)
+was reviewed there and is now `Accepted` / `Candidate`, so it counts in the bundle above.
+
+### `0.9.0` — effect control and response typing
+
+The effect-control bundle moves to `0.9.0` now that `0.8.0` is reserved for normalization. No row is
+a candidate yet. The bundle is proposed around the effect-control work, and its headline proposals
+remain `Draft`. ZEP-0107 is `Accepted` but has been removed from the program bundle and stays
+`Unscheduled`. Its implementation would require the generic-effect propagation work that ZEP-0005
+leaves deferred: applications containing type parameters, forwarding through generic calls, and
+omitted handler arguments.
 
 Proposed headline bundle: [ZEP-0118](./ZEP-0118.md) (response-typed effects and tail-resumptive
 handlers), then [ZEP-0110](./ZEP-0110.md) (block-bodied handlers).
-[ZEP-0111](./ZEP-0111.md) joins `0.8.0` only if it does not ship in `0.7.0`.
+[ZEP-0111](./ZEP-0111.md) joins `0.9.0` only if it does not ship in `0.7.0`.
 
 [ZEP-0112](./ZEP-0112.md) is an independent library track. [ZEP-0120](./ZEP-0120.md) depends on
 ZEP-0118 and ZEP-0112. [ZEP-0119](./ZEP-0119.md) is prototype-gated, and
 [ZEP-0121](./ZEP-0121.md) is `Deferred`.
 
 ZEP-0118 and ZEP-0110 remain `Draft`; ZEP-0000 requires an Accepted design before either can be
-marked `Candidate` or `Planned`.
+marked `Candidate` or `Planned` for `0.9.0`.
 
 [ZEP-0123](./ZEP-0123.md) is a `Draft` syntax companion to this bundle: it proposes the `admits`
 clause and response-indexed effect markers, and its `effect<R>` form depends on ZEP-0118. It

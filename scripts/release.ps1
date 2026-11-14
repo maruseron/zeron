@@ -24,10 +24,44 @@ $archivePath = Join-Path $releaseRoot "$packageName.zip"
 $compilerJar = Join-Path $stageRoot "lib\zeron.jar"
 $standardLibraryJarName = "zeron-stdlib-index-v$libraryIndexVersion-api-v$standardLibraryApiVersion.jar"
 $standardLibraryJar = Join-Path $stageRoot "lib\$standardLibraryJarName"
+$testInstallationRoot = Join-Path ([System.IO.Path]::GetTempPath()) "zeron-test-install-$([guid]::NewGuid().ToString('N'))"
+$previousPath = $env:Path
 
 Push-Location $repositoryRoot
 try {
-    & mvn clean package
+    $testCompilerJar = Join-Path $testInstallationRoot "lib\zeron.jar"
+    $testStandardLibraryJar = Join-Path $testInstallationRoot "lib\$standardLibraryJarName"
+
+    Write-Output "Staging a temporary Zeron installation for the test suite..."
+    & mvn -B -DskipTests package
+    if ($LASTEXITCODE -ne 0) { throw "Maven bootstrap package failed with exit code $LASTEXITCODE." }
+
+    $bootstrapCompilerJar = Join-Path $repositoryRoot "target\zeron-$projectVersion.jar"
+    if (-not (Test-Path -LiteralPath $bootstrapCompilerJar -PathType Leaf)) {
+        throw "Expected bootstrap compiler JAR was not produced: $bootstrapCompilerJar"
+    }
+
+    New-Item -ItemType Directory -Path (Join-Path $testInstallationRoot "bin") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $testInstallationRoot "lib") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $testInstallationRoot "share\zeron\errorcode") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $testInstallationRoot "share\zeron\stdlib") -Force | Out-Null
+
+    Copy-Item -LiteralPath $bootstrapCompilerJar -Destination $testCompilerJar
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot "distribution\bin\zeron") `
+        -Destination (Join-Path $testInstallationRoot "bin\zeron")
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot "distribution\bin\zeron.cmd") `
+        -Destination (Join-Path $testInstallationRoot "bin\zeron.cmd")
+    Copy-Item -Path (Join-Path $repositoryRoot "src\main\resources\errorcode\*.md") `
+        -Destination (Join-Path $testInstallationRoot "share\zeron\errorcode")
+    Copy-Item -Path (Join-Path $repositoryRoot "src\main\resources\stdlib\*") `
+        -Destination (Join-Path $testInstallationRoot "share\zeron\stdlib") -Recurse
+
+    & java -jar $testCompilerJar --build-stdlib (Join-Path $testInstallationRoot "lib\stdlib") `
+        --jar-output $testStandardLibraryJar
+    if ($LASTEXITCODE -ne 0) { throw "Test standard-library packaging failed with exit code $LASTEXITCODE." }
+
+    $env:Path = "$(Join-Path $testInstallationRoot 'bin');$previousPath"
+    & mvn "-Dzeron.home=$testInstallationRoot" clean package
     if ($LASTEXITCODE -ne 0) { throw "Maven package failed with exit code $LASTEXITCODE." }
 
     $builtCompilerJar = Join-Path $repositoryRoot "target\zeron-$projectVersion.jar"
@@ -164,4 +198,8 @@ stdlib = "source"
     Write-Output "  $archivePath.sha256"
 } finally {
     Pop-Location
+    $env:Path = $previousPath
+    if (Test-Path -LiteralPath $testInstallationRoot) {
+        Remove-Item -LiteralPath $testInstallationRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }

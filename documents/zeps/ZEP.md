@@ -15,7 +15,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0002](./ZEP-0002.md) | Explicit Shared Mutable State in Lambdas | Implemented | Shipped | 0.3.0 |
 | [ZEP-0003](./ZEP-0003.md) | Constraint-Aware Let-Bound Lambda Generalization | Implemented | Shipped | 0.4.0 |
 | [ZEP-0004](./ZEP-0004.md) | Complete Generic Witness Overlap Checking | Implemented | Shipped | 0.2.0 |
-| [ZEP-0005](./ZEP-0005.md) | Generic Effect Payloads with Closed Applied Identity | Implemented | Planned | 0.7.0 |
+| [ZEP-0005](./ZEP-0005.md) | Generic Effect Payloads with Closed Applied Identity | Implemented | Shipped | 0.7.0 |
 | [ZEP-0006](./ZEP-0006.md) | First-Class Reusable Typed-Effect Handlers | Superseded | Unscheduled | — |
 | [ZEP-0007](./ZEP-0007.md) | Resumable Algebraic Effects Exploration | Superseded | Unscheduled | — |
 | [ZEP-0008](./ZEP-0008.md) | Explicit Contract Derivation | Implemented | Shipped | 0.3.0 |
@@ -23,9 +23,9 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0010](./ZEP-0010.md) | Generic Admissibility Markers | Superseded | Shipped | 0.5.0 |
 | [ZEP-0011](./ZEP-0011.md) | Standard Library Phase 1: I/O, Environment, and Time | Implemented | Shipped | 0.3.0 |
 | [ZEP-0012](./ZEP-0012.md) | Pre-1.0 and Major-Series Versioning | Accepted | Not applicable | — |
-| [ZEP-0013](./ZEP-0013.md) | Effect Subtyping and the Top Effect Type | Implemented | Planned | 0.7.0 |
+| [ZEP-0013](./ZEP-0013.md) | Effect Subtyping and the Top Effect Type | Implemented | Shipped | 0.7.0 |
 | [ZEP-0014](./ZEP-0014.md) | Stable Generic Type Admissibility | Rejected | Unscheduled | — |
-| [ZEP-0015](./ZEP-0015.md) | Runtime Reification of Applied Type Identity | Implemented | Planned | 0.7.0 |
+| [ZEP-0015](./ZEP-0015.md) | Runtime Reification of Applied Type Identity | Implemented | Shipped | 0.7.0 |
 | [ZEP-0016](./ZEP-0016.md) | Standard Library Phase 2: Math, Characters, and Networking | Superseded | Unscheduled | — |
 | [ZEP-0017](./ZEP-0017.md) | Anonymous contract implementations | Implemented | Shipped | 0.3.0 |
 | [ZEP-0018](./ZEP-0018.md) | Final-Version Release Targets in ZEP Tracker | Accepted | Not applicable | — |
@@ -64,7 +64,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0051](./ZEP-0051.md) | Generic Covariance for Zeron | Implemented | Shipped | 0.5.0 |
 | [ZEP-0052](./ZEP-0052.md) | Use-Site Variance and Type Projections | Implemented | Shipped | 0.5.0 |
 | [ZEP-0053](./ZEP-0053.md) | Generic-Aware Runtime Type Tests and Safe Casts | Implemented | Shipped | 0.5.0 |
-| [ZEP-0054](./ZEP-0054.md) | Nominal Effect Payload Types | Implemented | Planned | 0.7.0 |
+| [ZEP-0054](./ZEP-0054.md) | Nominal Effect Payload Types | Implemented | Shipped | 0.7.0 |
 | [ZEP-0055](./ZEP-0055.md) | Effect-Kinded Generic Parameters | Superseded | Shipped | 0.5.0 |
 | [ZEP-0056](./ZEP-0056.md) | Named Reusable Typed-Effect Handler Declarations | Implemented | Shipped | 0.5.0 |
 | [ZEP-0057](./ZEP-0057.md) | First-Class Typed-Effect Handler Types | Implemented | Shipped | 0.5.0 |
@@ -82,7 +82,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0069](./ZEP-0069.md) | Transparent Data Classes | Implemented | Shipped | 0.6.0 |
 | [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Draft | Unscheduled | — |
 | [ZEP-0071](./ZEP-0071.md) | Numeric Hierarchy and Context-Directed Literals | Implemented | Shipped | 0.6.0 |
-| [ZEP-0072](./ZEP-0072.md) | Class-Scoped Static Functions as Companion Namespace Members | Implemented | Planned | 0.7.0 |
+| [ZEP-0072](./ZEP-0072.md) | Class-Scoped Static Functions as Companion Namespace Members | Implemented | Shipped | 0.7.0 |
 | [ZEP-0073](./ZEP-0073.md) | Documentation Comments for Declarations | Implemented | Shipped | 0.6.0 |
 | [ZEP-0074](./ZEP-0074.md) | Numeric Literal Suffixes for Newtypes | Draft | Unscheduled | — |
 | [ZEP-0075](./ZEP-0075.md) | General Contextual Numeric Literal Construction | Draft | Unscheduled | — |
@@ -110,29 +110,29 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0097](./ZEP-0097.md) | Annotation Target for Model Mapping Clauses | Accepted | Unscheduled | — |
 | [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Draft | Unscheduled | — |
 | [ZEP-0099](./ZEP-0099.md) | Row-Polymorphic Derived Witnesses and Inclusion Matching | Draft | Unscheduled | — |
-| [ZEP-0100](./ZEP-0100.md) | Callable References for Methods, Constructors, and Static Functions | Implemented | Planned | 0.7.0 |
+| [ZEP-0100](./ZEP-0100.md) | Callable References for Methods, Constructors, and Static Functions | Implemented | Shipped | 0.7.0 |
 | [ZEP-0101](./ZEP-0101.md) | Field Representation Adapters for Model Mappings | Draft | Unscheduled | — |
 | [ZEP-0102](./ZEP-0102.md) | Generic Models through Model Factories | Draft | Unscheduled | — |
 | [ZEP-0103](./ZEP-0103.md) | Polymorphic Models for Closed Sum Types | Draft | Unscheduled | — |
-| [ZEP-0104](./ZEP-0104.md) | Wildcard Existentials and Type-Bound Pattern Matching | Implemented | Planned | 0.7.0 |
-| [ZEP-0105](./ZEP-0105.md) | General Existential Types and Escape Semantics | Implemented | Planned | 0.7.0 |
-| [ZEP-0106](./ZEP-0106.md) | Stored Existentials and Holder ABI | Implemented | Planned | 0.7.0 |
+| [ZEP-0104](./ZEP-0104.md) | Wildcard Existentials and Type-Bound Pattern Matching | Implemented | Shipped | 0.7.0 |
+| [ZEP-0105](./ZEP-0105.md) | General Existential Types and Escape Semantics | Implemented | Shipped | 0.7.0 |
+| [ZEP-0106](./ZEP-0106.md) | Stored Existentials and Holder ABI | Implemented | Shipped | 0.7.0 |
 | [ZEP-0107](./ZEP-0107.md) | Ancestor-Aware Runtime Type Descriptors | Accepted | Unscheduled | — |
 | [ZEP-0108](./ZEP-0108.md) | Contract-Bound Runtime Tests | Deferred | Deferred | — |
-| [ZEP-0109](./ZEP-0109.md) | Rank-2 Polymorphism: Polymorphic Function Types and Generic Lambdas | Implemented | Planned | 0.7.0 |
+| [ZEP-0109](./ZEP-0109.md) | Rank-2 Polymorphism: Polymorphic Function Types and Generic Lambdas | Implemented | Shipped | 0.7.0 |
 | [ZEP-0110](./ZEP-0110.md) | Block-Bodied Handler Expressions | Draft | Unscheduled | — |
-| [ZEP-0111](./ZEP-0111.md) | Witness-Dispatched Do-Notation | Implemented | Planned | 0.7.0 |
+| [ZEP-0111](./ZEP-0111.md) | Witness-Dispatched Do-Notation | Implemented | Shipped | 0.7.0 |
 | [ZEP-0112](./ZEP-0112.md) | Structured Concurrency on Virtual Threads | Draft | Unscheduled | — |
 | [ZEP-0113](./ZEP-0113.md) | Declaration-Site Covariance for Sum and Product Types | Draft | Unscheduled | — |
-| [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Planned | 0.7.0 |
-| [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Planned | 0.7.0 |
-| [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Planned | 0.7.0 |
+| [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Shipped | 0.7.0 |
+| [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Shipped | 0.7.0 |
+| [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Shipped | 0.7.0 |
 | [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Accepted | Candidate | 0.8.0 |
 | [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Draft | Unscheduled | — |
 | [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Unscheduled | — |
 | [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Unscheduled | — |
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Unscheduled | — |
-| [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Planned | 0.7.0 |
+| [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Shipped | 0.7.0 |
 | [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Explicit Effect Responses | Draft | Unscheduled | — |
 | [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Accepted | Candidate | 0.8.0 |
 | [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Accepted | Candidate | 0.8.0 |

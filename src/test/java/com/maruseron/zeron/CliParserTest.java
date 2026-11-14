@@ -42,6 +42,30 @@ public final class CliParserTest {
     }
 
     @Test
+    public void parsesTargetNamesAndWarningPolicyOverrides() throws Exception {
+        final var manifest = createProjectManifest("target-project.toml", "target-src");
+        Files.writeString(manifest, Files.readString(manifest) + """
+                [targets.app]
+                entry = "target-src/Main.zn"
+                """, StandardCharsets.UTF_8);
+        final var build = (CliParser.ProjectCommand) parse(
+                "build", "app", "--manifest", manifest.toString(), "--deny-warnings");
+        assertEquals(Optional.of("app"), build.targetName());
+        assertEquals("app", build.target().name());
+        assertTrue(build.denyWarnings());
+
+        final var run = (CliParser.ProjectCommand) parse(
+                "run", "app", "--manifest", manifest.toString(), "--no-deny-warnings");
+        assertFalse(run.denyWarnings());
+        assertTrue(invalid("build", "app", "other", "--manifest", manifest.toString())
+                .message().contains("at most one target"));
+        assertTrue(invalid("build", "--deny-warnings", "--no-deny-warnings",
+                "--manifest", manifest.toString()).message().contains("cannot be combined"));
+        assertTrue(invalid("build", "--no-deny-warnings", "--no-deny-warnings",
+                "--manifest", manifest.toString()).message().contains("only be specified once"));
+    }
+
+    @Test
     public void parsesLspStdioTransportOption() throws Exception {
         final var manifest = createProjectManifest("lsp-project.toml", "lsp-src");
         final var command = (CliParser.LspCommand) parse(

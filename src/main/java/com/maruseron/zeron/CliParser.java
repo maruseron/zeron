@@ -114,17 +114,33 @@ final class CliParser {
         final var launch = args[0].equals("run");
         var manifest = Paths.get("zeron.toml");
         var debug = false;
-        var denyWarnings = false;
+        Boolean denyWarnings = null;
+        var denyWarningsSpecified = false;
+        var noDenyWarningsSpecified = false;
+        String targetName = null;
         var noWarnings = false;
         for (var index = 1; index < args.length; index++) {
             final var argument = args[index];
             if (argument.equals("--debug") || argument.equals("-d")) {
                 debug = true;
             } else if (argument.equals("--deny-warnings")) {
-                if (denyWarnings) {
+                if (denyWarningsSpecified) {
                     return invalid("The --deny-warnings option may only be specified once.");
                 }
+                if (noDenyWarningsSpecified) {
+                    return invalid("The --deny-warnings and --no-deny-warnings options cannot be combined.");
+                }
+                denyWarningsSpecified = true;
                 denyWarnings = true;
+            } else if (argument.equals("--no-deny-warnings")) {
+                if (noDenyWarningsSpecified) {
+                    return invalid("The --no-deny-warnings option may only be specified once.");
+                }
+                if (denyWarningsSpecified) {
+                    return invalid("The --deny-warnings and --no-deny-warnings options cannot be combined.");
+                }
+                noDenyWarningsSpecified = true;
+                denyWarnings = false;
             } else if (argument.equals("--no-warnings")) {
                 if (noWarnings) {
                     return invalid("The --no-warnings option may only be specified once.");
@@ -135,8 +151,12 @@ final class CliParser {
                     return invalid(args[0] + " --manifest requires a TOML file.");
                 }
                 manifest = Paths.get(args[index]);
-            } else {
+            } else if (argument.startsWith("-")) {
                 return invalid("Unknown " + args[0] + " option: " + argument);
+            } else if (targetName != null) {
+                return invalid(args[0] + " accepts at most one target name.");
+            } else {
+                targetName = argument;
             }
         }
         final var manifestError = readableFileError(manifest, "Project manifest");
@@ -152,9 +172,16 @@ final class CliParser {
         } catch (final IllegalArgumentException exception) {
             return invalid(exception.getMessage());
         }
+        final ProjectManifest.ProjectTarget target;
+        try {
+            target = project.selectTarget(Optional.ofNullable(targetName));
+        } catch (final IllegalArgumentException exception) {
+            return invalid(exception.getMessage());
+        }
         final var projectPathError = projectPathError(project);
         if (projectPathError.isPresent()) return invalid(projectPathError.get());
-        return parsed(new ProjectCommand(launch, manifest, debug, denyWarnings, noWarnings, project));
+        return parsed(new ProjectCommand(launch, manifest, debug, Optional.ofNullable(targetName),
+                project, target, denyWarnings, noWarnings));
     }
 
     private static ParseResult parseLspCommand(final String[] args) {
@@ -184,6 +211,9 @@ final class CliParser {
         final var result = parseProjectCommand(projectArgs);
         if (result instanceof InvalidArguments invalidArguments) return invalidArguments;
         final var project = (ProjectCommand) ((Parsed) result).invocation();
+        if (project.targetName().isPresent()) {
+            return invalid("lsp does not accept a target name: " + project.targetName().get());
+        }
         return parsed(new LspCommand(Optional.of(project.manifest())));
     }
 
@@ -192,18 +222,18 @@ final class CliParser {
             final var directoryError = readableDirectoryError(sourceRoot, "Project source root");
             if (directoryError.isPresent()) return directoryError;
         }
-        final var entryError = readableFileError(project.entry(), "Project entry source");
-        if (entryError.isPresent()) return entryError;
-        if (!project.entry().getFileName().toString().endsWith(".zn")) {
-            return Optional.of("Project entry source must have a .zn extension: " + project.entry());
+        for (final var target : project.effectiveTargets()) {
+            final var entryDescription = target.implicit()
+                    ? "Project entry source"
+                    : "Project target '" + target.name() + "' entry source";
+            final var entryError = readableFileError(target.entry(), entryDescription);
+            if (entryError.isPresent()) return entryError;
+            final var outputDescription = target.implicit()
+                    ? "Project output"
+                    : "Project target '" + target.name() + "' output";
+            final var outputError = directoryOutputError(target.outputDirectory(), outputDescription);
+            if (outputError.isPresent()) return outputError;
         }
-        if (project.sourceRoots().stream()
-                .map(path -> path.toAbsolutePath().normalize())
-                .noneMatch(project.entry().toAbsolutePath().normalize()::startsWith)) {
-            return Optional.of("Project entry source must be under a configured source root: " + project.entry());
-        }
-        final var outputError = directoryOutputError(project.outputDirectory(), "Project output");
-        if (outputError.isPresent()) return outputError;
         for (final var library : project.libraryRoots()) {
             final var libraryError = libraryRootError(library);
             if (libraryError.isPresent()) return libraryError;
@@ -522,9 +552,17 @@ final class CliParser {
         public boolean debug() { return false; }
     }
 
-    record ProjectCommand(boolean launch, Path manifest, boolean debug, boolean denyWarnings,
-                          boolean noWarnings, ProjectManifest project)
-            implements Invocation {}
+    record ProjectCommand(boolean launch, Path manifest, boolean debug, Optional<String> targetName,
+                          ProjectManifest project, ProjectManifest.ProjectTarget target,
+                          Boolean denyWarningsOverride, boolean noWarnings) implements Invocation {
+        ProjectCommand {
+            targetName = targetName == null ? Optional.empty() : targetName;
+        }
+
+        public boolean denyWarnings() {
+            return denyWarningsOverride != null ? denyWarningsOverride : target.denyWarnings();
+        }
+    }
 
     record LspCommand(Optional<Path> manifest) implements Invocation {
         @Override

@@ -20,7 +20,37 @@ java-classpath = ["lib/host-api.jar"]
 java-sources = ["java-src"]
 ```
 
-`project.entry` and at least one source root are required. The output defaults to `dist`. When
+At least one source root is required. `project.entry` is required unless a `default-target`
+supplies an entry, and the output defaults to `dist`. A project can also declare typed build policy
+and several runnable targets:
+
+```toml
+[project]
+entry = "src/main.zn"
+source-roots = ["src"]
+output = "dist"
+default-target = "app"
+
+[build]
+deny-warnings = false
+
+[targets.app]
+entry = "src/main.zn"
+output = "dist/app"
+
+[targets.bench]
+entry = "src/bench.zn"
+deny-warnings = true
+```
+
+`zeron build [<target>]` and `zeron run [<target>]` select a named target, or the
+`default-target`/implicit project target when no name is given. A target inherits
+`[project].entry` and `[build].deny-warnings`, and defaults its output to
+`<project.output>/<name>`. Effective outputs must be distinct, and every target entry must be under
+a configured source root. Command-line `--deny-warnings` and `--no-deny-warnings` override manifest
+policy. See the generated [command reference](39-command-reference.md) and
+[manifest reference](40-manifest-reference.md) for every command, option, key, default, and
+validation rule. When
 `[platform].stdlib` is omitted, compilation prefers the compiled standard library bundled in the
 Zeron installation's `lib/` directory when its API index matches the compiler. If the artifact is
 missing or incompatible, the default falls back to the bundled standard-library sources. A complete
@@ -61,9 +91,10 @@ parent must be a writable directory; an existing JAR output must be writable.
 
 ## Build, run, and diagnostics
 
-`zeron build` reads the manifest in the current directory, and `zeron run` builds and launches its
-entry point with the configured runtime classpath. Use `--manifest path/to/zeron.toml` to select a
-different file. `zeron help` lists commands and flags; `zeron help run` or `zeron help --manifest`
+`zeron build` reads the manifest in the current directory, and `zeron run` builds and launches the
+selected target's entry point with the configured runtime classpath. Use `--manifest
+path/to/zeron.toml` to select a different file, and a positional target name to select a declared
+target. `zeron help` lists commands and flags; `zeron help run` or `zeron help --manifest`
 shows focused help. `zeron explain ZR0000` displays a terminal-formatted bundled explanation for a
 diagnostic code. `zeron dump <api-index|class-directory|library.jar>` prints the public API index
 for a library artifact. Use `zeron version` (or `zeron --version`) to identify the running

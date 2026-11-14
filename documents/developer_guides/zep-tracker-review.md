@@ -13,9 +13,9 @@ when bundle scope or sequencing changes.
 
 ## Current state
 
-The tracker records 134 ZEPs: 77 shipped, 0 planned, 12 candidates, and 39 unscheduled. The
+The tracker records 135 ZEPs: 77 shipped, 0 planned, 13 candidates, and 39 unscheduled. The
 remaining six rows are process entries, deferred work, or not applicable. `0.7.0` shipped on
-2026-11-14; `0.8.0` is the normalization bundle with twelve candidates, and `0.9.0` is the proposed
+2026-11-14; `0.8.0` is the normalization bundle with thirteen candidates, and `0.9.0` is the proposed
 effect-control follow-on.
 
 ### Bundle summary
@@ -24,14 +24,15 @@ effect-control follow-on.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization of already implemented work | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 12 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0133; ZEP-0132 lands first |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 13 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0134; ZEP-0132 lands first |
 | `0.9.0` | Effect control and response typing | Proposed; no candidates | ZEP-0118 and ZEP-0110 headline the bundle |
 
 `0.7.0` shipped on 2026-11-14. Its 15 rows are `Shipped`; release scope is approved and complete.
-`0.8.0` is the next target: its twelve candidates are accepted designs and cover normalization,
-nominal representation, standard-library ownership, refinement correctness, and a bounded
-operator-inference improvement rather than control flow. `0.9.0` is a planning target with no
-candidates yet, not a scheduled release.
+`0.8.0` is the next target: its thirteen candidates include twelve accepted designs plus one draft
+targeted proposal, and cover normalization, nominal representation, standard-library ownership,
+refinement correctness, a bounded operator-inference improvement, and function-valued expression
+invocation rather than control flow. `0.9.0` is a planning target with no candidates yet, not a
+scheduled release.
 
 The bundles stay separate because `0.7.0` changes type identity, runtime descriptors, type-bound
 tests, and effect payload identity, while `0.9.0` changes control flow through response-typed
@@ -120,10 +121,11 @@ not add a second ABI alongside ZEP-0106.
 
 ## `0.8.0` — Normalization and nominal implementation
 
-`0.8.0` is the proposed normalization release. Its twelve candidates are accepted and cover project
-configuration, nominal static evidence, optional HKT blocks, the entry-point contract, data-class
-structural access, generalized newtypes, sum parameter bounds, intrinsic declaration ownership,
-refinement correctness, and operator-constraint inference for typeless lambdas. None changes
+`0.8.0` is the proposed normalization release. Its thirteen candidates include twelve accepted
+designs and one draft target, and cover project configuration, nominal static evidence, optional
+HKT blocks, the entry-point contract, data-class structural access, generalized newtypes, sum
+parameter bounds, intrinsic declaration ownership, refinement correctness, operator-constraint
+inference for typeless lambdas, and invocation of function-valued expressions. None changes
 `raise` or `handle` typing, and none introduces a new runtime control-flow mechanism. ZEP-0132 is
 a correctness fix and should land before the rest.
 
@@ -131,7 +133,7 @@ a correctness fix and should land before the rest.
 
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
-| ZEP-0117 | Declarative Project Targets and Generated CLI/Manifest Reference | Accepted | Tooling and configuration: `[build]`, `[targets]`, and generated CLI/manifest references; no runtime ABI |
+| ZEP-0117 | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Tooling and configuration: `[build]`, `[targets]`, and generated CLI/manifest references; no runtime ABI |
 | ZEP-0124 | Nominal Static Contract Implementation | Accepted | Nominal static evidence through public class static functions and first-order block entries |
 | ZEP-0125 | Optional Higher-Kinded Implementation Blocks | Accepted | Header `is` conformance plus public members replaces the mandatory block |
 | ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Accepted | Entry values are interpreted through `Main<A>` evidence; standard witnesses for `Unit`, `Int`, and `Result` |
@@ -143,6 +145,7 @@ a correctness fix and should land before the rest.
 | ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Accepted | `is`/`matches` through composed conditions and stable paths; implicit `this` field/property reads |
 | ZEP-0132 | Nullable Safe-Cast Correction | Accepted | `as?` always yields a nullable target; immediate correctness fix before the rest of the bundle |
 | ZEP-0133 | Operator-Constraint Inference for Typeless Lambdas | Accepted | Infer a rank-1 numeric or comparison scheme for eligible typeless lambdas; `(a, b) -> a + b` becomes `<T: Numeric<T>> (T, T) -> T` and `(a, b) -> a < b` becomes `<T: Comparable<T>> (T, T) -> Boolean` |
+| ZEP-0134 | Invocation of Function-Valued Expressions | Draft | Allow a postfix argument list after any function-valued expression, so `makeFunction()()` and `add(2)(3)` work without a temporary binding or new runtime representation |
 
 ZEP-0132 is the first implementation item. It is a localized correctness fix, and leaving the old
 behavior in place while ZEP-0131 adds chained refinement would let new conditions rely on an
@@ -157,11 +160,11 @@ its `String` inventory should follow the same API-index and separate-compilation
 independent of the representation track: it extends the existing ZEP-0003 constrained-lambda path
 and needs focused lambda, operator, and resolver validation rather than an API-index schema bump.
 
-ZEP-0117 is independent. It should land in two stages: first extract command, option, and
-manifest-schema metadata and generate the reference pages with a staleness test; then add `[build]`,
-`[targets]`, default-target selection, inheritance and precedence, and target-aware compilation and
-launch. It changes the CLI and manifest surface but not language semantics, the runtime, the
-standard library, or the API index.
+ZEP-0117 is independent. It landed in two stages: command, option, and manifest-schema metadata
+with generated reference pages and a staleness test, then `[build]`, `[targets]`, default-target
+selection, inheritance and precedence, and target-aware compilation and launch. It changes the CLI
+and manifest surface but not language semantics, the runtime, the standard library, or the API
+index.
 
 ZEP-0124 and ZEP-0125 are independently decidable but share one static/receiverless matcher.
 Implement ZEP-0124 first, then reuse the matcher for receiverless HKT operations in ZEP-0125.
@@ -192,6 +195,7 @@ the backlog into the same bundle:
 | ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Accepted / `Candidate` | Complete guard-chain refinement and remove routine `this.` reads |
 | ZEP-0132 | Nullable Safe-Cast Correction | Accepted / `Candidate` | Correct `as?` to return `T?` and land before the broader refinement work |
 | ZEP-0133 | Operator-Constraint Inference for Typeless Lambdas | Accepted / `Candidate` | Infer numeric or comparable operator bounds for eligible typeless let-bound lambdas without defaulting to a concrete type |
+| ZEP-0134 | Invocation of Function-Valued Expressions | Draft / `Candidate` | Allow invocation of any non-null function-valued expression; candidate target recorded while design review remains open |
 
 ZEP-0126 was accepted on 2026-11-13. The review settled the `Main.run` effect row (`raises Effect`,
 with pure witnesses allowed by row subtyping), the placement of the standard witnesses (ordinary
@@ -204,7 +208,9 @@ ZEP-0127 was accepted on 2026-11-14. It makes canonical components readable rega
 data class's public modifier, adds root and nested positional patterns over canonical components,
 and fixes the false-unreachable diagnosis for refutable applied cases with the same identity.
 
-ZEP-0128 through ZEP-0133 were accepted on 2026-11-14. ZEP-0132 is a corrective candidate: `as?`
+ZEP-0128 through ZEP-0133 were accepted on 2026-11-14. ZEP-0134 was added as a `Draft` /
+`Candidate` for `0.8.0`; its invocation semantics are proposed but not yet accepted. ZEP-0132 is a
+corrective candidate: `as?`
 must not produce a non-null `T` from a nullable source or strip the `?` from a `T?` target. ZEP-0131
 then makes chained `is`/`matches` conditions carry refinement and allows implicit receiver reads.
 ZEP-0128 adds bounded sum parameters, existential case-local parameters, and context-resolved
@@ -304,11 +310,12 @@ cycle. ZEP-0119 is prototype-gated, ZEP-0120 depends on two other proposals, and
 - `0.7.0` was published on 2026-11-14; its 15 rows are `Shipped` / `0.7.0`, and its acceptance
   queue is closed.
 - ZEP-0111 shipped in `0.7.0`; it does not fall back to `0.9.0`.
-- The `0.8.0` candidate set is now twelve accepted designs. Decide whether to freeze scope there or
-  admit further normalization items.
+- The `0.8.0` candidate set now has thirteen rows: twelve accepted designs plus the draft ZEP-0134.
+  Decide whether to freeze scope there or admit further normalization items.
 - Sequence ZEP-0132 first as the immediate safe-cast correction, then ZEP-0131, then the
-  representation track (ZEP-0070, ZEP-0129, ZEP-0128), with ZEP-0130 and ZEP-0133 independent.
-  Confirm that ordering before implementation begins.
+  representation track (ZEP-0070, ZEP-0129, ZEP-0128), with ZEP-0130, ZEP-0133, and ZEP-0134
+  independent. Confirm that ordering before implementation begins, and accept ZEP-0134 before
+  implementing it.
 - Settle the `String.split` empty-separator and return-type questions, the `charAt`/`at` shape, and
   the regex dialect questions in ZEP-0130 before treating the inventory as complete.
 - Settle the ZEP-0126 implementation detail before coding begins: the exact `Result` failure text,
@@ -383,8 +390,8 @@ These decisions shape the current plan. Details live in each ZEP.
   existentials, escape approximation, and variance changes are out.
 - **ZEP-0117:** declarative project targets and generated references; `[build]`, `[targets]`, a
   positional target for `build`/`run`, `--deny-warnings`/`--no-deny-warnings` precedence, and
-  generated command and manifest reference pages. Accepted and `Candidate` for `0.8.0`; no
-  language, runtime, standard-library, or API-index change.
+  generated command and manifest reference pages. Implemented 2026-11-14 and `Candidate` for
+  `0.8.0`; no language, runtime, standard-library, or API-index change.
 - **ZEP-0110:** block form of `handle`; notation only, no semantic change.
 - **ZEP-0111:** `do` with `let x <- e` binds, mandatory final `yield`, and receiver-call lowering
   through the `Monad` witness; implemented and shipped in `0.7.0`.
@@ -445,16 +452,18 @@ These decisions shape the current plan. Details live in each ZEP.
 
 - Proposal status and release state are independent. A row can be `Implemented` and still
   `Unscheduled`; that is not an error by itself.
-- A ZEP cannot move to `Candidate` while it is `Draft` or `Deferred`; accept the design first.
+- A ZEP normally cannot move to `Candidate` while it is `Draft` or `Deferred`; accept the design
+  first. ZEP-0134 is recorded as a draft target by explicit maintainer direction; treat its
+  `Candidate` row as proposed until its design review is complete.
 - `Candidate` is a proposed release target, not a commitment. `Planned` records an approved bundle.
 - The `0.7.0` description is shipped scope: its 15 rows are `Shipped` / `0.7.0`. The `0.8.0`
-  description has twelve accepted candidates; its acceptance queue remains open. The `0.9.0`
-  description remains a planning record.
+  description has thirteen candidates (twelve accepted designs plus draft ZEP-0134); its acceptance
+  queue remains open. The `0.9.0` description remains a planning record.
 - The `0.7.0` acceptance queue is closed. The 15 shipped rows are the release set; ZEP-0107 and
   ZEP-0108 are outside the program bundle.
 - `0.6.0` shipped with 24 rows. ZEP-0068 remains `Accepted` because its external-name and adapter
   scope stays open under ZEP-0091, ZEP-0097, and ZEP-0098.
-- Do not reuse a ZEP number. The next available number is `0134`.
+- Do not reuse a ZEP number. The next available number is `0135`.
 - Routine fixes and contained changes do not need a ZEP.
 - `pom.xml` records `0.7.0`; `CHANGELOG.md` retains the `0.6.0` history and released `0.7.0` from
   the current entry. The `0.7.0` rows are `Shipped` / `0.7.0`; the next version bump belongs to the

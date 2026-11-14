@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0] - Unreleased
+
+### Tooling and project configuration
+
+- Added ZEP-0117 declarative project targets and generated CLI/manifest references. `zeron.toml`
+  accepts `[build].deny-warnings`, `[targets.<name>]` entries with optional `entry`, `output`, and
+  `deny-warnings`, and `[project].default-target`. `zeron build [<target>]` and `zeron run
+  [<target>]` select a target, resolve manifest policy and command-line overrides, and launch from
+  the target's output directory while retaining one project-wide source and dependency universe.
+  Command, option, and manifest-schema metadata now drive `zeron help` and the generated
+  `guide/39-command-reference.md` and `guide/40-manifest-reference.md` chapters; a test fails when
+  the checked-in pages are stale. No language, runtime, standard-library, or API-index compatibility
+  changes are expected.
+
 ## [0.7.0] - 2026, 13 NOV
 
 ### Compiler and language work

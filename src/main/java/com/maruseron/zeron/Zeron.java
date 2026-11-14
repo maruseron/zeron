@@ -192,11 +192,12 @@ public class Zeron {
 
     private static int runProjectCommand(final CliParser.ProjectCommand command) throws IOException {
         final var project = command.project();
-        final var compilation = runProject(project.sourceRoots(), project.entry(), project.libraryRoots(),
+        final var target = command.target();
+        final var compilation = runProject(project.sourceRoots(), target.entry(), project.libraryRoots(),
                 project.javaClassPathRoots(), project.standardLibraryMode(),
-                project.outputDirectory());
+                target.outputDirectory());
         if (compilation == null || !command.launch() || exitCode() != 0) return exitCode();
-        return runGeneratedClass(compilation.mainClass(), project.outputDirectory(),
+        return runGeneratedClass(compilation.mainClass(), target.outputDirectory(),
                 compilation.libraryRoots(), project.javaClassPathRoots());
     }
 

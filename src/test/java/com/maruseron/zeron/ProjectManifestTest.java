@@ -173,6 +173,205 @@ public final class ProjectManifestTest {
         }
     }
 
+    @Test
+    public void resolvesNamedTargetsThroughBuildPolicyAndDefaults() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-targets-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        try {
+            Files.createDirectories(projectRoot.resolve("src"));
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+                    output = "dist"
+                    default-target = "app"
+
+                    [build]
+                    deny-warnings = true
+
+                    [targets.app]
+                    entry = "src/App.zn"
+
+                    [targets.bench]
+                    entry = "src/Bench.zn"
+                    output = "out/bench"
+                    deny-warnings = false
+                    """);
+
+            final var project = ProjectManifest.load(manifest);
+            assertEquals(java.util.Optional.of("app"), project.defaultTargetName());
+            assertTrue(project.denyWarnings());
+            assertEquals(projectRoot.resolve("src/App.zn"), project.entry());
+            assertEquals(projectRoot.resolve("dist/app"), project.selectTarget(java.util.Optional.empty()).outputDirectory());
+            assertTrue(project.selectTarget(java.util.Optional.empty()).denyWarnings());
+            assertEquals(projectRoot.resolve("out/bench"), project.selectTarget(java.util.Optional.of("bench")).outputDirectory());
+            assertFalse(project.selectTarget(java.util.Optional.of("bench")).denyWarnings());
+            assertEquals(3, project.effectiveTargets().size());
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
+    @Test
+    public void allowsOmittedProjectEntryWhenTheDefaultTargetSuppliesOne() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-target-entry-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        try {
+            Files.createDirectories(projectRoot.resolve("src"));
+            Files.writeString(manifest, """
+                    [project]
+                    source-roots = ["src"]
+                    default-target = "app"
+
+                    [targets.app]
+                    entry = "src/App.zn"
+                    """);
+            final var project = ProjectManifest.load(manifest);
+            assertEquals(projectRoot.resolve("src/App.zn"), project.entry());
+            assertEquals(1, project.effectiveTargets().size());
+            assertEquals(projectRoot.resolve("dist/app"), project.targets().get("app").outputDirectory());
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
+    @Test
+    public void rejectsInvalidDefaultTargetsNamesAndSharedOutputs() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-target-invalid-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        try {
+            Files.createDirectories(projectRoot.resolve("src"));
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+                    default-target = "missing"
+                    """);
+            assertTrue(assertThrows(IllegalArgumentException.class,
+                    () -> ProjectManifest.load(manifest)).getMessage().contains("default-target"));
+
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+
+                    [targets."1bad"]
+                    entry = "src/Main.zn"
+                    """);
+            assertTrue(assertThrows(IllegalArgumentException.class,
+                    () -> ProjectManifest.load(manifest)).getMessage().contains("Invalid target name"));
+
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+
+                    [targets.app]
+                    entry = "src/Main.zn"
+                    output = "dist"
+                    """);
+            assertTrue(assertThrows(IllegalArgumentException.class,
+                    () -> ProjectManifest.load(manifest)).getMessage().contains("share output directory"));
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
+    @Test
+    public void buildsEachSelectedTargetIntoItsOwnOutput() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-target-build-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        try {
+            final var source = projectRoot.resolve("src");
+            Files.createDirectories(source.resolve("app"));
+            Files.createDirectories(source.resolve("bench"));
+            Files.writeString(source.resolve("app/App.zn"), "package app;\nfn main() {}\n");
+            Files.writeString(source.resolve("bench/Bench.zn"), "package bench;\nfn main() {}\n");
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/app/App.zn"
+                    source-roots = ["src"]
+                    output = "dist"
+                    default-target = "app"
+
+                    [platform]
+                    stdlib = "source"
+
+                    [targets.app]
+                    entry = "src/app/App.zn"
+
+                    [targets.bench]
+                    entry = "src/bench/Bench.zn"
+                    """);
+
+            assertEquals(0, Zeron.runCli("build", "--manifest", manifest.toString()));
+            assertTrue(Files.isRegularFile(projectRoot.resolve("dist/app/app/App.class")));
+
+            assertEquals(0, Zeron.runCli("build", "bench", "--manifest", manifest.toString()));
+            assertTrue(Files.isRegularFile(projectRoot.resolve("dist/bench/bench/Bench.class")));
+            assertTrue(Files.isRegularFile(projectRoot.resolve("dist/app/app/App.class")));
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
+    @Test
+    public void commandLineWarningPolicyOverridesManifestAndTargetSettings() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-target-warnings-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        try {
+            final var source = projectRoot.resolve("src");
+            Files.createDirectories(source);
+            Files.writeString(source.resolve("Main.zn"), "fn main() {}\nfn unused(): Int = 1;\n");
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+
+                    [platform]
+                    stdlib = "source"
+
+                    [build]
+                    deny-warnings = true
+                    """);
+
+            assertEquals(71, Zeron.runCli("build", "--manifest", manifest.toString()));
+            assertEquals(0, Zeron.runCli("build", "--manifest", manifest.toString(), "--no-deny-warnings"));
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
+    @Test
+    public void rejectsAnUnknownPositionalTargetWithAvailableNames() throws Exception {
+        final var projectRoot = Files.createTempDirectory(Path.of("target"), "zeron-target-unknown-")
+                .toAbsolutePath().normalize();
+        final var manifest = projectRoot.resolve("zeron.toml");
+        try {
+            Files.createDirectories(projectRoot.resolve("src"));
+            Files.createFile(projectRoot.resolve("src/Main.zn"));
+            Files.writeString(manifest, """
+                    [project]
+                    entry = "src/Main.zn"
+                    source-roots = ["src"]
+
+                    [targets.app]
+                    """);
+            final var result = CliParser.parse("build", "missing", "--manifest", manifest.toString());
+            assertTrue(result instanceof CliParser.InvalidArguments);
+            final var message = ((CliParser.InvalidArguments) result).message();
+            assertTrue(message, message.contains("Unknown target 'missing'"));
+            assertTrue(message, message.contains("app"));
+        } finally {
+            deleteTree(projectRoot);
+        }
+    }
+
     private static void deleteTree(final Path path) throws Exception {
         if (!Files.exists(path)) return;
         try (final var paths = Files.walk(path)) {

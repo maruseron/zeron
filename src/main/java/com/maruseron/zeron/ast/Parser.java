@@ -1596,7 +1596,7 @@ public final class Parser {
             final var initializerBlocks = new ArrayList<Stmt.InitializerBlock>();
             for (final var component : dataComponents) {
                 properties.add(new Stmt.Property(component.name(), component.type(), null,
-                        isTopLevelPublic, false, null, null, null, true));
+                        true, false, null, null, null, true));
                 storedStateOrder.add(component.name());
             }
             Stmt.Constructor constructor = null;

@@ -127,7 +127,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Shipped | 0.7.0 |
 | [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Shipped | 0.7.0 |
 | [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Shipped | 0.7.0 |
-| [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Accepted | Candidate | 0.8.0 |
+| [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Candidate | 0.8.0 |
 | [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Draft | Unscheduled | — |
 | [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Unscheduled | — |
 | [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Unscheduled | — |
@@ -144,6 +144,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0131](./ZEP-0131.md) | Chained Flow Refinement and Implicit Receiver Access | Accepted | Candidate | 0.8.0 |
 | [ZEP-0132](./ZEP-0132.md) | Nullable Safe-Cast Correction | Accepted | Candidate | 0.8.0 |
 | [ZEP-0133](./ZEP-0133.md) | Operator-Constraint Inference for Typeless Lambdas | Accepted | Candidate | 0.8.0 |
+| [ZEP-0134](./ZEP-0134.md) | Invocation of Function-Valued Expressions | Draft | Candidate | 0.8.0 |
 
 ## Release bundles
 
@@ -157,7 +158,7 @@ sequencing.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 12 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0133; ZEP-0132 is the immediate corrective |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 13 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0134; ZEP-0132 is the immediate corrective |
 | `0.9.0` | Effect control and response typing | Proposed | No candidates; ZEP-0118 and ZEP-0110 headline the bundle |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -185,7 +186,7 @@ and is likewise outside the bundle. The bundle shipped on 2026-11-14; its rows a
 
 ### `0.8.0` — normalization and nominal implementation
 
-The bundle targets smaller normalization work rather than new control-flow semantics. Its twelve
+The bundle targets smaller normalization work rather than new control-flow semantics. Its thirteen
 candidates are:
 
 - [ZEP-0117](./ZEP-0117.md) — declarative project targets and generated CLI/manifest reference.
@@ -225,6 +226,10 @@ candidates are:
   uncontextualized immutable let-bound lambda can infer a rank-1 scheme from numeric or comparison
   operator use, so `(a, b) -> a + b` becomes `<T: Numeric<T>> (T, T) -> T` and
   `(a, b) -> a < b` becomes `<T: Comparable<T>> (T, T) -> Boolean`, rather than a concrete default.
+- [ZEP-0134](./ZEP-0134.md) — invocation of function-valued expressions. A postfix argument list
+  may follow any non-null function-valued expression, so `makeFunction()()` and `add(2)(3)` work
+  without introducing a temporary binding or a new runtime representation. The proposal is still
+  `Draft`; its `0.8.0` candidacy records the intended target, not an accepted design.
 
 ZEP-0124 and ZEP-0125 are implementation-coupled through one static/receiverless matcher, even
 though they are independently decidable designs. They should be implemented and validated together
@@ -234,12 +239,14 @@ runtime ABI. ZEP-0126 is the only candidate that changes the entry-point rule; i
 static-requirement work in ZEP-0124 for nominal `Main<A>` conformance, but its witness-only form can
 ship independently. The bundle does not change `raise` or `handle` typing.
 
-These twelve are the current target; further small normalization items may join `0.8.0` as additional
-candidates. The acceptance queue remains open.
+These thirteen are the current target; further small normalization items may join `0.8.0` as additional
+candidates. The acceptance queue remains open. ZEP-0134 is the only draft row in the target set; it
+must be accepted before implementation and is not a committed bundle item yet.
 
 The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
 and ZEP-0128–ZEP-0133 were reviewed there and are now `Accepted` / `Candidate`; ZEP-0070 was
-promoted from the backlog. All count in the bundle above.
+promoted from the backlog. ZEP-0134 was added directly as a `Draft` / `Candidate` for `0.8.0`; its
+acceptance review is still pending. All count in the bundle above.
 
 ### `0.9.0` — effect control and response typing
 

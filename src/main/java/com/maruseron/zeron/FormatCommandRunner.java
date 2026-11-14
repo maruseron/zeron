@@ -127,6 +127,7 @@ final class FormatCommandRunner {
     private static List<Path> excludedRoots(final ProjectManifest project) {
         final var excluded = new ArrayList<Path>();
         excluded.add(project.outputDirectory());
+        project.effectiveTargets().forEach(target -> excluded.add(target.outputDirectory()));
         excluded.addAll(project.libraryRoots());
         excluded.addAll(project.javaClassPathRoots());
         return excluded.stream().map(path -> path.toAbsolutePath().normalize()).toList();

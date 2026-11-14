@@ -49,6 +49,8 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [Java interoperability](23-java-interoperability.md)
 1. [Libraries and separate compilation](24-libraries-and-separate-compilation.md)
 1. [Configuration, releases, and the roadmap](25-configuration-releases-and-roadmap.md)
+1. [Command reference](39-command-reference.md)
+1. [Project manifest reference](40-manifest-reference.md)
 
 ## Part VI — Editor and CLI tools
 

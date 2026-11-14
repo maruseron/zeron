@@ -16,7 +16,7 @@ import static com.maruseron.zeron.analize.Resolver.*;
 
 final class MemberInteropResolver {
     record PropertyInfo(String name, Token nameToken, TypeDescriptor type,
-                        boolean isPublic, boolean isMutating) {}
+                        boolean isPublic, boolean isMutating, String ownerName) {}
     private record SafeNavigationFlows(FlowState nonNull, FlowState nullPath) {}
     private record JavaCandidate(JavaClassPath.JavaMethod method, List<TypeDescriptor> parameterTypes,
                                  TypeDescriptor returnType, int cost, boolean varArgs) {}
@@ -276,7 +276,7 @@ final class MemberInteropResolver {
             }
             final var propertyType = exposeProjectedResult(
                     resolvedPropertyType(context, ownerName, propertyDeclaration, memberReceiverType), property.name);
-            property.setResolvedOwnerName(ownerName);
+            property.setResolvedOwnerName(propertyDeclaration.ownerName());
             property.setResolvedAsProperty(true);
             context.recordReference(property.name, propertyDeclaration.nameToken(), propertyType);
             final var resultType = property.safeNavigation()
@@ -1084,7 +1084,11 @@ final class MemberInteropResolver {
                 ? TypeClassEvidence.selectMemberMethod(context, receiverType, call.name.lexeme(), call.name)
                 : TypeClassEvidence.selectMethod(context, receiverType,
                         requiredContractType, call.name.lexeme(), call.name);
-        if (selection == null) return null;
+        if (selection == null) {
+            return requiredContractType == null
+                    ? resolveBuiltinDisplayMemberCall(context, call, receiverType)
+                    : null;
+        }
         final var method = selection.method();
         final var signature = method.methodSignature();
         final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
@@ -1141,6 +1145,87 @@ final class MemberInteropResolver {
         call.setType(resolvedSignature.returnType());
         call.setEvidenceArguments(witnessEvidence);
         return resolvedSignature.returnType();
+    }
+
+    /// Resolves a direct `toString()` call on a built-in type through the same intrinsic methods
+    /// used for built-in `Display` evidence. Built-in evidence is not stored in
+    /// `typeClassWitnesses`, so without this path a concrete receiver such as `Int` falls through
+    /// to `Unknown method` even though `Display` is available.
+    private static TypeDescriptor resolveBuiltinDisplayMemberCall(
+            final ResolutionContext context,
+            final Expr.MemberCall call,
+            final TypeDescriptor receiverType) {
+        if (!call.name.lexeme().equals("toString")
+                || !call.explicitTypeArguments.isEmpty()) return null;
+        if (call.javaCallTarget() != null) return call.getType();
+        if (!call.arguments.isEmpty()) return null;
+        final var receiverBaseType = receiverType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : receiverType;
+        final String owner;
+        final String method;
+        final String descriptor;
+        final JavaCallTarget.InvocationKind kind;
+        final List<TypeDescriptor> parameters;
+        if (receiverBaseType instanceof CharDescriptor) {
+            owner = "zeron.runtime.StringUnicode";
+            method = "charToString";
+            descriptor = "(C)Ljava/lang/String;";
+            kind = JavaCallTarget.InvocationKind.STATIC;
+            parameters = List.of(receiverBaseType);
+        } else if (receiverBaseType instanceof IntDescriptor) {
+            owner = "java.lang.String";
+            method = "valueOf";
+            descriptor = "(I)Ljava/lang/String;";
+            kind = JavaCallTarget.InvocationKind.STATIC;
+            parameters = List.of(receiverBaseType);
+        } else if (receiverBaseType instanceof LongDescriptor) {
+            owner = "java.lang.String";
+            method = "valueOf";
+            descriptor = "(J)Ljava/lang/String;";
+            kind = JavaCallTarget.InvocationKind.STATIC;
+            parameters = List.of(receiverBaseType);
+        } else if (receiverBaseType instanceof FloatDescriptor) {
+            owner = "java.lang.String";
+            method = "valueOf";
+            // Zeron Float values use the JVM double representation.
+            descriptor = "(D)Ljava/lang/String;";
+            kind = JavaCallTarget.InvocationKind.STATIC;
+            parameters = List.of(receiverBaseType);
+        } else if (receiverBaseType instanceof BooleanDescriptor) {
+            owner = "java.lang.String";
+            method = "valueOf";
+            descriptor = "(Z)Ljava/lang/String;";
+            kind = JavaCallTarget.InvocationKind.STATIC;
+            parameters = List.of(receiverBaseType);
+        } else if (receiverBaseType instanceof StringDescriptor) {
+            owner = "java.lang.String";
+            method = "toString";
+            descriptor = "()Ljava/lang/String;";
+            kind = JavaCallTarget.InvocationKind.VIRTUAL;
+            parameters = List.of();
+        } else if (receiverBaseType instanceof UnitDescriptor) {
+            owner = "zeron.lang.Unit";
+            method = "toString";
+            descriptor = "()Ljava/lang/String;";
+            kind = JavaCallTarget.InvocationKind.VIRTUAL;
+            parameters = List.of();
+        } else {
+            return null;
+        }
+        if (kind == JavaCallTarget.InvocationKind.STATIC) {
+            // Static intrinsic methods spell the receiver as their first argument; the member-call
+            // receiver is not emitted separately for STATIC Java targets.
+            call.appendArgument(call.receiver);
+        }
+        final var signature = TypeDescriptor.functionOf(method, TypeDescriptor.ofString(),
+                parameters.toArray(TypeDescriptor[]::new));
+        call.setJavaCallTarget(new JavaCallTarget(owner, method, descriptor, kind, false));
+        call.setResolvedDescriptor(signature);
+        call.setType(signature.returnType());
+        context.recordReference(call.name, call.name, signature);
+        context.recordCallSiteFunctionType(call.name,
+                TypeDescriptor.functionOf("toString", TypeDescriptor.ofString()));
+        return signature.returnType();
     }
 
     private record ExtensionReceiverMatch(Stmt.ExtensionMethod method, TypeDescriptor projection) {}
@@ -3128,7 +3213,7 @@ final class MemberInteropResolver {
                     .filter(property -> property.name().lexeme().equals(name.lexeme()))
                     .findFirst()
                     .map(property -> new PropertyInfo(property.name().lexeme(), property.name(),
-                            property.type(), property.isPublic(), property.isMutating()))
+                            property.type(), property.isPublic(), property.isMutating(), ownerName))
                     .orElse(null);
         }
         final var contract = context.contracts.get(ownerName);
@@ -3140,7 +3225,7 @@ final class MemberInteropResolver {
                 if (property.name().lexeme().equals(name.lexeme())) {
                     return new PropertyInfo(property.name().lexeme(), property.name(),
                             TypeSubstitution.substitute(property.type(), applied.substitutions()),
-                            true, property.isMutating());
+                            true, property.isMutating(), applied.declaration().name().lexeme());
                 }
             }
         }

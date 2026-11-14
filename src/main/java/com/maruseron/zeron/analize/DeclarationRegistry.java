@@ -113,10 +113,10 @@ final class DeclarationRegistry {
         }
         final var valueName = new Token(TokenType.IDENTIFIER, "value", null, newtype.name().span());
         final var property = new Stmt.Property(valueName, newtype.underlyingType(), null,
-                newtype.isPublic(), false, null, null, null, true);
+                true, false, null, null, null, true);
         final var constructor = new Stmt.Constructor(
                 new Token(TokenType.IDENTIFIER, "new", null, newtype.name().span()),
-                newtype.isPublic() && newtype.validator() == null);
+                newtype.validator() == null);
         classes.put(newtype.name().lexeme(), new Stmt.ClassDecl(newtype.name(), List.of(), List.of(),
                 List.of(), List.of(property), constructor, List.of(), List.of(), List.of(),
                 newtype.isPublic(), false));
@@ -141,12 +141,12 @@ final class DeclarationRegistry {
         }
         final var properties = product.components().stream()
                 .map(component -> new Stmt.Property(component.name(), component.type(), null,
-                        product.isPublic(), false, null, null, null, true))
+                        true, false, null, null, null, true))
                 .toList();
         final var generatedClass = new Stmt.ClassDecl(product.name(), product.typeParameters(), List.of(),
                 List.of(), properties,
                 new Stmt.Constructor(new Token(TokenType.IDENTIFIER, "new", null,
-                        product.name().span()), product.isPublic()),
+                        product.name().span()), true),
                 List.of(), List.of(), List.of(), product.isPublic(), false);
         classes.put(product.name().lexeme(), generatedClass);
     }

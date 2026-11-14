@@ -62,10 +62,11 @@ order, left-to-right, short-circuiting at the first unequal component. It is not
 product conflicts with this intrinsic derivation. Product equality does not imply `Hashable` or
 `Stable`.
 
-The initial product feature omits destructuring patterns, methods, defaults, custom accessors,
-mutable slots, and `Hashable`/`Stable` derivation. Products lower to final JVM classes with
-private-final component storage and generated accessors. The generated constructor and accessors
-preserve declaration order and generic erasure rules.
+The initial product feature omits methods, defaults, custom accessors, mutable slots, and
+`Hashable`/`Stable` derivation; positional product destructuring is covered in
+[design-document-16](design-document-16_patterns-and-pattern-matching.md). Products lower to final
+JVM classes with private-final component storage and generated accessors. The generated
+constructor and accessors preserve declaration order and generic erasure rules.
 
 Compiled-library metadata records product identity, generic parameters, and ordered component names
 and types. A consumer uses that metadata for construction, property typing, and conditional equality;
@@ -135,24 +136,28 @@ structural `Eq` support for sums is described in
 
 ### Cases, payloads, construction, and visibility
 
-The preferred direction is to qualify cases with the sum name at use sites, for example:
+Qualification remains the unambiguous form, and [ZEP-0128](../zeps/ZEP-0128.md) accepts
+context-resolved unqualified case names as an ergonomic alternative:
 
 ```zeron
-let missing: Option<Int> = Option<Int>.None();
-let present = Option.Some(42);
-let direction = Coordinate.North();
+let missing: Option<Int> = None();
+let present: Option<Int> = Some(42);
+let qualified = Option.Some(42);
+let direction = North();
 ```
 
+An unqualified case name resolves through the expected sum type or the match scrutinee; if two
+visible sums expose the same case name and context does not choose one, the name must be qualified.
 Qualification avoids package-level collisions between common names such as `None`, `Some`, and
-`North`, and provides one spelling for construction and patterns. Every case is constructed by a
-qualified call, including payload-less cases: `Option.None()` or `Option<Int>.None()`. Payloads are
-declared as ordered named fields, are immutable, and are positional at construction and match sites.
-Names are metadata/documentation only; named arguments and payload defaults are not in the MVP.
+`North`, and remains available for construction and patterns. Payloads are declared as ordered named
+fields, are immutable, and are positional at construction and match sites. Names are
+metadata/documentation only; named arguments and payload defaults are not in the MVP.
 
 All cases have the visibility of their sum. Public sums expose every case and payload type in their
-API; payload types must themselves be publicly nameable. Per-case visibility and case-specific type
-parameters are excluded. Adding, removing, or changing a public case or payload is a public API
-change.
+API; payload types must themselves be publicly nameable. Per-case visibility is excluded. Case-local
+type parameters are accepted in [ZEP-0128](../zeps/ZEP-0128.md) but remain pending implementation;
+the current MVP still excludes them. Adding, removing, or changing a public case or payload is a
+public API change.
 
 Every zero-payload case is semantically a singleton: constructing it repeatedly yields the same
 value, and reference identity comparisons observe that stable identity. Payload-bearing cases
@@ -234,12 +239,14 @@ equality evidence. Direct self-recursive payloads are supported; mutually recurs
 are not yet synthesized as a recursive evidence group. See
 [design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
 
-## Newtypes and value-class-like wrappers
+## Newtypes and nominal single-value views
 
 ### Declaration, representation, and construction
 
 A newtype declares a distinct nominal type over one concrete, non-generic immutable built-in
 representation. The initial supported representations are `Int`, `Float`, `Boolean`, and `String`.
+[ZEP-0070](../zeps/ZEP-0070.md) accepts generic and nominal representations for `0.8.0`; the current
+MVP remains scalar-only until that work is implemented.
 For example:
 
 ```zeron
@@ -256,18 +263,21 @@ determinism for validator expressions; invariant validity is established at cons
 the built-in representation restriction ensures that the wrapped value cannot later mutate.
 
 Validated newtypes have no source-accessible unchecked constructor. Unvalidated newtypes use the
-ordinary `.new(value)` constructor. Both forms expose a generated read-only `.value` property with
-the visibility of the declaration. Reading `.value` reveals the representation but does not permit
-forging a validated newtype.
+ordinary `.new(value)` constructor. The current implementation exposes a generated read-only
+`.value` property with the visibility of the declaration. [ZEP-0070](../zeps/ZEP-0070.md) is accepted
+for `0.8.0` and removes that accessor and the wrapper field in favor of direct representation;
+implementation is pending. Under the accepted direction, a newtype-owned extension or witness sees
+the representation through `this`, and ordinary callers use an explicit extension when they need the
+representation.
 
 Newtypes do not implicitly inherit `Eq`, `Comparable`, or any other evidence from the underlying
 type. Equality and other behavior require explicit ordinary witnesses or extensions. JVM identity
 comparison (`===`) is not defined for newtypes; use value equality only when the corresponding
 evidence is available.
 
-The initial implementation uses a final JVM wrapper class. This preserves nominal identity and gives
-nullable and generic uses a conventional reference representation, but allocates on construction.
-Direct-carrier lowering is a future optimization, not a property of this MVP. Any later erasure must
+The current implementation uses a final JVM wrapper class. ZEP-0070's accepted direction replaces it
+with a direct carrier: concrete fields, parameters, and returns use the representation, while
+generic, nullable, `Any`, array, and other erased positions may box. Any representation change must
 preserve the source-level distinction and define boxing/adaptation at nullable, generic, contract,
 function, Java, and library ABI boundaries.
 
@@ -296,18 +306,20 @@ Changing the metadata schema is distinct from changing the standard-library API 
 ### Product and newtype representation
 
 Products lower to final nominal classes with private-final component storage, a canonical constructor,
-and generated read-only accessors. Newtypes initially lower to final wrapper classes with private-final
-representation storage and a generated read-only accessor. Any future representation optimization
-must preserve nominal checks, validated construction, generic behavior, and stable public library
-metadata.
+and generated read-only accessors. Newtypes currently lower to final wrapper classes with
+private-final representation storage and a generated read-only accessor. [ZEP-0070](../zeps/ZEP-0070.md)
+is accepted for `0.8.0` and replaces that wrapper with a direct carrier; concrete fields,
+parameters, and returns use the representation, while erased positions may box. Any representation
+change must preserve nominal checks, validated construction, generic behavior, and stable public
+library metadata.
 
 ## Deferred design questions
 
-Newtype deserialization and host interop must not bypass validated construction. Direct-carrier
-lowering, generic newtypes, mutable or user-defined representations, derived equality, and
-identity-sensitive operations remain deferred. [ZEP-0070](../zeps/ZEP-0070.md) explores generic
-newtypes and nominal backing representations; its representation and invariant questions are not
-settled.
+Newtype deserialization and host interop must not bypass validated construction. Mutable or
+user-defined representations, guarded reference newtypes, derived equality, and identity-sensitive
+operations remain deferred. [ZEP-0070](../zeps/ZEP-0070.md) is accepted for `0.8.0` and settles
+generic and nominal backing representations over direct carriers; its implementation is pending.
+Guarded newtypes remain limited to immutable scalar and `String` representations.
 
 ## Suggested sequencing
 
@@ -315,5 +327,5 @@ settled.
    nullary cases. Product MVP implementation is complete; mutual-recursion evidence between
    declarations remains a separate extension.
 2. The concrete newtype MVP is implemented using wrapper classes and guarded `tryNew` construction.
-   Treat direct-carrier lowering and its ABI as a later representation change, not as an invisible
-   optimization.
+   ZEP-0070's accepted direction replaces the wrapper with direct carriers and removes `.value`; that
+   is an explicit ABI change, not an invisible optimization.

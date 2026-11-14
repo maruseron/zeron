@@ -152,9 +152,11 @@ Remaining rank-2 work is separate from the hidden-slot ABI:
   still unsupported.
 
 This is an initial, intentionally constrained generalization rule. Reassignable bindings, nested
-polymorphic schemes, explicit `forall`, and unresolved parameters used by operators are not
-generalized. Operator overloading uses explicit `Numeric<T>` and `Fractional<T>` bounds, but
-operator-constrained lambdas remain monomorphic and do not infer those bounds.
+polymorphic schemes, and explicit `forall` are not generalized. The current implementation leaves
+operator-constrained lambdas monomorphic and does not infer their `Numeric<T>`, `Fractional<T>`, or
+`Comparable<T>` bounds. [ZEP-0133](../zeps/ZEP-0133.md) is accepted for `0.8.0` and extends this same rank-1,
+direct immutable-`let` path with numeric and comparison operator-constraint inference; implementation
+is pending.
 
 ### Multi-parameter lambda syntax
 
@@ -202,7 +204,9 @@ Address the remaining work in this order:
   expression and binding. Expected types flow through declarations, assignments, calls, and returns.
   Conditional expressions pass the expected type independently to both result branches.
   Safe immutable let-bound identity/constant lambdas generalize to rank-1 schemes and instantiate
-  freshly at each use; operator-constrained lambdas retain monomorphic contextual inference.
+  freshly at each use. The current implementation keeps operator-constrained lambdas on
+  monomorphic contextual inference; ZEP-0133 extends the rank-1 path with inferred numeric and
+  comparison operator bounds for eligible lambdas, pending implementation.
 3. **Add multi-parameter lambdas: implemented.** The AST, parser, resolver, and lowering logic now support zero-argument, single-argument, and multi-argument lambda forms, and they lower each shape to the appropriate generated functional interface.
 4. **Specify capture semantics before classes: implemented.** Captures are immutable by default: a lambda may close over immutable values, but it must not implicitly capture and mutate stack-scoped locals. Mutation must happen through explicitly shared heap state such as objects or a dedicated cell/reference abstraction.
 5. **Extend polymorphic lambda inference: rank-1 generalization and rank-2 support

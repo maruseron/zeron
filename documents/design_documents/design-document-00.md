@@ -137,7 +137,10 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
 
 - Safe immutable let-bound lambdas with identity or constant-result bodies generalize unresolved
     parameters into rank-1 schemes; each call or expected function type instantiates them separately.
-    Operator-constrained lambdas remain on the contextual monomorphic inference path. Mutable
+    The current implementation keeps operator-constrained lambdas on the contextual monomorphic
+    inference path. [ZEP-0133](../zeps/ZEP-0133.md) is accepted for `0.8.0` and will infer numeric
+    and comparison operator bounds for eligible direct immutable-`let` lambdas; implementation is
+    pending. Mutable
     bindings and nested schemes are not generalized.
 - Lambdas are reusable first-class values and lower to generated function-shape interfaces. Named
     functions can be used as values when an expected function type is available; generic named

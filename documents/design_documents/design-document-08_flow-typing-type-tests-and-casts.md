@@ -169,6 +169,8 @@ its payload properties are available there. Parenthesized tests behave the same,
 swaps the two outcomes. Payload names are available only on the outcome where the underlying case
 pattern succeeds. This initial complement rule does not apply to `is` tests or `matches` expressions
 composed with `and` or `or`; nullable values retain their null possibility on the false path.
+[ZEP-0131](../zeps/ZEP-0131.md) is accepted for `0.8.0` and extends this rule to composed
+conditions; the implementation remains pending.
 
 Statement-form `if` branches and value-producing `if` expressions resolve their branches under the
 corresponding true/false facts. An `if` expression joins the facts from both result branches after

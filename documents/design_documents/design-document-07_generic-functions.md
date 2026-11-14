@@ -110,8 +110,10 @@ constant-result forms. The accepted extension in
 [ZEP-0003](../zeps/ZEP-0003.md) defines a broader, still rank-1 rule for lambdas written directly as
 immutable `let` initializers: infer applied-contract bounds from direct member use and substituted
 bounds of generic callees, then quantify only type variables absent from the captured environment.
-Raised effects remain fixed in the function signature. Mutable bindings, nested schemes, arbitrary
-lambda-valued expressions, and operator constraints remain outside that rule.
+Raised effects remain fixed in the function signature. Mutable bindings, nested schemes, and
+arbitrary lambda-valued expressions remain outside that rule. Operator constraints were originally
+outside it as well; [ZEP-0133](../zeps/ZEP-0133.md) is accepted for `0.8.0` and extends the same
+rank-1 path with inferred numeric and comparison operator bounds, pending implementation.
 
 At a direct generic call, the resolver seeds substitutions from explicit type arguments, if given,
 then resolves non-lambda arguments and structurally matches their types against the generic
@@ -144,8 +146,11 @@ missing or ambiguous evidence at the use with a reference to the binding. Scheme
 are not serialized as top-level API values. At runtime each scheme use is monomorphic: required
 evidence is captured in a specialized closure, one closure is reused per specialization during each
 dynamic activation of the `let`, and different specializations have distinct closure identities.
-Mutable bindings, nested schemes, explicit `forall`, arbitrary lambda-valued expressions, and
-operator constraints remain outside the accepted rule. Generic function names still require full
+Mutable bindings, nested schemes, explicit `forall`, and arbitrary lambda-valued expressions remain
+outside the accepted rule. Operator constraints remain outside ZEP-0003's implemented scope; ZEP-0133
+adds inferred numeric and comparison operator bounds to the eligible rank-1 path, pending
+implementation. Generic
+function names still require full
 explicit specialization (`name::<T>`) or an expected function type; those named-function references
 are monomorphic values.
 

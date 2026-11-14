@@ -80,7 +80,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Unscheduled | — |
 | [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Accepted | Shipped | 0.6.0 |
 | [ZEP-0069](./ZEP-0069.md) | Transparent Data Classes | Implemented | Shipped | 0.6.0 |
-| [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Draft | Unscheduled | — |
+| [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Accepted | Candidate | 0.8.0 |
 | [ZEP-0071](./ZEP-0071.md) | Numeric Hierarchy and Context-Directed Literals | Implemented | Shipped | 0.6.0 |
 | [ZEP-0072](./ZEP-0072.md) | Class-Scoped Static Functions as Companion Namespace Members | Implemented | Shipped | 0.7.0 |
 | [ZEP-0073](./ZEP-0073.md) | Documentation Comments for Declarations | Implemented | Shipped | 0.6.0 |
@@ -137,6 +137,13 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Accepted | Candidate | 0.8.0 |
 | [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Accepted | Candidate | 0.8.0 |
 | [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Accepted | Candidate | 0.8.0 |
+| [ZEP-0127](./ZEP-0127.md) | Data Class Component Access and Positional Destructuring | Accepted | Candidate | 0.8.0 |
+| [ZEP-0128](./ZEP-0128.md) | Sum-Type Parameter Bounds and Case-Local Type Parameters | Accepted | Candidate | 0.8.0 |
+| [ZEP-0129](./ZEP-0129.md) | Unary Products versus Arbitrary-Valued Newtypes | Accepted | Candidate | 0.8.0 |
+| [ZEP-0130](./ZEP-0130.md) | Standard-Library-Owned Intrinsic Declarations | Accepted | Candidate | 0.8.0 |
+| [ZEP-0131](./ZEP-0131.md) | Chained Flow Refinement and Implicit Receiver Access | Accepted | Candidate | 0.8.0 |
+| [ZEP-0132](./ZEP-0132.md) | Nullable Safe-Cast Correction | Accepted | Candidate | 0.8.0 |
+| [ZEP-0133](./ZEP-0133.md) | Operator-Constraint Inference for Typeless Lambdas | Accepted | Candidate | 0.8.0 |
 
 ## Release bundles
 
@@ -149,13 +156,13 @@ sequencing.
 | Bundle | Theme | Current state | Contents |
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization | Shipped | 24 rows |
-| `0.7.0` | Type identity, reification, and type bounds | Planned; release-ready | 15 planned; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 4 candidates | ZEP-0117, ZEP-0124, ZEP-0125, and ZEP-0126 |
+| `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 12 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0133; ZEP-0132 is the immediate corrective |
 | `0.9.0` | Effect control and response typing | Proposed | No candidates; ZEP-0118 and ZEP-0110 headline the bundle |
 
 ### `0.7.0` — type identity, reification, and type bounds
 
-Candidates: [ZEP-0005](./ZEP-0005.md), [ZEP-0013](./ZEP-0013.md), [ZEP-0015](./ZEP-0015.md),
+Shipped rows: [ZEP-0005](./ZEP-0005.md), [ZEP-0013](./ZEP-0013.md), [ZEP-0015](./ZEP-0015.md),
 [ZEP-0054](./ZEP-0054.md), [ZEP-0072](./ZEP-0072.md), [ZEP-0100](./ZEP-0100.md),
 [ZEP-0104](./ZEP-0104.md), [ZEP-0105](./ZEP-0105.md), [ZEP-0106](./ZEP-0106.md),
 [ZEP-0109](./ZEP-0109.md), [ZEP-0111](./ZEP-0111.md), [ZEP-0114](./ZEP-0114.md),
@@ -164,21 +171,21 @@ Candidates: [ZEP-0005](./ZEP-0005.md), [ZEP-0013](./ZEP-0013.md), [ZEP-0015](./Z
 ZEP-0122 is the required match-side companion to ZEP-0005: ordinary applied patterns and generic
 effect handler cases share one exact-descriptor test, and the two must ship together in `0.7.0`.
 
-ZEP-0109 is `Planned` for `0.7.0`: rank-2 syntax, checking, eta-expansion, the hidden-slot runtime
+ZEP-0109 shipped in `0.7.0`: rank-2 syntax, checking, eta-expansion, the hidden-slot runtime
 ABI, API-index preservation, separate compilation, and the 2026-11-13 application-cost benchmark
-are covered. Effect-binder support remains follow-up work. ZEP-0116 is `Planned` for `0.7.0`
-and implemented: mixed and nested opening, `else if` and value-producing `if` placements, and
-complete escape rejection; binder bounds, `in` opening, result-position existentials, escape
-approximation, and variance changes remain outside the design.
+are covered. Effect-binder support remains follow-up work. ZEP-0116 shipped in `0.7.0`: mixed
+and nested opening, `else if` and value-producing `if` placements, and complete escape rejection;
+binder bounds, `in` opening, result-position existentials, escape approximation, and variance
+changes remain outside the design.
 
 The `0.7.0` acceptance queue is closed. [ZEP-0107](./ZEP-0107.md) remains `Accepted` but has been
 removed from the program bundle and is `Unscheduled`; [ZEP-0108](./ZEP-0108.md) remains `Deferred`
-and is likewise outside the bundle. The bundle is release-ready; its rows move to `Shipped` /
-`0.7.0` only after the release is published.
+and is likewise outside the bundle. The bundle shipped on 2026-11-14; its rows are `Shipped` /
+`0.7.0`.
 
 ### `0.8.0` — normalization and nominal implementation
 
-The bundle targets smaller normalization work rather than new control-flow semantics. Its four
+The bundle targets smaller normalization work rather than new control-flow semantics. Its twelve
 candidates are:
 
 - [ZEP-0117](./ZEP-0117.md) — declarative project targets and generated CLI/manifest reference.
@@ -191,6 +198,33 @@ candidates are:
 - [ZEP-0126](./ZEP-0126.md) — compiler-owned `Main<A>` entry-point contract. A launchable `main`
   returns a closed entry value, and the generated launcher interprets it through `Main<A>` evidence
   after the user function returns.
+- [ZEP-0127](./ZEP-0127.md) — data-class component access and positional destructuring. Canonical
+  components are readable whenever the type is nameable, and positional patterns use only those
+  components at the root and in nested positions.
+- [ZEP-0070](./ZEP-0070.md) — generic and nominal newtype representations. A newtype may use a
+  type parameter, a function type, a nominal value, or another admissible representation as its
+  direct carrier; `.value` is removed and `this` is the representation inside extensions and
+  witnesses.
+- [ZEP-0128](./ZEP-0128.md) — sum-type parameter bounds and case-local type parameters. Sum
+  parameters accept contract bounds, a case may introduce an existential parameter such as the `B`
+  in `Bind<B>`, and unambiguous case constructors may omit the sum qualifier.
+- [ZEP-0129](./ZEP-0129.md) — unary products versus arbitrary-valued newtypes. Products stay at two
+  or more components; the single-value need is met by ZEP-0070's direct-representation newtypes
+  rather than by legalizing a unary product.
+- [ZEP-0130](./ZEP-0130.md) — standard-library-owned intrinsic declarations. Intrinsic types keep
+  compiler-owned identity, while a broad `String` inventory—including `split`, `splitRegex`,
+  `charAt`/`at`, case conversion, trimming, replacement, lines, parsing, and joining—is declared in
+  canonical `zeron.lang` extension modules rather than in a second class or intrinsic ID.
+- [ZEP-0131](./ZEP-0131.md) — chained flow refinement and implicit receiver access. `is` and
+  `matches` transfer through composed conditions and stable member paths, and unqualified field or
+  property reads use the implicit `this` receiver.
+- [ZEP-0132](./ZEP-0132.md) — nullable safe-cast correction. `as?` always produces a nullable
+  target, including when the target is written `T?`; the correction lands first because the current
+  behavior can bypass a required null check.
+- [ZEP-0133](./ZEP-0133.md) — operator-constraint inference for typeless lambdas. An
+  uncontextualized immutable let-bound lambda can infer a rank-1 scheme from numeric or comparison
+  operator use, so `(a, b) -> a + b` becomes `<T: Numeric<T>> (T, T) -> T` and
+  `(a, b) -> a < b` becomes `<T: Comparable<T>> (T, T) -> Boolean`, rather than a concrete default.
 
 ZEP-0124 and ZEP-0125 are implementation-coupled through one static/receiverless matcher, even
 though they are independently decidable designs. They should be implemented and validated together
@@ -200,11 +234,12 @@ runtime ABI. ZEP-0126 is the only candidate that changes the entry-point rule; i
 static-requirement work in ZEP-0124 for nominal `Main<A>` conformance, but its witness-only form can
 ship independently. The bundle does not change `raise` or `handle` typing.
 
-Further small normalization items may join `0.8.0` as additional candidates; these four are the
-initial target.
+These twelve are the current target; further small normalization items may join `0.8.0` as additional
+candidates. The acceptance queue remains open.
 
-The `0.8.0` acceptance queue remains open for further normalization items. [ZEP-0126](./ZEP-0126.md)
-was reviewed there and is now `Accepted` / `Candidate`, so it counts in the bundle above.
+The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
+and ZEP-0128–ZEP-0133 were reviewed there and are now `Accepted` / `Candidate`; ZEP-0070 was
+promoted from the backlog. All count in the bundle above.
 
 ### `0.9.0` — effect control and response typing
 
@@ -217,7 +252,7 @@ omitted handler arguments.
 
 Proposed headline bundle: [ZEP-0118](./ZEP-0118.md) (response-typed effects and tail-resumptive
 handlers), then [ZEP-0110](./ZEP-0110.md) (block-bodied handlers).
-[ZEP-0111](./ZEP-0111.md) joins `0.9.0` only if it does not ship in `0.7.0`.
+[ZEP-0111](./ZEP-0111.md) shipped in `0.7.0`; it is not part of `0.9.0`.
 
 [ZEP-0112](./ZEP-0112.md) is an independent library track. [ZEP-0120](./ZEP-0120.md) depends on
 ZEP-0118 and ZEP-0112. [ZEP-0119](./ZEP-0119.md) is prototype-gated, and

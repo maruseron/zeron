@@ -113,6 +113,11 @@ If a function calls another function that may raise an effect, it must either ha
 or list it in its own `raises` clause. This rule applies to functions, methods, extensions, named
 constructors, and function values. The entry-point `main` can declare effects too.
 
+A non-`Unit` entry has two effect boundaries. Producing the entry value runs `main` itself; an
+effect raised there escapes before `Main<A>.run` is reached. Interpreting the value runs
+`Main<A>.run`, whose contract declares `raises Effect`; a pure witness may narrow that row, while an
+effectful interpreter can declare its own effects. Neither path installs an implicit handler.
+
 ```zeron
 fn loadLabel(id: Int): String raises MissingUser =
     findUser(id);
@@ -275,7 +280,9 @@ Generic effect rows and explicit `under` subtyping are supported, but there is n
 handler, asynchronous effect propagation, handler composition, or automatic Java-exception
 translation. An unhandled effect escaping
 generated `main` propagates across the host boundary; the compiler does not currently add a launcher
-that formats it.
+that formats it. The same applies to an effect raised while `Main<A>.run` interprets an entry value.
+A program that wants formatted failure behavior should return `Result<Unit, E>` or handle its
+effects before returning.
 
 For declaration, checking, and runtime details, see the
 [typed raised effects design document](../documents/design_documents/design-document-13_typed-raised-effects.md).

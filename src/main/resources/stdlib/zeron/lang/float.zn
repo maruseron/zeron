@@ -5,9 +5,11 @@ import java.lang.Math;
 
 import zeron.numeric.Integer;
 import zeron.numeric.Rational;
+import zeron.numeric.Numeric;
+import zeron.numeric.Fractional;
 import zeron.numeric.Floating;
 
-default witness Floating<Float> for Float {
+default witness Numeric<Float> for Float {
     fn add(other: Float): Float = this + other;
     fn subtract(other: Float): Float = this - other;
     fn multiply(other: Float): Float = this * other;
@@ -16,11 +18,15 @@ default witness Floating<Float> for Float {
     fn signum(): Float =
         if (this < 0.0) then -1.0 else if (this > 0.0) then 1.0 else if (this == 0.0) then 0.0 else this;
     static fn fromInteger(value: Integer): Float = value.toFloat();
+}
 
+default witness Fractional<Float> for Float {
     fn divide(other: Float): Float = this / other;
     fn reciprocal(): Float = 1.0 / this;
     static fn fromRational(value: Rational): Float = value.toFloat();
+}
 
+default witness Floating<Float> for Float {
     fn sqrt(): Float = Math.sqrt(this);
     fn pow(exponent: Float): Float = Math.pow(this, exponent);
     fn exp(): Float = Math.exp(this);

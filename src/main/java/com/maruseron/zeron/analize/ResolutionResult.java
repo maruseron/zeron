@@ -1,5 +1,6 @@
 package com.maruseron.zeron.analize;
 
+import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.Diagnostic;
 import com.maruseron.zeron.domain.*;
@@ -8,6 +9,7 @@ import com.maruseron.zeron.scan.Token;
 import java.util.*;
 
 public record ResolutionResult(
+        EntryPoint entryPoint,
         SymbolTable globalSymbolTable,
         Set<String> types,
         List<Diagnostic> errors,
@@ -30,6 +32,9 @@ public record ResolutionResult(
         Map<Token, FunctionDescriptor> callSiteFunctionTypes,
         List<Diagnostic> warnings,
         List<Stmt.Witness> witnesses) {
+
+    public record EntryPoint(Stmt.FunctionDeclaration main, boolean passArguments,
+                             TypeDescriptor valueType, Expr.EvidenceArgument runEvidence) {}
 
     public ResolutionResult {
         Objects.requireNonNull(globalSymbolTable);

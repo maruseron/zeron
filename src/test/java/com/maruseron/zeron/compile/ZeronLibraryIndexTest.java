@@ -514,7 +514,7 @@ public final class ZeronLibraryIndexTest {
                 public class Box<T: mut> is Functor<Box<_>> {
                     public property value: T;
                     implementation Functor<Box<_>> {
-                        fn map<A: mut, B: mut>(this: Box<A>, transform: (A) -> B): Box<B> =
+                        fn map<A, B>(this: Box<A>, transform: (A) -> B): Box<B> =
                             Box.new(transform(this.value));
                     }
                 }
@@ -1543,11 +1543,11 @@ public final class ZeronLibraryIndexTest {
                                 """.formatted(libraryPackage));
                 final var values = parse("Values.zn", """
                                 package %s;
-                                import zeron.io.println;
+                                import java.lang.System;
                                 let mut counter = 0;
                                 fn initializeAnswer(): Int {
                                     counter += 1;
-                                    println("library initialized");
+                                    System.out?.println("library initialized");
                                     return 42;
                                 }
                                 public let answer = initializeAnswer();

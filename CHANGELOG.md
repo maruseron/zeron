@@ -2,6 +2,37 @@
 
 ## [0.8.0] - Unreleased
 
+### Compiler and language work
+
+- Added ZEP-0126 compiler-owned `Main<A>` entry values. A top-level `main` may return `Unit`, `Int`,
+  `Result<Unit, E>`, or another type with one applicable `Main<A>` witness; the generated launcher
+  evaluates `main` and then calls `Main<A>.run`. `Main<Int>` treats `0` as normal completion and
+  exits otherwise, while `Result` failures print through the new `System.err` binding and exit with
+  status `1`. Missing or ambiguous entry evidence is diagnosed at `main`.
+- `zeron.io.print`, `println`, `readln`, and `prompt` are now ordinary effectful functions that
+  raise `IoFailure`; the `IO` action monad and its `Main<IO<Unit>>` witness were removed. The
+  standard `zeron.control` contracts no longer admit mutable-reference operation arguments; the
+  `Option`, `Result`, `Stream`, `List`, and array instances use unbounded operation parameters, while
+  those types keep their own admissibility rules. Advanced the
+  standard-library API version to `15`.
+- Added ZEP-0124 and ZEP-0125 nominal static contract implementation and optional higher-kinded
+  implementation blocks. A class's `is` conformance now satisfies static requirements through public
+  class `static fn` declarations or `static fn` entries in a first-order `implementation` block;
+  explicit entries win, defaults fill the remainder, and a witness cannot replace a nominally
+  conforming class. HKT conformances no longer require an implementation block: omitting it matches
+  public instance methods for receiver operations and public class static functions for receiverless
+  operations, while explicit blocks remain authoritative. Both paths share one deterministic
+  signature matcher and need no API-index schema change.
+- Added ZEP-0135 witness provision and owner-directed dispatch. A witness now provides only the
+  contract it declares; each prerequisite in a `requires` chain resolves to its own canonical
+  provider, preferring `default` evidence and otherwise a unique named provider. Operations dispatch
+  through the contract that declares them, so `map` comes from `Functor`, `pure` and `ap` from
+  `Applicative`, and `flatMap` from `Monad`, even when several sibling witnesses share those
+  ancestors. Child witnesses may no longer redeclare inherited operations; the compiler rejects
+  them with a strict diagnostic and no migration window. Split the `Option`, `Result`, `Stream`, and
+  numeric standard-library witness chains and class implementation blocks one contract at a time,
+  and advanced the standard-library API version to `16`.
+
 ### Tooling and project configuration
 
 - Added ZEP-0117 declarative project targets and generated CLI/manifest references. `zeron.toml`

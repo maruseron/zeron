@@ -108,7 +108,7 @@ public final class LongSemanticsTest {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-main-args-");
         final var unit = parse("ArgumentMain.zn", """
                 import zeron.io.println;
-                fn main(args: Array<String>): Unit {
+                fn main(args: Array<String>): Unit raises IoFailure {
                     println(args[0]);
                 }
                 """);

@@ -3,6 +3,7 @@ package com.maruseron.zeron.compile;
 import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
+import com.maruseron.zeron.ast.SyntheticNames;
 import com.maruseron.zeron.analize.ContractComposition;
 import com.maruseron.zeron.analize.ResolutionResult;
 import com.maruseron.zeron.domain.FunctionDescriptor;
@@ -171,6 +172,13 @@ final class CompilationMetadata {
     void indexResolvedFunctions(final List<CompilationUnit> units, final String mainClassName,
                                 final ResolutionResult resolution) {
         hktBridgeSignatures.clear();
+        for (final var contract : resolution.contracts().values()) {
+            if (contract.higherKinded()
+                    && contract.methods().stream().anyMatch(Stmt.ContractMethod::isDefault)) {
+                final var owner = SyntheticNames.hktDefaultOwner(contract.name().lexeme());
+                functionOwners.put(owner, owner);
+            }
+        }
         for (var unitIndex = 0; unitIndex < units.size(); unitIndex++) {
             final var unit = units.get(unitIndex);
             if (unit.metadataOnly()) continue;

@@ -183,11 +183,12 @@ public final class HigherKindedAbstractionTest {
                 contract Applicative<F<_>> requires Mapper<F> {
                     pure<A: mut>(value: A): F<A>;
                 }
-                class Box<T: mut> is Applicative<Box<_>> {
+                class Box<T: mut> is Mapper<Box<_>>, Applicative<Box<_>> {
                     public property value: T;
                     public constructor new;
                     public map<R: mut>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
+                    delegating implementation Mapper<Box<_>> {}
                     delegating implementation Applicative<Box<_>> {
                         fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
                     }
@@ -216,7 +217,7 @@ public final class HigherKindedAbstractionTest {
     }
 
     @Test
-    public void delegatingClassImplementationsSynthesizeSharedInheritedHktMethods() throws Exception {
+    public void delegatingClassImplementationsRequirePerContractBlocks() throws Exception {
         final var source = """
                 contract Mapper<F<_>> {
                     map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
@@ -231,17 +232,21 @@ public final class HigherKindedAbstractionTest {
                 contract Foldable<F<_>> requires Mapper<F> {
                     foldLeft<A: mut, B: mut>(this: F<A>, initial: B, combine: (B, A) -> B): B;
                 }
-                class Box<T: nullable + mut> is Monad<Box<_>>, Foldable<Box<_>> {
+                class Box<T: nullable + mut> is Mapper<Box<_>>, Applicative<Box<_>>,
+                        Monad<Box<_>>, Foldable<Box<_>> {
                     public property value: T;
                     public constructor new;
                     public map<R: mut>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
                     public foldLeft<R: mut>(initial: R, combine: (R, T) -> R): R =
                         combine(initial, this.value);
-                    delegating implementation Monad<Box<_>> {
+                    delegating implementation Mapper<Box<_>> {}
+                    delegating implementation Applicative<Box<_>> {
                         fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
                         fn ap<A: mut, B: mut>(this: Box<(A) -> B>, values: Box<A>): Box<B> =
                             Box<B>.new(this.value(values.value));
+                    }
+                    delegating implementation Monad<Box<_>> {
                         fn flatMap<A: mut, B: mut>(
                             this: Box<A>, transform: (A) -> Box<B>
                         ): Box<B> = transform(this.value);
@@ -280,15 +285,18 @@ public final class HigherKindedAbstractionTest {
                 contract Monad<F<_>> requires Applicative<F> {
                     flatMap<A: mut, B: mut>(this: F<A>, transform: (A) -> F<B>): F<B>;
                 }
-                class Box<T: mut> is Monad<Box<_>> {
+                class Box<T: mut> is Mapper<Box<_>>, Applicative<Box<_>>, Monad<Box<_>> {
                     public property value: T;
                     public constructor new;
                     public map<R: mut>(transform: (T) -> R): Box<R> =
                         Box<R>.new(transform(this.value));
-                    delegating implementation Monad<Box<_>> {
+                    delegating implementation Mapper<Box<_>> {}
+                    delegating implementation Applicative<Box<_>> {
                         fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
                         fn ap<A: mut, B: mut>(this: Box<(A) -> B>, values: Box<A>): Box<B> =
                             Box<B>.new(this.value(values.value));
+                    }
+                    delegating implementation Monad<Box<_>> {
                         fn flatMap<A: mut, B: mut>(
                             this: Box<A>, transform: (A) -> Box<B>
                         ): Box<B> = transform(this.value);
@@ -637,6 +645,78 @@ public final class HigherKindedAbstractionTest {
     }
 
     @Test
+    public void childWitnessUsesAncestorEvidenceWithoutProvidingIt() throws Exception {
+        final var source = """
+                contract Functor<F<_>> {
+                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                }
+                contract Applicative<F<_>> requires Functor<F> {
+                    pure<A: mut>(value: A): F<A>;
+                }
+                class Box<T: mut> {
+                    public property value: T;
+                    public constructor new;
+                }
+                witness BoxFunctor: Functor<Box<_>> for Box<_> {
+                    fn map<A: mut, B: mut>(
+                        this: Box<A>, transform: (A) -> B
+                    ): Box<B> = Box<B>.new(transform(this.value));
+                }
+                witness BoxApplicative: Applicative<Box<_>> for Box<_> {
+                    fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
+                }
+                fn mapValue<F<_>: Applicative<F>, A: mut, B: mut>(
+                    source: F<A>, transform: (A) -> B
+                ): F<B> = F.map(source, transform);
+                fn pureValue<F<_>: Applicative<F>, A: mut>(value: A): F<A> = F.pure(value);
+                fn run(): Int =
+                    mapValue<Box<_>, Int, Int>(Box<Int>.new(40), value -> value + 1).value
+                        + pureValue<Box<_>, Int>(1).value;
+                """;
+        final var program = new CompilationService(parse(source), "ChildWitnessMain");
+
+        try {
+            deleteTree(Path.of("dist"));
+            program.resolve();
+            program.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass("ChildWitnessMain")
+                        .getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void childWitnessCannotRedeclareAnInheritedOperation() {
+        final var source = """
+                contract Functor<F<_>> {
+                    map<A: mut, B: mut>(this: F<A>, transform: (A) -> B): F<B>;
+                }
+                contract Applicative<F<_>> requires Functor<F> {
+                    pure<A: mut>(value: A): F<A>;
+                }
+                class Box<T: mut> {
+                    public property value: T;
+                    public constructor new;
+                }
+                witness BoxApplicative: Applicative<Box<_>> for Box<_> {
+                    fn map<A: mut, B: mut>(
+                        this: Box<A>, transform: (A) -> B
+                    ): Box<B> = Box<B>.new(transform(this.value));
+                    fn pure<A: mut>(value: A): Box<A> = Box<A>.new(value);
+                }
+                """;
+
+        final var error = assertThrows(ResolutionError.class,
+                () -> new CompilationService(parse(source), "InheritedWitnessMain").resolve());
+        assertTrue(error.getMessage().contains(
+                "Witness method 'map' is inherited from contract 'Functor'"));
+    }
+
+    @Test
     public void receiverBasedHktDefaultUsesDeclaredOperations() throws Exception {
         final var source = """
                 contract Foldable<F<_>> {
@@ -723,13 +803,15 @@ public final class HigherKindedAbstractionTest {
                 fn applySecond<A: mut, B: mut, C: mut>(
                     combine: (A, B) -> C, second: B
                 ): (A) -> C = first -> combine(first, second);
-                class Box<T: mut> is Applicative<Box<_>> {
+                class Box<T: mut> is Functor<Box<_>>, Applicative<Box<_>> {
                     public property value: T;
                     public constructor new;
-                    implementation Applicative<Box<_>> {
+                    implementation Functor<Box<_>> {
                         fn map<A: mut, B: mut>(
                             this: Box<A>, transform: (A) -> B
                         ): Box<B> = Box<B>.new(transform(this.value));
+                    }
+                    implementation Applicative<Box<_>> {
                         fn ap<A: mut, B: mut>(
                             this: Box<A>, transform: Box<(A) -> B>
                         ): Box<B> = Box<B>.new(transform.value(this.value));
@@ -760,7 +842,7 @@ public final class HigherKindedAbstractionTest {
     }
 
     @Test
-    public void unrelatedInheritedHktDefaultsRequireAnExplicitImplementation() {
+    public void unrelatedInheritedHktDefaultsAreLegalWithoutUse() {
         final var source = """
                 contract First<F<_>> {
                     default identity<A: mut>(value: F<A>): F<A> = value;
@@ -773,13 +855,50 @@ public final class HigherKindedAbstractionTest {
                     implementation Combined<Box<_>> {}
                 }
                 """;
-        final var error = assertThrows(ResolutionError.class,
-                () -> new CompilationService(parse(source), "HktDefaultConflictMain").resolve());
-        assertTrue(error.getMessage().contains("Multiple inherited HKT defaults"));
+        new CompilationService(parse(source), "HktDefaultConflictMain").resolve();
     }
 
     @Test
-    public void classHktConformanceRequiresAnImplementationBlock() {
+    public void omittedHktBlockUsesPublicClassMembers() throws Exception {
+        final var source = """
+                contract Functor<F<_>> {
+                    map<A, B>(this: F<A>, transform: (A) -> B): F<B>;
+                    pure<A>(value: A): F<A>;
+                }
+                class Box<T> is Functor<Box<_>> {
+                    public property value: T;
+                    public constructor new;
+                    public map<R>(transform: (T) -> R): Box<R> =
+                        Box<R>.new(transform(this.value));
+                    public static fn pure<A>(value: A): Box<A> = Box<A>.new(value);
+                }
+                fn mapValue<F<_>: Functor<F>, A, B>(
+                    source: F<A>, transform: (A) -> B
+                ): F<B> = source.map(transform);
+                fn make<F<_>: Functor<F>, A>(value: A): F<A> = F.pure(value);
+                fn run(): Int =
+                    mapValue<Box<_>, Int, Int>(Box.new(40), value -> value + 1).value
+                        + make<Box<_>, Int>(1).value;
+                """;
+
+        final var program = CompilationService.forCompilationUnits(
+                List.of(parseUnit(source)), "OmittedHktBlockMain", "", List.of(), false);
+        try {
+            deleteTree(Path.of("dist"));
+            program.resolve();
+            program.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass("OmittedHktBlockMain")
+                        .getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void omittedHktBlockStillReportsMissingOperations() {
         final var source = """
                 contract Functor<F<_>> {
                     map<A, B>(source: F<A>, transform: (A) -> B): F<B>;
@@ -789,7 +908,9 @@ public final class HigherKindedAbstractionTest {
                 }
                 """;
 
-        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
+        final var error = assertThrows(ResolutionError.class,
+                () -> new ResolutionService().resolve(parse(source)));
+        assertTrue(error.getMessage().contains("Missing witness implementation"));
     }
 
     @Test

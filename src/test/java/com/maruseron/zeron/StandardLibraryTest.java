@@ -897,7 +897,7 @@ public final class StandardLibraryTest {
                 import zeron.io.print;
                 import zeron.io.println;
                 import java.lang.System;
-                fn emit(): Unit {
+                fn emit(): Unit raises IoFailure {
                     print("a");
                     print(42);
                     println("b");
@@ -938,7 +938,7 @@ public final class StandardLibraryTest {
         final var source = parse("Main.zn", """
                 package %s;
                 import zeron.io.println;
-                fn main(): Unit {
+                fn main(): Unit raises IoFailure {
                     println("launched");
                 }
                 """.formatted(packageName));
@@ -1469,20 +1469,20 @@ public final class StandardLibraryTest {
         Files.createDirectories(second.getParent());
         Files.writeString(entry, """
                 package app;
-                import zeron.io.println;
+                import java.lang.System;
                 let first: Int = markFirst();
                 fn markFirst(): Int {
-                    println("first");
+                    System.out?.println("first");
                     return 1;
                 }
                 fn result(): Int = first + second;
                 """);
         Files.writeString(second, """
                 package app;
-                import zeron.io.println;
+                import java.lang.System;
                 let second: Int = markSecond();
                 fn markSecond(): Int {
-                    println("second");
+                    System.out?.println("second");
                     return 2;
                 }
                 """);
@@ -1519,7 +1519,7 @@ public final class StandardLibraryTest {
                 package %s;
                 import zeron.io.println;
                 let broken: Int = 1 / 0;
-                fn main(): Unit {
+                fn main(): Unit raises IoFailure {
                     println("main");
                 }
                 """.formatted(packageName));
@@ -2430,7 +2430,7 @@ public final class StandardLibraryTest {
                 fn reciprocal<T: mut + Fractional<T>>(value: T): T = value.reciprocal();
                 fn numericResult(): Int = subtract(add(20, 24), 2);
                 fn reciprocalResult(): Float = reciprocal(2.0);
-                fn announce(): Unit {
+                fn announce(): Unit raises IoFailure {
                     print("compiled");
                     println("!");
                 }

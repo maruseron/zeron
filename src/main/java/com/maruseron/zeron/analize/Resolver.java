@@ -372,7 +372,9 @@ public final class Resolver {
             }
         }
         Zeron.debug("resolution finished successfully with symbol table: \n" + context.symbols);
+        final var entryPoint = resolveEntryPoint(context, units, importsByUnit);
         return new ResolutionResult(
+                entryPoint,
                 context.symbols,
                 context.types,
                 context.diagnostics.snapshot(),
@@ -396,6 +398,80 @@ public final class Resolver {
                 Zeron.warnings(),
                 context.typeClassWitnesses.stream()
                         .map(TypeClassEvidence.WitnessEntry::declaration).toList());
+    }
+
+    private static ResolutionResult.EntryPoint resolveEntryPoint(
+            final ResolutionContext context, final List<CompilationUnit> units,
+            final Map<CompilationUnit, ImportResolver.ImportEnvironment> importsByUnit) {
+        if (units.isEmpty()) return null;
+        final var entryUnit = units.getFirst();
+        context.packageName = entryUnit.packageName();
+        context.currentImports = importsByUnit.get(entryUnit);
+        context.currentSourcePath = entryUnit.sourcePath();
+        final var mains = NamespaceMembers.flatten(entryUnit.declarations()).stream()
+                .filter(member -> member.namespaceName() == null)
+                .map(NamespaceMembers.Member::declaration)
+                .filter(Stmt.Function.class::isInstance)
+                .map(Stmt.Function.class::cast)
+                .filter(function -> function.name().lexeme().equals("main"))
+                .toList();
+        if (mains.isEmpty()) return null;
+
+        final var zeroArgument = new ArrayList<Stmt.Function>();
+        final var withArguments = new ArrayList<Stmt.Function>();
+        for (final var main : mains) {
+            if (!main.typeDescriptor().typeParameters().isEmpty()) {
+                entryError(context, main.name(),
+                        "Entry point 'main' cannot declare type parameters.");
+                continue;
+            }
+            if (main.typeDescriptor().parameters().isEmpty()) {
+                zeroArgument.add(main);
+            } else if (main.typeDescriptor().parameters().size() == 1
+                    && main.typeDescriptor().parameters().getFirst() instanceof ArrayDescriptor array
+                    && array.elementType() instanceof StringDescriptor) {
+                withArguments.add(main);
+            } else {
+                entryError(context, main.name(),
+                        "Entry point 'main' must have no parameters or one Array<String> parameter.");
+            }
+        }
+        for (final var candidates : List.of(zeroArgument, withArguments)) {
+            if (candidates.size() > 1) {
+                entryError(context, candidates.get(1).name(),
+                        "Multiple entry points named 'main' have the same parameter shape.");
+            }
+        }
+        final var selected = withArguments.isEmpty()
+                ? zeroArgument.stream().findFirst().orElse(null)
+                : withArguments.getFirst();
+        if (selected == null) return null;
+        final var passArguments = !withArguments.isEmpty();
+        if (!zeroArgument.isEmpty() && !withArguments.isEmpty()
+                && !zeroArgument.getFirst().typeDescriptor().returnType()
+                        .equals(withArguments.getFirst().typeDescriptor().returnType())) {
+            entryError(context, selected.name(),
+                    "The zero-argument and Array<String> 'main' forms return different entry value types.");
+        }
+        final var valueType = selected.typeDescriptor().returnType();
+        if (valueType instanceof UnitDescriptor) {
+            return new ResolutionResult.EntryPoint(selected, passArguments, valueType, null);
+        }
+        final var evidence = TypeClassEvidence.selectEntryEvidence(context, valueType, selected.name());
+        if (evidence == null) {
+            entryError(context, selected.name(),
+                    "Entry point 'main' returns '" + TypeFormatter.format(valueType)
+                            + "', but no Main<" + TypeFormatter.format(valueType)
+                            + "> evidence is available. Declare a witness for that type or return Unit.");
+        }
+        return new ResolutionResult.EntryPoint(selected, passArguments, valueType, evidence);
+    }
+
+    private static void entryError(final ResolutionContext context, final Token token,
+                                   final String message) {
+        context.diagnostics.record(new ResolutionError(
+                DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, token, message),
+                context.entrySourcePath);
     }
 
     private static boolean attempt(final ResolutionContext context, final Runnable operation) {

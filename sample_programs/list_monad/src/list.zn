@@ -1,5 +1,8 @@
 import zeron.control.Foldable;
+import zeron.control.Functor;
+import zeron.control.Applicative;
 import zeron.control.Monad;
+import zeron.control.Semigroup;
 import zeron.control.Monoid;
 
 type List<T: mut> = Nil | Cons(head: T, tail: List<T>);
@@ -31,26 +34,32 @@ witness<T: mut + Display> Display for List<T> {
     };
 }
 
-witness Monad<List<_>> for List<_> {
-    fn map<A: mut, B: mut>(this: List<A>, transform: (A) -> B): List<B> = match (this) {
+witness Functor<List<_>> for List<_> {
+    fn map<A, B>(this: List<A>, transform: (A) -> B): List<B> = match (this) {
         case Cons(head, tail) -> List.Cons(transform(head), tail.map<A, B>(transform));
         case Nil() -> List<B>.Nil();
     };
+}
 
-    fn flatMap<A: mut, B: mut>(this: List<A>, transform: (A) -> List<B>): List<B> = 
-        this.map(transform).join();
+witness Applicative<List<_>> for List<_> {
+    fn pure<A>(head: A): List<A> = List.Cons(head, List.Nil());
 
-    fn pure<A: mut>(head: A): List<A> = List.Cons(head, List.Nil());
-
-    fn ap<A: mut, B: mut>(this: List<A>, transform: List<(A) -> B>): List<B> =
+    fn ap<A, B>(this: List<A>, transform: List<(A) -> B>): List<B> =
         transform.flatMap(f -> this.map(x -> f(x)));
 }
 
-witness<T> Monoid<List<T>> for List<T> {
-    static fn empty(): List<T> = List.Nil();
+witness Monad<List<_>> for List<_> {
+    fn flatMap<A, B>(this: List<A>, transform: (A) -> List<B>): List<B> =
+        this.map(transform).join();
+}
 
+witness<T> Semigroup<List<T>> for List<T> {
     fn combine(other: List<T>): List<T> = match (this) {
         case Cons(head, tail) -> List.Cons(head, tail.combine(other));
         case Nil() -> other;
     };
+}
+
+witness<T> Monoid<List<T>> for List<T> {
+    static fn empty(): List<T> = List.Nil();
 }

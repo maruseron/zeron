@@ -1,0 +1,24 @@
+package zeron.lang;
+
+import java.lang.System;
+
+/// Executes the value produced by an entry point.
+///
+/// The compiler recognizes this contract in the entry unit and selects exactly one applicable
+/// `Main<A>` evidence value for a non-`Unit` `main` return type.
+public contract Main<A> {
+    /// Consumes the entry value and ends the program normally or by exiting.
+    static run(value: A): Unit raises Effect;
+}
+
+/// Entry behavior for a `Unit` value: the program ends normally.
+default witness Main<Unit> for Unit {
+    static fn run(value: Unit): Unit {}
+}
+
+/// Entry behavior for an integer exit status: `0` ends normally and any other value exits.
+default witness Main<Int> for Int {
+    static fn run(value: Int): Unit {
+        if (value != 0) System.exit(value);
+    }
+}

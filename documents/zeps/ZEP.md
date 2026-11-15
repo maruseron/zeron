@@ -134,9 +134,9 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Unscheduled | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Shipped | 0.7.0 |
 | [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Explicit Effect Responses | Draft | Unscheduled | — |
-| [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Accepted | Candidate | 0.8.0 |
-| [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Accepted | Candidate | 0.8.0 |
-| [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Accepted | Candidate | 0.8.0 |
+| [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Implemented | Candidate | 0.8.0 |
+| [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Implemented | Candidate | 0.8.0 |
+| [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Implemented | Candidate | 0.8.0 |
 | [ZEP-0127](./ZEP-0127.md) | Data Class Component Access and Positional Destructuring | Accepted | Candidate | 0.8.0 |
 | [ZEP-0128](./ZEP-0128.md) | Sum-Type Parameter Bounds and Case-Local Type Parameters | Accepted | Candidate | 0.8.0 |
 | [ZEP-0129](./ZEP-0129.md) | Unary Products versus Arbitrary-Valued Newtypes | Accepted | Candidate | 0.8.0 |
@@ -145,6 +145,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0132](./ZEP-0132.md) | Nullable Safe-Cast Correction | Accepted | Candidate | 0.8.0 |
 | [ZEP-0133](./ZEP-0133.md) | Operator-Constraint Inference for Typeless Lambdas | Accepted | Candidate | 0.8.0 |
 | [ZEP-0134](./ZEP-0134.md) | Invocation of Function-Valued Expressions | Draft | Candidate | 0.8.0 |
+| [ZEP-0135](./ZEP-0135.md) | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Candidate | 0.8.0 |
 
 ## Release bundles
 
@@ -158,7 +159,7 @@ sequencing.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 13 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0134; ZEP-0132 is the immediate corrective |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 14 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0135; ZEP-0132 is the immediate corrective |
 | `0.9.0` | Effect control and response typing | Proposed | No candidates; ZEP-0118 and ZEP-0110 headline the bundle |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -186,7 +187,7 @@ and is likewise outside the bundle. The bundle shipped on 2026-11-14; its rows a
 
 ### `0.8.0` — normalization and nominal implementation
 
-The bundle targets smaller normalization work rather than new control-flow semantics. Its thirteen
+The bundle targets smaller normalization work rather than new control-flow semantics. Its fourteen
 candidates are:
 
 - [ZEP-0117](./ZEP-0117.md) — declarative project targets and generated CLI/manifest reference.
@@ -198,7 +199,8 @@ candidates are:
   public members supplies HKT operations when no explicit block is present.
 - [ZEP-0126](./ZEP-0126.md) — compiler-owned `Main<A>` entry-point contract. A launchable `main`
   returns a closed entry value, and the generated launcher interprets it through `Main<A>` evidence
-  after the user function returns.
+  after the user function returns. Implemented with standard `Unit`, `Int`, and `Result<Unit, E>`
+  witnesses.
 - [ZEP-0127](./ZEP-0127.md) — data-class component access and positional destructuring. Canonical
   components are readable whenever the type is nameable, and positional patterns use only those
   components at the root and in nested positions.
@@ -230,6 +232,11 @@ candidates are:
   may follow any non-null function-valued expression, so `makeFunction()()` and `add(2)(3)` work
   without introducing a temporary binding or a new runtime representation. The proposal is still
   `Draft`; its `0.8.0` candidacy records the intended target, not an accepted design.
+- [ZEP-0135](./ZEP-0135.md) — witness provision, requirement evidence, and owner-directed dispatch.
+  A witness provides only its declared contract, `requires` contracts select their own canonical
+  provider, and operations dispatch through their declaring contract. This removes the
+  `Option`/`Monad`/`Alternative` diamond ambiguity without multi-contract witnesses or a
+  per-type coherence rule.
 
 ZEP-0124 and ZEP-0125 are implementation-coupled through one static/receiverless matcher, even
 though they are independently decidable designs. They should be implemented and validated together
@@ -239,14 +246,16 @@ runtime ABI. ZEP-0126 is the only candidate that changes the entry-point rule; i
 static-requirement work in ZEP-0124 for nominal `Main<A>` conformance, but its witness-only form can
 ship independently. The bundle does not change `raise` or `handle` typing.
 
-These thirteen are the current target; further small normalization items may join `0.8.0` as additional
+These fourteen are the current target; further small normalization items may join `0.8.0` as additional
 candidates. The acceptance queue remains open. ZEP-0134 is the only draft row in the target set; it
-must be accepted before implementation and is not a committed bundle item yet.
+must be accepted before implementation and is not a committed bundle item yet. ZEP-0135 was accepted,
+implemented, and added as a candidate for the same bundle.
 
 The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
-and ZEP-0128–ZEP-0133 were reviewed there and are now `Accepted` / `Candidate`; ZEP-0070 was
-promoted from the backlog. ZEP-0134 was added directly as a `Draft` / `Candidate` for `0.8.0`; its
-acceptance review is still pending. All count in the bundle above.
+ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135 is now `Implemented` / `Candidate`,
+and the others are `Accepted` / `Candidate`. ZEP-0070
+was promoted from the backlog. ZEP-0134 was added directly as a `Draft` / `Candidate` for `0.8.0`;
+its acceptance review is still pending. All count in the bundle above.
 
 ### `0.9.0` — effect control and response typing
 

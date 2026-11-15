@@ -446,7 +446,7 @@ public sealed interface Stmt {
             derivedContracts = List.copyOf(derivedContracts);
             storedStateOrder = List.copyOf(storedStateOrder);
             higherKindedContractUses = List.copyOf(higherKindedContractUses);
-            higherKindedImplementations = List.copyOf(higherKindedImplementations);
+            higherKindedImplementations = new java.util.ArrayList<>(higherKindedImplementations);
             literalSuffixes = List.copyOf(literalSuffixes);
             dataComponents = List.copyOf(dataComponents);
             initializerBlocks = List.copyOf(initializerBlocks);
@@ -591,6 +591,10 @@ public sealed interface Stmt {
                          List<Method> methods, boolean isPublic) {
             this(name, typeParameters, contractUses, fields, List.of(), constructor,
                     namedConstructors, methods, List.of(), isPublic, false);
+        }
+
+        public void addHigherKindedImplementation(final Witness witness) {
+            higherKindedImplementations.add(witness);
         }
 
         public List<Token> contractNames() {

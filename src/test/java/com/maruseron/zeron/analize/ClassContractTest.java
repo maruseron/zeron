@@ -152,7 +152,7 @@ public final class ClassContractTest {
     }
 
     @Test
-    public void contractsWithStaticRequirementsRequireWitnesses() {
+    public void classStaticFunctionsSatisfyStaticRequirements() {
         final var result = new ResolutionService().resolveWithDiagnostics(parse("""
                 contract StaticFactory {
                     static create(): Int;
@@ -160,19 +160,27 @@ public final class ClassContractTest {
                 contract DerivedFactory requires StaticFactory {}
                 class Direct is StaticFactory {
                     public constructor new;
-                    public create(): Int = 1;
+                    public static fn create(): Int = 1;
                 }
                 class Inherited is DerivedFactory {
+                    public constructor new;
+                    public static fn create(): Int = 2;
+                }
+                """));
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
+
+        final var missing = new ResolutionService().resolveWithDiagnostics(parse("""
+                contract StaticFactory {
+                    static create(): Int;
+                }
+                class Missing is StaticFactory {
                     public constructor new;
                     public create(): Int = 1;
                 }
                 """));
-
-        final var witnessOnlyErrors = result.errors().stream()
-                .filter(diagnostic -> diagnostic.message().contains(
-                        "must be implemented through a witness"))
-                .count();
-        assertEquals(result.errors().toString(), 2, witnessOnlyErrors);
+        assertEquals(missing.errors().toString(), 1, missing.errors().size());
+        assertTrue(missing.errors().getFirst().message().contains("requires static method 'create'"));
 
         new ResolutionService().resolve(parse("""
                 contract StaticFactory {
@@ -185,6 +193,58 @@ public final class ClassContractTest {
                     static fn create(): Int = 1;
                 }
                 """));
+
+        final var conflicting = new ResolutionService().resolveWithDiagnostics(parse("""
+                contract StaticFactory {
+                    static create(): Int;
+                }
+                class Direct is StaticFactory {
+                    public constructor new;
+                    public static fn create(): Int = 1;
+                }
+                witness StaticFactory for Direct {
+                    static fn create(): Int = 2;
+                }
+                """));
+        assertTrue(conflicting.errors().stream().anyMatch(diagnostic -> diagnostic.message().contains(
+                "cannot implement a contract already implemented nominally")));
+    }
+
+    @Test
+    public void genericClassStaticRequirementsCanUseFirstOrderImplementationBlocks() {
+        final var result = new ResolutionService().resolveWithDiagnostics(parse("""
+                contract StaticFactory {
+                    static create(): Int;
+                }
+                class Box<T> is StaticFactory {
+                    value: T;
+                    public constructor new;
+                    implementation StaticFactory {
+                        static fn create(): Int = 1;
+                    }
+                }
+                fn make<T: StaticFactory>(): Int = T.create();
+                fn run(): Int = make<Box<Int>>();
+                """));
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
+    }
+
+    @Test
+    public void staticContractDefaultsFillNominalConformance() {
+        final var result = new ResolutionService().resolveWithDiagnostics(parse("""
+                contract StaticFactory {
+                    default static create(): Int = 1;
+                }
+                class Box<T> is StaticFactory {
+                    value: T;
+                    public constructor new;
+                }
+                fn make<T: StaticFactory>(): Int = T.create();
+                fn run(): Int = make<Box<Int>>();
+                """));
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
     }
 
     @Test

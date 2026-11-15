@@ -35,9 +35,11 @@ class Box<T: mut> is Mapper<Box<_>> {
 ```
 
 The implementation block belongs to the class. Its method is statically dispatched through
-higher-kinded evidence; it does not add an ordinary virtual method to `Box`. If the class already
-provides a compatible public method for a receiver-based operation, the block can opt into
-forwarding it:
+higher-kinded evidence; it does not add an ordinary virtual method to `Box`. The block is optional:
+when it is omitted, public instance methods implement receiver-marked operations and public class
+static functions implement receiverless operations. Explicit blocks remain authoritative. If the
+class already provides a compatible public method for a receiver-based operation, the block can opt
+into forwarding it:
 
 ```zeron
 class Box<T> is Mapper<Box<_>> {
@@ -48,9 +50,18 @@ class Box<T> is Mapper<Box<_>> {
 }
 ```
 
-Explicit methods in the block take precedence. Contract defaults and receiverless operations keep
-their existing behavior; static and unmatched operations are not delegated. Mutating operations
-can delegate when the receiver and target method both allow mutation.
+Explicit methods in the block take precedence. Contract defaults fill any remaining operation, and
+receiverless operations are satisfied by public class static functions. The old
+`is Mapper<Box<_>>` form with no block now means the same structural matching; add an explicit
+block when you need to override a member, keep the implementation in one place, or provide an
+operation that has no matching public member. Mutating operations can delegate when the receiver
+and target method both allow mutation.
+
+An implementation block supplies exactly its own contract. When a contract requires another one,
+declare a separate block for the prerequisite; do not repeat inherited operations in the child
+block. In the standard library, `Stream` therefore has separate `Functor`, `Applicative`, `Monad`,
+and `Foldable` implementations, and `Option` and `Result` split their chains the same way. A child
+block that declares `map` is rejected because `Functor` owns `map`.
 
 The target method does not need to repeat the contract signature exactly. Its parameters may accept
 broader types and its return type may be narrower, provided the method remains assignable to the
@@ -73,8 +84,8 @@ let incremented = mapValues<Box<_>, Int, Int>(box, value -> value + 1);
 
 Here `F.map(...)` is an explicit static call through the constructor bound. The same type parameter
 and bound syntax appears in the standard library's `Functor<F<_>>`, `Applicative<F<_>>`,
-`Monad<F<_>>`, and `Foldable<F<_>>` contracts. `Stream` implements `Monad` and `Foldable`;
-`List` implements `Foldable` and `Collector`.
+`Monad<F<_>>`, and `Foldable<F<_>>` contracts. `Stream` implements `Functor`, `Applicative`,
+`Monad`, and `Foldable`; `List` implements `Foldable` and `Collector`.
 
 Higher-kinded capabilities also describe construction and mutation for a generic family:
 

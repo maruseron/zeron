@@ -2016,12 +2016,19 @@ final class NominalTypeEmitter {
         final var helperOwner = SyntheticNames.hktDefaultOwner(owner.name().lexeme());
         final var helperPath = outputPath(context, helperOwner);
         Files.createDirectories(helperPath.getParent());
-        context.classFile.buildTo(helperPath.toAbsolutePath(), ClassDesc.of(helperOwner), builder -> {
-            builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
-            builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL | ClassFile.ACC_SUPER);
-            owner.methods().stream().filter(Stmt.ContractMethod::isDefault)
-                    .forEach(method -> emitHktContractDefaultHelper(context, builder, owner, method));
-        });
+        final var previousHolder = context.currentHolderName;
+        context.currentHolderName = helperOwner;
+        try {
+            context.classFile.buildTo(helperPath.toAbsolutePath(), ClassDesc.of(helperOwner), builder -> {
+                builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
+                builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL | ClassFile.ACC_SUPER);
+                owner.methods().stream().filter(Stmt.ContractMethod::isDefault)
+                        .forEach(method -> emitHktContractDefaultHelper(context, builder, owner, method));
+                DeclarationEmitter.emitFunctionAdapters(context, builder);
+            });
+        } finally {
+            context.currentHolderName = previousHolder;
+        }
     }
 
     private static void emitHktContractDefaultHelper(

@@ -84,10 +84,13 @@ local to a package, or giving a type a contract implementation without modifying
 conformance. A witness does not change the target type itself: it provides compile-time evidence
 that can satisfy a bound.
 
-A witness must implement the contract's abstract instance methods, unless the contract supplies
-defaults. Its methods are read-only in the current model: `mut` requirements are unsupported,
-`this` is immutable, and implementations may access only public members of the target. This does
-not guarantee that a witness method is free of other effects.
+A witness implements the abstract instance methods declared directly by its own contract, unless
+that contract supplies defaults. Methods inherited from a prerequisite contract are not part of the
+witness: each prerequisite is separate evidence with its own provider. With the strict rule in
+effect, declaring an inherited operation in a child witness is an error that names the contract
+that owns the operation. Witness methods are read-only in the current model: `mut` requirements are
+unsupported, `this` is immutable, and implementations may access only public members of the target.
+This does not guarantee that a witness method is free of other effects.
 
 When a target class already has compatible public instance methods, a declaration can opt into
 forwarding those methods instead of repeating trivial witness bodies:
@@ -103,19 +106,78 @@ implementations. Static requirements are never delegated and must be implemented
 Delegation does not infer a witness: the witness declaration remains explicit.
 
 Contracts with static method requirements, including requirements inherited from another
-contract, must be implemented through a witness rather than a class's `is` clause. A witness for
-such a contract implements all of its abstract requirements: declare static implementations with
-`static fn` and instance implementations with `fn`. Contracts without static requirements may
-still use nominal class conformance; that conformance remains authoritative for its instance
-methods, and a witness cannot replace them. Factories are expressed separately: use a class's
+contract, may be implemented through a class's `is` clause. A public class-scoped `static fn`
+satisfies a matching static requirement directly. When the requirement needs the class's type
+parameters, or when several entries need to be grouped, add a first-order `implementation` block
+for the contract and use `static fn` entries:
+
+```zeron
+contract Factory {
+    static create(): Int;
+}
+
+class Box<T> is Factory {
+    implementation Factory {
+        static fn create(): Int = 1;
+    }
+}
+```
+
+Explicit block entries take precedence over class static functions, and contract defaults fill any
+remaining static requirement. A witness for such a contract implements its own abstract
+requirements: declare static implementations with `static fn` and instance implementations with
+`fn`. Requirements inherited from a prerequisite are supplied by that prerequisite's evidence.
+Nominal conformance remains authoritative for the whole contract, including its static
+requirements, so a witness cannot replace it. Factories are expressed separately: use a class's
 named constructor directly, pass a factory value for one concrete type, or use an HKT contract for
 a generic type family.
+
+The compiler-owned entry contract `Main<A>` is an example of a static requirement supplied by a
+witness. `Main.run` consumes the value returned by `main`; a user type opts in with a normal
+witness, and the compiler selects exactly one applicable `Main<A>` evidence value when building
+the launcher:
+
+```zeron
+public witness JobMain: Main<Job> for Job {
+    static fn run(value: Job): Unit = value.start();
+}
+```
+
+`Unit`, `Int`, and `Result<Unit, E>` have standard witnesses in `zeron.lang`. A library can add
+entry behavior for another type with its own witness.
+
+## Provision and requirement evidence
+
+A witness provides exactly the contract named in its declaration. If that contract has a
+`requires` clause, each prerequisite is a separate requirement: Zeron resolves it to its own
+canonical provider instead of treating the child witness as a provider of every contract in its
+closure. A canonical `default` witness wins; when no default exists, a named witness is used only
+if exactly one applies. Two independent providers for the same prerequisite are still ambiguous.
+
+This lets a contract hierarchy share evidence without duplicating methods. For example, an
+`Applicative<F>` witness provides `pure` and `ap`, while its `Functor<F>` prerequisite has the
+`map` witness. A `Monad<F>` witness provides `flatMap` and requires both, but does not provide
+`map`, `pure`, or `ap` itself. A concrete type therefore has one provider per contract in the
+chain, and `Monad<Option<_>>` can share the default `Applicative<Option<_>>` and
+`Functor<Option<_>>` witnesses with `Alternative<Option<_>>`.
+
+Operations are dispatched by their declaring contract. `map` resolves through `Functor`, `pure`
+and `ap` through `Applicative`, `flatMap` through `Monad`, and `empty` and `orElse` through
+`Alternative`, even when the receiver is a concrete type that implements all of them. Calling an
+operation through a child bound such as `F<_>: Monad<F>` still permits inherited operations: the
+compiler projects them from the bound's prerequisite evidence.
+
+The strict rule applies to every witness, including class `implementation` blocks: a block may
+declare only operations owned by its own contract. Split a chain into one implementation block per
+contract, and do not repeat inherited operations in a child block. The compiler rejects an
+inherited operation with an error that names the contract that declares it.
 
 ## Selecting witnesses
 
 For a concrete target type and fully applied contract, Zeron must find exactly one applicable
-witness in the active scope. If it finds none, the bound cannot be satisfied; if it finds more
-than one, the selection is ambiguous. The compiler does not choose a “closest” witness.
+provider in the active scope. If it finds none, the bound cannot be satisfied; if it finds more
+than one, the selection is ambiguous. The compiler does not choose a “closest” witness, and a
+witness for a child contract is not a provider for its prerequisites.
 
 Witnesses in the current package are active automatically, and a star import such as
 `import labels.*;` activates every witness exported by that package. A named public witness can
@@ -181,9 +243,11 @@ generic witness declarations could apply, their patterns must not overlap in act
 current overlap checks reject overlaps they can identify.
 
 Witness methods participate in member lookup after ordinary instance methods and applicable
-extensions. If more than one witness exposes the same method, the call is ambiguous. A generic
-helper with an explicit bound is often a clearer way to state which contract behavior the code
-requires.
+extensions. An operation exposed by a witness is selected from the provider for the contract that
+declares it; the compiler does not choose among sibling witnesses that happen to reach it through
+their prerequisites. If two providers compete for the same declaring contract, the call is
+ambiguous. A generic helper with an explicit bound is often a clearer way to state which contract
+behavior the code requires.
 
 ## Runtime representation and current limits
 
@@ -201,7 +265,8 @@ The current implementation has several boundaries:
   defaults use evidence carried by implementing instances.
 - A read-only receiver cannot call mutating methods through a bound; use a mutable reference.
   Mutating witness requirements remain unsupported.
-- A witness cannot override the instance methods of a nominally conforming class.
+- A witness cannot implement a contract already implemented nominally by a class, whether its
+  requirements are static, instance, or both.
 - Generic arguments are erased at runtime. An ordinary erased Java-callable descriptor has no
   witness context and throws `UnsupportedOperationException`; Zeron-generated calls use the
   evidence-bearing descriptor.

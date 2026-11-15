@@ -132,7 +132,7 @@ public final class ExtensionMethodTest {
             final var app = unit("""
                     package app;
                     import zeron.collections.*;
-                    fn main() {
+                    fn main(): Unit raises IoFailure {
                         ArrayList.of(1, 2, 3).forEach(println);
                     }
                     """, "Main.zn");

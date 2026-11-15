@@ -115,6 +115,15 @@ final class LambdaCompilationPlan {
         .toList();
     }
 
+    String ensureAdapterName(final FunctionDescriptor source, final FunctionDescriptor target) {
+        final var erasedSource = (FunctionDescriptor) TypeSubstitution.erase(source);
+        final var erasedTarget = (FunctionDescriptor) TypeSubstitution.erase(target);
+        final var adapter = functionAdapters.computeIfAbsent(adapterKey(erasedSource, erasedTarget),
+                _ -> new FunctionAdapterDefinition(erasedSource, erasedTarget,
+                        "$adapter$" + functionAdapters.size()));
+        return adapter.name();
+    }
+
     String adapterName(final FunctionDescriptor source, final FunctionDescriptor target) {
         final var adapter = functionAdapters.get(adapterKey(source, target));
         return adapter == null ? null : adapter.name();

@@ -24,6 +24,12 @@ type classes, while using compiler-passed method handles as the runtime represen
 declared contract conformance remains authoritative for its instance methods. An explicit witness
 may provide instance-method evidence for a target that does not declare that contract.
 
+ZEP-0135 refines this snapshot's provision model. A witness provides only the contract it is
+declared for; contracts in its `requires` chain are separate requirements resolved to their own
+canonical providers. Operations dispatch through the contract that declares them, and inherited
+operations are never selected from a child witness. The paragraphs below that describe inherited
+methods as part of one witness implementation are superseded by that owner-directed model.
+
 ## Applied contract bounds
 
 A generic bound denotes a complete applied contract type, not merely a raw contract name. For
@@ -95,11 +101,14 @@ does not create a second instance or replace a declared nominal conformance. Con
 class-side factory requirements; a generic API uses an HKT capability for a type family or accepts
 an explicit factory for a concrete type.
 
-Contracts with static method requirements are witness-only, including requirements inherited
-through contract composition. A class cannot claim such a contract with `is`, because class methods
-have no static implementation form. A witness supplies the contract implementation as a whole:
-static requirements use `static fn`, and any instance requirements use ordinary `fn` witness
-methods. Contracts without static requirements retain nominal class conformance.
+Contracts with static method requirements can be implemented nominally, including requirements
+inherited through contract composition. A public class-scoped `static fn` satisfies a matching
+static requirement directly. A first-order `implementation Contract { ... }` block can supply
+`static fn` entries when the requirement refers to the class's type parameters or when the
+implementation should be grouped explicitly. Explicit block entries take precedence over class
+static functions, and static contract defaults fill the remainder. A witness still supplies the
+contract implementation as a whole for non-nominal targets; it cannot be added alongside a nominal
+class conformance, including one with static requirements.
 
 For a non-nominal target, witness methods provide contract instance-method evidence:
 
@@ -133,10 +142,12 @@ refinement. This supplies evidence only for the sum target; it does not establis
 conformance for generated case classes or automatically synthesize a witness for each case.
 Generic witness target patterns must cover the sum's complete type-parameter pattern.
 
-A non-nominal witness must implement every abstract instance-method requirement. If a method is
-omitted and the contract provides a default implementation, the default is lowered as a static
-witness implementation. It receives the target and any prerequisite evidence needed by contract
-calls made within the default.
+A non-nominal witness implements the abstract instance methods declared directly by its own
+contract. It does not implement methods inherited from a prerequisite contract; those methods
+belong to the prerequisite's own witness. If an own-contract method is omitted and the contract
+provides a default implementation, the default is lowered as a static witness implementation. It
+receives the target and any prerequisite evidence needed by contract calls made within the
+default.
 
 A `delegating witness` opts into synthesizing forwarding implementations for abstract,
 non-static, non-mutating requirements that match public instance methods declared directly on its
@@ -157,7 +168,10 @@ witness<T: Display> Display for Buffer<T> {
 }
 ```
 
-Prerequisite bounds must be resolved recursively when selecting the witness. Generic contract
+Prerequisite bounds are resolved recursively when selecting the witness. Each prerequisite is
+resolved as a requirement in its own right: a canonical `default` witness for that contract and
+target wins, and a named witness is used only when no default exists and exactly one named provider
+is applicable. A witness for a child contract does not also provide its ancestors. Generic contract
 methods are supported. The target does not need to declare nominal conformance when witness methods
 supply the required behavior.
 
@@ -168,12 +182,13 @@ active; a `package.*` import activates witnesses from that package. Explicit sym
 activate witnesses. Separate packages may each define a witness, but importing both can make a
 lookup ambiguous.
 
-For a concrete type and fully applied contract, there must be at most one applicable witness among
-the active candidates. Missing evidence is a compile-time error, and multiple applicable witnesses
-are a compile-time ambiguity; resolution does not prefer the nearest scope or most recent import.
-Overlapping patterns within an active witness scope are rejected. Witnesses must obey the orphan
-rule: a witness is declared in the package of its contract or target type. Library metadata must
-preserve enough information to validate coherence across compilation boundaries.
+For a concrete type and fully applied contract, there must be at most one applicable provider among
+the active candidates. A witness provides exactly its declared contract, not every contract in that
+contract's `requires` closure. Missing evidence is a compile-time error, and multiple applicable
+providers are a compile-time ambiguity; resolution does not prefer the nearest scope or most recent
+import. Overlapping patterns within an active witness scope are rejected. Witnesses must obey the
+orphan rule: a witness is declared in the package of its contract or target type. Library metadata
+must preserve enough information to validate coherence across compilation boundaries.
 
 The compiler validates method signatures against the fully applied contract and checks declared
 nominal conformance where present. A witness cannot claim an unrelated contract/type pattern.
@@ -188,16 +203,19 @@ Direct calls on concrete receivers preserve this precedence:
 3. Witness methods in the active witness scope.
 
 An applicable extension owns lookup even when its arguments are invalid; resolution reports the
-extension error instead of silently falling back to a witness. If multiple applicable witnesses
-expose the same unqualified method, the call is ambiguous. A helper with an explicit generic
-contract bound is the intended disambiguation mechanism.
+extension error instead of silently falling back to a witness. An operation exposed by a contract
+is selected from the witness for the contract that declares it. If the receiver's bounds reach the
+operation through several contracts, resolution follows the declaring contract's prerequisite
+evidence rather than choosing among sibling witnesses. A helper with an explicit generic contract
+bound is the intended disambiguation mechanism when separate named providers compete.
 
 HKT operations remain statically dispatched. An HKT contract operation whose first parameter is
 marked `this: F<A>` may additionally be called as `value.operation(...)`; the marker is preserved
 in the API index and receiver syntax supplies that first argument to the selected evidence helper.
-The constructor-bound form `F.operation(value, ...)` remains equivalent. Concrete nominal methods
-win before HKT receiver operations, and HKT operations without the marker are not exposed as
-receiver calls.
+The constructor-bound form `F.operation(value, ...)` remains equivalent. The selected helper comes
+from the witness for the contract that declares the operation, even when the receiver's bound is a
+child contract. Concrete nominal methods win before HKT receiver operations, and HKT operations
+without the marker are not exposed as receiver calls.
 
 When compiling a generic function, each applied behavioral or HKT bound contributes hidden evidence
 parameters to its implementation signature. Calls through those bounds dispatch using the

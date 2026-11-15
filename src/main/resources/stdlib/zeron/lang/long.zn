@@ -2,9 +2,10 @@ package zeron.lang;
 
 import zeron.numeric.Integral;
 import zeron.numeric.Integer;
+import zeron.numeric.Numeric;
 import zeron.numeric.Rational;
 
-default witness Integral<Long> for Long {
+default witness Numeric<Long> for Long {
     fn add(other: Long): Long = this + other;
     fn subtract(other: Long): Long = this - other;
     fn multiply(other: Long): Long = this * other;
@@ -12,7 +13,25 @@ default witness Integral<Long> for Long {
     fn abs(): Long = if (this < 0L) then -this else this;
     fn signum(): Long = if (this < 0L) then -1L else if (this > 0L) then 1L else 0L;
     static fn fromInteger(value: Integer): Long = value.toLongExact();
+}
 
+default witness Eq<Long> for Long {
+    fn eq(other: Long): Boolean = this == other;
+}
+
+default witness Hashable<Long> for Long {
+    fn hash(): Long = this;
+}
+
+default witness Comparable<Long> for Long {
+    fn compareTo(other: Long): Ordering {
+             if (this == other) return Ordering.EQ();
+        else if (this  < other) return Ordering.LT();
+        else                    return Ordering.GT();
+    }
+}
+
+default witness Integral<Long> for Long {
     fn quot(other: Long): Long = this / other;
     fn rem(other: Long): Long = this % other;
     fn div(other: Long): Long {
@@ -32,15 +51,6 @@ default witness Integral<Long> for Long {
     }
     fn toInteger(): Integer = Integer.fromLong(this);
     fn toRational(): Rational = Rational.fromInteger(this.toInteger());
-
-    fn hash(): Long = this;
-    fn eq(other: Long): Boolean = this == other;
-
-    fn compareTo(other: Long): Ordering {
-             if (this == other) return Ordering.EQ();
-        else if (this  < other) return Ordering.LT();
-        else                    return Ordering.GT();
-    }
 }
 
 /// Conversions of `Long`.

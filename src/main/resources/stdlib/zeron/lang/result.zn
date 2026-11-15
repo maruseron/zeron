@@ -1,7 +1,10 @@
 package zeron.lang;
 
+import java.lang.System;
+
 import zeron.control.Foldable;
 import zeron.control.Functor;
+import zeron.control.Applicative;
 import zeron.control.Monad;
 
 // fn applyResultFunction<A: mut, B: mut>(transform: (A) -> B, value: A): B = transform(value);
@@ -74,12 +77,14 @@ public extension<T: mut, E: mut> Result<T, E> {
         };
 }
 
-default witness<E: mut> Monad<Result<_, E>> for Result<_, E> {
-    fn map<A: mut, B: mut>(this: Result<A, E>, transform: (A) -> B): Result<B, E> = this.map(transform);
+default witness<E: mut> Functor<Result<_, E>> for Result<_, E> {
+    fn map<A, B>(this: Result<A, E>, transform: (A) -> B): Result<B, E> = this.map(transform);
+}
 
-    fn pure<A: mut>(value: A): Result<A, E> = Result<A, E>.Ok(value);
+default witness<E: mut> Applicative<Result<_, E>> for Result<_, E> {
+    fn pure<A>(value: A): Result<A, E> = Result<A, E>.Ok(value);
 
-    fn ap<A: mut, B: mut>(this: Result<A, E>, function: Result<(A) -> B, E>): Result<B, E> =
+    fn ap<A, B>(this: Result<A, E>, function: Result<(A) -> B, E>): Result<B, E> =
         match (this) {
             case Result.Ok(value) -> match (function) {
                 case Result.Ok(f) -> Result<B, E>.Ok(f(value));
@@ -87,15 +92,37 @@ default witness<E: mut> Monad<Result<_, E>> for Result<_, E> {
             };
             case Result.Err(error) -> Result<B, E>.Err(error);
         };
+}
 
-    fn flatMap<A: mut, B: mut>(this: Result<A, E>, transform: (A) -> Result<B, E>): Result<B, E> =
+default witness<E: mut> Monad<Result<_, E>> for Result<_, E> {
+    fn flatMap<A, B>(this: Result<A, E>, transform: (A) -> Result<B, E>): Result<B, E> =
         this.flatMap(transform);
 }
 
 default witness<E: mut> Foldable<Result<_, E>> for Result<_, E> {
-    fn foldLeft<A: mut, B: mut>(this: Result<A, E>, initial: B, combine: (B, A) -> B): B =
+    fn foldLeft<A, B>(this: Result<A, E>, initial: B, combine: (B, A) -> B): B =
         match (this) {
             case Result.Ok(value) -> combine(initial, value);
             case Result.Err(_) -> initial;
         };
+}
+
+/// Entry behavior for a fallible program: success ends normally, failure is reported and exits
+/// with status `1`.
+///
+/// The failure report is written to standard error using `Display`.
+fn reportResultError<E: Display + nullable + mut>(error: E): Int {
+    System.err?.println(error?.toString());
+    return 1;
+}
+
+default witness<T: mut, E: Display + nullable + mut>
+Main<Result<Unit, E>> for Result<T, E> {
+    static fn run(value: Result<Unit, E>): Unit {
+        let status = match (value) {
+            case Result.Ok(_) -> 0;
+            case Result.Err(error) -> reportResultError(error);
+        };
+        if (status != 0) System.exit(status);
+    }
 }

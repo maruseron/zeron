@@ -97,8 +97,11 @@ public class Rational is Ratio<Integer>, Hashable<Rational>, Comparable<Rational
     }
 }
 
-default delegating witness Fractional<Rational> for Rational {
+default delegating witness Numeric<Rational> for Rational {
     static fn fromInteger(value: Integer): Rational = Rational.fromInteger(value);
+}
+
+default delegating witness Fractional<Rational> for Rational {
     static fn fromRational(value: Rational): Rational = value;
 }
 

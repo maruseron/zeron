@@ -201,7 +201,7 @@ fn report(values: Iterable<Int>): String =
     "Total: " + total(values).toString();
 
 // Shell: the only code that touches the outside world.
-println(report([8, 10, 9]));
+fn main(): Unit raises IoFailure = println(report([8, 10, 9]));
 ```
 
 The core can be tested by calling it with values and checking what it returns. It never needs a

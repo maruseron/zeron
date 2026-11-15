@@ -1,7 +1,10 @@
 package zeron.lang;
 
 import zeron.control.Foldable;
+import zeron.control.Functor;
+import zeron.control.Applicative;
 import zeron.control.Monad;
+import zeron.control.Alternative;
 
 /// A value that may be absent.
 ///
@@ -56,13 +59,15 @@ public extension<T: nullable + mut> Option<T> {
         };
 }
 
-default witness Monad<Option<_>> for Option<_> {
-    fn map<A: mut, B: mut>(this: Option<A>, transform: (A) -> B): Option<B> =
+default witness Functor<Option<_>> for Option<_> {
+    fn map<A, B>(this: Option<A>, transform: (A) -> B): Option<B> =
         this.map(transform);
+}
 
-    fn pure<A: mut>(value: A): Option<A> = Option.Some(value);
+default witness Applicative<Option<_>> for Option<_> {
+    fn pure<A>(value: A): Option<A> = Option.Some(value);
 
-    fn ap<A: mut, B: mut>(this: Option<A>, function: Option<(A) -> B>): Option<B> =
+    fn ap<A, B>(this: Option<A>, function: Option<(A) -> B>): Option<B> =
         match (this) {
             case Some(value) -> match (function) {
                 case Some(f) -> Option.Some(f(value));
@@ -70,16 +75,27 @@ default witness Monad<Option<_>> for Option<_> {
             };
             case None() -> Option<B>.None();
         };
+}
 
-    fn flatMap<A: mut, B: mut>(this: Option<A>, transform: (A) -> Option<B>): Option<B> =
+default witness Monad<Option<_>> for Option<_> {
+    fn flatMap<A, B>(this: Option<A>, transform: (A) -> Option<B>): Option<B> =
         match (this) {
             case Some(value) -> transform(value);
             case None() -> Option<B>.None();
         };
 }
 
+default witness Alternative<Option<_>> for Option<_> {
+    fn empty<A>(): Option<A> = Option.None();
+
+    fn orElse<A>(this: Option<A>, other: Option<A>): Option<A> = match (this) {
+        case Some(value) -> Option.Some(value);
+        case None()      -> other;
+    };
+}
+
 default witness Foldable<Option<_>> for Option<_> {
-    fn foldLeft<A: mut, B: mut>(this: Option<A>, initial: B, combine: (B, A) -> B): B =
+    fn foldLeft<A, B>(this: Option<A>, initial: B, combine: (B, A) -> B): B =
         match (this) {
             case Some(value) -> combine(initial, value);
             case None() -> initial;

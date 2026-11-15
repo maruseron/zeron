@@ -1626,9 +1626,11 @@ public final class Parser {
                         && tokens.get(current + 1).lexeme().equals("implementation")) {
                     advance();
                     consumeSoftKeyword("implementation");
-                    higherKindedImplementations.add(higherKindedImplementation(true));
+                    higherKindedImplementations.add(higherKindedImplementation(
+                            true, name, List.copyOf(typeParameters.values())));
                 } else if (matchSoftKeyword("implementation")) {
-                    higherKindedImplementations.add(higherKindedImplementation(false));
+                    higherKindedImplementations.add(higherKindedImplementation(
+                            false, name, List.copyOf(typeParameters.values())));
                 } else if (isLiteralSuffixDeclaration()) {
                     literalSuffixes.add(literalSuffix(advance()));
                 } else if (match(PUBLIC, PRIVATE)) {
@@ -1794,29 +1796,36 @@ public final class Parser {
         return next == RAISES || next == LEFT_BRACE;
     }
 
-    private Stmt.Witness higherKindedImplementation(final boolean delegating) {
+    private Stmt.Witness higherKindedImplementation(final boolean delegating,
+                                                    final Token className,
+                                                    final List<TypeParameterDescriptor> classTypeParameters) {
         final var keyword = previous();
         final var contractType = collectType();
-        if (!(contractType instanceof GenericDescriptor generic)
-                || generic.typeParameters().size() != 1
-                || !(generic.typeParameters().getFirst() instanceof TypeConstructorDescriptor)) {
-            error(keyword, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
-                    "An implementation block requires an HKT contract applied to a constructor pattern.");
+        final boolean higherKinded = contractType instanceof GenericDescriptor generic
+                && generic.typeParameters().size() == 1
+                && generic.typeParameters().getFirst() instanceof TypeConstructorDescriptor;
+        final TypeDescriptor targetType;
+        final List<TypeParameterDescriptor> witnessTypeParameters;
+        if (higherKinded) {
+            targetType = ((GenericDescriptor) contractType).typeParameters().getFirst();
+            witnessTypeParameters = activeTypeParameters.values().stream()
+                    .filter(TypeParameterDescriptor.class::isInstance)
+                    .map(TypeParameterDescriptor.class::cast)
+                    .filter(parameter -> targetType instanceof TypeConstructorDescriptor constructor
+                            && constructor.arguments().contains(parameter))
+                    .toList();
+        } else {
+            targetType = classType(className, classTypeParameters);
+            witnessTypeParameters = List.copyOf(classTypeParameters);
         }
-        final var targetType = (TypeConstructorDescriptor) ((GenericDescriptor) contractType)
-                .typeParameters().getFirst();
-        final var witnessTypeParameters = activeTypeParameters.values().stream()
-                .filter(TypeParameterDescriptor.class::isInstance)
-                .map(TypeParameterDescriptor.class::cast)
-                .filter(parameter -> targetType.arguments().contains(parameter))
-                .toList();
         final var implementationName = new Token(IDENTIFIER,
                 "$zeron$witness$implementation$" + keyword.span().start().offset(), null, keyword.span());
-        consume(LEFT_BRACE, "Expect '{' before HKT implementation methods.");
+        consume(LEFT_BRACE, "Expect '{' before implementation methods.");
         final var methods = new ArrayList<Stmt.WitnessMethod>();
         while (!check(RIGHT_BRACE) && !isAtEnd()) {
-            consume(FN, "Expect 'fn' before an HKT implementation method.");
-            final var methodName = consumeMemberName("Expect HKT operation name.");
+            final var isStatic = match(STATIC);
+            consume(FN, "Expect 'fn' before an implementation method.");
+            final var methodName = consumeMemberName("Expect implementation operation name.");
             final var methodTypeParameters = typeParameterDeclaration(methodName, true, true);
             final var enclosingMethodTypeParameters = activeTypeParameters;
             activeTypeParameters = new LinkedHashMap<>(enclosingMethodTypeParameters);
@@ -1843,11 +1852,11 @@ public final class Parser {
             final var implementation = new Stmt.Function(helperName, parsed.parameters(), helperType,
                     parsed.body(), false, parsed.defaultValues(), sourceMethod.minimumArity(),
                     parsed.variadic());
-            methods.add(new Stmt.WitnessMethod(methodName, sourceMethod, implementation));
+            methods.add(new Stmt.WitnessMethod(methodName, sourceMethod, implementation, isStatic));
         }
-        final var closingBrace = consume(RIGHT_BRACE, "Expect '}' after HKT implementation methods.");
+        final var closingBrace = consume(RIGHT_BRACE, "Expect '}' after implementation methods.");
         return new Stmt.Witness(implementationName, witnessTypeParameters, contractType, targetType,
-                methods, false, List.of(), true, closingBrace, delegating);
+                methods, false, List.of(), higherKinded, closingBrace, delegating);
     }
 
     private Stmt.Pattern classPattern(final boolean isPublic) {

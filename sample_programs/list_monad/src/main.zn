@@ -1,4 +1,4 @@
-fn main() {
+fn main(): Unit raises IoFailure {
     let list = List.from<Int>(1, 2, 3, 4, 5);
     println(list.map(i -> i * 2).toString());
     println(map(list, i -> i * 2).toString());

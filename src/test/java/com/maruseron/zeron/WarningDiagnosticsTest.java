@@ -68,7 +68,7 @@ public final class WarningDiagnosticsTest {
                     }
                     return value;
                 }
-                fn main(): Int = shadow(1);
+                fn main(): Unit = ();
                 """);
         assertTrue(shadowing.toString(), shadowing.contains("ZR3017"));
 
@@ -79,7 +79,7 @@ public final class WarningDiagnosticsTest {
                     public constructor new;
                 }
                 fn peek(counter: &Counter): Int = counter.value;
-                fn main(): Int = peek(Counter.new(1));
+                fn main(): Unit = ();
                 """);
         assertTrue(projection.toString(), projection.contains("ZR3015"));
     }
@@ -88,6 +88,7 @@ public final class WarningDiagnosticsTest {
     public void doesNotReportShadowingForImplicitReceivers() {
         final var warnings = resolve("""
                 package warnings;
+
                 contract Reader {
                     read(): Int;
                 }
@@ -101,7 +102,7 @@ public final class WarningDiagnosticsTest {
                         return reader.read();
                     }
                 }
-                fn main(): Int = Box.new(1).peek();
+                fn main(): Unit = ();
                 """);
         assertFalse(warnings.toString(), warnings.contains("ZR3017"));
     }

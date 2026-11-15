@@ -92,7 +92,9 @@ parent must be a writable directory; an existing JAR output must be writable.
 ## Build, run, and diagnostics
 
 `zeron build` reads the manifest in the current directory, and `zeron run` builds and launches the
-selected target's entry point with the configured runtime classpath. Use `--manifest
+selected target's entry point with the configured runtime classpath. Entry selection and `Main<A>`
+evidence are resolved independently for each target's entry unit, so targets can return different
+entry values without a target-specific launcher or manifest key. Use `--manifest
 path/to/zeron.toml` to select a different file, and a positional target name to select a declared
 target. `zeron help` lists commands and flags; `zeron help run` or `zeron help --manifest`
 shows focused help. `zeron explain ZR0000` displays a terminal-formatted bundled explanation for a

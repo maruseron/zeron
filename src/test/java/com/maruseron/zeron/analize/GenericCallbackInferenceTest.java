@@ -24,10 +24,10 @@ public final class GenericCallbackInferenceTest {
                 callback(1);
             }
 
-            fn throughReference(): Unit = apply(println);
+            fn throughReference(): Unit raises IoFailure = apply(println);
 
-            fn throughValue(): Unit {
-                let printer: (Any?) -> Unit = println;
+            fn throughValue(): Unit raises IoFailure {
+                let printer: (Any?) -> Unit raises IoFailure = println;
                 apply(printer);
             }
 

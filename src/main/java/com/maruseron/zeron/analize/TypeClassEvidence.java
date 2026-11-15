@@ -116,18 +116,21 @@ final class TypeClassEvidence {
                 classSubstitutions.put(targetParameters.get(index), witness.typeParameters().get(index));
             }
         }
-        final var classContract = target != null && ContractComposition.forClass(context, target).stream()
+        final var classBlock = isClassHktImplementation(context, witness);
+        final var classContract = target != null && !classBlock
+                && ContractComposition.forClass(context, target).stream()
                 .anyMatch(applied -> sameAppliedType(
-                        appliedType(applied, classSubstitutions), witness.contractType())
-                        && !ContractComposition.hasStaticMethods(context, applied.use()));
-        if (classContract && !witness.methods().isEmpty()) {
+                        appliedType(applied, classSubstitutions), witness.contractType()));
+        if (classContract) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    witness.name(), "A witness cannot override methods of a nominally conforming class."));
+                    witness.name(), "A witness cannot implement a contract already implemented nominally by a class."));
         }
-        if (!witness.derived() && (target == null || !classContract)) {
+        if (!witness.derived() && !classContract) {
             synthesizeDefaultWitnessMethods(context, witness, contract, targetSubstitutions, contractArguments);
-            synthesizeDelegatedWitnessMethods(
-                    context, witness, contract, target, classSubstitutions);
+            if (!classBlock || contract.higherKinded()) {
+                synthesizeDelegatedWitnessMethods(
+                        context, witness, contract, target, classSubstitutions);
+            }
             if (!validateWitnessMethods(context, witness, contract)) return;
         }
 
@@ -136,7 +139,47 @@ final class TypeClassEvidence {
 
     static void synthesizeDelegatingClassHktImplementations(final ResolutionContext context) {
         for (final var target : context.classes.values()) {
-            for (final var implementation : target.higherKindedImplementations()) {
+            for (final var use : target.contractUses()) {
+                final var contract = findContract(context.contracts, use.name().lexeme());
+                if (contract == null || contract.higherKinded()
+                        || contract.methods().stream().noneMatch(method ->
+                                method.isDefault() && method.isStatic())) continue;
+                final var present = target.higherKindedImplementations().stream()
+                        .anyMatch(implementation -> simpleName(implementation.contractType().name())
+                                .equals(simpleName(use.name().lexeme())));
+                if (present) continue;
+                final var contractType = use.typeArguments().isEmpty()
+                        ? TypeDescriptor.ofName(use.name().lexeme())
+                        : TypeDescriptor.genericOf(
+                                TypeDescriptor.ofName(use.name().lexeme()), use.typeArguments());
+                final var targetType = target.typeParameters().isEmpty()
+                        ? TypeDescriptor.ofName(target.name().lexeme())
+                        : TypeDescriptor.genericOf(TypeDescriptor.ofName(target.name().lexeme()),
+                                target.typeParameters().stream()
+                                        .map(parameter -> (TypeDescriptor) parameter).toList());
+                target.addHigherKindedImplementation(new Stmt.Witness(target.name(),
+                        target.typeParameters(), contractType, targetType,
+                        List.of(), false, List.of(), false, target.closingBrace(), false));
+            }
+            for (final var use : target.higherKindedContractUses()) {
+                final var contract = findContract(context.contracts, use.name().lexeme());
+                if (contract == null || !contract.higherKinded()
+                        || use.typeArguments().size() != 1) continue;
+                final var constructor = (TypeConstructorDescriptor) use.typeArguments().getFirst();
+                final var contractType = TypeDescriptor.genericOf(
+                        TypeDescriptor.ofName(use.name().lexeme()), List.of(constructor));
+                final var present = target.higherKindedImplementations().stream()
+                        .anyMatch(implementation -> simpleName(implementation.contractType().name())
+                                .equals(simpleName(contractType.name())));
+                if (present) continue;
+                final var witnessTypeParameters = target.typeParameters().stream()
+                        .filter(parameter -> constructor.arguments().contains(parameter))
+                        .toList();
+                target.addHigherKindedImplementation(new Stmt.Witness(target.name(),
+                        witnessTypeParameters, contractType, constructor,
+                        List.of(), false, List.of(), true, target.closingBrace(), true));
+            }
+            for (final var implementation : List.copyOf(target.higherKindedImplementations())) {
                 if (implementation.delegating()) {
                     implementation.resetMethodsToDeclarations();
                     synthesizeDelegatedHktMethods(context, target, implementation);
@@ -157,10 +200,17 @@ final class TypeClassEvidence {
                 .collect(java.util.stream.Collectors.toSet());
         for (final var slot : ContractComposition.methods(context.contracts, compositionRoot)) {
             final var required = slot.method();
-            if (required.isDefault() || required.isStatic() || required.parameters().isEmpty()
-                    || implementedNames.contains(required.name().lexeme())) continue;
+            if (slot.applied().declaration() != contract) continue;
+            if (required.isDefault() || implementedNames.contains(required.name().lexeme())) continue;
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
                     required.typeDescriptor(), slot.applied().substitutions());
+            if (!Stmt.hasReceiverParameter(required.parameters())) {
+                if (synthesizeReceivelessHktMethod(context, target, implementation,
+                        required, requiredType)) {
+                    implementedNames.add(required.name().lexeme());
+                }
+                continue;
+            }
             final var classSubstitutions = classSubstitutionsForReceiver(
                     target, requiredType.parameters().getFirst());
             if (classSubstitutions == null) continue;
@@ -180,7 +230,7 @@ final class TypeClassEvidence {
             final var sourceMethod = new Stmt.Function(required.name(), required.parameters(), implementationType,
                     List.of(), false, required.defaultValues(), required.minimumArity(), required.variadic());
             final var helperName = new Token(TokenType.IDENTIFIER,
-                    implementation.name().lexeme() + "$" + required.name().lexeme(),
+                    implementation.name().lexeme().replace('.', '$') + "$" + required.name().lexeme(),
                     null, required.name().span());
             final var helperTypeParameters = new ArrayList<TypeParameterDescriptor>(
                     implementation.typeParameters());
@@ -205,6 +255,50 @@ final class TypeClassEvidence {
                     required.minimumArity(), required.variadic());
             implementation.addMethod(new Stmt.WitnessMethod(required.name(), sourceMethod, helper));
         }
+    }
+
+    private static boolean synthesizeReceivelessHktMethod(
+            final ResolutionContext context, final Stmt.ClassDecl target,
+            final Stmt.Witness implementation, final Stmt.ContractMethod required,
+            final FunctionDescriptor requiredType) {
+        final var candidate = target.staticFunctions().stream()
+                .filter(method -> method.name().lexeme().equals(required.name().lexeme())
+                        && method.isPublic()
+                        && method.variadic() == required.variadic()
+                        && DeclarationResolver.compatibleMethodSignatures(
+                                context, requiredType, required.variadic(),
+                                method.typeDescriptor(), method.variadic()))
+                .findFirst().orElse(null);
+        if (candidate == null) return false;
+
+        final var helperName = new Token(TokenType.IDENTIFIER,
+                implementation.name().lexeme().replace('.', '$') + "$" + required.name().lexeme(),
+                null, required.name().span());
+        final var helperTypeParameters = new ArrayList<TypeParameterDescriptor>(
+                implementation.typeParameters());
+        helperTypeParameters.addAll(requiredType.typeParameters());
+        final var helperType = TypeDescriptor.functionWithEffectsOf(helperName.lexeme(),
+                requiredType.returnType(), requiredType.parameters(), helperTypeParameters,
+                requiredType.raisedEffects());
+        final var arguments = new ArrayList<Expr>();
+        for (var index = 0; index < required.parameters().size(); index++) {
+            arguments.add(new Expr.Variable(required.parameters().get(index),
+                    requiredType.parameters().get(index)));
+        }
+        final var receiver = new Expr.Variable(target.name(), TypeDescriptor.ofInfer());
+        final var explicitTypeArguments = candidate.typeDescriptor().typeParameters().isEmpty()
+                ? List.<TypeDescriptor>of()
+                : requiredType.typeParameters().stream().map(type -> (TypeDescriptor) type).toList();
+        final var call = new Expr.MemberCall(receiver, candidate.name(), required.name(),
+                arguments, explicitTypeArguments, TypeDescriptor.ofInfer());
+        final var helper = new Stmt.Function(helperName, required.parameters(), helperType,
+                List.of(new Stmt.Return(call, required.name())), false, required.defaultValues(),
+                required.minimumArity(), required.variadic());
+        implementation.addMethod(new Stmt.WitnessMethod(required.name(),
+                new Stmt.Function(required.name(), required.parameters(), requiredType,
+                        List.of(), false, required.defaultValues(), required.minimumArity(),
+                        required.variadic()), helper));
+        return true;
     }
 
     private static Stmt.ContractDecl findContract(
@@ -816,9 +910,12 @@ final class TypeClassEvidence {
         final var implementedNames = witness.methods().stream()
                 .map(method -> method.requirementName().lexeme())
                 .collect(java.util.stream.Collectors.toSet());
+        final var classBlock = isClassHktImplementation(context, witness);
         for (final var slot : ContractComposition.methods(context, contractUse(witness.contractType()))) {
             final var required = slot.method();
+            if (slot.applied().declaration() != contract) continue;
             if (!required.isDefault() || implementedNames.contains(required.name().lexeme())) continue;
+            if (classBlock && !contract.higherKinded() && !required.isStatic()) continue;
             if (required.isMutating()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
                         required.name(), "Witnesses cannot use mutating default contract methods."));
@@ -867,6 +964,7 @@ final class TypeClassEvidence {
                 .collect(java.util.stream.Collectors.toSet());
         for (final var slot : ContractComposition.methods(context, contractUse(witness.contractType()))) {
             final var required = slot.method();
+            if (slot.applied().declaration() != contract) continue;
             if (required.isDefault() || required.isStatic() || required.isMutating()
                     || implementedNames.contains(required.name().lexeme())) continue;
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
@@ -923,7 +1021,11 @@ final class TypeClassEvidence {
 
     private static boolean validateWitnessMethods(final ResolutionContext context, final Stmt.Witness witness,
                                                   final Stmt.ContractDecl contract) {
-        final var methodSlots = ContractComposition.methods(context, contractUse(witness.contractType()));
+        final var allMethodSlots = ContractComposition.methods(
+                context, contractUse(witness.contractType()));
+        final var methodSlots = allMethodSlots.stream()
+                .filter(slot -> slot.applied().declaration() == contract)
+                .toList();
         final var implementations = new LinkedHashMap<String, Stmt.WitnessMethod>();
         final var errors = new ArrayList<ResolutionError>();
         for (final var method : witness.methods()) {
@@ -936,8 +1038,18 @@ final class TypeClassEvidence {
                             .equals(method.requirementName().lexeme()))
                     .findFirst().orElse(null);
             if (requiredSlot == null) {
+                final var inheritedOwner = allMethodSlots.stream()
+                        .filter(slot -> slot.method().name().lexeme()
+                                .equals(method.requirementName().lexeme()))
+                        .map(slot -> slot.applied().declaration().name().lexeme())
+                        .findFirst().orElse(null);
+                final var message = inheritedOwner == null
+                        ? "Unknown contract method requirement."
+                        : "Witness method '" + method.requirementName().lexeme()
+                                + "' is inherited from contract '" + inheritedOwner
+                                + "'; declare it on that contract's own witness instead.";
                 errors.add(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
-                        method.requirementName(), "Unknown contract method requirement."));
+                        method.requirementName(), message));
                 continue;
             }
             if (contract.name().lexeme().equals("zeron.lang.Hashable")
@@ -990,7 +1102,6 @@ final class TypeClassEvidence {
             }
         }
         if (contract.higherKinded()) {
-            final var root = contractUse(witness.contractType());
             final var defaultNames = methodSlots.stream()
                     .filter(slot -> slot.method().isDefault())
                     .map(slot -> slot.method().name().lexeme())
@@ -1000,8 +1111,6 @@ final class TypeClassEvidence {
                 final var defaults = methodSlots.stream()
                         .filter(slot -> slot.method().isDefault()
                                 && slot.method().name().lexeme().equals(name))
-                        .filter(slot -> root == null || !ContractComposition.isShadowedByAncestor(
-                                context, root, slot.applied().use(), name))
                         .toList();
                 if (defaults.size() > 1) {
                     errors.add(new ResolutionError(
@@ -1016,7 +1125,9 @@ final class TypeClassEvidence {
                 .filter(slot -> !slot.method().isDefault()
                         && !implementations.containsKey(slot.method().name().lexeme()))
                 .toList();
-        if (!missing.isEmpty()) {
+        final var partialClassBlock = isClassHktImplementation(context, witness)
+                && !contract.higherKinded();
+        if (!missing.isEmpty() && !partialClassBlock) {
             var error = new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                     witness.name(), "Missing witness implementation for contract method '"
                             + missing.getFirst().method().name().lexeme() + "'.");
@@ -1279,7 +1390,7 @@ final class TypeClassEvidence {
                 final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
                 if (matchPattern(entry.declaration().targetType(), actual,
                         entry.declaration().typeParameters(), substitutions)
-                        && witnessEntails(context, entry.declaration(), substitutions, contractType)
+                        && provides(context, entry.declaration(), substitutions, contractType)
                         && prerequisitesAvailable(context, entry.declaration(), substitutions, where, resolving)) {
                     matchingWitnesses++;
                 }
@@ -1349,9 +1460,13 @@ final class TypeClassEvidence {
                 if (use == null) continue;
                 final var methods = ContractComposition.methods(context, use);
                 if (slot.constructorIndex() >= methods.size()) continue;
+                final var methodSlot = methods.get(slot.constructorIndex());
+                final var appliedBound = TypeSubstitution.substitute(
+                        appliedType(methodSlot.applied(), Map.of()),
+                        Map.of(parameter, actualType));
                 result.add(selectMethodEvidence(context, parameter, slot.boundIndex(),
-                        slot.constructorIndex(), requiredBound, evidenceTarget,
-                        methods.get(slot.constructorIndex()).method(), where, resolvingDefaults));
+                        slot.constructorIndex(), appliedBound, evidenceTarget,
+                        methodSlot.method(), where, resolvingDefaults));
             }
         }
         return List.copyOf(result);
@@ -1537,6 +1652,26 @@ final class TypeClassEvidence {
                     helperType, null, true, Expr.EvidenceHandleKind.STATIC, prerequisiteEvidence);
         }
 
+        if (requirement.isStatic()) {
+            final var classDeclaration = context.classes.get(nominalName(concrete));
+            if (classDeclaration != null) {
+                final var candidate = classDeclaration.staticFunctions().stream()
+                        .filter(function -> function.name().lexeme().equals(requirement.name().lexeme()))
+                        .filter(function -> function.isPublic()
+                                && function.variadic() == requirement.variadic()
+                                && DeclarationResolver.compatibleMethodSignatures(
+                                        context, requiredType, requirement.variadic(),
+                                        function.typeDescriptor(), function.variadic()))
+                        .findFirst().orElse(null);
+                if (candidate != null) {
+                    return new Expr.EvidenceArgument(targetParameter, targetBoundIndex,
+                            targetMethodIndex, classDeclaration.name().lexeme(),
+                            candidate.name().lexeme(), candidate.typeDescriptor(), null, true,
+                            Expr.EvidenceHandleKind.STATIC);
+                }
+            }
+        }
+
         final var derived = derivedMethodHandle(context, requiredBound, concrete, requirement,
                 targetParameter, targetBoundIndex, targetMethodIndex, where);
         if (derived != null) return derived;
@@ -1576,7 +1711,7 @@ final class TypeClassEvidence {
                     && isSerializationContract(witness.contractType(), "Codec")) continue;
             final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
             if (matchPattern(witness.targetType(), concrete, witness.typeParameters(), substitutions)
-                    && witnessEntails(context, witness, substitutions, requiredBound)
+                    && provides(context, witness, substitutions, requiredBound)
                     && prerequisitesAvailable(context, witness, substitutions, where, new HashSet<>())) {
                 selected.add(Map.entry(witness, substitutions));
             }
@@ -1673,14 +1808,24 @@ final class TypeClassEvidence {
                 .anyMatch(applied -> sameAppliedType(appliedType(applied, Map.of()), required));
     }
 
-    private static boolean witnessEntails(
+    /// A witness provides exactly the contract it is declared for. Ancestor contracts are
+    /// prerequisites that must be supplied by their own provider; they are not provided by this
+    /// declaration.
+    private static boolean provides(
             final ResolutionContext context, final Stmt.Witness witness,
             final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
             final TypeDescriptor requiredContract) {
-        final var witnessContract = TypeSubstitution.substitute(witness.contractType(), substitutions);
-        final var use = contractUse(witnessContract);
-        return use != null && ContractComposition.closure(context, use).stream()
-                .anyMatch(applied -> sameAppliedType(appliedType(applied, Map.of()), requiredContract));
+        final var witnessContract = TypeSubstitution.substitute(
+                witness.contractType(), substitutions);
+        return sameAppliedType(witnessContract, requiredContract);
+    }
+
+    private static boolean declaresMethodDirectly(
+            final ResolutionContext context, final TypeDescriptor contractType,
+            final String methodName) {
+        final var contract = context.contracts.get(nominalName(contractType));
+        return contract != null && contract.methods().stream()
+                .anyMatch(method -> method.name().lexeme().equals(methodName));
     }
 
     private static Stmt.ContractUse contractUse(final TypeDescriptor type) {
@@ -2033,6 +2178,24 @@ final class TypeClassEvidence {
         return sameAppliedType(target, actualType);
     }
 
+    static Expr.EvidenceArgument selectEntryEvidence(final ResolutionContext context,
+                                                     final TypeDescriptor valueType,
+                                                     final com.maruseron.zeron.scan.Token where) {
+        final var contract = context.contracts.get("zeron.lang.Main");
+        if (contract == null) return null;
+        final var required = contract.methods().stream()
+                .filter(method -> method.name().lexeme().equals("run"))
+                .findFirst().orElse(null);
+        if (required == null) return null;
+        final var contractType = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName(contract.name().lexeme()), valueType);
+        if (!hasEvidence(context, contractType, valueType, where)) return null;
+        final var parameter = new TypeParameterDescriptor(Integer.MIN_VALUE + 17,
+                "$entry", List.of(contractType));
+        return selectMethodEvidence(context, parameter, 0, 0, contractType, valueType,
+                required, where);
+    }
+
     static WitnessMethodSelection selectMethod(final ResolutionContext context,
                                                final TypeDescriptor actualType,
                                                final String methodName,
@@ -2069,11 +2232,17 @@ final class TypeClassEvidence {
             final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
             if (!matchPattern(entry.declaration().targetType(), actual,
                     entry.declaration().typeParameters(), substitutions)) continue;
-            if (requiredContractType != null && !witnessEntails(
-                    context, entry.declaration(), substitutions, requiredContractType)) continue;
+            final var witnessContract = TypeSubstitution.substitute(
+                    entry.declaration().contractType(), substitutions);
+            if (requiredContractType != null
+                    && !provides(context, entry.declaration(), substitutions, requiredContractType)) {
+                continue;
+            }
+            if (requiredContractType == null
+                    && !declaresMethodDirectly(context, witnessContract, methodName)) continue;
             if (!prerequisitesAvailable(context, entry.declaration(), substitutions,
                 where, new HashSet<>())) continue;
-            final var contract = context.contracts.get(nominalName(entry.declaration().contractType()));
+            final var contract = context.contracts.get(nominalName(witnessContract));
             var hasExplicitMethod = false;
             for (final var method : entry.declaration().methods()) {
                 if (!method.requirementName().lexeme().equals(methodName)) continue;
@@ -2088,13 +2257,12 @@ final class TypeClassEvidence {
                 hasExplicitMethod = true;
             }
             if (!hasExplicitMethod && contract != null && contract.higherKinded()) {
-                final var root = contractUse(entry.declaration().contractType());
+                final var root = contractUse(witnessContract);
                 if (root == null) continue;
                 final var defaultSlots = ContractComposition.methods(context, root).stream()
+                        .filter(slot -> slot.applied().declaration() == contract)
                         .filter(slot -> slot.method().isDefault()
                                 && slot.method().name().lexeme().equals(methodName))
-                        .filter(slot -> !ContractComposition.isShadowedByAncestor(
-                                context, root, slot.applied().use(), methodName))
                         .toList();
                 if (defaultSlots.size() > 1) {
                     Zeron.resolutionError(new ResolutionError(

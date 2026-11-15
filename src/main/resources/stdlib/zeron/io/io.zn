@@ -1,20 +1,20 @@
 package zeron.io;
 
-import java.lang.IO;
+import java.lang.IO as JavaIO;
 import java.lang.System;
 
-public fn print(value: Any?): Unit {
+public fn print(value: Any?): Unit raises IoFailure {
     System.out?.print(value);
 }
 
-public fn println(value: Any?): Unit {
+public fn println(value: Any?): Unit raises IoFailure {
     System.out?.println(value);
 }
 
-public fn readln(): String? {
-    return IO.readln();
+public fn readln(): String? raises IoFailure {
+    return JavaIO.readln();
 }
 
-public fn prompt(prompt: String): String? {
-    return IO.readln(prompt);
+public fn prompt(prompt: String): String? raises IoFailure {
+    return JavaIO.readln(prompt);
 }

@@ -26,7 +26,7 @@ it is not pure:
 ```zeron
 import zeron.io.println;
 
-fn announce(name: String): Unit {
+fn announce(name: String): Unit raises IoFailure {
     println("Hello, " + name);
 }
 ```

@@ -1,6 +1,8 @@
 package zeron.collections;
 
 import zeron.control.Foldable;
+import zeron.control.Functor;
+import zeron.control.Applicative;
 import zeron.control.Monad;
 
 class ArrayStream<T: mut> is Iterable<T> {
@@ -289,7 +291,8 @@ fn streamMonadAp<A: mut, B: mut>(values: Stream<A>, functions: Stream<(A) -> B>)
 ///
 /// The terminal operations `fold`, `count`, `any`, `all`, and `toList` consume the traversal they
 /// start, and `any`/`all` stop at the first decisive element.
-public class Stream<T: mut> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>> {
+public class Stream<T: mut> is Iterable<T>, Functor<Stream<_>>, Applicative<Stream<_>>,
+        Monad<Stream<_>>, Foldable<Stream<_>> {
     source: Iterable<T>;
 
     private constructor new;
@@ -368,18 +371,22 @@ public class Stream<T: mut> is Iterable<T>, Monad<Stream<_>>, Foldable<Stream<_>
         return true;
     }
 
-    delegating implementation Monad<Stream<_>> {
-        fn pure<A: mut>(value: A): Stream<A> = Stream<A>.of(value);
+    delegating implementation Functor<Stream<_>> {}
 
-        fn flatMap<A: mut, B: mut>(this: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
-            Stream<B>.new(MonadFlatMappedStream<A, B>.new(this.source, transform));
+    delegating implementation Applicative<Stream<_>> {
+        fn pure<A>(value: A): Stream<A> = Stream<A>.of(value);
 
-        fn ap<A: mut, B: mut>(this: Stream<A>, functions: Stream<(A) -> B>): Stream<B> =
+        fn ap<A, B>(this: Stream<A>, functions: Stream<(A) -> B>): Stream<B> =
             streamMonadAp(this, functions);
     }
 
+    delegating implementation Monad<Stream<_>> {
+        fn flatMap<A, B>(this: Stream<A>, transform: (A) -> Stream<B>): Stream<B> =
+            Stream<B>.new(MonadFlatMappedStream<A, B>.new(this.source, transform));
+    }
+
     delegating implementation Foldable<Stream<_>> {
-        fn foldLeft<A: mut, B: mut>(this: Stream<A>, initial: B, combine: (B, A) -> B): B =
+        fn foldLeft<A, B>(this: Stream<A>, initial: B, combine: (B, A) -> B): B =
             this.fold(initial, combine);
     }
 

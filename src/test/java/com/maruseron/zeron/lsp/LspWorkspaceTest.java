@@ -1367,10 +1367,10 @@ public class LspWorkspaceTest {
         final var listSource = Files.readString(listPath);
         final var witnessDeclarationHovers = List.of(
                 hoverAt(snapshot, listPath, listSource, "toString():"),
-                hoverAt(snapshot, listPath, listSource, "map<A:"),
-                hoverAt(snapshot, listPath, listSource, "flatMap<A:"),
-                hoverAt(snapshot, listPath, listSource, "pure<A:"),
-                hoverAt(snapshot, listPath, listSource, "ap<A:"));
+                hoverAt(snapshot, listPath, listSource, "map<A,"),
+                hoverAt(snapshot, listPath, listSource, "flatMap<A,"),
+                hoverAt(snapshot, listPath, listSource, "pure<A>"),
+                hoverAt(snapshot, listPath, listSource, "ap<A,"));
         final var witnessCallHovers = List.of(
                 hoverAt(snapshot, listPath, listSource, "tail.map", "tail.".length()),
                 hoverAt(snapshot, listPath, listSource, "head.combine", "head.".length()),

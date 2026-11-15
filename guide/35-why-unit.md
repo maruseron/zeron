@@ -29,7 +29,7 @@ it in different ways, but Zeron follows the functional programming tradition: `U
 and `()` is the single value it can hold: the unit.
 
 ```zeron
-fn log(msg: String): Unit = println(msg); // returns ()
+fn log(msg: String): Unit raises IoFailure = println(msg); // returns ()
 ```
 
 In algebraic terms, `Unit` is the 1 type: its cardinality is 1. Contrast it with:
@@ -54,12 +54,12 @@ function contract guarantees.
 With `Unit`, every function has the shape `A -> B`. There is no need for a special case:
 
 ```zeron
-// No special case: println is an ordinary value of type Any? -> Unit
-let printer: Any? -> Unit = println;
+// No special case: println is an ordinary value of type
+// Any? -> Unit raises IoFailure
+let printer: (Any?) -> Unit raises IoFailure = println;
 
-// ...so it can be passed anywhere a function is expected
-let results: List<Unit> = Stream.of(1, 2, 3).map(printer).toList();
-// prints 1, 2, 3; results is [(), (), ()]
+// ...so it can be passed anywhere a matching function is expected
+printer(1); // prints 1 and returns ()
 ```
 
 With `void`, you need separate rules for functions that return vs. those that don't at all levels
@@ -93,9 +93,11 @@ Because functions are uniform values, they can compose without special cases:
 
 ```zeron
 fn run<T>(f: () -> T): T = f();
+fn runEffect<T>(f: () -> T raises IoFailure): T raises IoFailure = f();
 
-run(() -> println("hello")); // T = Unit
-run(() -> 42);               // T = Int
+run(() -> ());                        // T = Unit
+run(() -> 42);                        // T = Int
+runEffect(() -> println("hello"));    // T = Unit, raises IoFailure
 ```
 
 A single definition of `run` covers both cases. With `void`, you'd need overloads or a dedicated

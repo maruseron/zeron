@@ -598,13 +598,6 @@ final class DeclarationResolver {
                                     + contractUse.typeArguments().size() + "."));
                 }
                 validateContractUse(context, contractUse);
-                if (ContractComposition.hasStaticMethods(context, contractUse)) {
-                    Zeron.resolutionError(new ResolutionError(
-                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                            contractName,
-                            "Contracts with static methods must be implemented through a witness, not class "
-                                    + "conformance. Remove this 'is' clause and declare a witness instead."));
-                }
                 if (contract.isSealed() && contract.permittedClasses().stream()
                         .noneMatch(permitted -> permitted.name().lexeme().equals(declaration.name().lexeme()))) {
                     Zeron.resolutionError(new ResolutionError(
@@ -775,23 +768,37 @@ final class DeclarationResolver {
             }
         }
 
+        final var firstOrder = new HashSet<TypeDescriptor>();
+        for (final var use : declaration.contractUses()) {
+            firstOrder.add(use.typeArguments().isEmpty()
+                    ? TypeDescriptor.ofName(use.name().lexeme())
+                    : TypeDescriptor.genericOf(
+                            TypeDescriptor.ofName(use.name().lexeme()), use.typeArguments()));
+        }
+
         final var implemented = new HashSet<TypeDescriptor>();
         for (final var witness : declaration.higherKindedImplementations()) {
             final var contractType = witness.contractType();
-            if (!declared.containsKey(contractType)) {
+            final var contract = context.contracts.get(contractType.name());
+            if (contract == null || contract.higherKinded()
+                    ? !declared.containsKey(contractType)
+                    : !firstOrder.contains(contractType)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        witness.name(), "An HKT implementation block must match a class-header conformance."));
+                        witness.name(), "An implementation block must match a class-header conformance."));
             }
             if (!implemented.add(contractType)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
-                        witness.name(), "Duplicate HKT implementation block."));
+                        witness.name(), "Duplicate implementation block."));
             }
-        }
-        for (final var entry : declared.entrySet()) {
-            if (!implemented.contains(entry.getKey())) {
-                Zeron.resolutionError(new ResolutionError(
-                        DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        entry.getValue().name(), "A class HKT conformance requires an implementation block."));
+            if (contract != null && !contract.higherKinded()) {
+                for (final var method : witness.methods()) {
+                    if (!method.isStatic()) {
+                        Zeron.resolutionError(new ResolutionError(
+                                DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                                method.requirementName(),
+                                "A first-order contract implementation block may contain only 'static fn' entries."));
+                    }
+                }
             }
         }
     }
@@ -1138,6 +1145,30 @@ final class DeclarationResolver {
         for (final var required : contract.methods()) {
             final var requiredType = (FunctionDescriptor) TypeSubstitution.substitute(
                     required.typeDescriptor(), substitutions);
+            if (required.isStatic()) {
+                final var staticImplementation = declaration.staticFunctions().stream()
+                        .filter(function -> function.name().lexeme().equals(required.name().lexeme()))
+                        .filter(function -> function.isPublic()
+                                && function.variadic() == required.variadic()
+                                && compatibleMethodSignatures(context, requiredType,
+                                        required.variadic(), function.typeDescriptor(),
+                                        function.variadic()))
+                        .findFirst().orElse(null);
+                final var blockImplementation = hasStaticBlockEntry(context, declaration,
+                        contractUse, required, requiredType);
+                if (staticImplementation == null && !blockImplementation && !required.isDefault()) {
+                    methodErrors.add(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                            contractUse.name(),
+                            "Contract '" + TypeFormatter.format(TypeDescriptor.genericOf(
+                                    TypeDescriptor.ofName(contractUse.name().lexeme()),
+                                    contractUse.typeArguments()))
+                                    + "' requires static method '" + required.name().lexeme()
+                                    + "', but this class provides no compatible public 'static fn' "
+                                    + "or implementation block entry."));
+                }
+                continue;
+            }
             final var implementation = declaration.methods().stream()
                     .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
                     .filter(method -> method.isPublic() && method.isMutating() == required.isMutating()
@@ -1231,6 +1262,26 @@ final class DeclarationResolver {
             final var inherited = closure.get(index);
             checkConformance(context, declaration, inherited.use(), inherited.declaration());
         }
+    }
+
+    private static boolean hasStaticBlockEntry(final ResolutionContext context,
+                                               final Stmt.ClassDecl declaration,
+                                               final Stmt.ContractUse contractUse,
+                                               final Stmt.ContractMethod required,
+                                               final FunctionDescriptor requiredType) {
+        for (final var block : declaration.higherKindedImplementations()) {
+            final var blockUse = ContractComposition.fromType(block.contractType());
+            if (blockUse == null || !ContractComposition.entails(context, blockUse,
+                    contractUse.name().lexeme(), contractUse.typeArguments())) continue;
+            for (final var method : block.methods()) {
+                if (!method.isStatic()
+                        || !method.requirementName().lexeme().equals(required.name().lexeme())) continue;
+                if (compatibleMethodSignatures(context, requiredType, required.variadic(),
+                        method.methodSignature().typeDescriptor(),
+                        method.methodSignature().variadic())) return true;
+            }
+        }
+        return false;
     }
 
     private static String formatMethodCandidate(final Stmt.Method method) {

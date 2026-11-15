@@ -298,10 +298,9 @@ final class LambdaSupportEmitter {
         final var sourceInterface = TypeDescriptor.toJavaClassDesc(sourceType);
         final var targetInterface = TypeDescriptor.toJavaClassDesc(targetType);
         final var targetMethodType = toJavaMethodDescriptor(targetType);
-        final var adapterName = context.lambdaPlan.adapterName(sourceType, targetType);
-        if (adapterName == null) {
-            throw new IllegalStateException("Missing function adapter for " + sourceType + " to " + targetType);
-        }
+                final var adapterName = context.lambdaPlan.adapterName(sourceType, targetType) != null
+                ? context.lambdaPlan.adapterName(sourceType, targetType)
+                : context.lambdaPlan.ensureAdapterName(sourceType, targetType);
         final var implementationParameters = new ArrayList<TypeDescriptor>();
         implementationParameters.add(sourceType);
         implementationParameters.addAll(targetType.invocationParameters());
@@ -320,7 +319,7 @@ final class LambdaSupportEmitter {
                 metafactoryType.descriptorString());
         final var implementation = MethodHandleDesc.of(
             DirectMethodHandleDesc.Kind.STATIC,
-            ClassDesc.of(context.mainClassName),
+                        ClassDesc.of(context.currentHolderName),
             adapterName,
             toJavaMethodDescriptor(targetType, implementationParameters).descriptorString());
         composer.invokedynamic(DynamicCallSiteDesc.of(

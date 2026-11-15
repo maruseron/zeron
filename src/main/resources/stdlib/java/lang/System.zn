@@ -4,6 +4,7 @@ import java.io.PrintStream;
 
 public external class System = "java.lang.System" {
     public static property out: &PrintStream?;
+    public static property err: &PrintStream?;
     public static getenv(name: String?): String?;
     public static getProperty(key: String?): String?;
     public static identityHashCode(value: Any?): Int;

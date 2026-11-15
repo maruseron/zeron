@@ -147,20 +147,41 @@ final class DeclarationEmitter {
             }
         }
 
-        if (entryHolder && (hasLaunchableMain || hasLaunchableMainWithArguments)) {
-            final var passArguments = hasLaunchableMainWithArguments;
+        final var entryPoint = context.resolution.entryPoint();
+        if (entryHolder && entryPoint != null) {
+            final var passArguments = entryPoint.passArguments();
+            final var valueType = entryPoint.valueType();
+            final var erasedValueType = TypeSubstitution.erase(valueType);
+            final var valueClass = TypeDescriptor.toJavaClassDesc(erasedValueType);
             classBuilder.withMethodBody(
                     "main",
                     MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String.arrayType()),
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC,
                     composer -> {
                         if (passArguments) composer.aload(0);
+                        if (entryPoint.runEvidence() == null) {
+                            composer.invokestatic(composer.constantPool().methodRefEntry(
+                                    ClassDesc.of(context.currentHolderName),
+                                    "main",
+                                    MethodTypeDesc.of(UNIT_CLASS, passArguments
+                                            ? List.of(ConstantDescs.CD_Object.arrayType())
+                                            : List.of())));
+                            composer.pop();
+                            composer.return_();
+                            return;
+                        }
                         composer.invokestatic(composer.constantPool().methodRefEntry(
                                 ClassDesc.of(context.currentHolderName),
                                 "main",
-                                passArguments
-                                        ? MethodTypeDesc.of(UNIT_CLASS, ConstantDescs.CD_Object.arrayType())
-                                        : MethodTypeDesc.of(UNIT_CLASS)));
+                                MethodTypeDesc.of(valueClass, passArguments
+                                        ? List.of(ConstantDescs.CD_Object.arrayType())
+                                        : List.of())));
+                        final var kind = TypeKind.fromDescriptor(valueClass.descriptorString());
+                        composer.storeLocal(kind, 1);
+                        emitEvidenceArguments(context, composer, List.of(entryPoint.runEvidence()));
+                        composer.loadLocal(kind, 1);
+                        composer.invokevirtual(ClassDesc.of("java.lang.invoke.MethodHandle"), "invoke",
+                                MethodTypeDesc.of(UNIT_CLASS, valueClass));
                         composer.pop();
                         composer.return_();
                     });
@@ -214,18 +235,7 @@ final class DeclarationEmitter {
                                     context, composer, lambda));
                 }
 
-                if (entryHolder) for (final var adapter : context.lambdaPlan.adapters()) {
-                    final var sourceType = adapter.source();
-                    final var targetType = adapter.target();
-                    final var parameters = new ArrayList<TypeDescriptor>();
-                    parameters.add(sourceType);
-                    parameters.addAll(targetType.invocationParameters());
-                    classBuilder.withMethodBody(
-                        adapter.name(),
-                        toJavaMethodDescriptor(targetType, parameters),
-                        ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
-                        composer -> LambdaSupportEmitter.emitFunctionAdapterImplementation(context, composer, sourceType, targetType));
-                }
+                emitFunctionAdapters(context, classBuilder);
 
                     if (entryHolder) for (final var adapter : context.lambdaPlan.nullableAdapters()) {
                         final var sourceType = adapter.source();
@@ -302,6 +312,24 @@ final class DeclarationEmitter {
                 ClassDesc.of(context.metadata.functionOwner(function)), function,
                 context.metadata.hktBridgeSignature(function));
         emitDefaultArgumentWrappers(context, classBuilder, function, typeDescriptor);
+    }
+
+    static void emitFunctionAdapters(final CompilationContext context, final ClassBuilder classBuilder) {
+        var adapterIndex = 0;
+        while (adapterIndex < context.lambdaPlan.adapters().size()) {
+            final var adapter = context.lambdaPlan.adapters().get(adapterIndex++);
+            final var sourceType = adapter.source();
+            final var targetType = adapter.target();
+            final var parameters = new ArrayList<TypeDescriptor>();
+            parameters.add(sourceType);
+            parameters.addAll(targetType.invocationParameters());
+            classBuilder.withMethodBody(
+                    adapter.name(),
+                    toJavaMethodDescriptor(targetType, parameters),
+                    ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
+                    composer -> LambdaSupportEmitter.emitFunctionAdapterImplementation(
+                            context, composer, sourceType, targetType));
+        }
     }
 
     private static void generateHktImplementationBridge(final CompilationContext context,

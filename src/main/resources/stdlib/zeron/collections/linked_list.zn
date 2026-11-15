@@ -56,11 +56,7 @@ class LinkedListIterator<T: mut> is Iterator<T> {
 /// declare `PositionalEditor`, because editing the middle of a linked list has no index-based
 /// constant-time operation.
 public class LinkedList<T: mut>
-    is Iterable<T>,
-       Sized<T>,
-       List<T>,
-       Sequenced<T>,
-       Deque<T>,
+    is Deque<T>,
        Sink<T>,
        Clearable,
        Reversible<LinkedList<_>>,

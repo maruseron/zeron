@@ -110,6 +110,46 @@ A product case covers the root only if all its component patterns are total. Thu
 alone is not exhaustive; a total pattern such as `Point(x, y)` or a wildcard is needed. Product
 patterns can also be nested inside sum payloads and class-pattern outputs.
 
+## Matching data classes
+
+A data class can be matched positionally at the match root and in nested positions. The pattern
+arity is the canonical component count, in declaration order, and auxiliary fields or computed
+properties are never part of the pattern:
+
+```zeron
+data class Point(x: Int, y: Int) {}
+data class Segment(start: Point, end: Point) {}
+
+fn describe(point: Point): String = match (point) {
+    case Point(0, 0) -> "origin";
+    case Point(0, y) -> "on the y axis at " + y;
+    case Point(x, y) -> "at " + x + ", " + y;
+};
+
+fn lengthSquared(segment: Segment): Int = match (segment) {
+    case Segment(Point(x1, y1), Point(x2, y2)) ->
+        (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+};
+```
+
+Generic data-class patterns may spell the complete applied type or omit it. Omission adopts the
+scrutinee's applied type; partial type-argument lists and wildcards are not accepted:
+
+```zeron
+data class Box<A: mut>(value: A) {}
+
+fn classify(box: Box<Int>): String = match (box) {
+    case Box<Int>(0) -> "zero";
+    case Box<Int>(1) -> "one";
+    case Box(other) -> "other " + other;
+};
+```
+
+Coverage follows the product rule: the type test plus a total pattern over every canonical
+component covers the root. A refutable component such as a literal makes the case refutable, so
+later cases with the same applied identity remain reachable. Named patterns keep precedence: a
+pattern written as `Type.name(...)` still resolves through the class-defined named-pattern path.
+
 ## Matching applied types
 
 When a value's applied type identity is available at runtime, an applied class or product pattern

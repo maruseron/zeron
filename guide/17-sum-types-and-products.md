@@ -56,6 +56,12 @@ signature. Components are immutable, read-only properties. A data class is nomin
 class with the same components is still a different type. Components must all be supplied to
 `.new`; component defaults and alternate named constructors are not supported.
 
+Canonical components are readable by any declaration that can name the data class, even when the
+data class itself is not `public`. The type's visibility still controls who may name `Point`; once
+the type is nameable, its structural components are part of its readable surface. Positional
+patterns use exactly these components, in declaration order, and exclude auxiliary fields and
+computed properties.
+
 The compiler provides structural `Eq` when every component supports equality, comparing only those
 components. Do not write `deriving Eq`; it is intrinsic. `Hashable` is optional and must be requested
 with `deriving Hashable`, as in the example. Auxiliary fields such as `coordinateSum`, methods, and
@@ -68,6 +74,25 @@ functions. An initializer block can declare its raised effects on the data class
 `Point raises InitializationFailure { ... }`; those effects become part of construction and must be
 handled or propagated by the caller. See [Raised effects](./22-raised-effects.md) for the effect
 model.
+
+Data classes can be destructured positionally. The pattern arity is the canonical component count,
+not the number of auxiliary properties:
+
+```zeron
+public data class Box<A: mut>(value: A) {
+    public property doubled: A {
+        get = value;
+    }
+}
+
+fn unwrap(box: Box<Int>): Int = match (box) {
+    case Box(x) -> x;
+};
+```
+
+Generic type arguments may be written explicitly or inferred from the scrutinee. See
+[Pattern matching](./18-pattern-matching.md#matching-data-classes) for nested patterns and
+coverage rules.
 
 The standard library defines streaming `Encoder`/`Decoder` protocols and the effect-aware
 `Encode<T, E>`, `Decode<T, E>`, `Codec<T, E>`, and `Shape<T>` contracts. Products, sums, and

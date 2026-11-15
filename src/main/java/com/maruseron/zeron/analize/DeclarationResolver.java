@@ -1154,9 +1154,13 @@ final class DeclarationResolver {
                                         required.variadic(), function.typeDescriptor(),
                                         function.variadic()))
                         .findFirst().orElse(null);
+                final var constructorImplementation = constructorImplementation(
+                        context, declaration, required.name().lexeme(), requiredType,
+                        required.variadic(), Map.of());
                 final var blockImplementation = hasStaticBlockEntry(context, declaration,
                         contractUse, required, requiredType);
-                if (staticImplementation == null && !blockImplementation && !required.isDefault()) {
+                if (staticImplementation == null && constructorImplementation == null
+                        && !blockImplementation && !required.isDefault()) {
                     methodErrors.add(new ResolutionError(
                             DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                             contractUse.name(),
@@ -1480,6 +1484,38 @@ final class DeclarationResolver {
         return EffectRows.includedIn(implementation.raisedEffects(), requiredEffects,
                 context.effectHierarchy)
                 && context.typeCompatibility.canAssign(requiredReturn, implementation.returnType());
+    }
+
+    static Stmt.NamedConstructor constructorImplementation(
+            final ResolutionContext context, final Stmt.ClassDecl declaration,
+            final String methodName, final FunctionDescriptor required,
+            final boolean requiredVariadic,
+            final Map<TypeParameterDescriptor, TypeDescriptor> classSubstitutions) {
+        return declaration.namedConstructors().stream()
+                .filter(constructor -> constructor.isPublic()
+                        && constructor.name().lexeme().equals(methodName)
+                        && compatibleConstructorSignatures(context, required, requiredVariadic,
+                                constructor, classSubstitutions))
+                .findFirst().orElse(null);
+    }
+
+    static boolean compatibleConstructorSignatures(
+            final ResolutionContext context, final FunctionDescriptor required,
+            final boolean requiredVariadic, final Stmt.NamedConstructor constructor,
+            final Map<TypeParameterDescriptor, TypeDescriptor> classSubstitutions) {
+        if (required.typeParameters().size() != 0) return false;
+        final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                constructor.typeDescriptor(), classSubstitutions);
+        var returnType = descriptor.returnType();
+        if (!(required.returnType() instanceof ReferenceDescriptor)
+                && returnType instanceof ReferenceDescriptor reference) {
+            returnType = reference.baseType();
+        }
+        final var candidate = TypeDescriptor.functionWithEffectsOf(descriptor.name(),
+                returnType, descriptor.parameters(), descriptor.typeParameters(),
+                descriptor.raisedEffects());
+        return compatibleMethodSignatures(context, required, requiredVariadic,
+                candidate, constructor.variadic());
     }
 
 }

@@ -85,6 +85,66 @@ public final class WarningDiagnosticsTest {
     }
 
     @Test
+    public void reportsNullableReturnsAndTracksForwardedMutableArguments() {
+        final var nullable = resolve("""
+                package warnings;
+                public fn maybeName(): String? {
+                    if (true) return "name";
+                    return null;
+                }
+                fn main(): Unit = ();
+                """);
+        assertTrue(nullable.toString(), nullable.contains("ZR3018"));
+
+        final var projection = resolve("""
+                package warnings;
+                class Handle {
+                    public constructor new;
+                    public mut touch(): Unit = ();
+                }
+                fn mutate(subject: &Handle): Unit = subject.touch();
+                fn forward(subject: &Handle): Unit = mutate(subject);
+                fn main(): Unit = ();
+                """);
+        assertFalse(projection.toString(), projection.contains("ZR3015"));
+    }
+
+    @Test
+    public void reportsNullableReturnsOnlyForPublicApi() {
+        final var warnings = resolve("""
+                package warnings;
+                class PackagePrivate {
+                    public constructor new;
+                    public lookup(): String? = null;
+                }
+                public class Visible {
+                    public constructor new;
+                    public exposed(): String? = null;
+                    private hidden(): String? = null;
+                }
+                fn main(): Unit = ();
+                """);
+        assertEquals(1L, warnings.stream().filter("ZR3018"::equals).count());
+    }
+
+    @Test
+    public void functionReferencesInsideClassBodiesCountAsUses() {
+        final var warnings = resolve("""
+                package warnings;
+                fn helper(value: Int): Int = value + 1;
+                class Box {
+                    public property value: Int;
+                    public constructor new;
+                    public constructor withTransform(transform: (Int) -> Int) =
+                        Box.new(transform(1));
+                    public constructor build() = Box.withTransform(helper);
+                }
+                fn main(): Unit = ();
+                """);
+        assertFalse(warnings.toString(), warnings.contains("ZR3013"));
+    }
+
+    @Test
     public void doesNotReportShadowingForImplicitReceivers() {
         final var warnings = resolve("""
                 package warnings;

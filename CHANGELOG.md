@@ -4,6 +4,23 @@
 
 ### Compiler and language work
 
+- Added ZEP-0127 data-class positional patterns. A data class can be destructured at the match root
+  and in nested positions using its canonical components in declaration order; auxiliary and computed
+  properties are excluded. Generic patterns accept a complete applied type or infer it from the
+  scrutinee. Canonical components are readable by any declaration that can name the data class even
+  when the class itself is not `public`, and refutable applied cases with the same identity no
+  longer make later cases unreachable.
+- Added `ZR3018`, a warning for public functions and public methods on public classes that return
+  `T?`, with guidance to return `Option<T>` or `Result<T, _>` instead; package-private classes and
+  private methods remain quiet. Class-body method and implementation-block analysis now participates in
+  nullability, mutable-projection, and unused-function warnings, so a free function referenced from
+  a class body counts as used and mutable-reference arguments forwarded to other functions count as
+  mutable uses. Parameters of contract-implemented methods no longer receive the unnecessary
+  mutable-projection warning, and iterability now follows transitive contract requirements.
+- Named constructors may satisfy a static contract requirement when their parameters match and
+  their `&T` return is compatible with a readonly `T` or mutable `&T` requirement. Named-constructor
+  evidence is selected before contract-interface projection, so a conforming class supplies its own
+  static implementation instead of an unusable interface handle.
 - Added ZEP-0126 compiler-owned `Main<A>` entry values. A top-level `main` may return `Unit`, `Int`,
   `Result<Unit, E>`, or another type with one applicable `Main<A>` witness; the generated launcher
   evaluates `main` and then calls `Main<A>.run`. `Main<Int>` treats `0` as normal completion and

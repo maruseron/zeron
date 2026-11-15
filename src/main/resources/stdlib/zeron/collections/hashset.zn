@@ -7,12 +7,11 @@ import zeron.lang.Hashable;
 /// Iteration order is not specified. Membership and insertion rely on `Hashable<T>`, which implies
 /// `Eq<T>`; mutating operations require a mutable reference to the set.
 public class HashSet<T: Hashable<T>>
-    is Iterable<T>,
+    is Set<T>,
        Sized<T>,
        Sink<T>,
        Removable<T>,
-       Clearable,
-       Set<T> {
+       Clearable {
     values: &HashMap<T, Unit>;
 
     private constructor new;

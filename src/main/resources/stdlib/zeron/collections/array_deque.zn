@@ -25,11 +25,7 @@ class ArrayDequeIterator<T: mut> is Iterator<T> {
 /// end is amortized constant time, and indexed reads are constant time. Removing from the middle is
 /// not part of the deque contract and is not offered.
 public class ArrayDeque<T: mut>
-    is Iterable<T>,
-       Sized<T>,
-       List<T>,
-       Sequenced<T>,
-       Deque<T>,
+    is Deque<T>,
        Sink<T>,
        RandomAccess<T>,
        Clearable,

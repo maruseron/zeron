@@ -780,26 +780,54 @@ public final class Resolver {
         final var declaration = context.classes.get(baseName);
         if (declaration != null) {
             final var substitutions = substitutionsFor(context, declaration.typeParameters(), arrayType);
-            for (final var contractUse : declaration.contractUses()) {
-                if (!iterableName.equals(contractUse.name().lexeme())
-                        || contractUse.typeArguments().size() != 1) continue;
-                recordIterationProtocol(context, where, iterableName);
-                return TypeSubstitution.substitute(contractUse.typeArguments().getFirst(), substitutions);
-            }
+            final var elementType = transitiveIterableElement(context, declaration.contractUses(),
+                    substitutions, where, new HashSet<>());
+            if (elementType != null) return elementType;
         }
         final var contract = context.contracts.get(baseName);
         if (contract != null) {
             final var substitutions = substitutionsFor(context, contract.typeParameters(), arrayType);
-            for (final var contractRequirements : contract.requiredContracts()) {
-                if (!iterableName.equals(contractRequirements.name().lexeme()) 
-                        || contractRequirements.typeArguments().size() != 1) continue;
-                recordIterationProtocol(context, where, iterableName);
-                return TypeSubstitution.substitute(contractRequirements.typeArguments().getFirst(), substitutions);
-            }
+            final var elementType = transitiveIterableElement(context, contract.requiredContracts(),
+                    substitutions, where, new HashSet<>());
+            if (elementType != null) return elementType;
         }
         Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_ITERABLE, where,
                 "Iterative control flow requires Array<T>, an integer range literal, or a type conforming to Iterable<T>."));
         return TypeDescriptor.ofInfer();
+    }
+
+    private static TypeDescriptor transitiveIterableElement(
+            final ResolutionContext context, final List<Stmt.ContractUse> uses,
+            final Map<TypeParameterDescriptor, TypeDescriptor> substitutions,
+            final Token where, final Set<String> visited) {
+        for (final var use : uses) {
+            final var arguments = use.typeArguments().stream()
+                    .map(argument -> TypeSubstitution.substitute(argument, substitutions))
+                    .toList();
+            final var element = transitiveIterableElement(context, use.name().lexeme(), arguments,
+                    where, visited);
+            if (element != null) return element;
+        }
+        return null;
+    }
+
+    private static TypeDescriptor transitiveIterableElement(
+            final ResolutionContext context, final String contractName,
+            final List<TypeDescriptor> arguments, final Token where, final Set<String> visited) {
+        final var iterableName = "zeron.collections.Iterable";
+        if (iterableName.equals(contractName) && arguments.size() == 1) {
+            recordIterationProtocol(context, where, iterableName);
+            return arguments.getFirst();
+        }
+        final var contract = context.contracts.get(contractName);
+        if (contract == null) return null;
+        final var key = contractName + arguments;
+        if (!visited.add(key)) return null;
+        final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+        for (var index = 0; index < Math.min(contract.typeParameters().size(), arguments.size()); index++) {
+            substitutions.put(contract.typeParameters().get(index), arguments.get(index));
+        }
+        return transitiveIterableElement(context, contract.requiredContracts(), substitutions, where, visited);
     }
 
     static TypeDescriptor ensureSink(final ResolutionContext context, final TypeDescriptor type, final Token where) {

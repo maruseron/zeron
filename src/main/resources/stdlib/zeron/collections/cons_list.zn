@@ -37,9 +37,7 @@ class ConsListIterator<T: mut> is Iterator<T> {
 /// receiver. The length is cached in each header, so `size` is constant time even though `last`
 /// walks the spine. A cons list is a `List` but does not declare any mutation capability.
 public class ConsList<T: mut>
-    is Iterable<T>,
-       Sized<T>,
-       List<T>,
+    is List<T>,
        Sequenced<T>,
        Reversible<ConsList<_>>,
        Foldable<ConsList<_>> {

@@ -1625,6 +1625,41 @@ final class TypeClassEvidence {
                 requiredType.returnType(), methodParameters, requiredType.typeParameters(),
                 requiredType.raisedEffects());
 
+        if (requirement.isStatic()) {
+            final var classDeclaration = context.classes.get(nominalName(concrete));
+            if (classDeclaration != null) {
+                final var candidate = classDeclaration.staticFunctions().stream()
+                        .filter(function -> function.name().lexeme().equals(requirement.name().lexeme()))
+                        .filter(function -> function.isPublic()
+                                && function.variadic() == requirement.variadic()
+                                && DeclarationResolver.compatibleMethodSignatures(
+                                        context, requiredType, requirement.variadic(),
+                                        function.typeDescriptor(), function.variadic()))
+                        .findFirst().orElse(null);
+                if (candidate != null) {
+                    return new Expr.EvidenceArgument(targetParameter, targetBoundIndex,
+                            targetMethodIndex, classDeclaration.name().lexeme(),
+                            candidate.name().lexeme(), candidate.typeDescriptor(), null, true,
+                            Expr.EvidenceHandleKind.STATIC);
+                }
+                final var classSubstitutions = classSubstitutionsForReceiver(
+                        classDeclaration, concrete);
+                final var constructor = DeclarationResolver.constructorImplementation(
+                        context, classDeclaration, requirement.name().lexeme(), requiredType,
+                        requirement.variadic(),
+                        classSubstitutions == null ? Map.of() : classSubstitutions);
+                if (constructor != null) {
+                    final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                            constructor.typeDescriptor(),
+                            classSubstitutions == null ? Map.of() : classSubstitutions);
+                    return new Expr.EvidenceArgument(targetParameter, targetBoundIndex,
+                            targetMethodIndex, classDeclaration.name().lexeme(),
+                            constructor.name().lexeme(), descriptor, null, true,
+                            Expr.EvidenceHandleKind.STATIC);
+                }
+            }
+        }
+
         if (TypeCompatibility.isArrayIterableProjection(requiredBound, concrete)) {
             return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
                     "zeron.runtime.ArrayIterable", "$bound$" + requirement.name().lexeme(),
@@ -1650,26 +1685,6 @@ final class TypeClassEvidence {
             return new Expr.EvidenceArgument(targetParameter, targetBoundIndex, targetMethodIndex,
                     explicit.helperQualifiedName(), explicit.method().implementation().name().lexeme(),
                     helperType, null, true, Expr.EvidenceHandleKind.STATIC, prerequisiteEvidence);
-        }
-
-        if (requirement.isStatic()) {
-            final var classDeclaration = context.classes.get(nominalName(concrete));
-            if (classDeclaration != null) {
-                final var candidate = classDeclaration.staticFunctions().stream()
-                        .filter(function -> function.name().lexeme().equals(requirement.name().lexeme()))
-                        .filter(function -> function.isPublic()
-                                && function.variadic() == requirement.variadic()
-                                && DeclarationResolver.compatibleMethodSignatures(
-                                        context, requiredType, requirement.variadic(),
-                                        function.typeDescriptor(), function.variadic()))
-                        .findFirst().orElse(null);
-                if (candidate != null) {
-                    return new Expr.EvidenceArgument(targetParameter, targetBoundIndex,
-                            targetMethodIndex, classDeclaration.name().lexeme(),
-                            candidate.name().lexeme(), candidate.typeDescriptor(), null, true,
-                            Expr.EvidenceHandleKind.STATIC);
-                }
-            }
         }
 
         final var derived = derivedMethodHandle(context, requiredBound, concrete, requirement,

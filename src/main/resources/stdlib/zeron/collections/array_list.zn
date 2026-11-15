@@ -31,9 +31,7 @@ class ArrayListIterator<T: mut> is Iterator<T> {
 /// by index are constant time and adding at the end is amortized constant time. Removing or
 /// inserting in the middle shifts the following elements.
 public class ArrayList<T: mut>
-    is Iterable<T>,
-       Sized<T>,
-       List<T>,
+    is List<T>,
        Sink<T>,
        RandomAccess<T>,
        Sequenced<T>,

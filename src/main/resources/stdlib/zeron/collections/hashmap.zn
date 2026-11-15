@@ -15,11 +15,10 @@ fn equalKeys<T: Eq<T>>(left: T, right: T): Boolean = left == right;
 /// and must not change in a way that affects either operation while they are in the map. Iteration
 /// order is not specified.
 public class HashMap<K: Hashable<K>, V: mut>
-    is Iterable<Pair<K, V>>,
+    is Map<K, V>,
        Sized<Pair<K, V>>,
        KeyedSink<K, V>,
-       Clearable,
-       Map<K, V> {
+       Clearable {
     table: &HashTable<K, V>;
 
     private constructor new;
@@ -39,7 +38,7 @@ public class HashMap<K: Hashable<K>, V: mut>
 
     /// Creates an empty map using the standard hashing and equality of `K`.
     public constructor empty() =
-        HashMap<K, V>.withOperations(hashKey::<K>, equalKeys::<K>);
+        HashMap<K, V>.withOperations(hashKey, equalKeys);
 
     /// Creates a map holding each entry; a later duplicate key replaces the earlier value.
     public constructor of(entries: &Pair<K, V>...) {

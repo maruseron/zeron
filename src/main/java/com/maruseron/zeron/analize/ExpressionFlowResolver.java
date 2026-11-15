@@ -1056,14 +1056,14 @@ final class ExpressionFlowResolver {
                 if (variable.resolvedFunctionName() != null) {
                     final var resolvedType = variable.specializedFunctionType();
                     context.recordReference(variable.name,
-                            context.functionSymbolTokens.get(variable.resolvedFunctionName()), resolvedType);
+                            functionDeclarationToken(context, variable.resolvedFunctionName()), resolvedType);
                     yield resolvedType;
                 }
                 if (!variable.explicitFunctionTypeArguments.isEmpty()) {
                     final var resolvedType = LambdaResolver.resolveFunctionReference(context, variable, null);
                     if (variable.resolvedFunctionName() != null) {
                         context.recordReference(variable.name,
-                                context.functionSymbolTokens.get(variable.resolvedFunctionName()), resolvedType);
+                                functionDeclarationToken(context, variable.resolvedFunctionName()), resolvedType);
                     }
                     yield resolvedType;
                 }
@@ -1191,6 +1191,13 @@ final class ExpressionFlowResolver {
         final var type = new ReferenceDescriptor(TypeDescriptor.ofName(object.generatedClassName()));
         object.setType(type);
         return type;
+    }
+
+    private static Token functionDeclarationToken(final ResolutionContext context,
+                                                  final String functionName) {
+        final var declaration = context.functions.get(functionName);
+        return declaration == null
+                ? context.functionSymbolTokens.get(functionName) : declaration.name();
     }
 
     private static TypeDescriptor resolveStringConcatenation(final ResolutionContext context,
@@ -1948,6 +1955,9 @@ final class ExpressionFlowResolver {
         final boolean sealedRoot = sealedContract != null && sealedContract.isSealed();
         final boolean appliedRoot = !sealedRoot
                 && match.arms.stream().anyMatch(arm -> hasAppliedPattern(arm.pattern()));
+        final var scrutineeClass = context.classes.get(scrutineeType.name());
+        final boolean dataClassRoot = !sealedRoot && scrutineeClass != null
+                && scrutineeClass.dataClass() && !scrutineeClass.isEffect();
         final boolean productRoot = context.products.containsKey(scrutineeType.name());
         final boolean literalRoot = isLiteralPatternType(scrutineeType);
         final boolean concreteLiteralRoot = isConcretePatternType(context, scrutineeType)
@@ -1957,6 +1967,8 @@ final class ExpressionFlowResolver {
             rootKind = MatchRootKind.SEALED;
         } else if (appliedRoot) {
             rootKind = MatchRootKind.APPLIED;
+        } else if (dataClassRoot) {
+            rootKind = MatchRootKind.DATA_CLASS;
         } else if (productRoot) {
             rootKind = MatchRootKind.PRODUCT;
         } else if (literalRoot && match.arms.stream().anyMatch(arm -> containsLiteralPattern(arm.pattern()))) {
@@ -1966,7 +1978,7 @@ final class ExpressionFlowResolver {
         } else {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     match.keyword,
-                    "Match expressions require a sealed contract, product type, or literal match on a concrete non-open type."));
+                    "Match expressions require a sealed contract, product type, data class, or literal match on a concrete non-open type."));
             throw new IllegalStateException("Resolution errors must abort match resolution.");
         }
         final var contractArguments = matchDomainType instanceof GenericDescriptor generic
@@ -1982,11 +1994,14 @@ final class ExpressionFlowResolver {
                 ? sealedContract.permittedClasses().stream()
                 .map(permitted -> permitted.name().lexeme())
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
-                : rootKind == MatchRootKind.PRODUCT || rootKind == MatchRootKind.CONCRETE_LITERAL
+                : rootKind == MatchRootKind.PRODUCT || rootKind == MatchRootKind.DATA_CLASS
+                || rootKind == MatchRootKind.CONCRETE_LITERAL
                 ? new LinkedHashSet<>(Set.of(scrutineeType.name()))
                 : new LinkedHashSet<String>();
         final var matchedNames = new LinkedHashSet<String>();
         final var matchedApplications = new LinkedHashSet<TypeDescriptor>();
+        final var coveredNames = new LinkedHashSet<String>();
+        final var coveredApplications = new LinkedHashSet<TypeDescriptor>();
         final var matchedLiterals = new LinkedHashSet<LiteralPatternKey>();
         boolean wildcardSeen = false;
         boolean rootCovered = false;
@@ -2008,14 +2023,14 @@ final class ExpressionFlowResolver {
                     permittedNames, contractArguments, rootKind);
             if (rootKind == MatchRootKind.APPLIED) {
                 if (!arm.pattern().wildcard() && pattern.matchedType() instanceof GenericDescriptor
-                        && matchedApplications.contains(pattern.matchedType())) {
+                        && coveredApplications.contains(pattern.matchedType())) {
                     Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                             arm.keyword(), "An applied match case with the same exact identity "
                                     + "follows an unguarded case and is unreachable."));
                 }
             } else if (!arm.pattern().wildcard() && pattern.matchedType() != null
-                    && matchedNames.contains(pattern.matchedType().name())) {
+                    && coveredNames.contains(pattern.matchedType().name())) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         arm.keyword(), "A match case for '" + pattern.matchedType().name()
                                 + "' follows an unguarded case and is unreachable."));
@@ -2064,11 +2079,28 @@ final class ExpressionFlowResolver {
                 } else {
                     matchedNames.addAll(pattern.coveredClasses());
                 }
+                if (pattern.irrefutable()) {
+                    if (pattern.matchedType() instanceof GenericDescriptor) {
+                        coveredApplications.add(pattern.matchedType());
+                    }
+                    if (pattern.matchedType() != null) {
+                        coveredNames.add(pattern.matchedType().name());
+                    }
+                }
+                if (pattern.identityTotal()) {
+                    if (pattern.matchedType() instanceof GenericDescriptor) {
+                        coveredApplications.add(pattern.matchedType());
+                    }
+                    if (pattern.matchedType() != null) {
+                        coveredNames.add(pattern.matchedType().name());
+                    }
+                }
                 matchedLiterals.addAll(pattern.coveredLiterals());
                 if (rootKind == MatchRootKind.APPLIED) {
                     rootCovered = pattern.irrefutable();
                 } else if (rootKind == MatchRootKind.SEALED && matchedNames.containsAll(permittedNames)
-                        || (rootKind == MatchRootKind.PRODUCT || rootKind == MatchRootKind.CONCRETE_LITERAL)
+                        || (rootKind == MatchRootKind.PRODUCT || rootKind == MatchRootKind.DATA_CLASS
+                        || rootKind == MatchRootKind.CONCRETE_LITERAL)
                         && matchedNames.contains(scrutineeType.name())
                         || rootKind == MatchRootKind.LITERAL
                         && TypeDescriptor.ofBoolean().equals(scrutineeType)
@@ -2088,6 +2120,8 @@ final class ExpressionFlowResolver {
                     ? "true, false"
                     : rootKind == MatchRootKind.APPLIED
                     ? "a wildcard or a statically total application"
+                    : rootKind == MatchRootKind.DATA_CLASS
+                    ? "a wildcard or a total data-class pattern"
                     : "a wildcard or total pattern";
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                     match.keyword,
@@ -2105,6 +2139,7 @@ final class ExpressionFlowResolver {
         SEALED,
         APPLIED,
         PRODUCT,
+        DATA_CLASS,
         LITERAL,
         CONCRETE_LITERAL
     }
@@ -2197,7 +2232,16 @@ final class ExpressionFlowResolver {
                                           Set<String> coveredClasses,
                                           Set<LiteralPatternKey> coveredLiterals,
                                           boolean irrefutable,
-                                          TypeDescriptor matchedType) {}
+                                          boolean identityTotal,
+                                          TypeDescriptor matchedType) {
+        MatchPatternResolution(final Map<String, MatchBinding> bindings,
+                               final Set<String> coveredClasses,
+                               final Set<LiteralPatternKey> coveredLiterals,
+                               final boolean irrefutable,
+                               final TypeDescriptor matchedType) {
+            this(bindings, coveredClasses, coveredLiterals, irrefutable, irrefutable, matchedType);
+        }
+    }
 
     private static MatchPatternResolution resolveMatchPattern(
             final ResolutionContext context,
@@ -2298,8 +2342,13 @@ final class ExpressionFlowResolver {
         final var effectiveInputType = inputType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : inputType;
         final var resolvedPatternType = patternType;
+        final var positionalDataClass = pattern.productPattern()
+                && resolvedPatternType instanceof NominalDescriptor
+                && resolvedPatternType.name() != null
+                && context.classes.get(resolvedPatternType.name()) != null
+                && context.classes.get(resolvedPatternType.name()).dataClass();
         final var productPatternType = pattern.productPattern()
-                && context.products.containsKey(resolvedPatternType.name())
+                && (context.products.containsKey(resolvedPatternType.name()) || positionalDataClass)
                 && resolvedPatternType instanceof NominalDescriptor
                 && effectiveInputType instanceof GenericDescriptor applied
                 && applied.name().equals(resolvedPatternType.name())
@@ -2478,6 +2527,73 @@ final class ExpressionFlowResolver {
                     root && !refutable ? Set.of(patternType.name()) : Set.of(),
                     Set.of(), !refutable, patternType);
         }
+        final var dataClass = context.classes.get(patternTypeForResolution.name());
+        if (pattern.productPattern() && dataClass != null && dataClass.dataClass()
+                && !dataClass.isEffect()) {
+            var appliedDataClassType = patternTypeForResolution;
+            if (!(appliedDataClassType instanceof GenericDescriptor)
+                    && !dataClass.typeParameters().isEmpty()) {
+                if (effectiveInputType instanceof GenericDescriptor input
+                        && input.name().equals(dataClass.name().lexeme())) {
+                    appliedDataClassType = input;
+                } else {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH, pattern.keyword(),
+                            "A generic data-class pattern must supply type arguments or match a "
+                                    + "scrutinee with a known application."));
+                }
+            }
+            if (appliedDataClassType instanceof GenericDescriptor generic
+                    && generic.typeParameters().size() != dataClass.typeParameters().size()) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH, pattern.keyword(),
+                        "Data class '" + simpleName(dataClass.name().lexeme()) + "' expects "
+                                + dataClass.typeParameters().size() + " type arguments."));
+            }
+            final var components = dataClass.dataComponents();
+            if (pattern.type() != null && pattern.extractor() != null
+                    || pattern.arguments().size() != components.size()) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH, pattern.keyword(),
+                        "Data-class pattern expects " + components.size() + " component patterns."));
+            }
+            TypeResolver.validateType(context, appliedDataClassType, pattern.keyword());
+            if (root && rootKind != MatchRootKind.APPLIED) {
+                final var classArguments = appliedDataClassType instanceof GenericDescriptor generic
+                        ? generic.typeParameters() : List.<TypeDescriptor>of();
+                if (!permittedNames.contains(appliedDataClassType.name())
+                        || !classArguments.equals(contractArguments)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH, pattern.keyword(),
+                            "Data-class pattern type must match the scrutinee."));
+                }
+            } else if (!root && !context.typeCompatibility.canTypeTest(inputType, appliedDataClassType)) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH, pattern.keyword(),
+                        "Nested data-class pattern is incompatible with its extracted value."));
+            }
+            pattern.resolve(null, appliedDataClassType, false);
+            final var bindings = new LinkedHashMap<String, MatchBinding>();
+            if (pattern.alias() != null) {
+                addPatternBinding(context, bindings, pattern.alias(), appliedDataClassType);
+            }
+            final var substitutions = TypeResolver.substitutionsFor(
+                    context, dataClass.typeParameters(), appliedDataClassType);
+            boolean componentRefutable = false;
+            for (int index = 0; index < components.size(); index++) {
+                final var argument = pattern.arguments().get(index);
+                final var componentType = TypeSubstitution.substitute(
+                        components.get(index).type(), substitutions);
+                final var nested = resolveMatchPattern(context, argument, componentType, false,
+                        permittedNames, contractArguments, rootKind);
+                mergePatternBindings(context, bindings, nested.bindings(), argument.keyword());
+                componentRefutable |= !nested.irrefutable();
+            }
+            final boolean refutable = !appliedDataClassType.equals(inputType) || componentRefutable;
+            return new MatchPatternResolution(bindings,
+                    root && !refutable ? Set.of(appliedDataClassType.name()) : Set.of(),
+                    Set.of(), !refutable, !componentRefutable, appliedDataClassType);
+        }
         final var positionalClass = pattern.productPattern() && product == null
                 && rootKind == MatchRootKind.APPLIED
                 ? context.classes.get(patternTypeForResolution.name()) : null;
@@ -2500,7 +2616,7 @@ final class ExpressionFlowResolver {
             }
             final var substitutions = TypeResolver.substitutionsFor(
                     context, positionalClass.typeParameters(), patternTypeForResolution);
-            boolean refutable = !patternTypeForResolution.equals(inputType);
+            boolean componentRefutable = false;
             for (int index = 0; index < positionalClass.properties().size(); index++) {
                 final var argument = pattern.arguments().get(index);
                 final var componentType = TypeSubstitution.substitute(
@@ -2508,11 +2624,12 @@ final class ExpressionFlowResolver {
                 final var nested = resolveMatchPattern(context, argument, componentType, false,
                         permittedNames, contractArguments, rootKind);
                 mergePatternBindings(context, bindings, nested.bindings(), argument.keyword());
-                refutable |= !nested.irrefutable();
+                componentRefutable |= !nested.irrefutable();
             }
+            final boolean refutable = !patternTypeForResolution.equals(inputType) || componentRefutable;
             return new MatchPatternResolution(bindings,
                     root && !refutable ? Set.of(patternTypeForResolution.name()) : Set.of(),
-                    Set.of(), !refutable, patternTypeForResolution);
+                    Set.of(), !refutable, !componentRefutable, patternTypeForResolution);
         }
         if (pattern.productPattern()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
@@ -2611,7 +2728,7 @@ final class ExpressionFlowResolver {
         }
         return new MatchPatternResolution(bindings,
                 root && !refutable ? Set.of(patternType.name()) : Set.of(),
-                Set.of(), !refutable, patternType);
+                Set.of(), !refutable, pattern.extractor() == null || !refutable, patternType);
     }
 
     private static TypeDescriptor findUnqualifiedPatternSum(final ResolutionContext context,

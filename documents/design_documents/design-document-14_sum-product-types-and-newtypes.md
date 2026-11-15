@@ -88,6 +88,9 @@ public data class Point(x: Int, y: Int) {
 ```
 
 Components are immutable, read-only properties and form the canonical constructor arguments.
+Canonical components are readable by any declaration that can name the data class, regardless of
+whether the data class itself is `public`; the type's visibility gates nameability, not structural
+access. Positional patterns use the components in declaration order and exclude auxiliary state.
 Components are initialized first, then direct field initializers run in source order, followed by
 initializer blocks in source order. Auxiliary state is excluded from structural equality and is not
 part of the canonical component representation. Direct initializers may call only effect-free

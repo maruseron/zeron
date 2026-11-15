@@ -145,6 +145,12 @@ These choices let a class hide details that callers should not depend on. A publ
 created and used from outside; its private fields remain internal, while its public members form
 the set of operations available to other code.
 
+Data-class components are a readable structural surface rather than incidental implementation
+state. They remain readable from any declaration that can name the data class, even when the data
+class itself is not `public`; the type's visibility still decides who can name it. Ordinary class
+fields and properties keep the access rules above. See
+[products and data classes](17-sum-types-and-products.md#data-classes).
+
 ## Methods that can change an object
 
 By default, a method can read the object's fields but cannot change them. Mark a method `mut`

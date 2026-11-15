@@ -2102,7 +2102,7 @@ final class LspFeatures {
                 final var symbol = new Symbol(extension.name().lexeme(), qualifiedName,
                         packageName, namespace,
                         "extension on " + TypeFormatter.format(extension.receiverType())
-                                + ": " + signature(extension.name().lexeme(),
+                                + ":\n" + signature(extension.name().lexeme(),
                                         extension.typeDescriptor(), parameterNames),
                         extension.property() ? CompletionItemKind.Property : CompletionItemKind.Method,
                         extension.name(), null, extension.isPublic(),
@@ -2323,7 +2323,7 @@ final class LspFeatures {
                     byToken.put(value.name(), new Symbol(value.name().lexeme(), qualified,
                             unit.packageName(), null,
                             "extension on " + TypeFormatter.format(extension.receiverType())
-                                    + ": " + signature(value.name().lexeme(), value.typeDescriptor(),
+                                    + ":\n" + signature(value.name().lexeme(), value.typeDescriptor(),
                                             parameterNames),
                             extension.property() ? CompletionItemKind.Property : CompletionItemKind.Method,
                             value.name(), path, value.isPublic(),

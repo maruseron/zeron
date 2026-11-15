@@ -282,6 +282,120 @@ public final class DataClassTest {
         }
     }
 
+    @Test
+    public void readsComponentsAndDestructuresDataClassesPositionally() throws Exception {
+        final var source = """
+                data class Point(x: Int, y: Int) {}
+                data class Segment(start: Point, end: Point) {}
+
+                fn lengthSquared(point: Point): Int =
+                    point.x * point.x + point.y * point.y;
+
+                fn classify(point: Point): String = match (point) {
+                    case Point(0, 0) -> "origin";
+                    case Point(0, y) -> "y " + y;
+                    case Point(x, y) -> "point " + x + " " + y;
+                };
+
+                fn segmentLengthSquared(segment: Segment): Int = match (segment) {
+                    case Segment(Point(x1, y1), Point(x2, y2)) ->
+                        (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+                };
+
+                fn classifyOrigin(): String = classify(Point.new(0, 0));
+                fn classifyAxis(): String = classify(Point.new(0, 5));
+                fn classifyPoint(): String = classify(Point.new(2, 3));
+                fn length(): Int = lengthSquared(Point.new(3, 4));
+                fn segment(): Int =
+                    segmentLengthSquared(Segment.new(Point.new(1, 1), Point.new(4, 5)));
+                """;
+        final var programName = "DataPatternProgram" + UUID.randomUUID().toString().replace("-", "");
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals(25, program.getMethod("length").invoke(null));
+                assertEquals("origin", program.getMethod("classifyOrigin").invoke(null));
+                assertEquals("y 5", program.getMethod("classifyAxis").invoke(null));
+                assertEquals("point 2 3", program.getMethod("classifyPoint").invoke(null));
+                assertEquals(25, program.getMethod("segment").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void genericDataClassPatternsInferTypeArgumentsAndIgnoreAuxiliaryProperties()
+            throws Exception {
+        final var source = """
+                data class Box<A: mut>(value: A) {
+                    public property doubled: A {
+                        get = value;
+                    }
+                }
+
+                fn inferred(box: Box<Int>): Int = match (box) {
+                    case Box(x) -> x;
+                };
+
+                fn explicit(box: Box<Int>): String = match (box) {
+                    case Box<Int>(0) -> "zero";
+                    case Box<Int>(1) -> "one";
+                    case Box<Int>(other) -> "other " + other;
+                };
+
+                fn auxiliary(box: Box<Int>): Int = box.doubled;
+                fn inferredValue(): Int = inferred(Box<Int>.new(7));
+                fn zeroValue(): String = explicit(Box<Int>.new(0));
+                fn oneValue(): String = explicit(Box<Int>.new(1));
+                fn otherValue(): String = explicit(Box<Int>.new(9));
+                fn auxiliaryValue(): Int = auxiliary(Box<Int>.new(11));
+                """;
+        final var programName = "GenericDataPatternProgram" + UUID.randomUUID().toString().replace("-", "");
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals(7, program.getMethod("inferredValue").invoke(null));
+                assertEquals("zero", program.getMethod("zeroValue").invoke(null));
+                assertEquals("one", program.getMethod("oneValue").invoke(null));
+                assertEquals("other 9", program.getMethod("otherValue").invoke(null));
+                assertEquals(11, program.getMethod("auxiliaryValue").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void rejectsWrongDataClassPatternArityAndComponentTypes() {
+        final var arity = """
+                data class Point(x: Int, y: Int) {}
+                fn bad(point: Point): Int = match (point) {
+                    case Point(x) -> x;
+                };
+                """;
+        final var arityError = org.junit.Assert.assertThrows(ResolutionError.class,
+                () -> new CompilationService(parse(arity), "BadDataArity").resolve());
+        assertTrue(arityError.getMessage().contains("expects 2 component patterns"));
+
+        final var componentType = """
+                data class Point(x: Int, y: Int) {}
+                fn bad(point: Point): Int = match (point) {
+                    case Point("x", y) -> y;
+                };
+                """;
+        org.junit.Assert.assertThrows(ResolutionError.class,
+                () -> new CompilationService(parse(componentType), "BadDataComponent").resolve());
+    }
+
     private static List<com.maruseron.zeron.ast.Stmt> parse(final String source) {
         final var result = Parser.of(Scanner.from(source, "DataClassTest.zn").scanTokens())
                 .parseCompilationUnitWithDiagnostics("DataClassTest.zn");

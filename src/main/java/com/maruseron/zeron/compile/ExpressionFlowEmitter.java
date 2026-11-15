@@ -776,19 +776,26 @@ final class ExpressionFlowEmitter {
             }
             final var substitutions = TypeSubstitution.substitutionsFor(
                     productDeclaration.typeParameters(), matchType);
+            final var dataComponents = productDeclaration.dataClass()
+                    ? productDeclaration.dataComponents() : null;
             for (int index = 0; index < pattern.arguments().size(); index++) {
                 final var argument = pattern.arguments().get(index);
                 if (argument.wildcard()) continue;
-                final var component = productDeclaration.properties().get(index);
-                final var erasedComponentType = TypeSubstitution.erase(component.type());
+                final var componentName = dataComponents == null
+                        ? productDeclaration.properties().get(index).name()
+                        : dataComponents.get(index).name();
+                final var declaredComponentType = dataComponents == null
+                        ? productDeclaration.properties().get(index).type()
+                        : dataComponents.get(index).type();
+                final var erasedComponentType = TypeSubstitution.erase(declaredComponentType);
                 final var sourceComponentType = TypeSubstitution.substitute(
-                        component.type(), substitutions);
+                        declaredComponentType, substitutions);
                 final var sourceRepresentation = StoredExistentialSupport.runtimeRepresentation(
                         sourceComponentType);
                 final var componentType = argument.resolvedType();
                 final var output = emitMatchTemporary(context, "productComponent", componentType);
                 loadPipelineValue(context, composer, matchedValue, matchType);
-                composer.invokevirtual(targetClass, Stmt.propertyGetterName(component.name().lexeme()),
+                composer.invokevirtual(targetClass, Stmt.propertyGetterName(componentName.lexeme()),
                         MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedComponentType)));
                 emitConversion(context, composer, erasedComponentType, componentType,
                         sourceRepresentation, sourceComponentType);

@@ -16,11 +16,10 @@ fn sameReference(left: Any?, right: Any?): Boolean = left === right;
 /// `Hashable` can be keys. Identity is meaningful for reference values; boxed primitives are
 /// distinct objects unless the same instance is reused.
 public class IdentityHashMap<K, V: mut>
-    is Iterable<Pair<K, V>>,
+    is Map<K, V>,
        Sized<Pair<K, V>>,
        KeyedSink<K, V>,
-       Clearable,
-       Map<K, V> {
+       Clearable {
     table: &HashTable<K, V>;
 
     private constructor new;

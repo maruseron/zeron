@@ -137,7 +137,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Implemented | Candidate | 0.8.0 |
 | [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Implemented | Candidate | 0.8.0 |
 | [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Implemented | Candidate | 0.8.0 |
-| [ZEP-0127](./ZEP-0127.md) | Data Class Component Access and Positional Destructuring | Accepted | Candidate | 0.8.0 |
+| [ZEP-0127](./ZEP-0127.md) | Data Class Component Access and Positional Destructuring | Implemented | Candidate | 0.8.0 |
 | [ZEP-0128](./ZEP-0128.md) | Sum-Type Parameter Bounds and Case-Local Type Parameters | Accepted | Candidate | 0.8.0 |
 | [ZEP-0129](./ZEP-0129.md) | Unary Products versus Arbitrary-Valued Newtypes | Accepted | Candidate | 0.8.0 |
 | [ZEP-0130](./ZEP-0130.md) | Standard-Library-Owned Intrinsic Declarations | Accepted | Candidate | 0.8.0 |
@@ -253,7 +253,7 @@ implemented, and added as a candidate for the same bundle.
 
 The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
 ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135 is now `Implemented` / `Candidate`,
-and the others are `Accepted` / `Candidate`. ZEP-0070
+and ZEP-0127 is implemented, while the others are `Accepted` / `Candidate`. ZEP-0070
 was promoted from the backlog. ZEP-0134 was added directly as a `Draft` / `Candidate` for `0.8.0`;
 its acceptance review is still pending. All count in the bundle above.
 

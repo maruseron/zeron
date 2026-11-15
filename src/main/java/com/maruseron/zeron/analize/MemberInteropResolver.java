@@ -3038,6 +3038,9 @@ final class MemberInteropResolver {
 
     static TypeDescriptor resolveArgument(final ResolutionContext context, final Expr argument,
                                           final TypeDescriptor expectedType) {
+        if (expectedType instanceof ReferenceDescriptor) {
+            MutationTracking.markRoot(context, argument);
+        }
         final var resolvedType = resolveArgumentValue(context, argument, expectedType);
         ensureNullableTypeParameterArgumentHandled(context, argument, resolvedType, expectedType);
         return resolvedType;
@@ -3164,7 +3167,14 @@ final class MemberInteropResolver {
                 && (variable.resolvedFunctionName() != null
                 || !context.symbols.containsSymbol(variable.name)
                 && resolveFunctionName(context, variable.name.lexeme(), variable.name) != null)) {
-            return LambdaResolver.resolveFunctionReference(context, variable, expectedType);
+            final var resolved = LambdaResolver.resolveFunctionReference(context, variable, expectedType);
+            final var functionName = variable.resolvedFunctionName();
+            if (functionName != null) {
+                final var declaration = context.functions.get(functionName);
+                context.recordReference(variable.name, declaration == null
+                        ? context.functionSymbolTokens.get(functionName) : declaration.name(), resolved);
+            }
+            return resolved;
         }
         if (argument instanceof Expr.Lambda lambda) {
             final var functionType = LambdaResolver.functionType(context, expectedType);

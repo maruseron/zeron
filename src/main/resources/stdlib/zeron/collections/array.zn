@@ -6,6 +6,9 @@ import zeron.lang.Eq;
 
 /// Folding and streaming over intrinsic arrays.
 public extension<T: nullable + mut> Array<T> {
+    /// Creates a copy of this array with `element` added at the end.
+    ///
+    /// Arrays are fixed-length, so this method is always O(n) in both time and memory complexity.
     public fn append(element: T): Array<T> = 
         generateArray(
             this.length + 1, 

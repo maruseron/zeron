@@ -15,8 +15,10 @@ import org.junit.Test;
 
 import java.lang.reflect.Modifier;
 import java.net.URLClassLoader;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -208,6 +210,39 @@ public final class ClassContractTest {
                 """));
         assertTrue(conflicting.errors().stream().anyMatch(diagnostic -> diagnostic.message().contains(
                 "cannot implement a contract already implemented nominally")));
+    }
+
+    @Test
+    public void namedConstructorsSatisfyStaticRequirementsForReadonlyAndMutableSelf() throws Exception {
+        final var source = """
+                contract Factory<T> {
+                    static createReadonly(value: Int): T;
+                    static createMutable(value: Int): &T;
+                }
+                class Box is Factory<Box> {
+                    public property value: Int;
+                    public constructor new;
+                    public constructor createReadonly(value: Int) = Box.new(value);
+                    public constructor createMutable(value: Int) = Box.new(value);
+                }
+                fn makeReadonly<T: Factory<T>>(value: Int): T = T.createReadonly(value);
+                fn makeMutable<T: Factory<T>>(value: Int): &T = T.createMutable(value);
+                fn run(): Int = makeReadonly<Box>(40).value + makeMutable<Box>(2).value;
+                """;
+        final var program = new CompilationService(parse(source), "ConstructorStaticFactory");
+
+        try {
+            deleteTree(Path.of("dist"));
+            program.resolve();
+            program.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass("ConstructorStaticFactory")
+                        .getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
     }
 
     @Test
@@ -2055,5 +2090,14 @@ public final class ClassContractTest {
                 .map(Instruction.class::cast)
                 .map(Instruction::opcode)
                 .toList();
+    }
+
+    private static void deleteTree(final Path root) throws IOException {
+        if (!Files.exists(root)) return;
+        try (final var paths = Files.walk(root)) {
+            for (final var path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
     }
 }

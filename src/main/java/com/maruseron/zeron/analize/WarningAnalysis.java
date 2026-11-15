@@ -9,7 +9,9 @@ import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.diagnostic.DiagnosticCatalog;
 import com.maruseron.zeron.domain.ReferenceDescriptor;
 import com.maruseron.zeron.domain.FunctionDescriptor;
+import com.maruseron.zeron.domain.NullableDescriptor;
 import com.maruseron.zeron.domain.TypeDescriptor;
+import com.maruseron.zeron.domain.TypeFormatter;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
 
@@ -35,11 +37,50 @@ final class WarningAnalysis {
                     reportUnusedVariable(usedDeclarations, variable);
                 } else if (declaration instanceof Stmt.Function function) {
                     reportUnusedFunction(usedDeclarations, function);
-                    reportProjection(context, function.parameters(), function.typeDescriptor());
+                    reportProjection(context, function.parameters(), function.typeDescriptor(), false);
+                    reportNullableReturn(function.name(), function.typeDescriptor(), false,
+                            function.isPublic(), "Function");
                     analyzeBody(context, function.body(), usedDeclarations);
+                } else if (declaration instanceof Stmt.ClassDecl type) {
+                    analyzeClass(context, type);
                 }
             }
         }
+    }
+
+    private static void analyzeClass(final ResolutionContext context,
+                                     final Stmt.ClassDecl declaration) {
+        final var contractMethods = contractMethodNames(context, declaration);
+        for (final var method : declaration.methods()) {
+            final var contractMethod = contractMethods.contains(method.name().lexeme());
+            reportProjection(context, method.parameters(), method.typeDescriptor(), contractMethod);
+            reportNullableReturn(method.name(), method.typeDescriptor(), contractMethod,
+                    declaration.isPublic() && method.isPublic(), "Method");
+        }
+        for (final var implementation : declaration.higherKindedImplementations()) {
+            for (final var method : implementation.methods()) {
+                reportProjection(context, method.methodSignature().parameters(),
+                        method.methodSignature().typeDescriptor(), true);
+                reportNullableReturn(method.requirementName(),
+                        method.methodSignature().typeDescriptor(), true, false, "Method");
+            }
+        }
+    }
+
+    private static Set<String> contractMethodNames(final ResolutionContext context,
+                                                   final Stmt.ClassDecl declaration) {
+        final var names = new HashSet<String>();
+        for (final var applied : ContractComposition.forClass(context, declaration)) {
+            for (final var method : applied.declaration().methods()) {
+                names.add(method.name().lexeme());
+            }
+        }
+        for (final var implementation : declaration.higherKindedImplementations()) {
+            for (final var method : implementation.methods()) {
+                names.add(method.requirementName().lexeme());
+            }
+        }
+        return names;
     }
 
     private static boolean isBundledStandardLibrary(final CompilationUnit unit) {
@@ -92,7 +133,9 @@ final class WarningAnalysis {
 
     private static void reportProjection(final ResolutionContext context,
                                          final List<Token> parameters,
-                                         final TypeDescriptor descriptor) {
+                                         final TypeDescriptor descriptor,
+                                         final boolean contractMethod) {
+        if (contractMethod) return;
         final var parameterTypes = descriptor instanceof FunctionDescriptor function
                 ? function.parameters() : List.<TypeDescriptor>of();
         for (var index = 0; index < Math.min(parameters.size(), parameterTypes.size()); index++) {
@@ -110,6 +153,18 @@ final class WarningAnalysis {
                     "Parameter '" + parameter.lexeme()
                             + "' is never used mutably; narrow its mutable reference to a read-only value.");
         }
+    }
+
+    private static void reportNullableReturn(final Token name, final TypeDescriptor descriptor,
+                                             final boolean contractMethod, final boolean publicApi,
+                                             final String kind) {
+        if (contractMethod || !publicApi || !(descriptor instanceof FunctionDescriptor function)
+                || !(function.returnType() instanceof NullableDescriptor nullable)
+                || isSynthetic(name) || name.lexeme().startsWith("_")) return;
+        Zeron.warning(name, DiagnosticCatalog.NULLABLE_RETURN_TYPE,
+                kind + " '" + name.lexeme() + "' returns a nullable '"
+                        + TypeFormatter.format(nullable)
+                        + "'; consider returning Option<T> or Result<T, _> instead.");
     }
 
     private static void analyzeBody(final ResolutionContext context, final List<Stmt> body,

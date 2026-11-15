@@ -109,6 +109,15 @@ declaration order after the identity test. Refutable patterns, including those c
 literal, do not count as total class coverage. These rules keep destructuring distinct from an
 open-ended runtime type test.
 
+Data classes use their canonical components as their positional pattern surface. The pattern may
+appear at the match root or recursively in a nested position, and its arity is the canonical
+component count rather than the number of auxiliary or computed properties. A generic data-class
+pattern may write a complete applied type or omit the type arguments; omission adopts the
+scrutinee's application. Coverage follows the product rule: a type test plus total component
+patterns covers the data-class root, while a literal or other refutable component makes the case
+refutable. Refutable applied cases with the same identity remain reachable after one another; only
+a total earlier case covers that identity.
+
 ## Opting classes into root matching
 
 **Accepted design; implementation pending.** A concrete class opts into direct root matching by

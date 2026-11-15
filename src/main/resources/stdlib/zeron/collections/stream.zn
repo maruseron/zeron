@@ -291,8 +291,12 @@ fn streamMonadAp<A: mut, B: mut>(values: Stream<A>, functions: Stream<(A) -> B>)
 ///
 /// The terminal operations `fold`, `count`, `any`, `all`, and `toList` consume the traversal they
 /// start, and `any`/`all` stop at the first decisive element.
-public class Stream<T: mut> is Iterable<T>, Functor<Stream<_>>, Applicative<Stream<_>>,
-        Monad<Stream<_>>, Foldable<Stream<_>> {
+public class Stream<T: mut> 
+    is Iterable<T>, 
+       Functor<Stream<_>>, 
+       Applicative<Stream<_>>,
+       Monad<Stream<_>>, 
+       Foldable<Stream<_>> {
     source: Iterable<T>;
 
     private constructor new;

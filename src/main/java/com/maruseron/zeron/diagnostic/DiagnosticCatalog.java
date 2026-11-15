@@ -134,6 +134,8 @@ public final class DiagnosticCatalog {
             warning("ZR3016", "'while (true)' can be written as 'loop'");
     public static final Entry SHADOWED_LOCAL =
             warning("ZR3017", "Local declaration shadows an outer declaration");
+    public static final Entry NULLABLE_RETURN_TYPE =
+            warning("ZR3018", "Nullable return type");
     public static final Entry PACKAGE_SOURCE_DIRECTORY_MISMATCH =
             entry("ZR4001", "Package does not match source directory");
 
@@ -195,6 +197,7 @@ public final class DiagnosticCatalog {
             UNNECESSARY_MUTABLE_PROJECTION,
             WHILE_TRUE_LOOP,
             SHADOWED_LOCAL,
+            NULLABLE_RETURN_TYPE,
             PACKAGE_SOURCE_DIRECTORY_MISMATCH);
 
     private static final Map<DiagnosticCode, Entry> ENTRIES_BY_CODE;

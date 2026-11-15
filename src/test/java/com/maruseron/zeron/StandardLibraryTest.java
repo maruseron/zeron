@@ -1320,6 +1320,48 @@ public final class StandardLibraryTest {
     }
 
     @Test
+    public void iteratesCollectionsThroughTransitiveIterableRequirements() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var className = "app.TransitiveIterable" + suffix;
+        final var source = """
+                package app;
+
+                import zeron.collections.ConsList;
+                import zeron.collections.LinkedList;
+
+                fn consTotal(): Int {
+                    let list = ConsList<Int>.of(1, 2, 3);
+                    let mut total = 0;
+                    for (let value in list) total += value;
+                    return total;
+                }
+
+                fn linkedTotal(): Int {
+                    let list = LinkedList<Int>.of(4, 5, 6);
+                    let mut total = 0;
+                    for (let value in list) total += value;
+                    return total;
+                }
+                """;
+        final var units = StandardLibrary.withBundledUnits(List.of(parse("transitive-iterable.zn", source)));
+
+        try {
+            final var compiler = CompilationService.forCompilationUnits(units, className, "app");
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL(),
+                            Zeron.bundledStandardLibraryJar().orElseThrow().toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(6, loader.loadClass(className).getMethod("consTotal").invoke(null));
+                assertEquals(15, loader.loadClass(className).getMethod("linkedTotal").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
     public void cliCompilesAliasedTypeImportAcrossPackages() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var appPackage = "app" + suffix;

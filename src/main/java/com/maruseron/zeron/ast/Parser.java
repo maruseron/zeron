@@ -42,7 +42,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.maruseron.zeron.scan.TokenType.*;
 
@@ -62,7 +61,6 @@ public final class Parser {
     private String currentNamespaceName;
     private String sourcePath;
     private final List<ImportDeclaration> imports = new ArrayList<>();
-    private static final AtomicInteger TYPE_PARAMETER_SCOPES = new AtomicInteger();
     private Map<String, TypeParameterDescriptor> activeTypeParameters = Map.of();
     /// Non-null only while parsing a declared parameter type. Each anonymous existential found
     /// there is lowered to a hidden type parameter appended to the declared signature.
@@ -605,7 +603,7 @@ public final class Parser {
 
     private Stmt typeDeclaration(final boolean isPublic) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect type name."));
-        final var typeParameters = typeParameterDeclaration(name, false);
+        final var typeParameters = typeParameterDeclaration(name, true);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
@@ -633,18 +631,39 @@ public final class Parser {
             do {
                 final var caseDocumentation = documentationBefore(peek());
                 final var caseName = consume(IDENTIFIER, "Expect sum case name.");
-                final var payloads = new ArrayList<Stmt.SumPayload>();
-                if (match(LEFT_PAREN)) {
-                    if (!check(RIGHT_PAREN)) {
-                        do {
-                            final var payloadName = consume(IDENTIFIER, "Expect sum payload name.");
-                            consume(COLON, "Expect ':' after sum payload name.");
-                            payloads.add(new Stmt.SumPayload(payloadName, collectType()));
-                        } while (match(COMMA));
+                var caseTypeParameters = Map.<String, TypeParameterDescriptor>of();
+                if (check(LESS)) {
+                    caseTypeParameters = typeParameterDeclaration(caseName, true, false, false);
+                    for (final var parameter : caseTypeParameters.values()) {
+                        if (!parameter.bounds().isEmpty()) {
+                            error(caseName, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
+                                    "Contract bounds are not supported on case-local type parameters.");
+                        }
+                        if (typeParameters.containsKey(parameter.name())) {
+                            error(caseName, DiagnosticCatalog.DUPLICATE_DECLARATION_COMPONENT,
+                                    "A case-local type parameter cannot shadow a sum type parameter.");
+                        }
                     }
-                    consume(RIGHT_PAREN, "Expect ')' after sum payloads.");
                 }
-                cases.add(new Stmt.SumCase(caseName, payloads));
+                final var caseScope = new LinkedHashMap<>(typeParameters);
+                caseScope.putAll(caseTypeParameters);
+                activeTypeParameters = caseScope;
+                final var payloads = new ArrayList<Stmt.SumPayload>();
+                try {
+                    if (match(LEFT_PAREN)) {
+                        if (!check(RIGHT_PAREN)) {
+                            do {
+                                final var payloadName = consume(IDENTIFIER, "Expect sum payload name.");
+                                consume(COLON, "Expect ':' after sum payload name.");
+                                payloads.add(new Stmt.SumPayload(payloadName, collectType()));
+                            } while (match(COMMA));
+                        }
+                        consume(RIGHT_PAREN, "Expect ')' after sum payloads.");
+                    }
+                } finally {
+                    activeTypeParameters = typeParameters;
+                }
+                cases.add(new Stmt.SumCase(caseName, List.copyOf(caseTypeParameters.values()), payloads));
                 if (caseDocumentation != null) documentation.put(caseName, caseDocumentation);
             } while (match(PIPE));
             consume(SEMICOLON, "Expect ';' after sum declaration.");
@@ -1391,7 +1410,7 @@ public final class Parser {
                                                                           final boolean rejectShadowing,
                                                                           final boolean allowCovariance) {
         if (!match(LESS)) return Map.of();
-        final var scopeId = TYPE_PARAMETER_SCOPES.incrementAndGet();
+        final var scopeId = TypeParameterDescriptor.nextScopeId();
         final var parameters = new LinkedHashMap<String, TypeParameterDescriptor>();
         do {
             var variance = TypeParameterDescriptor.Variance.INVARIANT;
@@ -1469,8 +1488,8 @@ public final class Parser {
                     } else {
                         if (!allowBounds) {
                             throw error(parameter, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                                    "Type-parameter bounds are supported only on generic classes, functions, "
-                                            + "methods, and witnesses.");
+                                    "Type-parameter bounds are supported only on generic classes, contracts, "
+                                            + "sum types, functions, methods, and witnesses.");
                         }
                         bounds.add(collectType());
                     }
@@ -2594,7 +2613,7 @@ public final class Parser {
                             "An opening binder cannot shadow another type parameter or repeat in one pattern.");
                 }
                 final var parameter = new TypeParameterDescriptor(
-                        TYPE_PARAMETER_SCOPES.incrementAndGet(), name.lexeme());
+                        TypeParameterDescriptor.nextScopeId(), name.lexeme());
                 parameter.markOpeningBinder();
                 pendingOpeningTypeParameters.add(parameter);
                 typeArgs.add(parameter);
@@ -2691,7 +2710,7 @@ public final class Parser {
             throw error(where, DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     "An anonymous existential requires a bound or marker.");
         }
-        final var id = TYPE_PARAMETER_SCOPES.incrementAndGet();
+        final var id = TypeParameterDescriptor.nextScopeId();
         final var parameter = new TypeParameterDescriptor(id,
                 TypeParameterDescriptor.ANONYMOUS_EXISTENTIAL_PREFIX + id, bounds,
                 false, TypeParameterDescriptor.Variance.INVARIANT,
@@ -2793,7 +2812,10 @@ public final class Parser {
         return stopQualifiedTypeAtNamedPattern
                 && current + 2 < tokens.size()
                 && tokens.get(current + 1).type() == IDENTIFIER
-                && tokens.get(current + 2).type() == LEFT_PAREN;
+                && (tokens.get(current + 2).type() == LEFT_PAREN
+                || tokens.get(current + 2).type() == LESS
+                && current + 3 < tokens.size()
+                && tokens.get(current + 3).type() == LET);
     }
 
     private Token withLexeme(final Token token, final String lexeme) {
@@ -3919,7 +3941,7 @@ public final class Parser {
         }
         return new Expr.MatchPattern(pattern.keyword(), pattern.type(), pattern.extractor(),
                 pattern.arguments(), pattern.binding(), alias, pattern.wildcard(), List.of(),
-                pattern.literal(), pattern.productPattern());
+                pattern.literal(), pattern.productPattern(), pattern.caseParameters());
     }
 
     private TypeDescriptor handlerEffectType(final Expr.MatchPattern pattern, final Token where) {
@@ -3959,14 +3981,27 @@ public final class Parser {
                 if (alias != null) {
                     pattern = new Expr.MatchPattern(pattern.keyword(), pattern.type(), pattern.extractor(),
                             pattern.arguments(), pattern.binding(), alias, false, List.of(),
-                            pattern.literal(), pattern.productPattern());
+                            pattern.literal(), pattern.productPattern(), pattern.caseParameters());
                 }
             }
-            Expr guard = null;
-            if (match(IF)) guard = expression();
-            consume(ARROW, "Expect '->' after match pattern.");
-            final var body = expression();
-            consume(SEMICOLON, "Expect ';' after match arm.");
+            final var enclosingTypeParameters = activeTypeParameters;
+            if (!pattern.caseParameters().isEmpty()) {
+                final var caseScope = new LinkedHashMap<>(enclosingTypeParameters);
+                for (final var parameter : pattern.caseParameters()) {
+                    caseScope.put(parameter.name(), parameter);
+                }
+                activeTypeParameters = caseScope;
+            }
+            final Expr guard;
+            final Expr body;
+            try {
+                guard = match(IF) ? expression() : null;
+                consume(ARROW, "Expect '->' after match pattern.");
+                body = expression();
+                consume(SEMICOLON, "Expect ';' after match arm.");
+            } finally {
+                activeTypeParameters = enclosingTypeParameters;
+            }
             arms.add(new Expr.MatchArm(caseKeyword, pattern, guard, body));
         }
         consume(RIGHT_BRACE, "Expect '}' after match cases.");
@@ -4047,8 +4082,11 @@ public final class Parser {
             return new Expr.MatchPattern(keyword, null, null, List.of(), binding, null, false, List.of());
         }
         if (root && allowBareSumCase && check(IDENTIFIER)
-                && tokens.get(current + 1).type() == LEFT_PAREN) {
+                && (tokens.get(current + 1).type() == LEFT_PAREN
+                || tokens.get(current + 1).type() == LESS
+                && tokens.get(current + 2).type() == LET)) {
             final var caseName = advance();
+            final var caseParameters = patternCaseParameters(caseName);
             final var arguments = new ArrayList<Expr.MatchPattern>();
             consume(LEFT_PAREN, "Expect '(' after sum case name.");
             if (!check(RIGHT_PAREN)) {
@@ -4058,7 +4096,7 @@ public final class Parser {
             }
             consume(RIGHT_PAREN, "Expect ')' after sum case arguments.");
             return new Expr.MatchPattern(keyword, null, caseName, arguments, null, null,
-                    false, List.of(), null, true);
+                    false, List.of(), null, true, caseParameters);
         }
 
         final var previousStop = stopQualifiedTypeAtNamedPattern;
@@ -4071,9 +4109,11 @@ public final class Parser {
         }
         Token extractor = null;
         final var arguments = new ArrayList<Expr.MatchPattern>();
+        var caseParameters = List.<TypeParameterDescriptor>of();
         boolean productPattern = false;
         if (match(DOT)) {
             extractor = consume(IDENTIFIER, "Expect named pattern after '.'.");
+            caseParameters = patternCaseParameters(extractor);
             consume(LEFT_PAREN, "Expect '(' after named pattern.");
             if (!check(RIGHT_PAREN)) {
                 do {
@@ -4094,7 +4134,30 @@ public final class Parser {
                 ? consume(IDENTIFIER, "Expect binding name after 'as'.")
                 : null;
         return new Expr.MatchPattern(keyword, type, extractor, arguments, null, alias,
-                false, List.of(), null, productPattern);
+                false, List.of(), null, productPattern, caseParameters);
+    }
+
+    private List<TypeParameterDescriptor> patternCaseParameters(final Token caseName) {
+        if (!match(LESS)) return List.of();
+        final var parameters = new ArrayList<TypeParameterDescriptor>();
+        do {
+            if (!match(LET)) {
+                throw error(peek(), DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        "A case-local pattern argument must be an opening binder written 'let Name'.");
+            }
+            final var name = consume(IDENTIFIER, "Expect a type name after 'let' in a case pattern.");
+            if (activeTypeParameters.containsKey(name.lexeme())
+                    || parameters.stream().anyMatch(parameter -> parameter.name().equals(name.lexeme()))) {
+                throw error(name, DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
+                        "A case-local opening binder cannot shadow another type parameter or repeat in one pattern.");
+            }
+            final var parameter = new TypeParameterDescriptor(
+                    TypeParameterDescriptor.nextScopeId(), name.lexeme());
+            parameter.markOpeningBinder();
+            parameters.add(parameter);
+        } while (match(COMMA));
+        consume(GREATER, "Expect '>' after case-local opening binders.");
+        return List.copyOf(parameters);
     }
 
     private Expr.MatchPattern literalPattern(final Token keyword, final Object value,

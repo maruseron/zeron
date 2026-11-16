@@ -180,7 +180,9 @@ final class DeclarationRegistry {
                     .map(payload -> new Stmt.Field(payload.name(), payload.type()))
                     .toList();
             final var contractUse = new Stmt.ContractUse(sum.name(), typeArguments);
-            final var caseClass = new Stmt.ClassDecl(caseClassToken, sum.typeParameters(), List.of(contractUse),
+            final var caseTypeParameters = new ArrayList<TypeParameterDescriptor>(sum.typeParameters());
+            caseTypeParameters.addAll(sumCase.typeParameters());
+            final var caseClass = new Stmt.ClassDecl(caseClassToken, caseTypeParameters, List.of(contractUse),
                     fields, List.of(), new Stmt.Constructor(new Token(TokenType.IDENTIFIER, "new", null,
                             sumCase.name().span()), true), List.of(), List.of(), List.of(), sum.isPublic(), false);
             registerType(caseClassToken);

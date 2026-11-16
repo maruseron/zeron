@@ -555,6 +555,117 @@ public final class SumTypeTest {
         assertEquals("Unknown type 'Missing'.", error.getMessage());
     }
 
+    @Test
+    public void roundTripsCaseLocalParametersAndBoundsThroughLibraryMetadata() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "caselib" + suffix;
+        final var appPackage = "caseapp" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-case-library-");
+        final var appOutput = Files.createTempDirectory(Path.of("target"), "zeron-case-client-");
+        final var libraryUnit = parse("Library.zn", """
+                package %s;
+                import zeron.lang.Comparable;
+                public type IO<A: mut> = Pure(value: A) | Bind<B: mut>(source: IO<A>, transform: (A) -> IO<B>);
+                public type Sorted<A: Comparable<A>> = Empty | Cons(head: A, tail: Sorted<A>);
+                """.formatted(libraryPackage));
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
+                    libraryPackage + ".Library", libraryPackage, List.of(), true, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+            final var io = (ZeronLibraryIndex.SumExport) index.declarations().stream()
+                    .filter(declaration -> declaration instanceof ZeronLibraryIndex.SumExport sum
+                            && sum.qualifiedName().equals(libraryPackage + ".IO"))
+                    .findFirst().orElseThrow();
+            final var bind = io.cases().stream()
+                    .filter(sumCase -> sumCase.name().equals("Bind")).findFirst().orElseThrow();
+            assertEquals(1, bind.typeParameters().size());
+            assertEquals("B", bind.typeParameters().getFirst().name());
+            assertTrue(bind.typeParameters().getFirst().admitsMutableArguments());
+            final var sorted = (ZeronLibraryIndex.SumExport) index.declarations().stream()
+                    .filter(declaration -> declaration instanceof ZeronLibraryIndex.SumExport sum
+                            && sum.qualifiedName().equals(libraryPackage + ".Sorted"))
+                    .findFirst().orElseThrow();
+            assertFalse(sorted.typeParameters().getFirst().bounds().isEmpty());
+
+            final var appUnit = parse("Main.zn", """
+                    package %s;
+                    import %s.IO;
+                    import %s.Sorted;
+                    fn inc(x: Int): IO<Int> = IO.Pure(x + 1);
+                    fn make(): IO<Int> = Bind<Int>(IO.Pure(1), inc);
+                    fn read(io: IO<Int>): Int = match (io) {
+                        case IO.Pure(value) -> value;
+                        case Bind<let B>(source, transform) -> 1;
+                    };
+                    fn result(): Int = read(make());
+                    fn sorted(): Sorted<Int> = Sorted.Cons(1, Sorted.Empty());
+                    """.formatted(appPackage, libraryPackage, libraryPackage));
+            final var appCompiler = CompilationService.forCompilationUnits(List.of(appUnit),
+                    appPackage + ".Main", appPackage, List.of(index), true, List.of(), appOutput);
+            appCompiler.resolve();
+            appCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    appOutput.toUri().toURL(), libraryOutput.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(1, loader.loadClass(appPackage + ".Main").getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(appOutput);
+            deleteTree(libraryOutput);
+        }
+    }
+
+    @Test
+    public void supportsBoundedSumParametersAndCaseLocalParameters() throws Exception {
+        final var programName = "BoundedSum" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                import zeron.lang.Comparable;
+                type Sorted<A: Comparable<A>> = Empty | Cons(head: A, tail: Sorted<A>);
+                type Tagged<A> = Value(value: A) | Tag<B>(value: B);
+                type IO<A> = Pure(value: A) | Bind<B>(source: IO<A>, transform: (A) -> IO<B>);
+                fn sorted(): Sorted<Int> = Sorted.Cons(1, Sorted.Empty());
+                fn bound<A: Comparable<A>>(value: A): Sorted<A> = Sorted.Cons(value, Sorted.Empty());
+                fn tagged(): Tagged<Int> = Tag<Int>(42);
+                fn read(tagged: Tagged<Int>): Int = match (tagged) {
+                    case Tagged.Value(value) -> value;
+                    case Tagged.Tag<let B>(value) -> 1;
+                };
+                fn result(): Int = read(tagged());
+                fn inc(x: Int): IO<Int> = IO.Pure(x + 1);
+                fn bind(): IO<Int> {
+                    let source: IO<Int> = IO.Pure(1);
+                    return IO.Bind<Int>(source, inc);
+                }
+                fn readIO(io: IO<Int>): Int = match (io) {
+                    case IO.Pure(value) -> value;
+                    case IO.Bind<let B>(source, transform) -> 1;
+                };
+                fn ioResult(): Int = readIO(bind());
+                """;
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(1, loader.loadClass(programName).getMethod("result").invoke(null));
+                assertEquals(1, loader.loadClass(programName).getMethod("ioResult").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "Sorted.class"));
+            Files.deleteIfExists(Path.of("dist", "Sorted$$sum$Empty.class"));
+            Files.deleteIfExists(Path.of("dist", "Sorted$$sum$Cons.class"));
+            Files.deleteIfExists(Path.of("dist", "Tagged.class"));
+            Files.deleteIfExists(Path.of("dist", "Tagged$$sum$Value.class"));
+            Files.deleteIfExists(Path.of("dist", "Tagged$$sum$Tag.class"));
+            Files.deleteIfExists(Path.of("dist", "IO.class"));
+            Files.deleteIfExists(Path.of("dist", "IO$$sum$Pure.class"));
+            Files.deleteIfExists(Path.of("dist", "IO$$sum$Bind.class"));
+        }
+    }
+
     private static List<Stmt> parse(final String source) {
         return Parser.of(Scanner.from(source).scanTokens()).parse();
     }

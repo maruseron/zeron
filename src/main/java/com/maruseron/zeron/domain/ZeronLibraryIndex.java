@@ -245,6 +245,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     final var sumName = token(sum.qualifiedName());
                     final var cases = sum.cases().stream()
                             .map(sumCase -> new Stmt.SumCase(token(sumCase.name()),
+                                    sumCase.typeParameters(),
                                     sumCase.payloads().stream()
                                             .map(payload -> new Stmt.SumPayload(
                                                     token(payload.name()), payload.type()))
@@ -801,10 +802,16 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
     }
 
-    public record SumCaseExport(String name, List<SumPayloadExport> payloads) {
+    public record SumCaseExport(String name, List<TypeParameterDescriptor> typeParameters,
+                                List<SumPayloadExport> payloads) {
         public SumCaseExport {
             Objects.requireNonNull(name);
+            typeParameters = List.copyOf(typeParameters);
             payloads = List.copyOf(payloads);
+        }
+
+        public SumCaseExport(final String name, final List<SumPayloadExport> payloads) {
+            this(name, List.of(), payloads);
         }
     }
 
@@ -1293,6 +1300,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 sum.typeParameters(),
                                 sum.cases().stream()
                                         .map(sumCase -> new SumCaseExport(sumCase.name().lexeme(),
+                                                sumCase.typeParameters(),
                                                 sumCase.payloads().stream()
                                                         .map(payload -> new SumPayloadExport(
                                                                 payload.name().lexeme(), payload.type()))
@@ -1785,6 +1793,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeInt(sum.cases().size());
                 for (final var sumCase : sum.cases()) {
                     output.writeUTF(sumCase.name());
+                    writeTypeParameters(output, sumCase.typeParameters(), context);
                     output.writeInt(sumCase.payloads().size());
                     for (final var payload : sumCase.payloads()) {
                         output.writeUTF(payload.name());
@@ -2095,11 +2104,14 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var cases = new ArrayList<SumCaseExport>();
                 for (int i = 0, count = readCount(input); i < count; i++) {
                     final var caseName = input.readUTF();
+                    final var caseTypeParameters = READ_VERSION.get() >= 16
+                            ? readTypeParameters(input, context)
+                            : List.<TypeParameterDescriptor>of();
                     final var payloads = new ArrayList<SumPayloadExport>();
                     for (int j = 0, payloadCount = readCount(input); j < payloadCount; j++) {
                         payloads.add(new SumPayloadExport(input.readUTF(), readType(input, context)));
                     }
-                    cases.add(new SumCaseExport(caseName, payloads));
+                    cases.add(new SumCaseExport(caseName, caseTypeParameters, payloads));
                 }
                 yield new SumExport(name, typeParameters, cases);
             }

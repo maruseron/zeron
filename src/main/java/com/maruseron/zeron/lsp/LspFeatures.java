@@ -525,7 +525,10 @@ final class LspFeatures {
                 final var parameters = sumCase.payloads().stream()
                         .map(payload -> payload.name().lexeme() + ": " + TypeFormatter.format(payload.type()))
                         .collect(java.util.stream.Collectors.joining(", ", "(", ")"));
-                return constructorCompletion(sumCase.name().lexeme() + parameters,
+                final var caseParameters = sumCase.typeParameters().isEmpty() ? ""
+                        : sumCase.typeParameters().stream().map(TypeParameterDescriptor::name)
+                                .collect(java.util.stream.Collectors.joining(", ", "<", ">"));
+                return constructorCompletion(sumCase.name().lexeme() + caseParameters + parameters,
                         TypeFormatter.format(new ReferenceDescriptor(resultType)));
             }).toList();
         }
@@ -2295,10 +2298,13 @@ final class LspFeatures {
                                 : TypeDescriptor.genericOf(TypeDescriptor.ofName(value.name().lexeme()),
                                         value.typeParameters().stream()
                                                 .map(parameter -> (TypeDescriptor) parameter).toList());
+                        final var constructorTypeParameters =
+                                new ArrayList<TypeParameterDescriptor>(value.typeParameters());
+                        constructorTypeParameters.addAll(sumCase.typeParameters());
                         final var constructorType = TypeDescriptor.genericFunctionOf(
                                 sumCase.name().lexeme(), resultType,
                                 sumCase.payloads().stream().map(Stmt.SumPayload::type).toList(),
-                                value.typeParameters());
+                                constructorTypeParameters);
                         addConstructor(sumCase.name(), constructorType, unit.packageName(),
                                 value.name().lexeme(), path, value.isPublic());
                     }
@@ -3143,6 +3149,7 @@ final class LspFeatures {
             final var prefix = "type " + simpleTypeName(declaration.name().lexeme())
                     + formatTypeParameters(declaration.typeParameters()) + " = ";
             final var cases = declaration.cases().stream().map(sumCase -> sumCase.name().lexeme()
+                    + formatTypeParameters(sumCase.typeParameters())
                     + (sumCase.payloads().isEmpty() ? "" : sumCase.payloads().stream()
                             .map(payload -> TypeFormatter.format(payload.type()))
                             .collect(java.util.stream.Collectors.joining(", ", "(", ")"))))

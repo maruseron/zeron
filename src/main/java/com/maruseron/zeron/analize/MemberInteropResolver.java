@@ -443,8 +443,8 @@ final class MemberInteropResolver {
         return resolved;
     }
 
-    private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
-                                                     final TypeDescriptor expectedType) {
+    static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
+                                            final TypeDescriptor expectedType) {
         if (call.safeNavigation()) {
             final var receiverType = ExpressionFlowResolver.resolveExpression(context, call.receiver);
             final var safeFlows = beginSafeNavigation(context, call.receiver, call.name, receiverType);
@@ -676,14 +676,23 @@ final class MemberInteropResolver {
             }
             final var caseName = sumDeclaration.generatedCaseName(sumCase);
             final var caseClass = context.classes.get(caseName);
-            final var caseExpectedType = expectedCaseType(sumDeclaration, expectedType, caseName);
+            final var caseExpectedType = expectedCaseType(sumDeclaration, expectedType, caseName,
+                    sumCase.typeParameters().size());
+            final var explicitCaseOnlyArguments = call.explicitOwnerTypeArguments().isEmpty()
+                    && !call.explicitTypeArguments.isEmpty();
+            final var explicitArgumentOffset = explicitCaseOnlyArguments
+                    && !sumCase.typeParameters().isEmpty()
+                    ? sumDeclaration.typeParameters().size() : 0;
             final var result = resolveClassFactoryCall(context, call, caseClass, caseName,
-                    new ClassFactory(null, true), caseExpectedType, null);
+                    new ClassFactory(null, true), caseExpectedType, null, explicitArgumentOffset);
             call.setSumCaseFactory(true);
             final var caseType = result instanceof ReferenceDescriptor reference
                     ? reference.baseType() : result;
-            final var arguments = caseType instanceof GenericDescriptor generic
+            final var caseArguments = caseType instanceof GenericDescriptor generic
                     ? generic.typeParameters() : List.<TypeDescriptor>of();
+            final var sumArity = sumDeclaration.typeParameters().size();
+            final var arguments = caseArguments.size() >= sumArity
+                    ? caseArguments.subList(0, sumArity) : caseArguments;
             final TypeDescriptor sumType = arguments.isEmpty()
                     ? TypeDescriptor.ofName(sumDeclaration.name().lexeme())
                     : TypeDescriptor.genericOf(TypeDescriptor.ofName(sumDeclaration.name().lexeme()), arguments);
@@ -705,7 +714,7 @@ final class MemberInteropResolver {
                         call.name, "Ambiguous name: both a class constructor and namespace function are declared."));
             }
             return resolveClassFactoryCall(context, call, classDeclaration, classOwnerName,
-                    classFactory, expectedType, null);
+                    classFactory, expectedType, null, 0);
         }
         if (!call.safeNavigation()) {
             if (namespaceFunction != null && !(namespaceFunction instanceof Stmt.ExtensionMethod)) {
@@ -1591,7 +1600,8 @@ final class MemberInteropResolver {
                                                            final String className,
                                                            final ClassFactory factory,
                                                            final TypeDescriptor expectedType,
-                                                           final List<TypeDescriptor> priorArgumentTypes) {
+                                                           final List<TypeDescriptor> priorArgumentTypes,
+                                                           final int explicitArgumentOffset) {
         if (factory.canonical() && className.equals(EffectSubtyping.TOP_EFFECT)) {
             Zeron.resolutionError(new ResolutionError(
                     DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, call.name,
@@ -1605,11 +1615,13 @@ final class MemberInteropResolver {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
                     call.name, "Zeron constructors do not declare method type parameters."));
         }
+        final var effectiveExplicitOffset = explicitClassTypeArguments.isEmpty()
+                ? 0 : explicitArgumentOffset;
         if (!explicitClassTypeArguments.isEmpty()
-                && typeParameters.size() != explicitClassTypeArguments.size()) {
+                && typeParameters.size() != explicitClassTypeArguments.size() + effectiveExplicitOffset) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
-                    call.name, "Expected " + typeParameters.size() + " class type arguments, found "
-                            + explicitClassTypeArguments.size() + "."));
+                    call.name, "Expected " + (typeParameters.size() - effectiveExplicitOffset)
+                            + " class type arguments, found " + explicitClassTypeArguments.size() + "."));
         }
         for (final var explicitType : explicitClassTypeArguments) {
             TypeResolver.validateType(context, explicitType, call.name);
@@ -1646,7 +1658,8 @@ final class MemberInteropResolver {
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         final var rowInference = new RowInference(context.typeCompatibility.effectSubtyping());
         for (int i = 0; i < explicitClassTypeArguments.size(); i++) {
-            substitutions.put(typeParameters.get(i), explicitClassTypeArguments.get(i));
+            substitutions.put(typeParameters.get(i + effectiveExplicitOffset),
+                    explicitClassTypeArguments.get(i));
         }
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
         for (int i = 0; i < call.arguments.size(); i++) {
@@ -1661,7 +1674,7 @@ final class MemberInteropResolver {
             }
         }
 
-        if (explicitClassTypeArguments.isEmpty()) {
+        if (explicitClassTypeArguments.isEmpty() || effectiveExplicitOffset > 0) {
             inferClassArgumentsFromExpectedType(declaration, substitutions, expectedType, call.name, context.typeCompatibility);
         }
 
@@ -1749,15 +1762,18 @@ final class MemberInteropResolver {
 
     private static TypeDescriptor expectedCaseType(final Stmt.SumDecl sum,
                                                    final TypeDescriptor expectedType,
-                                                   final String caseName) {
+                                                   final String caseName,
+                                                   final int caseParameterCount) {
         final var expected = expectedType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : expectedType;
         if (expected == null || !expected.name().equals(sum.name().lexeme())) return expectedType;
         final var arguments = expected instanceof GenericDescriptor generic
                 ? generic.typeParameters() : List.<TypeDescriptor>of();
-        final TypeDescriptor caseType = arguments.isEmpty()
+        final var caseArguments = new ArrayList<TypeDescriptor>(arguments);
+        for (int i = 0; i < caseParameterCount; i++) caseArguments.add(TypeDescriptor.ofInfer());
+        final TypeDescriptor caseType = caseArguments.isEmpty()
                 ? TypeDescriptor.ofName(caseName)
-                : TypeDescriptor.genericOf(TypeDescriptor.ofName(caseName), arguments);
+                : TypeDescriptor.genericOf(TypeDescriptor.ofName(caseName), caseArguments);
         return new ReferenceDescriptor(caseType);
     }
 
@@ -1864,6 +1880,7 @@ final class MemberInteropResolver {
                 final var expectedArgument = expectedGeneric.typeParameters().get(index);
                 if (expectedArgument instanceof TypeParameterDescriptor parameter
                         && parameter.isStoredExistential()) continue;
+                if (expectedArgument instanceof InferDescriptor) continue;
                 TypeUnifier.unify(patternGeneric.typeParameters().get(index), expectedArgument,
                         substitutions, where, projector);
             }
@@ -3143,6 +3160,9 @@ final class MemberInteropResolver {
         }
         if (argument instanceof Expr.MemberCall call) {
             return resolveMemberCall(context, call, expectedType);
+        }
+        if (argument instanceof Expr.Call call) {
+            return ExpressionFlowResolver.resolveCallWithExpected(context, call, expectedType);
         }
         if (argument instanceof Expr.ArrayLiteral literal) {
             var expectedArrayType = expectedType instanceof ReferenceDescriptor reference

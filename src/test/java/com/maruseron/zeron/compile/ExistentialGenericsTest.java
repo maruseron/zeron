@@ -672,7 +672,7 @@ public final class ExistentialGenericsTest {
             final var binder = (com.maruseron.zeron.domain.TypeParameterDescriptor) argument;
             assertTrue(binder.isStoredExistential());
             assertTrue(binder.isReified());
-            assertEquals(ZeronLibraryIndex.VERSION, 15);
+            assertEquals(ZeronLibraryIndex.VERSION, 16);
         } finally {
             deleteTree(output);
         }

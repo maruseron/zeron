@@ -143,7 +143,9 @@ newtypeDecl = 'newtype', IDENTIFIER, [ typeParameters ], [ derivingClause ], "="
 (* [CHANGED] ZEP-0070: newtypes may bind type parameters and accept any statically known source
    type after `=`. Guarded newtypes still require an immutable Int, Float, Boolean or String
    representation. `deriving` on a newtype is valid grammar and resolves through the carrier. *)
-sumCase = IDENTIFIER, [ "(", [ sumPayload, { ",", sumPayload } ], ")" ] ;
+(* [CHANGED] ZEP-0128: a case may declare its own type parameters. Marker bounds are accepted;
+   contract bounds on these case-local parameters are rejected by the parser. *)
+sumCase = IDENTIFIER, [ typeParameters ], [ "(", [ sumPayload, { ",", sumPayload } ], ")" ] ;
 sumPayload = IDENTIFIER, ":", type ;
 declaration = varDecl | funDecl | handlerDecl | statement ;
 varDecl = "let", [ "mut" ], IDENTIFIER, [ ":", type ], [ "=", expression ], ";" ;
@@ -683,10 +685,12 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    are no catch-all cases or effect subtyping in this slice.
    `Result` remains an ordinary value type.
    - Sum declarations introduce closed nominal types. Cases are constructed and matched through
-   qualified calls/patterns; payload positions are positional, and generic case patterns inherit
-   type arguments from the scrutinee unless arguments are explicitly supplied. Nullary cases are
-   singletons. Public compiled-library metadata preserves the sum declaration and ordered payloads.
-   Type argument arity is checked by resolution.
+   qualified calls/patterns or context-resolved unqualified names (ZEP-0128); payload positions are
+   positional, and generic case patterns inherit type arguments from the scrutinee unless opening
+   binders are supplied. A case may declare its own marker-bounded type parameters, which are
+   existential in the sum type. Nullary cases are singletons. Public compiled-library metadata
+   preserves the sum declaration, bounds, case-local parameters, and ordered payloads. Type argument
+   arity is checked by resolution.
    Parser productions describe syntax; declaration, type-argument, and return-flow constraints are
    enforced by resolution. *)
 

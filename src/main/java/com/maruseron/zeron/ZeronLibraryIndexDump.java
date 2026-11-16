@@ -241,7 +241,7 @@ public final class ZeronLibraryIndexDump {
                                 .map(payload -> payload.name() + ": " + formatType(payload.type()))
                                 .collect(Collectors.joining(", "));
                         System.out.println("  " + (caseIndex == 0 ? "" : "| ")
-                                + sumCase.name()
+                                + sumCase.name() + formatTypeParameters(sumCase.typeParameters())
                                 + (sumCase.payloads().isEmpty() ? "" : "(" + payloads + ")"));
                     }
                 }

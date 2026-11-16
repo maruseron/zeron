@@ -227,7 +227,7 @@ final class DeclarationResolver {
                         permitted.name(),
                         "A public sealed contract can only permit public classes."));
             }
-            if (implementation.typeParameters().size() != contract.typeParameters().size()
+            if (implementation.typeParameters().size() < contract.typeParameters().size()
                     || permitted.typeArguments().size() != contract.typeParameters().size()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         permitted.name(),
@@ -244,12 +244,13 @@ final class DeclarationResolver {
                     .filter(use -> use.name().lexeme().equals(contract.name().lexeme()))
                     .findFirst()
                     .orElse(null);
-            if (conformance == null || conformance.typeArguments().size() != implementation.typeParameters().size()) {
+            if (conformance == null
+                    || conformance.typeArguments().size() != contract.typeParameters().size()) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                         permitted.name(),
                         "A permitted class must directly conform to the sealed contract."));
             }
-            for (int i = 0; i < implementation.typeParameters().size(); i++) {
+            for (int i = 0; i < conformance.typeArguments().size(); i++) {
                 if (!conformance.typeArguments().get(i).equals(implementation.typeParameters().get(i))) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
                             permitted.name(),

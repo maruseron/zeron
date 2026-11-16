@@ -262,9 +262,15 @@ public sealed interface Stmt {
         }
     }
 
-    record SumCase(Token name, List<SumPayload> payloads) {
+    record SumCase(Token name, List<TypeParameterDescriptor> typeParameters,
+                   List<SumPayload> payloads) {
         public SumCase {
+            typeParameters = List.copyOf(typeParameters);
             payloads = List.copyOf(payloads);
+        }
+
+        public SumCase(final Token name, final List<SumPayload> payloads) {
+            this(name, List.of(), payloads);
         }
     }
 

@@ -261,8 +261,8 @@ implemented, and added as a candidate for the same bundle; ZEP-0136 and ZEP-0137
 added on 2026-11-15.
 
 The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
-ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135 is now `Implemented` / `Candidate`,
-and ZEP-0127 and ZEP-0070 are implemented, while the others are `Accepted` / `Candidate`.
+ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135, ZEP-0128, ZEP-0127, and ZEP-0070 are
+now `Implemented` / `Candidate`, while the others are `Accepted` / `Candidate`.
 ZEP-0070 was promoted from the backlog. ZEP-0134 was added directly as a `Draft` / `Candidate` for `0.8.0`;
 its acceptance review is still pending. ZEP-0136 and ZEP-0137 were accepted on 2026-11-15 and are
 `Accepted` / `Candidate`. All count in the bundle above.

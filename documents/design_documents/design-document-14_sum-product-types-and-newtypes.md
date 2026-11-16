@@ -158,9 +158,18 @@ metadata/documentation only; named arguments and payload defaults are not in the
 
 All cases have the visibility of their sum. Public sums expose every case and payload type in their
 API; payload types must themselves be publicly nameable. Per-case visibility is excluded. Case-local
-type parameters are accepted in [ZEP-0128](../zeps/ZEP-0128.md) but remain pending implementation;
-the current MVP still excludes them. Adding, removing, or changing a public case or payload is a
-public API change.
+type parameters are implemented by [ZEP-0128](../zeps/ZEP-0128.md). A case may declare its own
+marker-bounded parameters, which are existential in the sum type:
+
+```zeron
+public type IO<A: mut> =
+      Pure(value: A)
+    | Bind<B: mut>(source: IO<A>, transform: (A) -> IO<B>);
+```
+
+`IO<A>` still has one type argument; `Bind` chooses `B` at construction and matching treats it as
+opaque. Contract bounds on case-local parameters remain deferred. Adding, removing, or changing a
+public case or payload is a public API change.
 
 Every zero-payload case is semantically a singleton: constructing it repeatedly yields the same
 value, and reference identity comparisons observe that stable identity. Payload-bearing cases
@@ -170,7 +179,10 @@ Generic sum parameters are invariant, following existing generic nominal types. 
 inference uses payload argument types and a contextual expected sum type. For a payload-less case,
 context must determine the sum's type arguments or the caller must supply them explicitly. If
 arguments plus context do not uniquely determine all parameters, resolution fails rather than
-guessing.
+guessing. Sum parameters accept the same marker and contract bounds as classes and contracts, so a
+declaration such as `type Sorted<A: Comparable<A>> = Empty | Cons(head: A, tail: Sorted<A>);`
+checks its bound at every application. Case-local arguments are inferred from payloads and the
+expected sum, or supplied completely after the case name, as in `IO.Bind<B>(source, transform)`.
 
 ### Matching and exhaustiveness
 
@@ -195,6 +207,18 @@ evaluation apply.
 Case type arguments must match the scrutinee's resolved sum arguments. Generic runtime dispatch uses
 erased case identity; generic payload types are validated statically. This sum facility is a distinct
 source declaration, even if the first implementation reuses sealed-contract match machinery.
+
+Case-local parameters may be opened by a branch-local binder when matching:
+
+```zeron
+match (io) {
+    case IO.Pure(value) -> value;
+    case IO.Bind<let B>(source, transform) -> ...;
+}
+```
+
+The binder is opaque and cannot escape the branch. A concrete case-local argument in a pattern is
+rejected because case identity is erased.
 
 ### Case refinement and payload access
 
@@ -299,10 +323,11 @@ point. A tagged representation with a discriminator and shared payload storage c
 overhead, but adds layout complexity and is not required to establish source semantics. Source type
 identity and exhaustive coverage must not depend on generated JVM names or layout.
 
-Compiled-library metadata must export the sum declaration, type parameters, visibility, ordered
-cases, and each payload's name and type. Consumer compilation uses that metadata for construction,
-type inference, and exhaustive matching; it must not reconstruct source semantics from class files.
-Changing the metadata schema is distinct from changing the standard-library API compatibility number.
+Compiled-library metadata must export the sum declaration, type parameters and their bounds,
+visibility, ordered cases, each case's local parameters and marker bounds, and each payload's name
+and type. Consumer compilation uses that metadata for construction, type inference, pattern opening,
+and exhaustive matching; it must not reconstruct source semantics from class files. Changing the
+metadata schema is distinct from changing the standard-library API compatibility number.
 
 ### Product and newtype representation
 

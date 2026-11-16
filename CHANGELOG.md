@@ -4,6 +4,13 @@
 
 ### Compiler and language work
 
+- Implemented ZEP-0128 sum-type parameter bounds and case-local type parameters. Sum parameters
+  accept contract and marker bounds, cases may declare marker-bounded existential parameters such
+  as `Bind<B>`, construction infers or accepts complete explicit case-local arguments, and matching
+  opens them through branch-local `let` binders. Unqualified case construction and patterns resolve
+  through the expected sum or a unique visible case name while ordinary values continue to shadow
+  case names. Public library metadata now records case-local parameters and sum bounds, advancing
+  the API index schema to `16`; the standard-library API version is unchanged.
 - Implemented ZEP-0070 generic and nominal newtype representations. Newtypes may bind type
   parameters and use any statically known representation, including classes, products, sums,
   function types, and Java external classes. Newtypes now lower directly to their carrier: the

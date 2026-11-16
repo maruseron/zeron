@@ -19,13 +19,17 @@ final class CallResolver {
     }
 
     TypeDescriptor resolve(final Expr.Call call) {
-        return resolve(call, null);
+        return resolve(call, null, null);
+    }
+
+    TypeDescriptor resolve(final Expr.Call call, final TypeDescriptor expectedType) {
+        return resolve(call, null, expectedType);
     }
 
     TypeDescriptor resolveNamespaceCall(final Expr.MemberCall memberCall, final String functionName) {
         final var call = new Expr.Call(memberCall.name, memberCall.paren, memberCall.arguments,
                 memberCall.explicitTypeArguments, TypeDescriptor.ofInfer());
-        resolve(call, functionName);
+        resolve(call, functionName, null);
         memberCall.setNamespaceCall(call);
         memberCall.setType(call.getType());
         return call.getType();
@@ -52,7 +56,8 @@ final class CallResolver {
         return result;
     }
 
-    private TypeDescriptor resolve(final Expr.Call call, final String forcedFunctionName) {
+    private TypeDescriptor resolve(final Expr.Call call, final String forcedFunctionName,
+                                   final TypeDescriptor expectedType) {
         if (forcedFunctionName == null && !call.explicitTypeArguments.isEmpty()) {
             final var constructor = resolveGenericEffectConstructorShorthand(call);
             if (constructor != null) return constructor;
@@ -91,6 +96,10 @@ final class CallResolver {
             final var functionName = MemberInteropResolver.resolveFunctionName(context, call.callee.lexeme(), call.callee);
             final var functionToken = functionName == null ? null : context.functionSymbolTokens.get(functionName);
             if (functionToken == null) {
+                if (!hasImplicitMemberWithName(call.callee.lexeme())) {
+                    final var sumCase = resolveUnqualifiedSumCase(call, expectedType);
+                    if (sumCase != null) return sumCase;
+                }
                 if (context.frame.currentMethodOwner == null
                         && context.frame.receiverScopes.isEmpty()) {
                     Zeron.resolutionError(ResolutionError.withHelp(DiagnosticCatalog.NAME_NOT_FOUND,
@@ -172,6 +181,60 @@ final class CallResolver {
         recordCallSiteFunctionType(call.callee, descriptor, false);
         attachIntrinsicOperation(call);
         return descriptor.returnType();
+    }
+
+    private boolean hasImplicitMemberWithName(final String name) {
+        final var owner = context.frame.currentMethodOwner;
+        if (owner == null) return false;
+        final var declaration = context.classes.get(owner);
+        if (declaration == null) return false;
+        return declaration.fields().stream().anyMatch(field -> field.name().lexeme().equals(name))
+                || declaration.properties().stream().anyMatch(property -> property.name().lexeme().equals(name))
+                || declaration.methods().stream().anyMatch(method -> method.name().lexeme().equals(name))
+                || declaration.namedConstructors().stream()
+                        .anyMatch(constructor -> constructor.name().lexeme().equals(name));
+    }
+
+    /// Resolves an unqualified case constructor when no function or value owns the name. The
+    /// expected sum type fixes the case namespace; without one, exactly one visible sum may expose
+    /// the case name.
+    private TypeDescriptor resolveUnqualifiedSumCase(final Expr.Call call,
+                                                     final TypeDescriptor expectedType) {
+        var expected = expectedType;
+        if (expected instanceof ReferenceDescriptor reference) expected = reference.baseType();
+        if (expected instanceof NullableDescriptor nullable) expected = nullable.baseType();
+        Stmt.SumDecl selected = null;
+        if (expected != null && context.sums.containsKey(expected.name())) {
+            selected = context.sums.get(expected.name());
+        } else {
+            final var candidates = context.sums.values().stream()
+                    .filter(sum -> sum.cases().stream()
+                            .anyMatch(sumCase -> sumCase.name().lexeme().equals(call.callee.lexeme())))
+                    .toList();
+            if (candidates.size() > 1) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, call.callee,
+                        "Unqualified sum case '" + call.callee.lexeme()
+                                + "' is ambiguous; qualify it with the sum type."));
+                return TypeDescriptor.ofInfer();
+            }
+            if (candidates.size() == 1) selected = candidates.getFirst();
+        }
+        if (selected == null) return null;
+        final var sumCase = selected.cases().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(call.callee.lexeme()))
+                .findFirst().orElse(null);
+        if (sumCase == null) {
+            return null;
+        }
+        final var receiver = new Expr.Variable(
+                new Token(TokenType.IDENTIFIER, selected.name().lexeme(), null, call.callee.span()),
+                TypeDescriptor.ofInfer());
+        final var memberCall = new Expr.MemberCall(receiver, call.callee, call.paren, call.arguments,
+                call.explicitTypeArguments, TypeDescriptor.ofInfer());
+        call.setImplicitMemberCall(memberCall);
+        final var result = MemberInteropResolver.resolveMemberCall(context, memberCall, expectedType);
+        call.setType(result);
+        return result;
     }
 
     private void attachIntrinsicOperation(final Expr.Call call) {

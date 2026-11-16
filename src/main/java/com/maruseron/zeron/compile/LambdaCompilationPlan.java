@@ -185,6 +185,11 @@ final class LambdaCompilationPlan {
                 declaration.higherKindedImplementations().forEach(this::collectWitnessAdapters);
                 collectContractBridgeAdapters(declaration);
             }
+            case Stmt.SumDecl declaration -> declaration.cases().forEach(sumCase ->
+                    sumCase.payloads().forEach(payload -> collectFunctionShapes(payload.type())));
+            case Stmt.ProductDecl declaration -> declaration.components().forEach(component ->
+                    collectFunctionShapes(component.type()));
+            case Stmt.NewtypeDecl declaration -> collectFunctionShapes(declaration.underlyingType());
             case Stmt.ContractDecl declaration -> {
                 for (final var method : declaration.methods()) {
                     for (final var parameter : method.typeDescriptor().parameters()) collectFunctionShapes(parameter);

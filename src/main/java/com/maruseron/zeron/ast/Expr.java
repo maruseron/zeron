@@ -771,6 +771,7 @@ public sealed interface Expr {
         private final List<MatchPattern> alternatives;
         private final Expr.Literal literal;
         private final boolean productPattern;
+        private final List<TypeParameterDescriptor> caseParameters;
         private Stmt.Pattern declaration;
         private TypeDescriptor resolvedType;
         private TypeDescriptor declaredPatternType;
@@ -788,6 +789,15 @@ public sealed interface Expr {
                             final List<MatchPattern> arguments, final Token binding, final Token alias,
                             final boolean wildcard, final List<MatchPattern> alternatives,
                             final Expr.Literal literal, final boolean productPattern) {
+            this(keyword, type, extractor, arguments, binding, alias, wildcard, alternatives, literal,
+                    productPattern, List.of());
+        }
+
+        public MatchPattern(final Token keyword, final TypeDescriptor type, final Token extractor,
+                            final List<MatchPattern> arguments, final Token binding, final Token alias,
+                            final boolean wildcard, final List<MatchPattern> alternatives,
+                            final Expr.Literal literal, final boolean productPattern,
+                            final List<TypeParameterDescriptor> caseParameters) {
             this.keyword = keyword;
             this.type = type;
             this.extractor = extractor;
@@ -798,6 +808,7 @@ public sealed interface Expr {
             this.alternatives = List.copyOf(alternatives);
             this.literal = literal;
             this.productPattern = productPattern;
+            this.caseParameters = List.copyOf(caseParameters);
         }
 
         public Token keyword() { return keyword; }
@@ -810,6 +821,7 @@ public sealed interface Expr {
         public List<MatchPattern> alternatives() { return alternatives; }
         public Expr.Literal literal() { return literal; }
         public boolean productPattern() { return productPattern; }
+        public List<TypeParameterDescriptor> caseParameters() { return caseParameters; }
         public Stmt.Pattern declaration() { return declaration; }
         public TypeDescriptor resolvedType() { return resolvedType; }
         public TypeDescriptor declaredPatternType() { return declaredPatternType; }

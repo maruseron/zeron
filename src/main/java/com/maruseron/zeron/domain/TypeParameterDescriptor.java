@@ -2,8 +2,14 @@ package com.maruseron.zeron.domain;
 
 import java.util.Objects;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class TypeParameterDescriptor implements TypeDescriptor {
+    private static final AtomicInteger NEXT_SCOPE_ID = new AtomicInteger();
+
+    public static int nextScopeId() {
+        return NEXT_SCOPE_ID.incrementAndGet();
+    }
     /// Prefix for the hidden type parameter introduced by a parameter-position anonymous
     /// existential. The parameter is part of the lowered signature, but it is not written by
     /// source and does not consume an explicit call-site type argument.

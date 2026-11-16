@@ -1741,14 +1741,19 @@ final class BytecodeEmitter {
 
     static List<EvidenceField> classEvidenceFields(final CompilationContext context,
                                                   final Stmt.ClassDecl declaration) {
-        final var fields = new ArrayList<EvidenceField>(evidenceFields(
-                context, declaration.typeParameters(), "class", declaration.name().lexeme()));
+        final var fields = new java.util.LinkedHashMap<String, EvidenceField>();
+        for (final var field : evidenceFields(context, declaration.typeParameters(),
+                "class", declaration.name().lexeme())) {
+            fields.putIfAbsent(field.token().lexeme(), field);
+        }
         for (final var applied : ContractComposition.forClass(
                 context.resolution.contracts(), declaration)) {
-            fields.addAll(evidenceFields(context, applied.declaration().typeParameters(),
-                    "contract", applied.declaration().name().lexeme()));
+            for (final var field : evidenceFields(context, applied.declaration().typeParameters(),
+                    "contract", applied.declaration().name().lexeme())) {
+                fields.putIfAbsent(field.token().lexeme(), field);
+            }
         }
-        return List.copyOf(fields);
+        return List.copyOf(fields.values());
     }
 
     static MethodTypeDesc withEvidenceParameters(final MethodTypeDesc methodType, final int count) {

@@ -97,6 +97,9 @@ final class ExpressionFlowResolver {
         if (expression instanceof Expr.If iff) {
             return resolveIfExpression(context, iff, expectedType);
         }
+        if (expression instanceof Expr.Call call) {
+            return resolveCallWithExpected(context, call, expectedType);
+        }
         if (expression instanceof Expr.Unary unary && unary.operator.type() == TokenType.MINUS
                 && isNumericExpression(unary.right)) {
             resolveExpectedExpression(context, unary.right, expectedType);
@@ -827,20 +830,7 @@ final class ExpressionFlowResolver {
                 yield resolvedType;
             }
             case Expr.Call call -> {
-                final var resolved = context.callResolver.resolve(call);
-                if (call.genericFunctionType() != null) {
-                    final var specialized = call.specializedFunctionType();
-                    RaisedEffectFlow.add(context,
-                            new LinkedHashSet<>(specialized == null
-                                    ? call.genericFunctionType().raisedEffects() : specialized.raisedEffects()),
-                            call.callee);
-                }
-                if (call.implicitMemberCall() != null
-                        && call.implicitMemberCall().resolvedDescriptor() != null) {
-                    RaisedEffectFlow.add(context, new LinkedHashSet<>(
-                            call.implicitMemberCall().resolvedDescriptor().raisedEffects()), call.callee);
-                }
-                yield resolved;
+                yield resolveCallWithExpected(context, call, null);
             }
             case Expr.Grouping grouping -> {
                 final var resolvedType = resolve(context, grouping.expression);
@@ -1119,6 +1109,29 @@ final class ExpressionFlowResolver {
                 yield resolvedType;
             }
         };
+    }
+
+    /// Resolves a call through its contextual overload and records the same raised effects as an
+    /// ordinary expression call. Contextual callers must not bypass effect accounting.
+    static TypeDescriptor resolveCallWithExpected(final ResolutionContext context,
+                                                  final Expr.Call call,
+                                                  final TypeDescriptor expectedType) {
+        final var resolved = expectedType == null
+                ? context.callResolver.resolve(call)
+                : context.callResolver.resolve(call, expectedType);
+        if (call.genericFunctionType() != null) {
+            final var specialized = call.specializedFunctionType();
+            RaisedEffectFlow.add(context,
+                    new LinkedHashSet<>(specialized == null
+                            ? call.genericFunctionType().raisedEffects() : specialized.raisedEffects()),
+                    call.callee);
+        }
+        if (call.implicitMemberCall() != null
+                && call.implicitMemberCall().resolvedDescriptor() != null) {
+            RaisedEffectFlow.add(context, new LinkedHashSet<>(
+                    call.implicitMemberCall().resolvedDescriptor().raisedEffects()), call.callee);
+        }
+        return resolved;
     }
 
     private static TypeDescriptor resolveAnonymousObject(final ResolutionContext context,
@@ -2049,6 +2062,9 @@ final class ExpressionFlowResolver {
             }
 
             context.frame.flowState = incomingFlow.copy();
+            if (!pattern.openingBinders().isEmpty()) {
+                context.pushOpeningScope(pattern.openingBinders());
+            }
             beginScope(context);
             try {
                 for (final var binding : pattern.bindings().values()) {
@@ -2070,6 +2086,7 @@ final class ExpressionFlowResolver {
                 armFlows.add(armFlow);
             } finally {
                 endScope(context);
+                if (!pattern.openingBinders().isEmpty()) context.popOpeningScope();
             }
             if (arm.guard() == null) {
                 if (rootKind == MatchRootKind.APPLIED) {
@@ -2233,13 +2250,25 @@ final class ExpressionFlowResolver {
                                           Set<LiteralPatternKey> coveredLiterals,
                                           boolean irrefutable,
                                           boolean identityTotal,
-                                          TypeDescriptor matchedType) {
+                                          TypeDescriptor matchedType,
+                                          List<TypeParameterDescriptor> openingBinders) {
         MatchPatternResolution(final Map<String, MatchBinding> bindings,
                                final Set<String> coveredClasses,
                                final Set<LiteralPatternKey> coveredLiterals,
                                final boolean irrefutable,
                                final TypeDescriptor matchedType) {
-            this(bindings, coveredClasses, coveredLiterals, irrefutable, irrefutable, matchedType);
+            this(bindings, coveredClasses, coveredLiterals, irrefutable, irrefutable, matchedType,
+                    List.of());
+        }
+
+        MatchPatternResolution(final Map<String, MatchBinding> bindings,
+                               final Set<String> coveredClasses,
+                               final Set<LiteralPatternKey> coveredLiterals,
+                               final boolean irrefutable,
+                               final boolean identityTotal,
+                               final TypeDescriptor matchedType) {
+            this(bindings, coveredClasses, coveredLiterals, irrefutable, identityTotal, matchedType,
+                    List.of());
         }
     }
 
@@ -2416,9 +2445,41 @@ final class ExpressionFlowResolver {
             final TypeDescriptor appliedSumType = expectedSumArguments.isEmpty()
                     ? TypeDescriptor.ofName(sum.name().lexeme())
                     : TypeDescriptor.genericOf(TypeDescriptor.ofName(sum.name().lexeme()), expectedSumArguments);
-            final var substitutions = TypeResolver.substitutionsFor(context, sum.typeParameters(), appliedSumType);
+            final var declaredCaseParameters = sumCase.typeParameters();
+            if (!pattern.caseParameters().isEmpty() && declaredCaseParameters.isEmpty()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                        pattern.extractor(), "Sum case '" + sumCase.name().lexeme()
+                                + "' does not declare case-local type parameters."));
+            }
+            if (!pattern.caseParameters().isEmpty()
+                    && pattern.caseParameters().size() != declaredCaseParameters.size()) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                        pattern.extractor(), "Sum case '" + sumCase.name().lexeme() + "' expects "
+                                + declaredCaseParameters.size() + " case-local binders, found "
+                                + pattern.caseParameters().size() + "."));
+            }
+            final var caseBinders = new ArrayList<TypeParameterDescriptor>();
+            for (int index = 0; index < declaredCaseParameters.size(); index++) {
+                final var declared = declaredCaseParameters.get(index);
+                final var binder = index < pattern.caseParameters().size()
+                        ? pattern.caseParameters().get(index)
+                        : new TypeParameterDescriptor(TypeParameterDescriptor.nextScopeId(),
+                                declared.name(), List.of(), false,
+                                TypeParameterDescriptor.Variance.INVARIANT,
+                                declared.admitsNullableArguments(), false, false,
+                                declared.admitsMutableArguments());
+                binder.initializeOpening(null, List.of(), declared.admitsNullableArguments(),
+                        declared.admitsMutableArguments());
+                caseBinders.add(binder);
+            }
+            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>(
+                    TypeResolver.substitutionsFor(context, sum.typeParameters(), appliedSumType));
+            for (int index = 0; index < declaredCaseParameters.size(); index++) {
+                substitutions.put(declaredCaseParameters.get(index), caseBinders.get(index));
+            }
             final var bindings = new LinkedHashMap<String, MatchBinding>();
             boolean refutable = false;
+            final var openingBinders = new ArrayList<TypeParameterDescriptor>();
             for (int index = 0; index < sumCase.payloads().size(); index++) {
                 final var argument = pattern.arguments().get(index);
                 final var payloadType = TypeSubstitution.substitute(
@@ -2426,16 +2487,20 @@ final class ExpressionFlowResolver {
                 final var nested = resolveMatchPattern(context, argument, payloadType, false,
                         permittedNames, contractArguments, rootKind);
                 mergePatternBindings(context, bindings, nested.bindings(), argument.keyword());
+                openingBinders.addAll(nested.openingBinders());
                 refutable |= !nested.irrefutable();
             }
-            final var caseType = expectedSumArguments.isEmpty()
+            openingBinders.addAll(caseBinders);
+            final var caseTypeArguments = new ArrayList<TypeDescriptor>(expectedSumArguments);
+            caseTypeArguments.addAll(caseBinders);
+            final var caseType = caseTypeArguments.isEmpty()
                     ? TypeDescriptor.ofName(caseName)
-                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(caseName), expectedSumArguments);
+                    : TypeDescriptor.genericOf(TypeDescriptor.ofName(caseName), caseTypeArguments);
             pattern.resolve(null, caseType, false);
             pattern.markSumCase();
             context.recordReference(pattern.extractor(), sumCase.name(), caseType);
             return new MatchPatternResolution(bindings, root && !refutable ? Set.of(caseName) : Set.of(),
-                    Set.of(), !refutable, caseType);
+                    Set.of(), !refutable, !refutable, caseType, List.copyOf(openingBinders));
         }
         final var effectProduct = pattern.productPattern()
                 ? context.classes.get(patternTypeForResolution.name()) : null;

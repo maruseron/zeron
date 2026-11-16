@@ -141,7 +141,7 @@ land before the rest.
 | ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Implemented | Entry values are interpreted through `Main<A>` evidence; standard witnesses for `Unit`, `Int`, and `Result` |
 | ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented | Canonical components are readable structural accessors; positional patterns use canonical components at root and nested positions |
 | ZEP-0070 | Generic and Nominal Newtype Representations | Implemented | Generic and nominal direct carriers; no `.value` field or wrapper; `this` is the representation in newtype-owned bodies |
-| ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Accepted | Contract bounds on sum parameters; existential case-local parameters such as `Bind<B>`; context-resolved unqualified case names |
+| ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented | Contract bounds on sum parameters; existential case-local parameters such as `Bind<B>`; context-resolved unqualified case names |
 | ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Accepted | Keep products binary; use ZEP-0070 direct-representation newtypes for single-value shapes |
 | ZEP-0130 | Standard-Library-Owned Intrinsic Declarations | Accepted | Intrinsic identity stays compiler-owned; a comprehensive `String` inventory lives in `zeron.lang` modules |
 | ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Accepted | `is`/`matches` through composed conditions and stable paths; implicit `this` field/property reads |
@@ -203,7 +203,7 @@ third pass; all are promoted. ZEP-0070 moved from the backlog into the same bund
 | ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Implemented / `Candidate` | Formalize `main` return values, entry evidence, and effectful entry interpretation |
 | ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented / `Candidate` | Make canonical components readable and add positional data-class patterns |
 | ZEP-0070 | Generic and Nominal Newtype Representations | Implemented / `Candidate` | Promote direct-carrier single-value representations from the backlog |
-| ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Accepted / `Candidate` | Remove the sealed-contract workaround for polymorphic cases and bounded sums |
+| ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented / `Candidate` | Remove the sealed-contract workaround for polymorphic cases and bounded sums |
 | ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Accepted / `Candidate` | Keep unary products illegal and route single-value shapes through ZEP-0070 |
 | ZEP-0130 | Standard-Library-Owned Intrinsic Declarations | Accepted / `Candidate` | Settle intrinsic-operation ownership and add the practical `String` inventory |
 | ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Accepted / `Candidate` | Complete guard-chain refinement and remove routine `this.` reads |
@@ -464,8 +464,8 @@ These decisions shape the current plan. Details live in each ZEP.
   existential type parameters; construction infers them, matching opens them with a branch-local
   `let` binder, and concrete case-local pattern arguments are rejected. Unqualified case names are
   accepted when the expected sum or scrutinee determines the case, or the name is uniquely visible;
-  ordinary values shadow case names and ambiguity requires qualification. Accepted 2026-11-14 and
-  `Candidate` for `0.8.0`.
+  ordinary values shadow case names and ambiguity requires qualification. Implemented 2026-11-16
+  and `Candidate` for `0.8.0`.
 - **ZEP-0129:** products remain binary; unary products are not legalized; single-value shapes use
   ZEP-0070 direct-representation newtypes with no `.value` accessor. Implemented 2026-11-15 and
   `Candidate` for `0.8.0`.

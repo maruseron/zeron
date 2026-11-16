@@ -33,6 +33,62 @@ import static org.junit.Assert.assertTrue;
 
 public final class ZeronLibraryIndexTest {
     @Test
+    public void preservesAdtAnnotationTargetsAcrossLibraryIndexes() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "adtannotationlibrary" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-adt-annotation-library-");
+        final var library = parse("Library.zn", """
+                package %s;
+                public annotation Meta(value: String) on PRODUCT, PRODUCT_COMPONENT,
+                    SUM, SUM_CASE, NEWTYPE;
+                @Meta("product")
+                public type Pair = (@Meta("left") left: Int, @Meta("right") right: Int);
+                @Meta("sum")
+                public type Choice = @Meta("none") None | @Meta("some") Some(value: Int);
+                @Meta("identifier")
+                public newtype Id = Int;
+                """.formatted(libraryPackage));
+        try {
+            deleteTree(Path.of("dist"));
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage,
+                    List.of(), true, List.of(), libraryOutput);
+            compiler.resolve();
+            compiler.compile();
+
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+            final var applications = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.AnnotationApplicationExport.class::isInstance)
+                    .map(ZeronLibraryIndex.AnnotationApplicationExport.class::cast)
+                    .toList();
+            assertTrue(applications.stream().anyMatch(application ->
+                    application.target() == Stmt.AnnotationTarget.PRODUCT
+                            && application.targetName().endsWith(".Pair")));
+            assertTrue(applications.stream().anyMatch(application ->
+                    application.target() == Stmt.AnnotationTarget.PRODUCT_COMPONENT
+                            && application.targetName().endsWith(".Pair.left")));
+            assertTrue(applications.stream().anyMatch(application ->
+                    application.target() == Stmt.AnnotationTarget.SUM
+                            && application.targetName().endsWith(".Choice")));
+            assertTrue(applications.stream().anyMatch(application ->
+                    application.target() == Stmt.AnnotationTarget.SUM_CASE
+                            && application.targetName().endsWith(".Choice.Some")));
+            assertTrue(applications.stream().anyMatch(application ->
+                    application.target() == Stmt.AnnotationTarget.NEWTYPE
+                            && application.targetName().endsWith(".Id")));
+
+            final var indexedUnits = index.toCompilationUnits("library");
+            assertTrue(indexedUnits.stream().flatMap(unit -> unit.annotationSites().stream())
+                    .anyMatch(site -> site.target() == Stmt.AnnotationTarget.PRODUCT_COMPONENT));
+            assertTrue(indexedUnits.stream().flatMap(unit -> unit.annotationSites().stream())
+                    .anyMatch(site -> site.target() == Stmt.AnnotationTarget.SUM_CASE));
+        } finally {
+            deleteTree(Path.of("dist"));
+            deleteTree(libraryOutput);
+        }
+    }
+
+    @Test
     public void preservesAnnotationDefinitionsAndApplicationsAcrossLibraryIndexes() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var libraryPackage = "annotationlibrary" + suffix;

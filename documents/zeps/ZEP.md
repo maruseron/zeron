@@ -108,7 +108,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0095](./ZEP-0095.md) | Bytecode Quality and Evidence Inlining | Draft | Unscheduled | — |
 | [ZEP-0096](./ZEP-0096.md) | Primitive Specialization for Generic Code | Draft | Unscheduled | — |
 | [ZEP-0097](./ZEP-0097.md) | Annotation Target for Model Mapping Clauses | Accepted | Unscheduled | — |
-| [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Draft | Unscheduled | — |
+| [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Candidate | 0.8.0 |
 | [ZEP-0099](./ZEP-0099.md) | Row-Polymorphic Derived Witnesses and Inclusion Matching | Draft | Unscheduled | — |
 | [ZEP-0100](./ZEP-0100.md) | Callable References for Methods, Constructors, and Static Functions | Implemented | Shipped | 0.7.0 |
 | [ZEP-0101](./ZEP-0101.md) | Field Representation Adapters for Model Mappings | Draft | Unscheduled | — |
@@ -123,7 +123,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0110](./ZEP-0110.md) | Block-Bodied Handler Expressions | Draft | Unscheduled | — |
 | [ZEP-0111](./ZEP-0111.md) | Witness-Dispatched Do-Notation | Implemented | Shipped | 0.7.0 |
 | [ZEP-0112](./ZEP-0112.md) | Structured Concurrency on Virtual Threads | Draft | Unscheduled | — |
-| [ZEP-0113](./ZEP-0113.md) | Declaration-Site Covariance for Sum and Product Types | Draft | Unscheduled | — |
+| [ZEP-0113](./ZEP-0113.md) | Declaration-Site Covariance for Sum and Product Types | Implemented | Candidate | 0.8.0 |
 | [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Shipped | 0.7.0 |
 | [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Shipped | 0.7.0 |
 | [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Shipped | 0.7.0 |
@@ -138,7 +138,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Implemented | Candidate | 0.8.0 |
 | [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Implemented | Candidate | 0.8.0 |
 | [ZEP-0127](./ZEP-0127.md) | Data Class Component Access and Positional Destructuring | Implemented | Candidate | 0.8.0 |
-| [ZEP-0128](./ZEP-0128.md) | Sum-Type Parameter Bounds and Case-Local Type Parameters | Accepted | Candidate | 0.8.0 |
+| [ZEP-0128](./ZEP-0128.md) | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented | Candidate | 0.8.0 |
 | [ZEP-0129](./ZEP-0129.md) | Unary Products versus Arbitrary-Valued Newtypes | Accepted | Candidate | 0.8.0 |
 | [ZEP-0130](./ZEP-0130.md) | Standard-Library-Owned Intrinsic Declarations | Accepted | Candidate | 0.8.0 |
 | [ZEP-0131](./ZEP-0131.md) | Chained Flow Refinement and Implicit Receiver Access | Accepted | Candidate | 0.8.0 |
@@ -161,7 +161,7 @@ sequencing.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 16 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0137; ZEP-0132 is the immediate corrective |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 18 candidates | ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137; ZEP-0132 is the immediate corrective |
 | `0.9.0` | Effect control and response typing | Proposed | No candidates; ZEP-0118 and ZEP-0110 headline the bundle |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -189,8 +189,8 @@ and is likewise outside the bundle. The bundle shipped on 2026-11-14; its rows a
 
 ### `0.8.0` — normalization and nominal implementation
 
-The bundle targets smaller normalization work rather than new control-flow semantics. Its sixteen
-candidates are:
+The bundle targets smaller normalization and smoothing work rather than new control-flow semantics.
+Its eighteen candidates are:
 
 - [ZEP-0117](./ZEP-0117.md) — declarative project targets and generated CLI/manifest reference.
   A tooling and configuration change with no language, runtime, standard-library, compiled-library,
@@ -210,12 +210,18 @@ candidates are:
   type parameter, a function type, a nominal value, or another admissible representation as its
   direct carrier; `.value` is removed and `this` is the representation inside extensions and
   witnesses.
-- [ZEP-0128](./ZEP-0128.md) — sum-type parameter bounds and case-local type parameters. Sum
-  parameters accept contract bounds, a case may introduce an existential parameter such as the `B`
-  in `Bind<B>`, and unambiguous case constructors may omit the sum qualifier.
+- [ZEP-0128](./ZEP-0128.md) — sum-type parameter bounds and case-local type parameters. Sum and
+  product parameters accept contract bounds, a case may introduce an existential parameter such as
+  the `B` in `Bind<B>`, and unambiguous case constructors may omit the sum qualifier.
 - [ZEP-0129](./ZEP-0129.md) — unary products versus arbitrary-valued newtypes. Products stay at two
   or more components; the single-value need is met by ZEP-0070's direct-representation newtypes
   rather than by legalizing a unary product.
+- [ZEP-0098](./ZEP-0098.md) — annotation targets for native products, sums, and newtypes. Product
+  components and sum cases gain stable annotation sites, closing the metadata gap left by
+  ZEP-0031 without changing runtime representation.
+- [ZEP-0113](./ZEP-0113.md) — declaration-site covariance for sum and product types. Checked `out`
+  parameters extend to the primary immutable carriers, so `Option`, `Result`, and `Pair` can widen
+  safely at API boundaries without mapping every value.
 - [ZEP-0130](./ZEP-0130.md) — standard-library-owned intrinsic declarations. Intrinsic types keep
   compiler-owned identity, while a broad `String` inventory—including `split`, `splitRegex`,
   `charAt`/`at`, case conversion, trimming, replacement, lines, parsing, and joining—is declared in
@@ -254,11 +260,11 @@ runtime ABI. ZEP-0126 is the only candidate that changes the entry-point rule; i
 static-requirement work in ZEP-0124 for nominal `Main<A>` conformance, but its witness-only form can
 ship independently. The bundle does not change `raise` or `handle` typing.
 
-These sixteen are the current target; further small normalization items may join `0.8.0` as additional
-candidates. The acceptance queue remains open. ZEP-0134 is the only draft row in the target set; it
-must be accepted before implementation and is not a committed bundle item yet. ZEP-0135 was accepted,
-implemented, and added as a candidate for the same bundle; ZEP-0136 and ZEP-0137 were accepted and
-added on 2026-11-15.
+These eighteen are the current target; further small normalization items may join `0.8.0` as additional
+candidates. The acceptance queue remains open. ZEP-0098 and ZEP-0113 were accepted and implemented on
+2026-11-16; ZEP-0134 remains a draft row and must be accepted before implementation, and its
+`Candidate` state records the intended bundle only. ZEP-0135 was accepted, implemented, and added as
+a candidate for the same bundle; ZEP-0136 and ZEP-0137 were accepted and added on 2026-11-15.
 
 The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
 ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135, ZEP-0128, ZEP-0127, and ZEP-0070 are

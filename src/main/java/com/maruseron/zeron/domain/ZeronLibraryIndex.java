@@ -906,8 +906,31 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
     }
 
+    private static String derivedContractName(final List<ImportDeclaration> imports,
+                                              final String written) {
+        if (written.contains(".")) return written;
+        for (final var imported : imports) {
+            if (!imported.onDemand() && !imported.witness() && !imported.suffixImport()
+                    && written.equals(imported.localName())) {
+                return imported.qualifiedName();
+            }
+        }
+        final var canonical = switch (written) {
+            case "Eq" -> "zeron.lang.Eq";
+            case "Hashable" -> "zeron.lang.Hashable";
+            case "Encode" -> "zeron.serialization.Encode";
+            case "Decode" -> "zeron.serialization.Decode";
+            case "Codec" -> "zeron.serialization.Codec";
+            case "Shape" -> "zeron.serialization.Shape";
+            default -> null;
+        };
+        if (canonical == null) return written;
+        return canonical;
+    }
+
     private static void addDerivedWitnessExports(
             final List<ExportedDeclaration> exports, final String packageName,
+            final List<ImportDeclaration> imports,
             final Token typeName, final List<TypeParameterDescriptor> typeParameters,
             final List<Token> derivedContracts, final List<TypeDescriptor> componentTypes) {
         final var target = typeParameters.isEmpty()
@@ -915,16 +938,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 : TypeDescriptor.genericOf(TypeDescriptor.ofName(typeName.lexeme()),
                         typeParameters.stream().map(parameter -> (TypeDescriptor) parameter).toList());
         for (final var derived : derivedContracts) {
-            final var contractName = switch (derived.lexeme()) {
-                case "Eq" -> "zeron.lang.Eq";
-                case "Hashable" -> "zeron.lang.Hashable";
-                case "Encode" -> "zeron.serialization.Encode";
-                case "Decode" -> "zeron.serialization.Decode";
-                case "Codec" -> "zeron.serialization.Codec";
-                case "Shape" -> "zeron.serialization.Shape";
-                default -> null;
-            };
-            if (contractName == null) continue;
+            final var contractName = derivedContractName(imports, derived.lexeme());
+            if (!contractName.equals("zeron.lang.Eq") && !contractName.equals("zeron.lang.Hashable")
+                    && !contractName.startsWith("zeron.serialization.")) continue;
             final var emptyRow = EffectRows.of(List.<TypeDescriptor>of());
             final var serialization = contractName.startsWith("zeron.serialization.");
             final var contractArguments = contractName.equals("zeron.serialization.Encode")
@@ -1245,7 +1261,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         classDeclaration.patterns().stream().filter(Stmt.Pattern::isPublic)
                                 .forEach(pattern -> addDocumentationExport(exports, unit,
                                         classQualifiedName + "." + pattern.name().lexeme(), pattern.name()));
-                        addDerivedWitnessExports(exports, unit.packageName(), classDeclaration.name(),
+                        addDerivedWitnessExports(exports, unit.packageName(), unit.imports(),
+                                classDeclaration.name(),
                                 classDeclaration.typeParameters(),
                                 classDeclaration.derivedContracts(), derivedComponentTypes(classDeclaration));
                     }
@@ -1308,7 +1325,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                         .toList()));
                         sum.cases().forEach(sumCase -> addDocumentationExport(exports, unit,
                                 sumQualifiedName + "." + sumCase.name().lexeme(), sumCase.name()));
-                            addDerivedWitnessExports(exports, unit.packageName(), sum.name(),
+                            addDerivedWitnessExports(exports, unit.packageName(), unit.imports(), sum.name(),
                                     sum.typeParameters(), sum.derivedContracts(),
                                     sum.cases().stream().flatMap(sumCase -> sumCase.payloads().stream())
                                             .map(Stmt.SumPayload::type).toList());
@@ -1323,7 +1340,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                 .toList()));
                             product.components().forEach(component -> addDocumentationExport(exports, unit,
                                     productQualifiedName + "." + component.name().lexeme(), component.name()));
-                            addDerivedWitnessExports(exports, unit.packageName(), product.name(),
+                            addDerivedWitnessExports(exports, unit.packageName(), unit.imports(), product.name(),
                                     product.typeParameters(), product.derivedContracts(),
                                     product.components().stream().map(Stmt.ProductComponent::type).toList());
                     }
@@ -1331,8 +1348,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                             exports.add(new NewtypeExport(qualify(unit.packageName(), newtype.name().lexeme()),
                                         newtype.typeParameters(), newtype.underlyingType(),
                                         newtype.validator() != null));
-                            addDerivedWitnessExports(exports, unit.packageName(), newtype.name(),
-                                    List.of(), newtype.derivedContracts(), List.of(newtype.underlyingType()));
+                            addDerivedWitnessExports(exports, unit.packageName(), unit.imports(), newtype.name(),
+                                    newtype.typeParameters(), newtype.derivedContracts(),
+                                    List.of(newtype.underlyingType()));
                     }
                     case Stmt.ContractDecl contract when contract.isPublic() -> {
                             exports.add(new ContractExport(qualify(unit.packageName(), contract.name().lexeme()),

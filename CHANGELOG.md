@@ -11,6 +11,20 @@
   through the expected sum or a unique visible case name while ordinary values continue to shadow
   case names. Public library metadata now records case-local parameters and sum bounds, advancing
   the API index schema to `16`; the standard-library API version is unchanged.
+- Extended the ZEP-0128 bound rules to product type parameters, with checking performed on the
+  generated product class. `deriving` now resolves qualified contract names and import aliases
+  through the same import table as other type references. Generic-arity and unary-product
+  diagnostics now describe the actual problem, and the grammar and guides document effect headers,
+  deriving names, product bounds, and the nullary-sum alias trap.
+- Implemented ZEP-0098 annotation targets for native products and sums. `PRODUCT`,
+  `PRODUCT_COMPONENT`, `SUM`, `SUM_CASE`, and `NEWTYPE` applications parse and validate through the
+  existing annotation rules, remain metadata-only, and survive the library index for public
+  declarations. Annotation consumption remains separate.
+- Implemented ZEP-0113 declaration-site covariance for sums and products. Generic `type`
+  declarations accept checked `out` parameters over read-only payloads and components, reject
+  unsafe references, arrays, mutable positions, effects, and invariant derived contracts, and
+  reject use-site projections over ADT applications. `Option`, `Result`, and `Pair` are now
+  covariant; generated class names, JVM descriptors, equality, and hashing are unchanged.
 - Implemented ZEP-0070 generic and nominal newtype representations. Newtypes may bind type
   parameters and use any statically known representation, including classes, products, sums,
   function types, and Java external classes. Newtypes now lower directly to their carrier: the

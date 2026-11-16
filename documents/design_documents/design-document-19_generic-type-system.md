@@ -37,10 +37,12 @@ the value's binders independently. The first implementation slice supports unbou
 values through the existing erased function shape; binders that need hidden evidence or runtime
 descriptors are diagnosed until the adapter ABI lands.
 
-Unannotated generic parameters are invariant. Generic classes and contracts may declare checked
-covariant parameters with `out`; use-site `out T` and `in T` projections provide restricted views of
-invariant types. These mechanisms are distinct and are specified in
-[ZEP-0051](../zeps/ZEP-0051.md) and [ZEP-0052](../zeps/ZEP-0052.md). The star view `F<*>` is sugar
+Unannotated generic parameters are invariant. Generic classes, contracts, sums, and products may
+declare checked covariant parameters with `out`; use-site `out T` and `in T` projections provide
+restricted views of invariant types. These mechanisms are distinct and are specified in
+[ZEP-0051](../zeps/ZEP-0051.md), [ZEP-0052](../zeps/ZEP-0052.md), and
+[ZEP-0113](../zeps/ZEP-0113.md). Projections over sum and product applications remain rejected.
+The star view `F<*>` is sugar
 for `F<out Any?>`; `F<: bounds + markers>` instead introduces a method-local hidden type parameter
 with inherited bound evidence and an optional runtime descriptor. ZEP-0104 restricts the second
 form to direct callable-parameter arguments and implicitly packs call-site arguments into it.
@@ -92,7 +94,7 @@ nullability or capability metadata.
 | ---- | ------------- | -------------------- |
 | Generic functions and methods | Implemented. Calls accept explicit type arguments or infer them from supported arguments and contextual lambdas. Generic method signatures compose with receiver substitutions. | No general subtype solver or overload search. A type variable left unresolved by supported constraints requires an explicit argument. Expected result types alone do not generally infer function-call type arguments. |
 | Generic classes and contracts | Implemented. Type arguments are substituted through members, constructors, conformance, and library metadata. Constructor calls can use argument and expected-type constraints. | No implicit raw view. Inference is bounded and does not compute an arbitrary common supertype. Standalone class references and later statements do not provide constraints. |
-| Declaration-site variance | Implemented for checked covariance using `out`; unannotated parameters remain invariant. Unsafe positions are rejected. | Declaration-site contravariance is not part of the implemented model. Arrays, mutable references, writable properties, and generic effects retain their documented invariance rules. |
+| Declaration-site variance | Implemented for checked covariance using `out` on classes, contracts, sums, and products; unannotated parameters remain invariant. Unsafe positions are rejected. | Declaration-site contravariance is not part of the implemented model. Arrays, mutable references, writable properties, mutable fields, and generic effects retain their documented invariance rules; use-site projections over ADT applications are rejected. |
 | Use-site projections | Implemented for `out T` and `in T` generic applications, including supported imported Java generic signatures and wildcard mappings. | Capture is limited to the supported member-resolution model. Raw Java types, generic arrays, and unsupported Java signature forms remain unsupported. |
 | Contract bounds and witnesses | Applied contract bounds, multiple bounds in supported declarations, HKT constructor-family evidence, and non-nominal witnesses are implemented. | Mutating bound calls require a mutable receiver view and admissible arguments; `T: mut` admits mutable-reference arguments but grants no operations. Generic functions still require explicit `Numeric<T>`, `Fractional<T>`, or `Comparable<T>` bounds; ZEP-0133, pending implementation, adds inferred numeric or comparison bounds for eligible typeless `let`-bound lambdas. The witness solver rejects overlaps it can identify; complete generic-pattern overlap analysis remains follow-up hardening. |
 | Higher-kinded abstractions | The first-order constructor kind `F<_>`, constructor bounds, associated evidence, and receiver-based or receiverless non-static default operations are implemented. Default bodies can use operations from their contract's transitive `requires` graph and are available across compiled-library boundaries. | Static HKT defaults, unrestricted higher-kinded polymorphism, and type-level computation are not supported. Unrelated inherited defaults need an explicit implementation to resolve conflicts. |

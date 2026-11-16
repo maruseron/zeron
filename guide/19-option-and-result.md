@@ -41,6 +41,10 @@ example, `getOrElse` supplies a fallback when the option is `None`, while `map` 
 contained value when it is `Some` and leaves absence unchanged. These extensions are available
 from `zeron.lang.Option`.
 
+`Option<out T>`, `Result<out T, out E>`, and `Pair<out A, out B>` are covariant. If `Dog` conforms
+to `Animal`, then `Option<Dog>` is usable where `Option<Animal>` is expected without mapping the
+value first. Writable references, arrays, and other mutable positions remain invariant.
+
 ## Result: a value or an error
 
 Use `Result<T, E>` when a function can succeed or fail and callers should be able to learn why.

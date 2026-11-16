@@ -46,7 +46,8 @@ public sealed interface Stmt {
     sealed interface Decl {}
 
     enum AnnotationTarget {
-        CLASS, CONTRACT, FUNCTION, METHOD, CONSTRUCTOR, FIELD, PROPERTY, DATA_COMPONENT, PARAMETER
+        CLASS, CONTRACT, FUNCTION, METHOD, CONSTRUCTOR, FIELD, PROPERTY, DATA_COMPONENT, PARAMETER,
+        PRODUCT, PRODUCT_COMPONENT, SUM, SUM_CASE, NEWTYPE
     }
 
     final class AnnotationParameter {
@@ -664,9 +665,13 @@ public sealed interface Stmt {
     record LiteralSuffixFactory(LiteralSuffixCategory category, boolean stringInput,
                                 Token constructorName) {}
 
-    record Field(Token name, TypeDescriptor type, Expr initializer) {
+    record Field(Token name, TypeDescriptor type, Expr initializer, boolean readOnly) {
         public Field(final Token name, final TypeDescriptor type) {
-            this(name, type, null);
+            this(name, type, null, false);
+        }
+
+        public Field(final Token name, final TypeDescriptor type, final Expr initializer) {
+            this(name, type, initializer, false);
         }
     }
 

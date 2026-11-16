@@ -19,7 +19,7 @@ import zeron.control.Monad;
 ///
 /// Both type parameters admit nullable arguments, as `Option`'s does, so a result may carry
 /// `T?` or an optional error without an intervening wrapper.
-public type Result<T: nullable + mut, E: nullable + mut> =
+public type Result<out T: nullable + mut, out E: nullable + mut> =
       Ok(value: T)
     | Err(error: E);
 

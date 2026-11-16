@@ -16,20 +16,21 @@ final class VariancePositionValidator {
 
     private final Map<String, Stmt.ClassDecl> classes;
     private final Map<String, Stmt.ContractDecl> contracts;
+    private final ResolutionContext context;
     private final Token declarationName;
 
-    private VariancePositionValidator(final Map<String, Stmt.ClassDecl> classes,
-                                      final Map<String, Stmt.ContractDecl> contracts,
+    private VariancePositionValidator(final ResolutionContext context,
                                       final Token declarationName) {
-        this.classes = classes;
-        this.contracts = contracts;
+        this.context = context;
+        this.classes = context.classes;
+        this.contracts = context.contracts;
         this.declarationName = declarationName;
     }
 
     static void validate(final ResolutionContext context, final Stmt.ClassDecl declaration) {
         if (declaration.typeParameters().stream()
                 .noneMatch(parameter -> parameter.variance() == TypeParameterDescriptor.Variance.COVARIANT)) return;
-        final var validator = new VariancePositionValidator(context.classes, context.contracts, declaration.name());
+        final var validator = new VariancePositionValidator(context, declaration.name());
         for (final var parameter : declaration.typeParameters()) {
             validator.validateClassParameter(declaration, parameter);
         }
@@ -38,9 +39,27 @@ final class VariancePositionValidator {
     static void validate(final ResolutionContext context, final Stmt.ContractDecl declaration) {
         if (declaration.typeParameters().stream()
                 .noneMatch(parameter -> parameter.variance() == TypeParameterDescriptor.Variance.COVARIANT)) return;
-        final var validator = new VariancePositionValidator(context.classes, context.contracts, declaration.name());
+        final var validator = new VariancePositionValidator(context, declaration.name());
         for (final var parameter : declaration.typeParameters()) {
             validator.validateContractParameter(declaration, parameter);
+        }
+    }
+
+    static void validate(final ResolutionContext context, final Stmt.ProductDecl declaration) {
+        if (declaration.typeParameters().stream()
+                .noneMatch(parameter -> parameter.variance() == TypeParameterDescriptor.Variance.COVARIANT)) return;
+        final var validator = new VariancePositionValidator(context, declaration.name());
+        for (final var parameter : declaration.typeParameters()) {
+            validator.validateProductParameter(declaration, parameter);
+        }
+    }
+
+    static void validate(final ResolutionContext context, final Stmt.SumDecl declaration) {
+        if (declaration.typeParameters().stream()
+                .noneMatch(parameter -> parameter.variance() == TypeParameterDescriptor.Variance.COVARIANT)) return;
+        final var validator = new VariancePositionValidator(context, declaration.name());
+        for (final var parameter : declaration.typeParameters()) {
+            validator.validateSumParameter(declaration, parameter);
         }
     }
 
@@ -48,7 +67,8 @@ final class VariancePositionValidator {
                                         final TypeParameterDescriptor parameter) {
         if (parameter.variance() != TypeParameterDescriptor.Variance.COVARIANT) return;
         for (final var field : declaration.fields()) {
-            check(parameter, field.type(), INVARIANT, "field '" + field.name().lexeme() + "'");
+            check(parameter, field.type(), field.readOnly() ? COVARIANT : INVARIANT,
+                    "field '" + field.name().lexeme() + "'");
         }
         for (final var property : declaration.properties()) {
             check(parameter, property.type(), property.isMutating() ? INVARIANT : COVARIANT,
@@ -70,6 +90,40 @@ final class VariancePositionValidator {
         }
     }
 
+    private void validateProductParameter(final Stmt.ProductDecl declaration,
+                                          final TypeParameterDescriptor parameter) {
+        if (parameter.variance() != TypeParameterDescriptor.Variance.COVARIANT) return;
+        for (final var component : declaration.components()) {
+            check(parameter, component.type(), COVARIANT,
+                    "component '" + component.name().lexeme() + "'");
+        }
+        checkDerivedContracts(parameter, declaration.derivedContracts());
+    }
+
+    private void validateSumParameter(final Stmt.SumDecl declaration,
+                                      final TypeParameterDescriptor parameter) {
+        if (parameter.variance() != TypeParameterDescriptor.Variance.COVARIANT) return;
+        for (final var sumCase : declaration.cases()) {
+            for (final var payload : sumCase.payloads()) {
+                check(parameter, payload.type(), COVARIANT, "payload '" + payload.name().lexeme()
+                        + "' of case '" + sumCase.name().lexeme() + "'");
+            }
+        }
+        checkDerivedContracts(parameter, declaration.derivedContracts());
+    }
+
+    private void checkDerivedContracts(final TypeParameterDescriptor parameter,
+                                       final List<Token> derivedContracts) {
+        for (final var derived : derivedContracts) {
+            final var contractName = TypeResolver.resolveTypeName(context, derived.lexeme(), derived);
+            final var contract = contracts.get(contractName);
+            if (contract == null || contract.typeParameters().isEmpty()) continue;
+            final var variance = contract.typeParameters().getFirst().variance()
+                    == TypeParameterDescriptor.Variance.COVARIANT ? COVARIANT : INVARIANT;
+            check(parameter, parameter, variance, "derived contract '" + derived.lexeme() + "'");
+        }
+    }
+
     private void validateContractParameter(final Stmt.ContractDecl declaration,
                                            final TypeParameterDescriptor parameter) {
         if (parameter.variance() != TypeParameterDescriptor.Variance.COVARIANT) return;
@@ -87,13 +141,20 @@ final class VariancePositionValidator {
 
     private void checkContractUse(final TypeParameterDescriptor parameter,
                                  final Stmt.ContractUse contractUse) {
-        final var contract = contracts.get(contractUse.name().lexeme());
-        if (contract == null || contract.typeParameters().size() != contractUse.typeArguments().size()) return;
-        for (int index = 0; index < contractUse.typeArguments().size(); index++) {
+        checkContractUse(parameter, contractUse.name(), contractUse.typeArguments(),
+                "contract use '" + contractUse.name().lexeme() + "'");
+    }
+
+    private void checkContractUse(final TypeParameterDescriptor parameter,
+                                  final Token name,
+                                  final List<TypeDescriptor> typeArguments,
+                                  final String contextName) {
+        final var contract = contracts.get(name.lexeme());
+        if (contract == null || contract.typeParameters().size() != typeArguments.size()) return;
+        for (int index = 0; index < typeArguments.size(); index++) {
             final var variance = contract.typeParameters().get(index).variance()
                     == TypeParameterDescriptor.Variance.COVARIANT ? COVARIANT : INVARIANT;
-            check(parameter, contractUse.typeArguments().get(index), variance,
-                    "contract use '" + contractUse.name().lexeme() + "'");
+            check(parameter, typeArguments.get(index), variance, contextName);
         }
     }
 

@@ -126,7 +126,7 @@ use it.
 
 ## Declaration annotations
 
-Annotations attach validated metadata to declarations, members, data components, or parameters.
+Annotations attach validated metadata to declarations, members, components, cases, or parameters.
 Declare an annotation with typed parameters and the targets where it is allowed:
 
 ```zeron
@@ -147,8 +147,10 @@ public class User {
 
 Annotation names resolve through the same package and import rules as other declarations. The
 compiler checks that each annotation is declared, permits the current target, and receives supported
-constant values of the declared types. Initial targets are `CLASS`, `CONTRACT`, `FUNCTION`, `METHOD`,
-`CONSTRUCTOR`, `FIELD`, `PROPERTY`, `DATA_COMPONENT`, and `PARAMETER`.
+constant values of the declared types. Targets are `CLASS`, `CONTRACT`, `FUNCTION`, `METHOD`,
+`CONSTRUCTOR`, `FIELD`, `PROPERTY`, `DATA_COMPONENT`, `PARAMETER`, `PRODUCT`, `PRODUCT_COMPONENT`,
+`SUM`, `SUM_CASE`, and `NEWTYPE`. A product component or sum case may carry a stacked annotation
+prefix, while sum payloads cannot.
 
 Annotations are metadata, not runtime reflection. They have no effect unless a compiler feature or
 tool explicitly interprets them. Public annotation definitions and applications on exported API are

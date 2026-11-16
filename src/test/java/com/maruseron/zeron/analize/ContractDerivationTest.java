@@ -16,6 +16,7 @@ import java.util.Comparator;
 import java.io.IOException;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -106,6 +107,89 @@ public final class ContractDerivationTest {
                     public eq(other: Record): Boolean = true;
                 }
                 """)));
+    }
+
+    @Test
+    public void exportsGenericNewtypeDerivationWithItsTypeParameters() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "genericderivationlib" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "generic-derived-library-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "generic-derived-client-");
+        try {
+            final var library = parseUnit("library/Box.zn", """
+                    package %s;
+                    import zeron.lang.Eq as DerivableEq;
+                    public newtype Box<T> deriving DerivableEq = T;
+                    """.formatted(libraryPackage));
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), libraryPackage + ".Library", libraryPackage,
+                    List.of(), true, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var index = ZeronLibraryIndex.readFrom(libraryOutput.resolve(
+                    com.maruseron.zeron.ZeronVersions.API_INDEX_RELATIVE_PATH));
+            final var derivedEq = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.WitnessExport.class::isInstance)
+                    .map(ZeronLibraryIndex.WitnessExport.class::cast)
+                    .filter(witness -> witness.derived()
+                            && witness.contractType().name().equals("zeron.lang.Eq"))
+                    .findFirst().orElseThrow();
+            assertEquals(1, derivedEq.typeParameters().size());
+            assertTrue(derivedEq.targetType().toString(), derivedEq.targetType()
+                    instanceof com.maruseron.zeron.domain.GenericDescriptor);
+
+            final var client = parseUnit("client/Main.zn", """
+                    package client;
+                    import %s.Box;
+                    import zeron.lang.Eq;
+                    fn same<T: mut + Eq<T>>(left: T, right: T): Boolean = left.eq(right);
+                    fn result(): Boolean = same(Box<Int>.new(7), Box<Int>.new(7));
+                    """.formatted(libraryPackage));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), "client.Main", "client",
+                    List.of(index), true, List.of(), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    clientOutput.toUri().toURL(), libraryOutput.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertTrue((Boolean) loader.loadClass("client.Main").getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(clientOutput);
+            deleteTree(libraryOutput);
+        }
+    }
+
+    @Test
+    public void resolvesQualifiedAndAliasedDerivingContracts() throws Exception {
+        final var programName = "DerivedNameProgram" + UUID.randomUUID().toString().replace("-", "");
+        final var source = """
+                import zeron.lang.Eq as Same;
+                import zeron.lang.Hashable;
+                public newtype UserId deriving Same = Int;
+                public newtype Meter deriving zeron.lang.Eq = Int;
+                public data class Record(value: Int) deriving zeron.lang.Hashable {}
+                fn idsEqual(): Boolean = UserId.new(7) == UserId.new(7);
+                fn metersEqual(): Boolean = Meter.new(1) == Meter.new(1);
+                """;
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(parseUnit("ContractDerivationTest.zn", source)), programName, "");
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertTrue((Boolean) program.getMethod("idsEqual").invoke(null));
+                assertTrue((Boolean) program.getMethod("metersEqual").invoke(null));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", "UserId.class"));
+            Files.deleteIfExists(Path.of("dist", "Meter.class"));
+            Files.deleteIfExists(Path.of("dist", "Record.class"));
+        }
     }
 
     @Test

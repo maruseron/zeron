@@ -13,7 +13,7 @@ import zeron.control.Alternative;
 ///
 /// `Option` implements the `Monad` and `Foldable` operations through its witnesses, so the
 /// generic control operations work on it as well as the members below.
-public type Option<T: nullable + mut> =
+public type Option<out T: nullable + mut> =
       Some(value: T)
     | None;
 

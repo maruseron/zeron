@@ -36,8 +36,11 @@ public type Pair<A, B> = (left: A, right: B);
 ```
 
 The declaration creates a nominal type identified by its package and declared name. Product shape
-does not affect assignability or type identity. Component names must be unique. Generic parameters
-follow the existing invariant nominal-type rules.
+does not affect assignability or type identity. Component names must be unique. Product type
+parameters accept the same contract bounds and explicit `out` variance as classes and contracts,
+for example `type Pair<out T: Eq<T>> = (left: T, right: T);`. Bounds are checked on the
+compiler-generated product class, and covariance is checked against the read-only components, so
+both apply uniformly to construction, component access, inference, and separate compilation.
 
 Construction uses the ordinary canonical nominal constructor:
 
@@ -136,6 +139,18 @@ extended, implemented, or subclassed by consumers. A sum has no user-declared me
 members in the MVP. Declaration-site contract conformance remains unsupported; compiler-synthesized
 structural `Eq` support for sums is described in
 [design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
+
+Sum type parameters accept the same contract bounds and explicit `out` variance as classes,
+contracts, and products. Payloads are read-only, so a covariant parameter may occur in a case
+payload. `Option`, `Result`, and `Pair` use covariant parameters, and a covariant sum widens
+through nested applications. Writable references, arrays, mutable or consuming positions, and
+invariant derived contracts still reject an `out` occurrence.
+
+There are no transparent type aliases. A declaration such as `type MyInt = Int;` is a one-case sum
+whose case is named `Int`; it constructs as `MyInt.Int()` and is neither assignable to nor from
+`Int`. Use a newtype for a single-value nominal representation and a product with at least two
+components for a grouped value. This nominal behavior is intentional, but it is a common source of
+"alias" surprises.
 
 ### Cases, payloads, construction, and visibility
 
@@ -265,6 +280,24 @@ Structural `Eq<T>` evidence for sums is implemented when every non-recursive pay
 equality evidence. Direct self-recursive payloads are supported; mutually recursive sum declarations
 are not yet synthesized as a recursive evidence group. See
 [design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
+
+## Annotations
+
+Native products, sums, and newtypes accept annotations using the same syntax and validation rules
+as classes. The declaration targets are `PRODUCT`, `SUM`, and `NEWTYPE`; product components use
+`PRODUCT_COMPONENT`, and sum cases use `SUM_CASE`. Applications precede the annotated element:
+
+```zeron
+@Versioned(2)
+public type Pair<out A, out B> = (@SerialName("first") left: A, right: B);
+@Versioned(2)
+public type Result<out T, out E> = @SerialName("ok") Ok(value: T) | Err(error: E);
+```
+
+Annotations are metadata only: they do not change construction, matching, structural `Eq`,
+derivation, or representation. Public declarations export their applications and their
+components' or cases' applications through the library index; non-public declarations keep them
+in source metadata only. Annotation consumption remains a separate feature.
 
 ## Newtypes and nominal single-value views
 

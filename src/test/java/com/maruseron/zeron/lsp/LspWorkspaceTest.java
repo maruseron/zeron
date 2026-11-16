@@ -716,7 +716,7 @@ public class LspWorkspaceTest {
         final var target = Path.of(java.net.URI.create(definition.getLeft().getFirst().getUri()));
         assertTrue(target.toString(), target.endsWith(Path.of("stdlib", "zeron", "lang", "option.zn")));
         final var targetSource = Files.readString(target);
-        assertTrue(targetSource.contains("public type Option<T: nullable + mut>"));
+        assertTrue(targetSource.contains("public type Option<out T: nullable + mut>"));
         final var mapDeclaration = targetSource.indexOf("public fn map<B: mut>");
         assertTrue(mapDeclaration >= 0);
         final var expectedPosition = DocumentCoordinates.positionAt(targetSource, mapDeclaration);

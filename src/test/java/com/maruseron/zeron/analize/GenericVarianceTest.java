@@ -19,6 +19,72 @@ import static org.junit.Assert.assertTrue;
 
 public final class GenericVarianceTest {
     @Test
+    public void covariantSumsAndProductsAcceptSafeWidening() throws Exception {
+        final var unit = parseUnit("AdtVariance.zn", """
+                package adtvariance;
+                contract Animal {}
+                class Dog is Animal {
+                    public constructor new;
+                }
+                type CovariantSum<out T> = Some(value: T) | None;
+                type CovariantPair<out A, out B> = (left: A, right: B);
+                fn widenSum(source: CovariantSum<Dog>): CovariantSum<Animal> = source;
+                fn widenPair(source: CovariantPair<Dog, Dog>): CovariantPair<Animal, Animal> = source;
+                fn widenNested(source: CovariantSum<CovariantPair<Dog, Dog>>):
+                    CovariantSum<CovariantPair<Animal, Animal>> = source;
+                fn widenNullable(source: CovariantSum<Dog>?): CovariantSum<Animal>? = source;
+                """);
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
+                com.maruseron.zeron.StandardLibrary.withBundledUnits(List.of(unit)));
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
+    }
+
+    @Test
+    public void standardLibraryAdtParametersAreCovariant() throws Exception {
+        final var unit = parseUnit("StdlibVariance.zn", """
+                package stdlibvariance;
+                contract Animal {}
+                class Dog is Animal {
+                    public constructor new;
+                }
+                fn widenOption(source: Option<Dog>): Option<Animal> = source;
+                fn widenPair(source: Pair<Dog, Int>): Pair<Animal, Int> = source;
+                fn widenResult(source: Result<Dog, String>): Result<Animal, String> = source;
+                """);
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(
+                com.maruseron.zeron.StandardLibrary.withBundledUnits(List.of(unit)));
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
+    }
+
+    @Test
+    public void rejectsCovarianceInUnsafeAdtPositions() {
+        assertInvalid("""
+                type Bad<out T> = (callback: (T) -> Boolean, value: T);
+                """);
+        assertInvalid("""
+                type Bad<out T> = Some(callback: (T) -> Boolean);
+                """);
+        assertInvalid("""
+                type Bad<out T> = (reference: &T, value: T);
+                """);
+        assertInvalid("""
+                type Bad<out T> = (values: Array<T>, value: T);
+                """);
+        assertInvalid("""
+                type Bad<out T> deriving Eq = (value: T, other: T);
+                """);
+        assertInvalid("""
+                contract Animal {}
+                type Maybe<T> = Some(value: T) | None;
+                fn bad(value: Maybe<out Animal>): Unit = ();
+                """);
+    }
+
+    @Test
     public void covariantContractsAndClassesAcceptSafeAssignments() throws Exception {
         final var output = Files.createTempDirectory(Path.of("target"), "zeron-variance-");
         final var unit = parseUnit("Variance.zn", """
@@ -235,6 +301,59 @@ public final class GenericVarianceTest {
                     value.value += 1;
                 }
                 """);
+    }
+
+    @Test
+    public void compiledLibraryMetadataPreservesAdtVarianceForClients() throws Exception {
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-adt-variance-library-");
+        final var clientOutput = Files.createTempDirectory(Path.of("target"), "zeron-adt-variance-client-");
+        final var library = parseUnit("Library.zn", """
+                package variance.adtlibrary;
+                public contract Animal {}
+                public class Dog is Animal {
+                    public constructor new;
+                }
+                public type Maybe<out T> = Some(value: T) | None;
+                public type Duo<out A, out B> = (left: A, right: B);
+                """);
+        final var client = parseUnit("Client.zn", """
+                package variance.adtclient;
+                import variance.adtlibrary.*;
+                fn widenMaybe(value: Maybe<Dog>): Maybe<Animal> = value;
+                fn widenDuo(value: Duo<Dog, Dog>): Duo<Animal, Animal> = value;
+                """);
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(
+                    List.of(library), "variance.adtlibrary.Library", "variance.adtlibrary",
+                    List.of(), false, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+            final var maybe = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.SumExport.class::isInstance)
+                    .map(ZeronLibraryIndex.SumExport.class::cast)
+                    .filter(exported -> exported.qualifiedName().equals("variance.adtlibrary.Maybe"))
+                    .findFirst().orElseThrow();
+            final var duo = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.ProductExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ProductExport.class::cast)
+                    .filter(exported -> exported.qualifiedName().equals("variance.adtlibrary.Duo"))
+                    .findFirst().orElseThrow();
+            assertEquals(TypeParameterDescriptor.Variance.COVARIANT,
+                    maybe.typeParameters().getFirst().variance());
+            assertEquals(TypeParameterDescriptor.Variance.COVARIANT,
+                    duo.typeParameters().getFirst().variance());
+
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), "variance.adtclient.Client", "variance.adtclient",
+                    List.of(index), false, List.of(), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+        } finally {
+            deleteTree(clientOutput);
+            deleteTree(libraryOutput);
+        }
     }
 
     @Test

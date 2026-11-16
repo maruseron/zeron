@@ -133,7 +133,8 @@ final class DeclarationRegistry {
         }
         if (product.components().size() < 2) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    product.name(), "A product type must declare at least two components."));
+                    product.name(), "A unary product is not supported; use a newtype for a single-value"
+                            + " representation, or declare at least two product components."));
         }
         final var componentNames = new HashSet<String>();
         for (final var component : product.components()) {
@@ -177,7 +178,7 @@ final class DeclarationRegistry {
                     .map(parameter -> (TypeDescriptor) parameter).toList();
             permitted.add(new Stmt.ContractUse(caseClassToken, typeArguments));
             final var fields = sumCase.payloads().stream()
-                    .map(payload -> new Stmt.Field(payload.name(), payload.type()))
+                    .map(payload -> new Stmt.Field(payload.name(), payload.type(), null, true))
                     .toList();
             final var contractUse = new Stmt.ContractUse(sum.name(), typeArguments);
             final var caseTypeParameters = new ArrayList<TypeParameterDescriptor>(sum.typeParameters());

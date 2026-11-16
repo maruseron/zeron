@@ -95,6 +95,17 @@ public final class NewtypeTest {
     }
 
     @Test
+    public void rejectsCovariantNewtypeParameters() {
+        final var parsed = Parser.of(Scanner.from("""
+                newtype Box<out T> = T;
+                """, "variance.zn").scanTokens())
+                .parseCompilationUnitWithDiagnostics("variance.zn");
+        assertFalse(parsed.diagnostics().isEmpty());
+        assertTrue(parsed.diagnostics().toString(), parsed.diagnostics().stream()
+                .anyMatch(diagnostic -> diagnostic.message().contains("invariant")));
+    }
+
+    @Test
     public void acceptsGenericAndNominalRepresentations() throws Exception {
         final var programName = "GenericNewtypeProgram" + UUID.randomUUID().toString().replace("-", "");
         final var unit = parse("generic-newtypes.zn", """

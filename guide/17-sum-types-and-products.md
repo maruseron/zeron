@@ -212,6 +212,20 @@ Like products, sums are nominal: a different sum with identical-looking cases re
 type. Products and sums can receive structural `Eq` evidence when their payloads support it, but
 this does not give them `Hashable` automatically.
 
+Sum and product type parameters may be marked `out` when every use is read-only. Payloads and
+components are read-only, so `type Maybe<out T> = Some(value: T) | None` widens from
+`Maybe<Dog>` to `Maybe<Animal>`. Mutable positions and invariant derived contracts reject an
+unsafe `out` occurrence. Standard `Option`, `Result`, and `Pair` are covariant.
+
+Products, sums, and newtypes accept the same declaration annotations as classes. Targets are
+`PRODUCT`, `PRODUCT_COMPONENT`, `SUM`, `SUM_CASE`, and `NEWTYPE`; for example, `@SerialName("ok")`
+may precede a sum case.
+
+Zeron has no transparent type aliases. `type MyInt = Int;` declares a one-case sum whose case is
+also named `Int`, so construction is `MyInt.Int()` and `MyInt` is not assignable to or from `Int`.
+Use a `newtype` when the intent is a distinct single-value representation, and use a product with
+at least two components when the intent is a grouped value.
+
 ## Newtypes
 
 A newtype gives a supported scalar representation a distinct nominal identity. Its value is

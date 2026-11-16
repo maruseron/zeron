@@ -175,10 +175,28 @@ public final class ProductTypeTest {
     }
 
     @Test
+    public void acceptsAndChecksProductTypeParameterBounds() {
+        new CompilationService(parse("""
+                import zeron.lang.Eq;
+                type Pair<T: Eq<T>> = (left: T, right: T);
+                fn same<T: Eq<T>>(left: Pair<T>, right: Pair<T>): Boolean = left == right;
+                """), "ProductBoundsProgram").resolve();
+        final var invalid = assertThrows(ResolutionError.class, () -> new CompilationService(parse("""
+                type Pair<T: MissingBound> = (left: T, right: T);
+                """), "InvalidProductBoundsProgram").resolve());
+        assertTrue(invalid.getMessage(), invalid.getMessage().contains("MissingBound"));
+        final var notContract = assertThrows(ResolutionError.class, () -> new CompilationService(parse("""
+                type Pair<T: Int> = (left: T, right: T);
+                """), "NonContractProductBoundsProgram").resolve());
+        assertTrue(notContract.getMessage(), notContract.getMessage().contains("must be a contract type"));
+    }
+
+    @Test
     public void rejectsOneComponentAndDuplicateNames() {
-        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+        final var unary = assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 type One = (value: Int);
                 """)));
+        assertTrue(unary.getMessage(), unary.getMessage().contains("unary product"));
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 type Duplicate = (value: Int, value: String);
                 """)));

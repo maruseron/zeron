@@ -583,6 +583,9 @@ public final class Parser {
             case Stmt.ClassDecl ignored -> Stmt.AnnotationTarget.CLASS;
             case Stmt.ExternalClass ignored -> Stmt.AnnotationTarget.CLASS;
             case Stmt.ContractDecl ignored -> Stmt.AnnotationTarget.CONTRACT;
+            case Stmt.ProductDecl ignored -> Stmt.AnnotationTarget.PRODUCT;
+            case Stmt.SumDecl ignored -> Stmt.AnnotationTarget.SUM;
+            case Stmt.NewtypeDecl ignored -> Stmt.AnnotationTarget.NEWTYPE;
             case Stmt.ExternalFunction ignored -> Stmt.AnnotationTarget.FUNCTION;
             case Stmt.FunctionDeclaration function -> function instanceof Stmt.ExtensionMethod
                     ? Stmt.AnnotationTarget.METHOD : Stmt.AnnotationTarget.FUNCTION;
@@ -595,6 +598,9 @@ public final class Parser {
             case Stmt.ClassDecl classDeclaration -> classDeclaration.isPublic();
             case Stmt.ExternalClass externalClass -> externalClass.isPublic();
             case Stmt.ContractDecl contractDeclaration -> contractDeclaration.isPublic();
+            case Stmt.ProductDecl product -> product.isPublic();
+            case Stmt.SumDecl sum -> sum.isPublic();
+            case Stmt.NewtypeDecl newtype -> newtype.isPublic();
             case Stmt.ExternalFunction externalFunction -> externalFunction.isPublic();
             case Stmt.FunctionDeclaration function -> function.isPublic();
             default -> false;
@@ -603,7 +609,7 @@ public final class Parser {
 
     private Stmt typeDeclaration(final boolean isPublic) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect type name."));
-        final var typeParameters = typeParameterDeclaration(name, true);
+        final var typeParameters = typeParameterDeclaration(name, true, false, true);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
@@ -614,9 +620,15 @@ public final class Parser {
                 if (!check(RIGHT_PAREN)) {
                     do {
                         final var componentDocumentation = documentationBefore(peek());
+                        final var componentAnnotations = annotationApplications();
                         final var componentName = consume(IDENTIFIER, "Expect product component name.");
                         consume(COLON, "Expect ':' after product component name.");
-                        components.add(new Stmt.ProductComponent(componentName, collectType()));
+                        final var componentType = collectType();
+                        components.add(new Stmt.ProductComponent(componentName, componentType));
+                        recordAnnotationSite(Stmt.AnnotationTarget.PRODUCT_COMPONENT,
+                                annotationTargetName(name.lexeme()) + "." + componentName.lexeme(),
+                                componentType.descriptor(), components.size() - 1, isPublic,
+                                componentAnnotations);
                         if (componentDocumentation != null) {
                             documentation.put(componentName, componentDocumentation);
                         }
@@ -630,6 +642,7 @@ public final class Parser {
             final var cases = new ArrayList<Stmt.SumCase>();
             do {
                 final var caseDocumentation = documentationBefore(peek());
+                final var caseAnnotations = annotationApplications();
                 final var caseName = consume(IDENTIFIER, "Expect sum case name.");
                 var caseTypeParameters = Map.<String, TypeParameterDescriptor>of();
                 if (check(LESS)) {
@@ -664,6 +677,9 @@ public final class Parser {
                     activeTypeParameters = typeParameters;
                 }
                 cases.add(new Stmt.SumCase(caseName, List.copyOf(caseTypeParameters.values()), payloads));
+                recordAnnotationSite(Stmt.AnnotationTarget.SUM_CASE,
+                        annotationTargetName(name.lexeme()) + "." + caseName.lexeme(), null, -1,
+                        isPublic, caseAnnotations);
                 if (caseDocumentation != null) documentation.put(caseName, caseDocumentation);
             } while (match(PIPE));
             consume(SEMICOLON, "Expect ';' after sum declaration.");
@@ -676,7 +692,8 @@ public final class Parser {
 
     private Stmt.NewtypeDecl newtypeDeclaration(final boolean isPublic) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect newtype name."));
-        final var typeParameters = typeParameterDeclaration(name, true, false, true);
+        final var typeParameters = typeParameterDeclaration(name, true, false, false,
+                "Newtype type parameters are invariant; 'out' is not supported on a newtype.");
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = typeParameters;
         try {
@@ -702,7 +719,12 @@ public final class Parser {
         if (!matchSoftKeyword("deriving")) return List.of();
         final var contracts = new ArrayList<Token>();
         do {
-            contracts.add(consume(IDENTIFIER, "Expect a contract name after 'deriving'."));
+            final var contract = consume(IDENTIFIER, "Expect a contract name after 'deriving'.");
+            final var name = new StringBuilder(contract.lexeme());
+            while (match(DOT)) {
+                name.append('.').append(consume(IDENTIFIER, "Expect a contract name after '.'.").lexeme());
+            }
+            contracts.add(withLexeme(contract, name.toString()));
         } while (match(COMMA));
         return List.copyOf(contracts);
     }
@@ -1394,6 +1416,10 @@ public final class Parser {
         }
     }
 
+    /// Parses a type-parameter list. {@code allowBounds} controls whether contract bounds after
+    /// {@code :} are admitted; marker constraints remain available when it is false. Callers also
+    /// choose shadowing and covariance policy, so case-local and newtype parameters can reject the
+    /// forms their declaration does not support.
     private Map<String, TypeParameterDescriptor> typeParameterDeclaration(final Token declarationName,
                                                                           final boolean allowBounds) {
         return typeParameterDeclaration(declarationName, allowBounds, false, false);
@@ -1409,6 +1435,15 @@ public final class Parser {
                                                                           final boolean allowBounds,
                                                                           final boolean rejectShadowing,
                                                                           final boolean allowCovariance) {
+        return typeParameterDeclaration(declarationName, allowBounds, rejectShadowing, allowCovariance,
+                "Covariance is supported only on generic classes, contracts, sums, and products.");
+    }
+
+    private Map<String, TypeParameterDescriptor> typeParameterDeclaration(final Token declarationName,
+                                                                          final boolean allowBounds,
+                                                                          final boolean rejectShadowing,
+                                                                          final boolean allowCovariance,
+                                                                          final String covarianceError) {
         if (!match(LESS)) return Map.of();
         final var scopeId = TypeParameterDescriptor.nextScopeId();
         final var parameters = new LinkedHashMap<String, TypeParameterDescriptor>();
@@ -1418,7 +1453,7 @@ public final class Parser {
                 final var varianceToken = advance();
                 if (!allowCovariance) {
                     error(varianceToken, DiagnosticCatalog.INVALID_GENERIC_DECLARATION,
-                            "Covariance is supported only on generic classes and contracts.");
+                            covarianceError);
                 }
                 variance = TypeParameterDescriptor.Variance.COVARIANT;
             }

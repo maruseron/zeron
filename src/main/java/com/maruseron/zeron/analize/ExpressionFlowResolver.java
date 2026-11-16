@@ -3265,7 +3265,8 @@ final class ExpressionFlowResolver {
                                                           final Token where) {
         final var separator = targetType.name().lastIndexOf('.');
         if (separator < 0) return targetType;
-        final var sumName = targetType.name().substring(0, separator);
+        final var writtenSumName = targetType.name().substring(0, separator);
+        final var sumName = TypeResolver.resolveTypeName(context, writtenSumName, where);
         final var caseName = targetType.name().substring(separator + 1);
         final var sum = context.sums.get(sumName);
         if (sum == null) return targetType;

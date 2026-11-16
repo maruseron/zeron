@@ -145,6 +145,29 @@ Effect-kinded parameters use the exclusive `effect` marker to accept effect type
 propagation. For the marker rules and nested generic boundaries, see the
 [generic type-system design](../documents/design_documents/design-document-19_generic-type-system.md).
 
+## Covariant declarations
+
+Mark a type parameter `out` when the declaration only produces values of that type and never
+stores or consumes them through a mutable position:
+
+```zeron
+public class Box<out T> {
+    public property value: T;
+    public constructor new;
+}
+
+fn widen(box: Box<Dog>): Box<Animal> = box;
+```
+
+The same rule applies to contracts, sums, and products. Read-only properties, product components,
+and sum payloads may use a covariant parameter; mutable properties, writable references, arrays,
+consuming parameters, and invariant derived contracts may not. Zeron checks every use rather than
+trusting `out`, so an unsafe occurrence is an error at the declaration.
+
+Use-site projections such as `Box<out Animal>` do not create covariance for sums or products; mark
+the declaration instead. Standard `Option<T>`, `Result<T, E>`, and `Pair<A, B>` are covariant, so
+`Option<Dog>` widens to `Option<Animal>` when `Dog` conforms to `Animal`.
+
 ## Type erasure
 
 Zeron checks generic types while building a program, but the JVM does not keep every generic type

@@ -20,6 +20,10 @@ import java.util.Map;
 import java.util.Set;
 
 final class TypeClassEvidence {
+    private static final Set<String> DERIVABLE_CONTRACTS = Set.of(
+            "zeron.lang.Eq", "zeron.lang.Hashable", "zeron.serialization.Encode",
+            "zeron.serialization.Decode", "zeron.serialization.Codec", "zeron.serialization.Shape");
+
     private TypeClassEvidence() {}
 
     record WitnessEntry(Stmt.Witness declaration, String packageName) {}
@@ -513,6 +517,21 @@ final class TypeClassEvidence {
         return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
     }
 
+    /// Resolves a `deriving` entry through the file's imports and aliases, then falls back to the
+    /// historical unqualified names for the contracts the compiler can synthesize.
+    private static String derivedContractName(final ResolutionContext context, final Token derived) {
+        final var resolved = TypeResolver.resolveTypeName(context, derived.lexeme(), derived);
+        return switch (resolved) {
+            case "Eq" -> "zeron.lang.Eq";
+            case "Hashable" -> "zeron.lang.Hashable";
+            case "Encode" -> "zeron.serialization.Encode";
+            case "Decode" -> "zeron.serialization.Decode";
+            case "Codec" -> "zeron.serialization.Codec";
+            case "Shape" -> "zeron.serialization.Shape";
+            default -> resolved;
+        };
+    }
+
     private static void registerConstructorWitness(final ResolutionContext context,
                                                    final Stmt.Witness witness,
                                                    final String packageName,
@@ -601,24 +620,30 @@ final class TypeClassEvidence {
         final var product = declaration instanceof Stmt.ProductDecl;
         final var sum = declaration instanceof Stmt.SumDecl;
         if (dataClass) {
-            if (derives.removeIf(token -> token.lexeme().equals("Eq"))) {
+            if (derives.removeIf(token -> derivedContractName(context, token).equals("zeron.lang.Eq"))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         name, "Data classes have intrinsic structural Eq; do not derive Eq explicitly."));
             }
-            derives.add(new Token(TokenType.IDENTIFIER, "Eq", null, name.span()));
+            derives.add(new Token(TokenType.IDENTIFIER, "zeron.lang.Eq", null, name.span()));
         }
-        if (derives.stream().anyMatch(token -> token.lexeme().equals("Codec"))) {
-            if (derives.stream().noneMatch(token -> token.lexeme().equals("Encode"))) {
-                derives.add(new Token(TokenType.IDENTIFIER, "Encode", null, name.span()));
+        if (derives.stream().anyMatch(token -> derivedContractName(context, token)
+                .equals("zeron.serialization.Codec"))) {
+            if (derives.stream().noneMatch(token -> derivedContractName(context, token)
+                    .equals("zeron.serialization.Encode"))) {
+                derives.add(new Token(TokenType.IDENTIFIER, "zeron.serialization.Encode", null, name.span()));
             }
-            if (derives.stream().noneMatch(token -> token.lexeme().equals("Decode"))) {
-                derives.add(new Token(TokenType.IDENTIFIER, "Decode", null, name.span()));
+            if (derives.stream().noneMatch(token -> derivedContractName(context, token)
+                    .equals("zeron.serialization.Decode"))) {
+                derives.add(new Token(TokenType.IDENTIFIER, "zeron.serialization.Decode", null, name.span()));
             }
         }
-        if (derives.stream().anyMatch(token -> token.lexeme().equals("Encode"))
-                && derives.stream().anyMatch(token -> token.lexeme().equals("Decode"))
-                && derives.stream().noneMatch(token -> token.lexeme().equals("Codec"))) {
-            derives.add(new Token(TokenType.IDENTIFIER, "Codec", null, name.span()));
+        if (derives.stream().anyMatch(token -> derivedContractName(context, token)
+                .equals("zeron.serialization.Encode"))
+                && derives.stream().anyMatch(token -> derivedContractName(context, token)
+                        .equals("zeron.serialization.Decode"))
+                && derives.stream().noneMatch(token -> derivedContractName(context, token)
+                        .equals("zeron.serialization.Codec"))) {
+            derives.add(new Token(TokenType.IDENTIFIER, "zeron.serialization.Codec", null, name.span()));
         }
         if (derives.isEmpty()) return;
         final var parameters = typeParameters(declaration);
@@ -630,18 +655,10 @@ final class TypeClassEvidence {
         componentTypes.forEach(type -> TypeResolver.validateType(context, type, name));
         final var requested = new HashSet<String>();
         for (final var derived : derives) {
-            final var contractName = switch (derived.lexeme()) {
-                case "Eq" -> "zeron.lang.Eq";
-                case "Hashable" -> "zeron.lang.Hashable";
-                case "Encode" -> "zeron.serialization.Encode";
-                case "Decode" -> "zeron.serialization.Decode";
-                case "Codec" -> "zeron.serialization.Codec";
-                case "Shape" -> "zeron.serialization.Shape";
-                default -> null;
-            };
-            if (contractName == null) {
+            final var contractName = derivedContractName(context, derived);
+            if (!DERIVABLE_CONTRACTS.contains(contractName)) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        derived, "This contract cannot currently be derived."));
+                        derived, "Contract '" + contractName + "' cannot currently be derived."));
                 continue;
             }
             if (!requested.add(contractName)) {
@@ -662,7 +679,8 @@ final class TypeClassEvidence {
                     continue;
                 }
             } else if (!dataClass && contractName.equals("zeron.lang.Hashable")
-                    && !derives.stream().anyMatch(token -> token.lexeme().equals("Eq"))) {
+                    && !derives.stream().anyMatch(token -> derivedContractName(context, token)
+                            .equals("zeron.lang.Eq"))) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
                         derived, "Hashable derivation requires structural Eq derivation."));
                 continue;
@@ -730,7 +748,7 @@ final class TypeClassEvidence {
                                 List.of(target, decodeRow)), target));
             }
             final var syntheticName = new Token(TokenType.IDENTIFIER,
-                    "$zeron$derived$" + name.lexeme() + "$" + derived.lexeme(), null, derived.span());
+                    "$zeron$derived$" + name.lexeme() + "$" + simpleName(contractName), null, derived.span());
             final var witness = new Stmt.Witness(syntheticName, parameters, requiredContract, target,
                     List.of(), true, requirements);
             register(context, witness, packageName);
@@ -752,6 +770,7 @@ final class TypeClassEvidence {
             case Stmt.ClassDecl value -> value.typeParameters();
             case Stmt.ProductDecl value -> value.typeParameters();
             case Stmt.SumDecl value -> value.typeParameters();
+            case Stmt.NewtypeDecl value -> value.typeParameters();
             default -> List.of();
         };
     }

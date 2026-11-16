@@ -22,6 +22,92 @@ final class DeclarationResolver {
             final var caseClass = context.classes.get(sum.generatedCaseName(sumCase));
             resolveClass(context, caseClass);
         }
+        VariancePositionValidator.validate(context, sum);
+        if (sum.isPublic()) validatePublicSumPayloads(context, sum);
+    }
+
+    private static void validatePublicSumPayloads(final ResolutionContext context,
+                                                  final Stmt.SumDecl sum) {
+        final var reported = new HashSet<String>();
+        for (final var sumCase : sum.cases()) {
+            for (final var payload : sumCase.payloads()) {
+                validatePubliclyNameableType(context, payload.type(), payload.name(), sum, reported);
+            }
+        }
+    }
+
+    private static void validatePubliclyNameableType(final ResolutionContext context,
+                                                     final TypeDescriptor type,
+                                                     final Token where,
+                                                     final Stmt.SumDecl sum,
+                                                     final Set<String> reported) {
+        switch (type) {
+            case NominalDescriptor nominal -> {
+                final var name = nominal.name();
+                if (!isPubliclyNameableNominal(context, name) && reported.add(name)) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                            where, "Public sum '" + sum.name().lexeme() + "' exposes non-public payload type '"
+                                    + name + "'; payload types of a public sum must be public."));
+                }
+            }
+            case GenericDescriptor generic -> {
+                validatePubliclyNameableType(context, generic.baseType(), where, sum, reported);
+                generic.typeParameters().forEach(argument ->
+                        validatePubliclyNameableType(context, argument, where, sum, reported));
+            }
+            case ArrayDescriptor array ->
+                    validatePubliclyNameableType(context, array.elementType(), where, sum, reported);
+            case NullableDescriptor nullable ->
+                    validatePubliclyNameableType(context, nullable.baseType(), where, sum, reported);
+            case ReferenceDescriptor reference ->
+                    validatePubliclyNameableType(context, reference.baseType(), where, sum, reported);
+            case TypeConstructorDescriptor constructor -> {
+                validatePubliclyNameableType(context, constructor.baseType(), where, sum, reported);
+                constructor.arguments().forEach(argument ->
+                        validatePubliclyNameableType(context, argument, where, sum, reported));
+            }
+            case AppliedConstructorDescriptor applied ->
+                    validatePubliclyNameableType(context, applied.argument(), where, sum, reported);
+            case TypeProjectionDescriptor projection ->
+                    validatePubliclyNameableType(context, projection.bound(), where, sum, reported);
+            case FunctionDescriptor function -> {
+                if (function.receiverType() != null) {
+                    validatePubliclyNameableType(context, function.receiverType(), where, sum, reported);
+                }
+                function.parameters().forEach(parameter ->
+                        validatePubliclyNameableType(context, parameter, where, sum, reported));
+                validatePubliclyNameableType(context, function.returnType(), where, sum, reported);
+                function.raisedEffects().forEach(effect ->
+                        validatePubliclyNameableType(context, effect, where, sum, reported));
+            }
+            case TypeParameterDescriptor parameter -> parameter.bounds().forEach(bound ->
+                    validatePubliclyNameableType(context, bound, where, sum, reported));
+            case EffectRowDescriptor row -> {
+                row.effects().forEach(effect ->
+                        validatePubliclyNameableType(context, effect, where, sum, reported));
+                row.variables().forEach(variable ->
+                        validatePubliclyNameableType(context, variable, where, sum, reported));
+            }
+            default -> { }
+        }
+    }
+
+    private static boolean isPubliclyNameableNominal(final ResolutionContext context,
+                                                     final String name) {
+        final var classDeclaration = context.classes.get(name);
+        if (classDeclaration != null) return classDeclaration.isPublic();
+        final var contract = context.contracts.get(name);
+        if (contract != null) return contract.isPublic();
+        final var sum = context.sums.get(name);
+        if (sum != null) return sum.isPublic();
+        final var product = context.products.get(name);
+        if (product != null) return product.isPublic();
+        final var newtype = context.newtypes.get(name);
+        if (newtype != null) return newtype.isPublic();
+        final var external = context.externalClasses.get(name);
+        if (external != null) return external.isPublic();
+        // Builtin, type-parameter, and host classes are public by construction or outside this check.
+        return true;
     }
 
     private static void rejectReifiedTypeParameters(final List<TypeParameterDescriptor> parameters,
@@ -38,6 +124,7 @@ final class DeclarationResolver {
         final var declaration = context.classes.get(product.name().lexeme());
         if (declaration == null) return;
         resolveClass(context, declaration);
+        VariancePositionValidator.validate(context, product);
     }
 
     static void resolveNewtype(final ResolutionContext context, final Stmt.NewtypeDecl newtype) {

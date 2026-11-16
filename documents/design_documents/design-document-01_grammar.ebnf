@@ -134,9 +134,11 @@ publicDataClassDecl = "public", dataClassDecl ;
 sealedContractDecl = "sealed", contractDecl ;
 typeDecl = "type", IDENTIFIER, [ typeParameters ], [ derivingClause ], "=",
              ( productComponents | sumCase, { "|", sumCase } ), ";" ;
-derivingClause = 'deriving', IDENTIFIER, { ",", IDENTIFIER } ;
+(* [CHANGED] Deriving entries are qualified contract names; unqualified names resolve through the
+   file's imports and aliases like any other type reference. *)
+derivingClause = 'deriving', qualifiedName, { ",", qualifiedName } ;
 productComponents = "(", productComponent, ",", productComponent, { ",", productComponent }, ")" ;
-productComponent = IDENTIFIER, ":", type ;
+productComponent = { annotationApplication }, IDENTIFIER, ":", type ;
 newtypeDecl = 'newtype', IDENTIFIER, [ typeParameters ], [ derivingClause ], "=", type, [ 'where', expression ],
                 ";" ;
 
@@ -145,7 +147,8 @@ newtypeDecl = 'newtype', IDENTIFIER, [ typeParameters ], [ derivingClause ], "="
    representation. `deriving` on a newtype is valid grammar and resolves through the carrier. *)
 (* [CHANGED] ZEP-0128: a case may declare its own type parameters. Marker bounds are accepted;
    contract bounds on these case-local parameters are rejected by the parser. *)
-sumCase = IDENTIFIER, [ typeParameters ], [ "(", [ sumPayload, { ",", sumPayload } ], ")" ] ;
+sumCase = { annotationApplication }, IDENTIFIER, [ typeParameters ],
+          [ "(", [ sumPayload, { ",", sumPayload } ], ")" ] ;
 sumPayload = IDENTIFIER, ":", type ;
 declaration = varDecl | funDecl | handlerDecl | statement ;
 varDecl = "let", [ "mut" ], IDENTIFIER, [ ":", type ], [ "=", expression ], ";" ;
@@ -180,6 +183,10 @@ externalClassMember = { annotationApplication }, [ "public" ], [ "mut" ],
                     | { annotationApplication }, [ "public" ], "static",
                         ( "property", IDENTIFIER, ":", type, ";"
                         | memberName, "(", plainParameters, ")", ":", type, [ throwsClause ], ";" ) ;
+(* [CHANGED] ZEP-0128 and its product-bounds amendment: bounds (`:`) are accepted on class,
+   contract, effect, sum, product, newtype, function, method and witness type parameters. Case-local
+   sum parameters accept marker constraints only; newtype parameters are invariant, so `out` is
+   rejected on a newtype. *)
 typeParameters = "<", typeParameter, { ",", typeParameter }, ">" ;
 typeParameter = [ 'out' ], IDENTIFIER, [ "<", '_', ">" ],
                   [ ":", typeParameterConstraint, { "+", typeParameterConstraint } ] ;
@@ -197,7 +204,12 @@ plainParameters = [ plainParameter, { ",", plainParameter } ] ;
 plainParameter = { annotationApplication }, IDENTIFIER, ":", type ;
 classDecl = "class", IDENTIFIER, [ typeParameters ], [ "is", contractUse, { ",", contractUse } ],
               [ derivingClause ], "{", { classMember }, "}" ;
-effectDecl = "effect", IDENTIFIER, "{", { classMember }, "}" ;
+(* [CHANGED] Effects use the class-member syntax and additionally accept type parameters,
+   nominal contract uses after `is`, effect supertypes after `under`, and `deriving`. *)
+effectDecl = "effect", IDENTIFIER, [ typeParameters ],
+              [ "is", contractUse, { ",", contractUse } ],
+              [ "under", qualifiedName, { ",", qualifiedName } ],
+              [ derivingClause ], "{", { classMember }, "}" ;
 extensionDecl = "extension", [ typeParameters ], type, "{", { extensionMember }, "}" ;
 
 (* [CHANGED] Annotations: optional, stackable applications on extension members. An extension
@@ -499,11 +511,13 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
 (* Semantic/parser constraints:
    - An annotation application (`@Name` or `@Name(args)`) is a prefix on every annotation target:
    top-level declarations, class, data class, contract and external-class members, data-class
-   components, extension members, namespace members and parameters. Applications may be stacked.
+   components, product components, sum cases, extension members, namespace members and parameters.
+   Applications may be stacked.
    Each application must name a declaration whose target matches one of `CLASS`, `CONTRACT`,
-   `FUNCTION`, `METHOD`, `CONSTRUCTOR`, `FIELD`, `PROPERTY`, `DATA_COMPONENT` or `PARAMETER`.
+   `FUNCTION`, `METHOD`, `CONSTRUCTOR`, `FIELD`, `PROPERTY`, `DATA_COMPONENT`, `PARAMETER`,
+   `PRODUCT`, `PRODUCT_COMPONENT`, `SUM`, `SUM_CASE` or `NEWTYPE`.
    Target names are canonically uppercase; the parser matches them case-insensitively.
-   Annotations cannot target namespaces, product components, sum cases or sum payloads.
+   Annotations cannot target namespaces or sum payloads.
    - A wildcard import ends in `.*`, cannot have an alias, and cannot be a suffix import.
    - Namespace members are functions and immutable values; public mutable values remain unsupported.
    - `model` and `data` are soft keywords.
@@ -511,9 +525,9 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    instead of ordinary contract bounds. `effect...` denotes an effect-row parameter. `reified`
    passes a runtime applied-type descriptor and is permitted only on callable type parameters;
    class and contract type parameters reject it.
-   - The `out` prefix is allowed only on class and contract type parameters. A higher-kinded
-   parameter is written `F<_>` and cannot be covariant; class/contract covariance is checked for
-   unsafe positions rather than trusted from the annotation.
+   - The `out` prefix is allowed on class, contract, sum, and product type parameters. A
+   higher-kinded parameter is written `F<_>` and cannot be covariant; class, contract, sum, and
+   product covariance is checked for unsafe positions rather than trusted from the annotation.
    - Postfix `!!` asserts that an expression is non-null and produces its non-null type.
    - A trailing lambda may follow a callable name or call expression. An arrowless block with an
    expected one-parameter function type receives the implicit binding `it`.

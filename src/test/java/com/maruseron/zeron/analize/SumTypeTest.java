@@ -617,6 +617,52 @@ public final class SumTypeTest {
     }
 
     @Test
+    public void resolvesCrossLibrarySumCaseTestsThroughImports() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var libraryPackage = "caselookuplib" + suffix;
+        final var appPackage = "caselookupapp" + suffix;
+        final var libraryOutput = Files.createTempDirectory(Path.of("target"), "zeron-case-lookup-library-");
+        final var appOutput = Files.createTempDirectory(Path.of("target"), "zeron-case-lookup-client-");
+        final var libraryUnit = parse("Library.zn", """
+                package %s;
+                public type Box = Full | Empty;
+                """.formatted(libraryPackage));
+        try {
+            final var libraryCompiler = CompilationService.forCompilationUnits(List.of(libraryUnit),
+                    libraryPackage + ".Library", libraryPackage, List.of(), true, List.of(), libraryOutput);
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var index = ZeronLibraryIndex.readFromDirectory(libraryOutput);
+            final var appUnit = parse("Main.zn", """
+                    package %s;
+                    import %s.Box;
+                    fn make(): Box = Box.Full();
+                    fn result(): Boolean = make() is Box.Full;
+                    """.formatted(appPackage, libraryPackage));
+            final var appCompiler = CompilationService.forCompilationUnits(List.of(appUnit),
+                    appPackage + ".Main", appPackage, List.of(index), true, List.of(), appOutput);
+            appCompiler.resolve();
+            appCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    appOutput.toUri().toURL(), libraryOutput.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(true, loader.loadClass(appPackage + ".Main").getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(appOutput);
+            deleteTree(libraryOutput);
+        }
+    }
+
+    @Test
+    public void rejectsPublicSumsWithNonPublicPayloadTypes() {
+        final var error = assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                class Secret {}
+                public type Leaky = Full(value: Secret);
+                """)));
+        assertTrue(error.getMessage(), error.getMessage().contains("non-public payload type"));
+    }
+
+    @Test
     public void supportsBoundedSumParametersAndCaseLocalParameters() throws Exception {
         final var programName = "BoundedSum" + UUID.randomUUID().toString().replace("-", "");
         final var source = """

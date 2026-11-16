@@ -19,6 +19,20 @@ import static org.junit.Assert.assertTrue;
 
 public final class ClassTypeParameterBoundTest {
     @Test
+    public void resolvesAliasedGenericContractBoundsThroughImports() {
+        final var unit = parse("AliasedBound.zn", """
+                package aliasedbound;
+                import zeron.lang.Eq as Same;
+                fn same<T: Same<T>>(left: T, right: T): Boolean = left.eq(right);
+                fn result(): Boolean = same(1, 1);
+                """);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(unit), "AliasedBoundProgram", "aliasedbound");
+
+        compiler.resolve();
+    }
+
+    @Test
     public void classBoundsSurviveLibraryIndexRoundTrip() throws Exception {
         final var suffix = UUID.randomUUID().toString().replace("-", "");
         final var libraryPackage = "boundedlibrary" + suffix;

@@ -128,6 +128,9 @@ final class AnnotationResolver {
             case Stmt.ClassDecl classDeclaration -> classDeclaration.isPublic();
             case Stmt.ExternalClass externalClass -> externalClass.isPublic();
             case Stmt.ContractDecl contractDeclaration -> contractDeclaration.isPublic();
+            case Stmt.ProductDecl product -> product.isPublic();
+            case Stmt.SumDecl sum -> sum.isPublic();
+            case Stmt.NewtypeDecl newtype -> newtype.isPublic();
             case Stmt.ExternalFunction externalFunction -> externalFunction.isPublic();
             case Stmt.FunctionDeclaration function -> function.isPublic();
             case Stmt.Var variable -> variable.isPublic();
@@ -175,6 +178,9 @@ final class AnnotationResolver {
             case Stmt.ClassDecl ignored -> Stmt.AnnotationTarget.CLASS;
             case Stmt.ExternalClass ignored -> Stmt.AnnotationTarget.CLASS;
             case Stmt.ContractDecl ignored -> Stmt.AnnotationTarget.CONTRACT;
+            case Stmt.ProductDecl ignored -> Stmt.AnnotationTarget.PRODUCT;
+            case Stmt.SumDecl ignored -> Stmt.AnnotationTarget.SUM;
+            case Stmt.NewtypeDecl ignored -> Stmt.AnnotationTarget.NEWTYPE;
             case Stmt.ExternalFunction ignored -> Stmt.AnnotationTarget.FUNCTION;
             case Stmt.FunctionDeclaration function ->
                     function instanceof Stmt.ExtensionMethod

@@ -162,4 +162,61 @@ public final class AnnotationTest {
         assertTrue(unit.annotationSites().stream()
                 .anyMatch(site -> site.target() == Stmt.AnnotationTarget.DATA_COMPONENT));
     }
+
+    @Test
+    public void recordsAnnotationsOnAdtsComponentsCasesAndNewtypes() {
+        final var unit = Parser.of(Scanner.from("""
+                package adtannotations;
+                public annotation Meta(value: String) on PRODUCT, PRODUCT_COMPONENT,
+                    SUM, SUM_CASE, NEWTYPE;
+                @Meta("product")
+                public type Pair = (@Meta("left") left: Int, @Meta("right") right: Int);
+                @Meta("sum")
+                public type Choice = @Meta("none") None | @Meta("some") Some(value: Int);
+                @Meta("newtype")
+                public newtype Id = Int;
+                """).scanTokens()).parseCompilationUnit("src/main.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
+        assertTrue(unit.annotationSites().stream().anyMatch(site ->
+                site.target() == Stmt.AnnotationTarget.PRODUCT
+                        && site.targetName().endsWith(".Pair")));
+        assertTrue(unit.annotationSites().stream().anyMatch(site ->
+                site.target() == Stmt.AnnotationTarget.PRODUCT_COMPONENT
+                        && site.targetName().endsWith(".Pair.left")));
+        assertTrue(unit.annotationSites().stream().anyMatch(site ->
+                site.target() == Stmt.AnnotationTarget.SUM
+                        && site.targetName().endsWith(".Choice")));
+        assertTrue(unit.annotationSites().stream().anyMatch(site ->
+                site.target() == Stmt.AnnotationTarget.SUM_CASE
+                        && site.targetName().endsWith(".Choice.Some")));
+        assertTrue(unit.annotationSites().stream().anyMatch(site ->
+                site.target() == Stmt.AnnotationTarget.NEWTYPE
+                        && site.targetName().endsWith(".Id")));
+    }
+
+    @Test
+    public void rejectsMistargetedAndRepeatedAdtAnnotations() {
+        final var wrongTarget = Parser.of(Scanner.from("""
+                annotation OnlyCases on SUM_CASE;
+                @OnlyCases
+                type Choice = Some(value: Int) | None;
+                """).scanTokens()).parseCompilationUnit("src/main.zn");
+        final var wrongTargetResult = new ResolutionService()
+                .resolveUnitsWithDiagnostics(List.of(wrongTarget));
+
+        assertTrue(wrongTargetResult.errors().stream()
+                .anyMatch(error -> error.message().contains("does not target")));
+
+        final var repeated = Parser.of(Scanner.from("""
+                annotation Marker on PRODUCT_COMPONENT;
+                type Pair = (@Marker @Marker left: Int, right: Int);
+                """).scanTokens()).parseCompilationUnit("src/main.zn");
+        final var repeatedResult = new ResolutionService().resolveUnitsWithDiagnostics(List.of(repeated));
+
+        assertTrue(repeatedResult.errors().stream()
+                .anyMatch(error -> error.message().contains("may only be applied once")));
+    }
 }

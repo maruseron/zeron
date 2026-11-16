@@ -325,7 +325,8 @@ final class TypeResolver {
                 if (arity != 0) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                             where,
-                            "Type '" + nominal.name() + "' requires " + arity + " type arguments."));
+                            "Type '" + nominal.name() + "' requires " + arity
+                                    + (arity == 1 ? " type argument." : " type arguments.")));
                 }
             }
             case ArrayDescriptor array -> {
@@ -349,9 +350,8 @@ final class TypeResolver {
                 validateType(context, applied.argument(), where);
             }
             case TypeConstructorDescriptor constructor -> {
-                constructor.baseType().resolveName(resolveTypeName(
-                        context, constructor.baseType().name(), where));
-                final var name = constructor.baseType().name();
+                final var name = resolveTypeName(context, constructor.baseType().name(), where);
+                constructor.baseType().resolveName(name);
                 final var classDeclaration = context.classes.get(name);
                 final var sumDeclaration = context.sums.get(name);
                 final var productDeclaration = context.products.get(name);
@@ -390,9 +390,16 @@ final class TypeResolver {
             }
             case TypeProjectionDescriptor projection -> validateType(context, projection.bound(), where);
             case GenericDescriptor generic -> {
-                generic.baseType().resolveName(
-                        resolveTypeName(context, generic.baseType().name(), where));
-                final var name = generic.baseType().name();
+                final var name = resolveTypeName(context, generic.baseType().name(), where);
+                generic.baseType().resolveName(name);
+                if ((context.sums.containsKey(name) || context.products.containsKey(name))
+                        && generic.typeParameters().stream()
+                                .anyMatch(TypeProjectionDescriptor.class::isInstance)) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, where,
+                            "Use-site projections are not supported on sum or product types; widen the"
+                                    + " declaration or map the value instead."));
+                }
                 MemberInteropResolver.validateStarTypeAmbiguity(context, name, where);
                 final var classDeclaration = context.classes.get(name);
                 final var contractDeclaration = context.contracts.get(name);

@@ -4,6 +4,12 @@
 
 ### Compiler and language work
 
+- Implemented ZEP-0129 unary products versus arbitrary-valued newtypes. Products remain at two or
+  more components, while single-value shapes use ZEP-0070 direct-representation newtypes. Carrier
+  resolution now recurses through function types and generic applications, extension declarations
+  resolve `this` and newtype-typed parameters to their carriers, and generic function-carrier
+  returns adapt between erased function shapes. Function-shaped newtypes and their generic
+  extensions also work across separate compilation.
 - Implemented ZEP-0128 sum-type parameter bounds and case-local type parameters. Sum parameters
   accept contract and marker bounds, cases may declare marker-bounded existential parameters such
   as `Bind<B>`, construction infers or accepts complete explicit case-local arguments, and matching

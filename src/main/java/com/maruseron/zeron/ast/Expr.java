@@ -1079,6 +1079,7 @@ public sealed interface Expr {
         private String resolvedFunctionName;
         private Stmt.FunctionDeclaration resolvedFunctionDeclaration;
         private Token resolvedSymbolToken;
+        private TypeDescriptor resolvedCalleeType;
         private MemberCall implicitMemberCall;
         private ResolvedIntrinsicOperation intrinsicOperation;
         private TypeDescriptor variadicElementType;
@@ -1122,6 +1123,8 @@ public sealed interface Expr {
         }
         public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? callee : resolvedSymbolToken; }
         public void setResolvedSymbolToken(final Token token) { resolvedSymbolToken = token; }
+        public TypeDescriptor resolvedCalleeType() { return resolvedCalleeType; }
+        public void setResolvedCalleeType(final TypeDescriptor type) { resolvedCalleeType = type; }
         public MemberCall implicitMemberCall() { return implicitMemberCall; }
         public void setImplicitMemberCall(final MemberCall call) { implicitMemberCall = call; }
         public ResolvedIntrinsicOperation intrinsicOperation() { return intrinsicOperation; }

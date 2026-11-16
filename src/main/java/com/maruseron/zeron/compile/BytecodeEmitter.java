@@ -3812,6 +3812,8 @@ final class BytecodeEmitter {
     }
 
     private static FunctionDescriptor functionView(CompilationContext context, final TypeDescriptor type ){
+        final var resolved = NewtypeRepresentations.resolve(type);
+        if (!resolved.equals(type)) return functionView(context, resolved);
         return switch (type) {
             case FunctionDescriptor function -> function;
             case NullableDescriptor nullable -> functionView(context, nullable.baseType());

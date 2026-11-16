@@ -6,6 +6,7 @@ import com.maruseron.zeron.ast.Expr;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 
 import java.util.*;
 
@@ -725,7 +726,11 @@ final class LambdaCompilationPlan {
                 if (call.implicitMemberCall() == null) {
                     final var callee = call.resolvedSymbolToken();
                     final var calleeName = callee.lexeme();
-                    if (!localNames.contains(calleeName)
+                    if (callee.type() == TokenType.THIS && call.resolvedCalleeType() != null
+                            && !localNames.contains(calleeName) && seen.add(calleeName)) {
+                        captured.add(callee);
+                        activeCaptureTypes.putIfAbsent(calleeName, call.resolvedCalleeType());
+                    } else if (!localNames.contains(calleeName)
                             && (symbols.containsSymbol(callee) || symbols.containsAnySymbol(callee))) {
                         final var binding = lookupCapture(callee);
                         if (binding.lvt() != SymbolTable.GLOBAL
@@ -854,11 +859,22 @@ final class LambdaCompilationPlan {
                 final var resolvedName = variable.resolvedSymbolToken();
                 if (localNames.contains(sourceName)) return;
                 if (localNames.contains(resolvedName.lexeme())) return;
+                if (variable.name.type() == TokenType.THIS && variable.getType() != null) {
+                    final var captureName = resolvedName.lexeme();
+                    if (seen.add(captureName)) {
+                        captured.add(resolvedName);
+                        activeCaptureTypes.putIfAbsent(captureName, variable.getType());
+                    }
+                    return;
+                }
                 if ((symbols.containsSymbol(resolvedName) || symbols.containsAnySymbol(resolvedName))
                         && lookupCapture(resolvedName).lvt() != SymbolTable.GLOBAL
                         && seen.add(resolvedName.lexeme())) {
                     captured.add(resolvedName);
-                    activeCaptureTypes.putIfAbsent(resolvedName.lexeme(), variable.getType());
+                    final var captureType = variable.getType() != null
+                            ? variable.getType()
+                            : lookupCapture(resolvedName).type();
+                    activeCaptureTypes.putIfAbsent(resolvedName.lexeme(), captureType);
                 }
             }
             default -> {}
@@ -1184,6 +1200,8 @@ final class LambdaCompilationPlan {
     }
 
     private FunctionDescriptor functionView(final TypeDescriptor type) {
+        final var resolved = NewtypeRepresentations.resolve(type);
+        if (!resolved.equals(type)) return functionView(resolved);
         return switch (type) {
             case FunctionDescriptor function -> function;
             case NullableDescriptor nullable -> functionView(nullable.baseType());

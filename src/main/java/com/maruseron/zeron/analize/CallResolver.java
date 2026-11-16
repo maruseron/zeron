@@ -81,6 +81,7 @@ final class CallResolver {
         } else if (callableSymbol != null && context.symbols.containsSymbol(callableSymbol)) {
             call.setResolvedSymbolToken(callableSymbol);
             final var symbol = context.symbols.getSymbol(callableSymbol).type();
+            call.setResolvedCalleeType(symbol);
             context.recordReference(call.callee, context.symbols.getSymbol(callableSymbol).name(), symbol);
             if (symbol instanceof FunctionDescriptor function) {
                 descriptor = function;

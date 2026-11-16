@@ -47,6 +47,11 @@ final class DeclarationEmitter {
                     final var functionType = function.typeDescriptor().returnType() instanceof InferDescriptor
                             ? context.symbols.getFunctionType(context.resolution.functionSymbolToken(name))
                             : function.typeDescriptor();
+                    final var newtypeReceiver = extensionMethod != null
+                            && NewtypeRepresentations.isNewtype(extensionMethod.receiverType()
+                                    instanceof NominalDescriptor nominal ? nominal.name()
+                                    : extensionMethod.receiverType() instanceof GenericDescriptor generic
+                                            ? generic.baseType().name() : "");
                     final var witnessSlots = BytecodeEmitter.witnessSlots(context, typeDescriptor);
                     final var reifiedSlots = BytecodeEmitter.reifiedSlots(typeDescriptor);
                     final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
@@ -78,8 +83,13 @@ final class DeclarationEmitter {
                                 methodBuilder.withCode(composer -> {
                                     beginScope(context);
                                     final var previousReturnType = context.currentReturnType;
-                                    context.currentReturnType = functionType.returnType();
-                                    final var paramTypes = typeDescriptor.parameters();
+                                    context.currentReturnType = newtypeReceiver
+                                            ? NewtypeRepresentations.resolve(functionType.returnType())
+                                            : functionType.returnType();
+                                    final var paramTypes = newtypeReceiver
+                                            ? typeDescriptor.parameters().stream()
+                                                    .map(NewtypeRepresentations::resolve).toList()
+                                            : typeDescriptor.parameters();
                                     for (int i = 0; i < parameters.size(); i++) {
                                         context.symbols.declareSymbol(declaration, parameters.get(i), paramTypes.get(i),
                                                 BindingMutability.IMMUTABLE);

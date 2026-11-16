@@ -21,6 +21,134 @@ import static org.junit.Assert.assertTrue;
 
 public final class NewtypeTest {
     @Test
+    public void newtypeRepresentationsDoNotLeakAcrossCompilations() throws Exception {
+        final var firstOutput = Files.createTempDirectory("zeron-newtype-isolation-first");
+        final var secondOutput = Files.createTempDirectory("zeron-newtype-isolation-second");
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var first = parse("first.zn", """
+                newtype IO<A: mut> = () -> A;
+                fn value(): IO<Int> = IO.new(() -> 42);
+                """);
+        final var second = parse("second.zn", """
+                type IO<A> = Pure(value: A) | Bind<B>(source: IO<A>, transform: (A) -> IO<B>);
+                fn bind(): IO<Int> {
+                    let source: IO<Int> = IO.Pure(1);
+                    return IO.Bind<Int>(source, value -> IO.Pure(value + 1));
+                }
+                fn result(): Int = match (bind()) {
+                    case IO.Pure(value) -> value;
+                    case IO.Bind<let B>(source, transform) -> 1;
+                };
+                """);
+        try {
+            final var firstCompiler = CompilationService.forCompilationUnits(
+                    List.of(first), "First" + suffix, "", List.of(), true, List.of(), firstOutput);
+            firstCompiler.resolve();
+            firstCompiler.compile();
+
+            final var programName = "Second" + suffix;
+            final var secondCompiler = CompilationService.forCompilationUnits(
+                    List.of(second), programName, "", List.of(), true, List.of(), secondOutput);
+            secondCompiler.resolve();
+            secondCompiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{secondOutput.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(1, loader.loadClass(programName).getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(firstOutput);
+            deleteTree(secondOutput);
+        }
+    }
+
+    @Test
+    public void compiledLibraryPreservesGenericFunctionNewtypeCarrier() throws Exception {
+        final var libraryOutput = Files.createTempDirectory("zeron-function-newtype-library");
+        final var clientOutput = Files.createTempDirectory("zeron-function-newtype-client");
+        final var libraryPackage = "functionnewtypelib" + UUID.randomUUID().toString().replace("-", "");
+        final var library = parse("library/IO.zn", """
+                package %s;
+                public newtype IO<A: mut> = () -> A;
+                public extension<A: mut> IO<A> {
+                    public fn run(): A = this();
+                }
+                """.formatted(libraryPackage));
+        final var libraryCompiler = CompilationService.forCompilationUnits(
+                List.of(library), libraryPackage + ".Library", libraryPackage,
+                List.of(), true, List.of(), libraryOutput);
+        try {
+            libraryCompiler.resolve();
+            libraryCompiler.compile();
+            final var index = ZeronLibraryIndex.readFrom(libraryOutput.resolve(
+                    ZeronVersions.API_INDEX_RELATIVE_PATH));
+            final var exportedType = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.NewtypeExport.class::isInstance)
+                    .map(ZeronLibraryIndex.NewtypeExport.class::cast)
+                    .filter(newtype -> newtype.qualifiedName().equals(libraryPackage + ".IO"))
+                    .findFirst().orElseThrow();
+            assertEquals(1, exportedType.typeParameters().size());
+            assertTrue(exportedType.underlyingType() instanceof com.maruseron.zeron.domain.FunctionDescriptor);
+
+            final var client = parse("client/Main.zn", """
+                    package client;
+                    import %s.IO;
+                    fn reads(): Int = IO.new(() -> 42).run();
+                    """.formatted(libraryPackage));
+            final var clientCompiler = CompilationService.forCompilationUnits(
+                    List.of(client), "client.Main", "client",
+                    List.of(index), true, List.of(), clientOutput);
+            clientCompiler.resolve();
+            clientCompiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    clientOutput.toUri().toURL(), libraryOutput.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass("client.Main")
+                        .getMethod("reads").invoke(null));
+            }
+        } finally {
+            deleteTree(clientOutput);
+            deleteTree(libraryOutput);
+        }
+    }
+
+    @Test
+    public void functionShapedNewtypesUseTheirRepresentationForOperations() throws Exception {
+        final var output = Files.createTempDirectory("zeron-function-newtype-test");
+        final var programName = "FunctionNewtypeProgram" + UUID.randomUUID().toString().replace("-", "");
+        final var unit = parse("function-newtypes.zn", """
+                public newtype IO<A: mut> = () -> A;
+                public extension<A: mut> IO<A> {
+                    public fn map<B: mut>(transform: A -> B): IO<B> =
+                        IO.new(() -> transform(this()));
+                    public fn flatMap<B: mut>(transform: A -> IO<B>): IO<B> =
+                        IO.new(() -> {
+                            let next: () -> B = transform(this());
+                            return next();
+                        });
+                    public fn run(): A = this();
+                }
+                fn mapped(): Int = IO.new(() -> 41).map(value -> value + 1).run();
+                fn chained(): Int =
+                    IO.new(() -> 40).flatMap(value -> IO.new(() -> value + 2)).run();
+                """);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(unit), programName, "", List.of(), true, List.of(), output);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals(42, program.getMethod("mapped").invoke(null));
+                assertEquals(42, program.getMethod("chained").invoke(null));
+                assertThrows(ClassNotFoundException.class, () -> loader.loadClass("IO"));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
     public void validatedAndUnvalidatedNewtypesUseDistinctConstructionRules() throws Exception {
         final var output = Files.createTempDirectory("zeron-newtype-test");
         final var programName = "NewtypeProgram" + UUID.randomUUID().toString().replace("-", "");

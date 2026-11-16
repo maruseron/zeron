@@ -145,7 +145,7 @@ land before the rest.
 | ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented | Canonical components are readable structural accessors; positional patterns use canonical components at root and nested positions |
 | ZEP-0070 | Generic and Nominal Newtype Representations | Implemented | Generic and nominal direct carriers; no `.value` field or wrapper; `this` is the representation in newtype-owned bodies |
 | ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented | Contract bounds on sum and product parameters; existential case-local parameters such as `Bind<B>`; context-resolved unqualified case names |
-| ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Accepted | Keep products binary; use ZEP-0070 direct-representation newtypes for single-value shapes |
+| ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Implemented | Keep products binary; use ZEP-0070 direct-representation newtypes for single-value shapes, including function carriers |
 | ZEP-0130 | Standard-Library-Owned Intrinsic Declarations | Accepted | Intrinsic identity stays compiler-owned; a comprehensive `String` inventory lives in `zeron.lang` modules |
 | ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Accepted | `is`/`matches` through composed conditions and stable paths; implicit `this` field/property reads |
 | ZEP-0132 | Nullable Safe-Cast Correction | Accepted | `as?` always yields a nullable target; immediate correctness fix before the rest of the bundle |
@@ -208,7 +208,7 @@ ZEP-0113 were added as smoothing candidates and accepted and implemented on 2026
 | ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented / `Candidate` | Make canonical components readable and add positional data-class patterns |
 | ZEP-0070 | Generic and Nominal Newtype Representations | Implemented / `Candidate` | Promote direct-carrier single-value representations from the backlog |
 | ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented / `Candidate` | Remove the sealed-contract workaround for polymorphic cases and bounded sums; product bounds are included by amendment |
-| ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Accepted / `Candidate` | Keep unary products illegal and route single-value shapes through ZEP-0070 |
+| ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Implemented / `Candidate` | Keep unary products illegal and route single-value shapes through ZEP-0070 |
 | ZEP-0130 | Standard-Library-Owned Intrinsic Declarations | Accepted / `Candidate` | Settle intrinsic-operation ownership and add the practical `String` inventory |
 | ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Accepted / `Candidate` | Complete guard-chain refinement and remove routine `this.` reads |
 | ZEP-0132 | Nullable Safe-Cast Correction | Accepted / `Candidate` | Correct `as?` to return `T?` and land before the broader refinement work |
@@ -483,8 +483,9 @@ These decisions shape the current plan. Details live in each ZEP.
   shadow case names and ambiguity requires qualification. Implemented 2026-11-16 and `Candidate`
   for `0.8.0`.
 - **ZEP-0129:** products remain binary; unary products are not legalized; single-value shapes use
-  ZEP-0070 direct-representation newtypes with no `.value` accessor. Implemented 2026-11-15 and
-  `Candidate` for `0.8.0`.
+  ZEP-0070 direct-representation newtypes with no `.value` accessor. Function and generic carriers
+  are resolved recursively in newtype-owned bodies, including separate compilation of generic
+  function newtypes and their extensions. Implemented 2026-11-16 and `Candidate` for `0.8.0`.
 - **ZEP-0130:** intrinsic types keep compiler-owned identity and operations live in canonical
   `zeron.lang` extension/namespace modules, not in a second class. The initial `String` inventory
   covers literal and regex splitting, `charAt`/`at`, case conversion, trimming, replacement, lines,

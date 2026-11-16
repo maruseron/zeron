@@ -149,8 +149,11 @@ invariant derived contracts still reject an `out` occurrence.
 There are no transparent type aliases. A declaration such as `type MyInt = Int;` is a one-case sum
 whose case is named `Int`; it constructs as `MyInt.Int()` and is neither assignable to nor from
 `Int`. Use a newtype for a single-value nominal representation and a product with at least two
-components for a grouped value. This nominal behavior is intentional, but it is a common source of
-"alias" surprises.
+components for a grouped value. A one-component product is deliberately not provided
+([ZEP-0129](../zeps/ZEP-0129.md)): it would carry product equality and positional destructuring
+without providing structural information beyond the single component, while a newtype expresses the
+same shape with explicit construction and nominal identity. This nominal behavior is intentional,
+but it is a common source of "alias" surprises.
 
 ### Cases, payloads, construction, and visibility
 
@@ -306,13 +309,20 @@ in source metadata only. Annotation consumption remains a separate feature.
 A newtype declares a distinct nominal type over one statically known representation, including
 type parameters, nominal classes, products, sums, function types, and explicitly declared Java
 external classes. [ZEP-0070](../zeps/ZEP-0070.md) implements generic and nominal representations
-for `0.8.0`.
+for `0.8.0`, and [ZEP-0129](../zeps/ZEP-0129.md) applies them to single-value shapes such as a
+function-shaped `IO`.
 For example:
 
 ```zeron
 public newtype Meters = Float;
 public newtype UserId = String where value != "";
+public newtype IO<A: mut> = () -> A;
 ```
+
+`IO` is a function-shaped newtype: construction takes the function value, a newtype-owned extension
+sees that function as `this`, and an explicit `run()` operation invokes it. A parameter typed as the
+newtype inside such a body is likewise represented by its carrier, so a higher-order operation can
+accept `A -> IO<B>` and treat the returned value as its function carrier.
 
 The first declaration exposes `Meters.new(value)`; the second exposes only
 `UserId.tryNew(value): Option<UserId>`. The validator introduces an immutable local named `value`

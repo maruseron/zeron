@@ -51,6 +51,10 @@ public final class ResolutionService {
     public ResolutionResult resolveUnitsWithDiagnostics(final List<CompilationUnit> units) {
         final var context = new ResolutionContext(packageName,
                 new JavaClassPath(javaClassPathRoots), functionBindings);
+        // Resolution registers every newtype declared by, or imported into, this compilation.
+        // Clear stale representations so independent compilations in the same JVM cannot resolve
+        // unrelated declarations through a previously compiled newtype of the same name.
+        NewtypeRepresentations.reset();
         return Resolver.resolveUnits(context, units);
     }
 }

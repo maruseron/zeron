@@ -1,8 +1,10 @@
 package com.maruseron.zeron.domain;
 
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /// Tracks the direct JVM carrier chosen for each newtype. Newtypes keep their nominal identity
 /// in the type checker, but their values are represented by the carrier everywhere they cross a
@@ -25,6 +27,13 @@ public final class NewtypeRepresentations {
         REPRESENTATIONS.put(qualifiedName, new Representation(typeParameters, underlyingType));
     }
 
+    /// Discards the representations registered by a previous compilation. Resolution re-registers
+    /// every newtype visible to the compilation being resolved (including library-index units), so
+    /// representations must not survive into an unrelated compilation that shares this JVM.
+    public static void reset() {
+        REPRESENTATIONS.clear();
+    }
+
     public static boolean isNewtype(final String qualifiedName) {
         return REPRESENTATIONS.containsKey(qualifiedName);
     }
@@ -37,10 +46,21 @@ public final class NewtypeRepresentations {
     /// returned unchanged; nullable, reference, array and function wrappers are preserved so their
     /// element types can be resolved recursively.
     public static TypeDescriptor resolve(final TypeDescriptor type) {
+        return resolve(type, new HashSet<>());
+    }
+
+    private static TypeDescriptor resolve(final TypeDescriptor type, final Set<String> expanding) {
         return switch (type) {
-            case NominalDescriptor nominal when isNewtype(nominal.name()) ->
-                    representation(nominal.name()).underlyingType();
+            case NominalDescriptor nominal when isNewtype(nominal.name()) -> {
+                if (!expanding.add(nominal.name())) yield type;
+                try {
+                    yield resolve(representation(nominal.name()).underlyingType(), expanding);
+                } finally {
+                    expanding.remove(nominal.name());
+                }
+            }
             case GenericDescriptor generic when isNewtype(generic.baseType().name()) -> {
+                if (!expanding.add(generic.baseType().name())) yield type;
                 final var representation = representation(generic.baseType().name());
                 final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
                 for (int index = 0; index < representation.typeParameters().size()
@@ -48,11 +68,32 @@ public final class NewtypeRepresentations {
                     substitutions.put(representation.typeParameters().get(index),
                             generic.typeParameters().get(index));
                 }
-                yield TypeSubstitution.substitute(representation.underlyingType(), substitutions);
+                try {
+                    yield resolve(TypeSubstitution.substitute(
+                            representation.underlyingType(), substitutions), expanding);
+                } finally {
+                    expanding.remove(generic.baseType().name());
+                }
             }
-            case NullableDescriptor nullable -> resolve(nullable.baseType()).toNullable();
-            case ReferenceDescriptor reference -> new ReferenceDescriptor(resolve(reference.baseType()));
-            case ArrayDescriptor array -> TypeDescriptor.arrayOf(resolve(array.elementType()));
+            case NullableDescriptor nullable -> resolve(nullable.baseType(), expanding).toNullable();
+            case ReferenceDescriptor reference ->
+                    new ReferenceDescriptor(resolve(reference.baseType(), expanding));
+            case ArrayDescriptor array ->
+                    TypeDescriptor.arrayOf(resolve(array.elementType(), expanding));
+            case FunctionDescriptor function -> new FunctionDescriptor(
+                    function.name(),
+                    function.receiverType() == null ? null
+                            : resolve(function.receiverType(), expanding),
+                    resolve(function.returnType(), expanding),
+                    function.parameters().stream()
+                            .map(parameter -> resolve(parameter, expanding)).toList(),
+                    function.typeParameters(),
+                    function.raisedEffects().stream()
+                            .map(effect -> resolve(effect, expanding)).toList(),
+                    function.handledEffects().stream()
+                            .map(effect -> resolve(effect, expanding)).toList(),
+                    function.isHandler()).withHiddenSlots(
+                            function.hiddenEvidenceCount(), function.hiddenDescriptorCount());
             default -> type;
         };
     }

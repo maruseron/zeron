@@ -242,8 +242,31 @@ let id = UserId.tryNew("u-42");
 
 An unguarded newtype exposes `.new(value)`. A guarded newtype exposes `.tryNew(value)`, which
 returns `Option<Newtype>` and constructs a value only when the Boolean validator succeeds. The
-validator sees an immutable local named `value`. The supported representations are `Int`, `Float`,
-`Boolean`, and `String`; generic, mutable, and arbitrary class representations are not supported.
+validator sees an immutable local named `value`. A newtype may use any statically known admissible
+representation, including primitives, `String`, type parameters, nominal classes, products, sums,
+and function types. The representation is the runtime value: there is no wrapper object and no
+generated `.value` property.
+
+Inside a newtype-owned extension, witness, or namespace body, `this` and newtype-typed parameters
+are the representation directly. Callers use an explicit operation when they need the value:
+
+```zeron
+public newtype IO<A: mut> = () -> A;
+
+public extension<A: mut> IO<A> {
+    public fn map<B: mut>(transform: A -> B): IO<B> =
+        IO.new(() -> transform(this()));
+
+    public fn run(): A = this();
+}
+
+let answer: Int = IO.new(() -> 42).run();
+```
+
+Newtypes remain nominal: the representation is visible only in newtype-owned bodies, and ordinary
+code must construct the newtype explicitly. Products still require at least two components; use a
+newtype to name a single value, or a one-field data class when record-like component access and
+structural equality are wanted.
 
 Use a newtype to make a domain distinction explicit—for example, separating a distance from an
 ordinary `Float`, or a user identifier from an arbitrary `String`. Newtypes do not implicitly

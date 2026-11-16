@@ -111,13 +111,16 @@ final class DeclarationRegistry {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME,
                     newtype.name(), "Newtype '" + newtype.name().lexeme() + "' is already declared."));
         }
+        NewtypeRepresentations.register(newtype.name().lexeme(), newtype.typeParameters(),
+                newtype.underlyingType());
         final var valueName = new Token(TokenType.IDENTIFIER, "value", null, newtype.name().span());
         final var property = new Stmt.Property(valueName, newtype.underlyingType(), null,
                 true, false, null, null, null, true);
         final var constructor = new Stmt.Constructor(
                 new Token(TokenType.IDENTIFIER, "new", null, newtype.name().span()),
                 newtype.validator() == null);
-        classes.put(newtype.name().lexeme(), new Stmt.ClassDecl(newtype.name(), List.of(), List.of(),
+        classes.put(newtype.name().lexeme(), new Stmt.ClassDecl(newtype.name(),
+                newtype.typeParameters(), List.of(),
                 List.of(), List.of(property), constructor, List.of(), List.of(), List.of(),
                 newtype.isPublic(), false));
     }

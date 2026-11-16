@@ -3392,6 +3392,11 @@ final class ExpressionFlowResolver {
                                                   final TypeDescriptor sourceType, final Token where,
                                                   final boolean allowGenericTarget) {
         TypeResolver.validateType(context, targetType, where);
+        if (mentionsNewtype(context, targetType) || mentionsNewtype(context, sourceType)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST, where,
+                    "Runtime type tests and casts cannot target a newtype."));
+            return;
+        }
         if (targetType instanceof NullableDescriptor || targetType instanceof ReferenceDescriptor
                 || targetType instanceof ArrayDescriptor || targetType instanceof GenericDescriptor
                 || targetType instanceof FunctionDescriptor || targetType instanceof TypeParameterDescriptor
@@ -3406,6 +3411,17 @@ final class ExpressionFlowResolver {
                             ? "The generic arguments of this runtime type-test target are not statically determined."
                             : "This type cannot be used as a runtime type-test target."));
         }
+    }
+
+    private static boolean mentionsNewtype(final ResolutionContext context, final TypeDescriptor type) {
+        var current = type;
+        while (current instanceof NullableDescriptor nullable) current = nullable.baseType();
+        while (current instanceof ReferenceDescriptor reference) current = reference.baseType();
+        return switch (current) {
+            case NominalDescriptor nominal -> context.newtypes.containsKey(nominal.name());
+            case GenericDescriptor generic -> context.newtypes.containsKey(generic.baseType().name());
+            default -> false;
+        };
     }
 
     private static boolean isGeneratedSumCase(final ResolutionContext context, final String className) {

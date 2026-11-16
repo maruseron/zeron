@@ -160,6 +160,7 @@ final class NominalTypeEmitter {
         }
 
         for (final var declaration : context.resolution.classes().values()) {
+            if (context.resolution.newtypes().containsKey(declaration.name().lexeme())) continue;
             if (context.metadata.metadataTypeNames().contains(declaration.name().lexeme())) continue;
             final var className = declaration.name().lexeme();
             if (className.equals(context.mainClassName)) {

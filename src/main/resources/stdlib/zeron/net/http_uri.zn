@@ -14,6 +14,8 @@ public type HttpUriError =
 public newtype HttpUri = String where httpValidateUri(value) == 0;
 
 namespace HttpUri {
+    public fn value(uri: HttpUri): String = uri;
+
     public fn parse(value: String): Result<HttpUri, HttpUriError> {
         let validation = httpValidateUri(value);
         return match (validation) {

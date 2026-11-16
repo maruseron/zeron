@@ -402,14 +402,12 @@ public final class PublicMemberCatalog {
             final var name = qualifySourceName(resolution.typePackages().getOrDefault(
                     declaration.name().lexeme(), resolution.packageName()), declaration.name().lexeme());
             final var members = new ArrayList<MemberSpec>();
-            members.add(MemberSpec.property(name, "value", declaration.underlyingType(),
-                    false, provenance(declaration.name())));
             if (declaration.validator() == null) {
                 members.add(MemberSpec.constructor(name, "new",
                         List.of(new ParameterSpec("value", declaration.underlyingType(), false, false)),
                         false, provenance(declaration.name())));
             }
-            types.put(name, new TypeSpec(name, TypeKind.NEWTYPE, List.of(),
+            types.put(name, new TypeSpec(name, TypeKind.NEWTYPE, declaration.typeParameters(),
                     List.of(), members, provenance(declaration.name())));
         }
         final var extensions = new ArrayList<ExtensionSpec>();
@@ -506,15 +504,14 @@ public final class PublicMemberCatalog {
                 }
                 case ZeronLibraryIndex.NewtypeExport declaration -> {
                     final var members = new ArrayList<MemberSpec>();
-                    members.add(MemberSpec.property(declaration.qualifiedName(), "value",
-                            declaration.underlyingType(), false, Optional.empty()));
                     if (!declaration.validated()) {
                         members.add(MemberSpec.constructor(declaration.qualifiedName(), "new",
                                 List.of(new ParameterSpec("value", declaration.underlyingType(),
                                         false, false)), false, Optional.empty()));
                     }
                     types.put(declaration.qualifiedName(), new TypeSpec(declaration.qualifiedName(),
-                            TypeKind.NEWTYPE, List.of(), List.of(), members, Optional.empty()));
+                            TypeKind.NEWTYPE, declaration.typeParameters(), List.of(), members,
+                            Optional.empty()));
                 }
                 case ZeronLibraryIndex.ExtensionExport extension -> extensions.add(new ExtensionSpec(
                         extension.qualifiedName(), namespaceOf(extension.qualifiedName()),

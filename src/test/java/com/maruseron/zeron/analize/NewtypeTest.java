@@ -27,6 +27,8 @@ public final class NewtypeTest {
         final var unit = parse("newtypes.zn", """
                 public newtype UserId = String where value != "";
                 public newtype Meters = Float;
+                namespace UserId { fn text(userId: UserId): String = userId; }
+                namespace Meters { fn raw(meters: Meters): Float = meters; }
                 fn accepted(): Boolean = match (UserId.tryNew("alice")) {
                     case Option.Some(_) -> true;
                     case Option.None() -> false;
@@ -36,10 +38,10 @@ public final class NewtypeTest {
                     case Option.None() -> true;
                 };
                 fn extracted(): String = match (UserId.tryNew("alice")) {
-                    case Option.Some(userId) -> userId.value;
+                    case Option.Some(userId) -> UserId.text(userId);
                     case Option.None() -> "";
                 };
-                fn unvalidatedValue(): Float = Meters.new(2.5).value;
+                fn unvalidatedValue(): Float = Meters.raw(Meters.new(2.5));
                 """);
         final var compiler = CompilationService.forCompilationUnits(
                 List.of(unit), programName, "", List.of(), true, List.of(), output);
@@ -49,18 +51,14 @@ public final class NewtypeTest {
             try (final var loader = new URLClassLoader(
                     new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
                 final var program = loader.loadClass(programName);
-                final var userId = loader.loadClass("UserId");
-                final var meters = loader.loadClass("Meters");
                 assertTrue((Boolean) program.getMethod("accepted").invoke(null));
                 assertTrue((Boolean) program.getMethod("rejected").invoke(null));
                 assertEquals("alice", program.getMethod("extracted").invoke(null));
                 assertEquals(2.5, (Double) program.getMethod("unvalidatedValue").invoke(null), 0.0);
-                assertTrue(java.lang.reflect.Modifier.isPrivate(
-                        userId.getDeclaredConstructor(String.class).getModifiers()));
-                assertTrue(java.lang.reflect.Modifier.isPublic(
-                        meters.getDeclaredConstructor(double.class).getModifiers()));
-                assertTrue(java.lang.reflect.Modifier.isFinal(
-                        userId.getDeclaredField("$zeron$property$value").getModifiers()));
+                assertEquals(String.class, program.getMethod("extracted").getReturnType());
+                assertEquals(double.class, program.getMethod("unvalidatedValue").getReturnType());
+                assertThrows(ClassNotFoundException.class, () -> loader.loadClass("UserId"));
+                assertThrows(ClassNotFoundException.class, () -> loader.loadClass("Meters"));
             }
         } finally {
             deleteTree(output);
@@ -84,11 +82,76 @@ public final class NewtypeTest {
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("validator.zn", """
                 newtype UserId = String where value;
                 """).declarations()));
-        final var invalidRepresentation = Parser.of(Scanner.from("""
-                newtype Invalid = Array<Int>;
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("value.zn", """
+                newtype UserId = String;
+                fn invalid(userId: UserId): String = userId.value;
+                """).declarations()));
+        final var guardedReference = Parser.of(Scanner.from("""
+                data class Point(x: Int, y: Int) {}
+                newtype Invalid = Point where value.x > 0;
                 """, "invalid-representation.zn").scanTokens())
                 .parseCompilationUnitWithDiagnostics("invalid-representation.zn");
-        assertFalse(invalidRepresentation.diagnostics().isEmpty());
+        assertFalse(guardedReference.diagnostics().isEmpty());
+    }
+
+    @Test
+    public void acceptsGenericAndNominalRepresentations() throws Exception {
+        final var programName = "GenericNewtypeProgram" + UUID.randomUUID().toString().replace("-", "");
+        final var unit = parse("generic-newtypes.zn", """
+                public newtype Sum<A> = A;
+                data class Point(x: Int, y: Int) {}
+                public newtype PointView = Point;
+                namespace Sum { fn getInt(value: Sum<Int>): Int = value; }
+                namespace PointView { fn point(view: PointView): Point = view; }
+                fn generic(): Int = Sum.getInt(Sum<Int>.new(41)) + 1;
+                fn nominal(): Int = PointView.point(PointView.new(Point.new(3, 4))).x;
+                """);
+        final var compiler = new CompilationService(unit.declarations(), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals(42, program.getMethod("generic").invoke(null));
+                assertEquals(3, program.getMethod("nominal").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void rejectsRuntimeTypeTestsAndCastsOnNewtypes() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("test.zn", """
+                newtype UserId = String;
+                fn invalid(value: UserId): Boolean = value is UserId;
+                """).declarations()));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("cast.zn", """
+                newtype UserId = String;
+                fn invalid(value: UserId): UserId = value as UserId;
+                """).declarations()));
+    }
+
+    @Test
+    public void newtypeExtensionsOperateOnTheRepresentation() throws Exception {
+        final var programName = "NewtypeExtensionProgram" + UUID.randomUUID().toString().replace("-", "");
+        final var unit = parse("newtype-extension.zn", """
+                newtype UserId = String;
+                extension UserId { fn text(): String = this + "!"; }
+                fn read(): String = UserId.new("alice").text();
+                """);
+        final var compiler = new CompilationService(unit.declarations(), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals("alice!", loader.loadClass(programName).getMethod("read").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
     }
 
     @Test

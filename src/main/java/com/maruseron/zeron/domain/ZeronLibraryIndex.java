@@ -263,7 +263,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     final Expr validator = newtype.validated()
                             ? new Expr.Literal(Boolean.TRUE, TypeDescriptor.ofBoolean()) : null;
                     statements.add(new Stmt.NewtypeDecl(token(newtype.qualifiedName()),
-                            newtype.underlyingType(), validator, true));
+                            newtype.typeParameters(), newtype.underlyingType(), validator, true,
+                            List.of()));
+                    NewtypeRepresentations.register(newtype.qualifiedName(),
+                            newtype.typeParameters(), newtype.underlyingType());
                 }
                 case WitnessExport witness -> {
                     final var methods = witness.methods().stream().map(method -> {
@@ -821,15 +824,18 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
         }
     }
 
-    public record NewtypeExport(String qualifiedName, TypeDescriptor underlyingType,
+    public record NewtypeExport(String qualifiedName, List<TypeParameterDescriptor> typeParameters,
+                                TypeDescriptor underlyingType,
                                 boolean validated) implements ExportedDeclaration {
         public NewtypeExport {
             Objects.requireNonNull(qualifiedName);
             Objects.requireNonNull(underlyingType);
-            if (!(underlyingType instanceof IntDescriptor || underlyingType instanceof FloatDescriptor
-                    || underlyingType instanceof BooleanDescriptor || underlyingType instanceof StringDescriptor)) {
-                throw new IllegalArgumentException("Unsupported newtype representation.");
-            }
+            typeParameters = List.copyOf(typeParameters);
+        }
+
+        public NewtypeExport(final String qualifiedName, final TypeDescriptor underlyingType,
+                             final boolean validated) {
+            this(qualifiedName, List.of(), underlyingType, validated);
         }
     }
 
@@ -1315,7 +1321,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                     }
                     case Stmt.NewtypeDecl newtype when newtype.isPublic() -> {
                             exports.add(new NewtypeExport(qualify(unit.packageName(), newtype.name().lexeme()),
-                                        newtype.underlyingType(), newtype.validator() != null));
+                                        newtype.typeParameters(), newtype.underlyingType(),
+                                        newtype.validator() != null));
                             addDerivedWitnessExports(exports, unit.packageName(), newtype.name(),
                                     List.of(), newtype.derivedContracts(), List.of(newtype.underlyingType()));
                     }
@@ -1799,7 +1806,9 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             case NewtypeExport newtype -> {
                 output.writeByte(9);
                 output.writeUTF(newtype.qualifiedName());
-                writeType(output, newtype.underlyingType(), new WriteContext());
+                final var context = new WriteContext();
+                writeTypeParameters(output, newtype.typeParameters(), context);
+                writeType(output, newtype.underlyingType(), context);
                 output.writeBoolean(newtype.validated());
             }
             case ExternalClassExport externalClass -> {
@@ -2104,8 +2113,14 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 }
                 yield new ProductExport(name, typeParameters, components);
             }
-            case 9 -> new NewtypeExport(input.readUTF(), readType(input, new ReadContext()),
-                    input.readBoolean());
+            case 9 -> {
+                final var name = input.readUTF();
+                final var context = new ReadContext();
+                final var typeParameters = READ_VERSION.get() >= 15
+                        ? readTypeParameters(input, context) : List.<TypeParameterDescriptor>of();
+                yield new NewtypeExport(name, typeParameters, readType(input, context),
+                        input.readBoolean());
+            }
             case 10 -> {
                 final var name = input.readUTF();
                 final var javaBinaryName = input.readUTF();

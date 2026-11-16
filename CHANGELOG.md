@@ -4,6 +4,14 @@
 
 ### Compiler and language work
 
+- Implemented ZEP-0070 generic and nominal newtype representations. Newtypes may bind type
+  parameters and use any statically known representation, including classes, products, sums,
+  function types, and Java external classes. Newtypes now lower directly to their carrier: the
+  wrapper class, backing field, and `.value` accessor are gone, and `this` plus newtype-typed
+  parameters are the representation inside newtype-owned extensions, witnesses, and namespace
+  bodies. Runtime type tests and casts targeting a newtype are rejected. Newtype library metadata
+  records type parameters and representation types, advancing the API index schema to `15` and the
+  standard-library API to `17`.
 - Added ZEP-0127 data-class positional patterns. A data class can be destructured at the match root
   and in nested positions using its canonical components in declaration order; auxiliary and computed
   properties are excluded. Generic patterns accept a complete applied type or infer it from the

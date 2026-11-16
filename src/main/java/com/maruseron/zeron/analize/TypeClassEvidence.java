@@ -1711,11 +1711,46 @@ final class TypeClassEvidence {
         throw new IllegalStateException("Unreachable");
     }
 
+    private static TypeDescriptor replaceNewtype(final TypeDescriptor type,
+                                                 final TypeDescriptor from,
+                                                 final TypeDescriptor to) {
+        if (type.equals(from)) return to;
+        return switch (type) {
+            case NullableDescriptor nullable ->
+                    replaceNewtype(nullable.baseType(), from, to).toNullable();
+            case ReferenceDescriptor reference ->
+                    new ReferenceDescriptor(replaceNewtype(reference.baseType(), from, to));
+            case ArrayDescriptor array ->
+                    TypeDescriptor.arrayOf(replaceNewtype(array.elementType(), from, to));
+            case GenericDescriptor generic -> TypeDescriptor.genericOf(generic.baseType(),
+                    generic.typeParameters().stream()
+                            .map(argument -> replaceNewtype(argument, from, to)).toList());
+            case FunctionDescriptor function -> TypeDescriptor.functionWithEffectsOf(
+                    function.name(), replaceNewtype(function.returnType(), from, to),
+                    function.parameters().stream()
+                            .map(parameter -> replaceNewtype(parameter, from, to)).toList(),
+                    function.typeParameters(), function.raisedEffects());
+            default -> type;
+        };
+    }
+
     private static Expr.EvidenceArgument derivedMethodHandle(
             final ResolutionContext context, final TypeDescriptor requiredBound,
             final TypeDescriptor concrete, final Stmt.ContractMethod requirement,
             final TypeParameterDescriptor targetParameter, final int targetBoundIndex,
             final int targetMethodIndex, final com.maruseron.zeron.scan.Token where) {
+        final var representation = NewtypeRepresentations.resolve(concrete);
+        if (!representation.equals(concrete)) {
+            final var mappedBound = replaceNewtype(requiredBound, concrete, representation);
+            final var mappedType = (FunctionDescriptor) replaceNewtype(
+                    requirement.typeDescriptor(), concrete, representation);
+            final var mappedRequirement = new Stmt.ContractMethod(requirement.name(),
+                    requirement.parameters(), mappedType, requirement.isMutating(),
+                    requirement.isDefault(), requirement.body(), requirement.defaultValues(),
+                    requirement.minimumArity(), requirement.variadic(), requirement.isStatic());
+            return selectMethodEvidence(context, targetParameter, targetBoundIndex,
+                    targetMethodIndex, mappedBound, representation, mappedRequirement, where);
+        }
         final var selected = new ArrayList<Map.Entry<Stmt.Witness, Map<TypeParameterDescriptor, TypeDescriptor>>>();
         for (final var entry : context.typeClassWitnesses) {
             final var witness = entry.declaration();

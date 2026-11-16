@@ -872,13 +872,17 @@ final class LambdaResolver {
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
+        final var enclosingRepresentationContext = context.representationContext;
         final var exported = function.isPublic();
         final var typeParameters = function.typeDescriptor().typeParameters();
         context.enterInferableReifiedScope(exported, typeParameters);
+        context.representationContext = isNewtypeNamespace(context);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
         beginScope(context);
-        context.frame.expectedReturnTypes.push(function.typeDescriptor().returnType());
+        context.frame.expectedReturnTypes.push(context.representationContext
+                ? NewtypeRepresentations.resolve(function.typeDescriptor().returnType())
+                : function.typeDescriptor().returnType());
         try {
             resolveParametersAndDefaults(context, function, function.parameters(), function.typeDescriptor(),
                     function.defaultValues(), function.minimumArity());
@@ -903,8 +907,16 @@ final class LambdaResolver {
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
             context.exitInferableReifiedScope(exported, typeParameters);
+            context.representationContext = enclosingRepresentationContext;
             RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
+    }
+
+    private static boolean isNewtypeNamespace(final ResolutionContext context) {
+        final var namespace = context.currentNamespaceName;
+        if (namespace == null) return false;
+        return context.newtypes.keySet().stream()
+                .anyMatch(name -> name.equals(namespace) || name.endsWith("." + namespace));
     }
 
     static void resolveExtensionMethod(final ResolutionContext context,
@@ -913,12 +925,19 @@ final class LambdaResolver {
         final var enclosingFlow = context.frame.flowState;
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         final var exported = extension.isPublic();
+        final var enclosingRepresentationContext = context.representationContext;
         final var typeParameters = extension.typeDescriptor().typeParameters();
         context.enterInferableReifiedScope(exported, typeParameters);
+        context.representationContext = NewtypeRepresentations.isNewtype(
+                extension.receiverType() instanceof NominalDescriptor nominal ? nominal.name()
+                        : extension.receiverType() instanceof GenericDescriptor generic
+                                ? generic.baseType().name() : "");
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
         beginScope(context);
-        context.frame.expectedReturnTypes.push(extension.typeDescriptor().returnType());
+        context.frame.expectedReturnTypes.push(context.representationContext
+                ? NewtypeRepresentations.resolve(extension.typeDescriptor().returnType())
+                : extension.typeDescriptor().returnType());
         try {
             resolveParametersAndDefaults(context, extension, extension.parameters(),
                     extension.typeDescriptor(), extension.defaultValues(), extension.minimumArity());
@@ -933,6 +952,7 @@ final class LambdaResolver {
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
             context.exitInferableReifiedScope(exported, typeParameters);
+            context.representationContext = enclosingRepresentationContext;
             RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
@@ -956,7 +976,9 @@ final class LambdaResolver {
                                                     final List<Expr> defaultValues,
                                                     final int minimumArity) {
         for (int i = 0; i < parameterNames.size(); i++) {
-            final var parameterType = descriptor.parameters().get(i);
+            final var parameterType = context.representationContext
+                    ? NewtypeRepresentations.resolve(descriptor.parameters().get(i))
+                    : descriptor.parameters().get(i);
             if (i >= minimumArity && i - minimumArity < defaultValues.size()) {
                 final var defaultValue = defaultValues.get(i - minimumArity);
                 final var resolvedDefault = MemberInteropResolver.resolveArgument(context, defaultValue,

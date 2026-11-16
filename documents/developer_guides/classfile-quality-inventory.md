@@ -148,39 +148,14 @@ boundaries. Track as a representation ZEP with a compatibility plan for compiled
 `Unit`-returning declarations and suppress `pop` at call sites. This removes most instructions
 without changing generic representation.
 
-## B. Newtypes are wrapper objects
+## B. Newtypes are wrapper objects — resolved
 
-**Severity:** medium-high in newtype-heavy code. **Needs ZEP.**
+**Status:** resolved by ZEP-0070 in the `0.8.0` cycle.
 
-`DeclarationRegistry.registerNewtype` synthesizes a class declaration with a `value` property, and
-`NominalTypeEmitter.generateNominalClass` emits a normal final class
-(`NominalTypeEmitter.java:370-461`). A newtype therefore costs:
-
-- one heap allocation per `.new`,
-- one field store and a constructor call,
-- one getter invocation per `.value` access,
-- a distinct class file and metadata entry,
-- boxing when the newtype crosses a generic boundary.
-
-Measured `UserId = Int`:
-
-```text
-new UserId; dup; iload; invokespecial UserId."<init>":(I)V
-...
-invokevirtual UserId.$zeron$get$value:()I
-```
-
-`UserId.class` is 264 B, plus the call sites. For a type whose entire purpose is a nominal
-distinction, this is all overhead except the class identity.
-
-**Direction:** erase newtypes to their underlying JVM type and enforce nominal identity only in
-the type checker. `.new` and `.value` become no-ops. Keep a wrapper only when the value is used in
-a position that needs an object (generic type argument, `Array<T>`, nullable reference, contract
-evidence, Java interop). This requires care with overload/erasure collisions and with the API
-index; it is a representation ZEP.
-
-**Short step:** inline `.value`/`.new` at the call site when the newtype does not escape to a
-generic/object boundary, and emit `final` fields/getters only for escaping cases.
+Newtypes no longer emit a wrapper class, backing field, or `.value` accessor. The type checker keeps
+nominal identity while JVM descriptors use the carrier directly. `.new` emits its representation
+argument and `.tryNew` emits the guarded `Option`; erased boundaries box as required. The API index
+records type parameters and representation types under schema version `15`.
 
 ## C. `Array<T>` erases to `Object[]`, so primitives are boxed end-to-end
 

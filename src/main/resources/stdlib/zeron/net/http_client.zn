@@ -31,7 +31,8 @@ public class HttpClient is Disposable {
             bodyReadIdleTimeout = this.config.bodyReadIdleTimeout;
         }
 
-        let outcome = httpSend(this.clientHandle, request.uri.value, request.method.value,
+        let outcome = httpSend(this.clientHandle, HttpUri.value(request.uri),
+            HttpMethod.value(request.method),
             request.headers.toPairs(), request.body,
             responseTimeout.nanoseconds, bodyReadIdleTimeout.nanoseconds);
         if (not httpSendSucceeded(outcome)) {

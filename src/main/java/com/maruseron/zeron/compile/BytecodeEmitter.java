@@ -1556,7 +1556,7 @@ final class BytecodeEmitter {
             } else {
                 for (int i = 0; i < call.arguments.size(); i++) {
                     emitExpr(context, composer, call.arguments.get(i));
-                    emitConversion(context, composer, context.lastEmittedType, functionType.parameters().get(i));
+                    emitConversion(context, composer, context.lastEmittedType, runtimeType.parameters().get(i));
                 }
                 emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
                 final var invokedType = prefixFunctionType(runtimeType, call.arguments.size());
@@ -2197,6 +2197,23 @@ final class BytecodeEmitter {
             return;
         }
         if (call.name.lexeme().equals("new") && call.resolvedClassName() != null) {
+            if (context.resolution.newtypes().containsKey(call.resolvedClassName())) {
+                if (call.arguments.size() != 1) {
+                    throw new IllegalStateException("A newtype constructor must receive one representation value.");
+                }
+                emitExpr(context, composer, call.arguments.getFirst());
+                var newtypeType = call.getType();
+                final var newtypeName = call.resolvedClassName();
+                if (!(newtypeType instanceof NominalDescriptor nominal && nominal.name().equals(newtypeName))
+                        && !(newtypeType instanceof GenericDescriptor generic
+                                && generic.baseType().name().equals(newtypeName))) {
+                    newtypeType = TypeDescriptor.ofName(newtypeName);
+                }
+                final var representation = NewtypeRepresentations.resolve(newtypeType);
+                emitConversion(context, composer, context.lastEmittedType, representation);
+                context.lastEmittedType = representation;
+                return;
+            }
             final var declaration = context.resolution.classes().get(call.resolvedClassName());
             if (declaration == null) throw new IllegalStateException("Resolved constructor class not found.");
             final var classDesc = ClassDesc.of(call.resolvedClassName());
@@ -3201,7 +3218,8 @@ final class BytecodeEmitter {
 
     static void emitBox(CompilationContext context, final CodeBuilder composer, final TypeDescriptor type ){
         if (type == null) return;
-        final var boxer = switch (type) {
+        final var boxed = NewtypeRepresentations.resolve(type);
+        final var boxer = switch (boxed) {
             case IntDescriptor _, CharDescriptor _ -> "I";
             case LongDescriptor _ -> "J";
             case ByteDescriptor _ -> "C";
@@ -3658,6 +3676,16 @@ final class BytecodeEmitter {
             composer.invokespecial(exception, "<init>",
                     MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String));
             composer.athrow();
+            context.lastEmittedType = targetType;
+            return;
+        }
+        final var targetClass = TypeDescriptor.toJavaClassDesc(targetType);
+        final var sourceClass = TypeDescriptor.toJavaClassDesc(sourceType);
+        if (targetClass.equals(ConstantDescs.CD_Object)
+                && !sourceClass.equals(ConstantDescs.CD_Object)
+                && sourceClass.descriptorString().length() == 1
+                && !sourceClass.descriptorString().equals("V")) {
+            emitBox(context, composer, sourceType);
             context.lastEmittedType = targetType;
             return;
         }

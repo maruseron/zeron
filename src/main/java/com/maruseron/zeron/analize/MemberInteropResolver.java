@@ -267,6 +267,11 @@ final class MemberInteropResolver {
                 }
             }
         }
+        if (!allowMissing && context.newtypes.containsKey(ownerName)
+                && property.name.lexeme().equals("value")) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    property.name, "A newtype has no 'value' member; its representation is the value itself."));
+        }
         final var propertyDeclaration = findProperty(context, ownerName, property.name);
         if (propertyDeclaration != null) {
             if (!propertyDeclaration.isPublic()
@@ -1234,7 +1239,8 @@ final class MemberInteropResolver {
                                                             final Expr.MemberCall call,
                                                             final TypeDescriptor receiverType,
                                                             final boolean propertyAccess) {
-        final var localDeclarations = localExtensionDeclarations(context, call.name.lexeme());
+        final var localDeclarations = new ArrayList<>(localExtensionDeclarations(
+                context, call.name.lexeme()));
         final var extensionName = context.currentImports.extensions().get(call.name.lexeme());
         final var explicitDeclarations = extensionName == null
                 ? List.<Stmt.ExtensionMethod>of()
@@ -1243,6 +1249,20 @@ final class MemberInteropResolver {
         final var importedDeclarations = new ArrayList<>(explicitDeclarations);
         importedDeclarations.addAll(namespaceDeclarations);
         final var starDeclarations = starExtensionDeclarations(context, call.name.lexeme());
+        if (localDeclarations.isEmpty() && explicitDeclarations.isEmpty()
+                && namespaceDeclarations.isEmpty() && starDeclarations.isEmpty()) {
+            final var receiver = receiverType instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : receiverType;
+            final var newtypeName = receiver instanceof GenericDescriptor generic
+                    ? generic.baseType().name() : receiver instanceof NominalDescriptor nominal
+                            ? nominal.name() : null;
+            if (newtypeName != null && NewtypeRepresentations.isNewtype(newtypeName)) {
+                localDeclarations.addAll(context.extensionMethods.values().stream()
+                        .flatMap(Collection::stream)
+                        .filter(method -> method.name().lexeme().equals(call.name.lexeme()))
+                        .toList());
+            }
+        }
         final var matchingLocalDeclarations = localDeclarations.stream()
                 .filter(method -> method.property() == propertyAccess).toList();
         final var matchingImportedDeclarations = importedDeclarations.stream()

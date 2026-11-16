@@ -657,17 +657,26 @@ public final class Parser {
 
     private Stmt.NewtypeDecl newtypeDeclaration(final boolean isPublic) {
         final var name = qualifyDeclaredType(consume(IDENTIFIER, "Expect newtype name."));
-        final var derivedContracts = parseDerivedContracts();
-        consume(EQUAL, "Expect '=' before newtype representation.");
-        final var underlyingType = collectType();
-        if (!(underlyingType instanceof IntDescriptor || underlyingType instanceof FloatDescriptor
-                || underlyingType instanceof BooleanDescriptor || underlyingType instanceof StringDescriptor)) {
-            throw error(previous(), DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    "A newtype representation must be Int, Float, Boolean, or String.");
+        final var typeParameters = typeParameterDeclaration(name, true, false, true);
+        final var enclosingTypeParameters = activeTypeParameters;
+        activeTypeParameters = typeParameters;
+        try {
+            final var derivedContracts = parseDerivedContracts();
+            consume(EQUAL, "Expect '=' before newtype representation.");
+            final var underlyingType = collectType();
+            final var validator = matchSoftKeyword("where") ? expression() : null;
+            if (validator != null
+                    && !(underlyingType instanceof IntDescriptor || underlyingType instanceof FloatDescriptor
+                    || underlyingType instanceof BooleanDescriptor || underlyingType instanceof StringDescriptor)) {
+                throw error(previous(), DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
+                        "Guarded newtypes require an immutable Int, Float, Boolean, or String representation.");
+            }
+            consume(SEMICOLON, "Expect ';' after newtype declaration.");
+            return new Stmt.NewtypeDecl(name, List.copyOf(typeParameters.values()), underlyingType,
+                    validator, isPublic, derivedContracts);
+        } finally {
+            activeTypeParameters = enclosingTypeParameters;
         }
-        final var validator = matchSoftKeyword("where") ? expression() : null;
-        consume(SEMICOLON, "Expect ';' after newtype declaration.");
-        return new Stmt.NewtypeDecl(name, underlyingType, validator, isPublic, derivedContracts);
     }
 
     private List<Token> parseDerivedContracts() {

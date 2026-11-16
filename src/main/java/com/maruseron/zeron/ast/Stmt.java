@@ -287,15 +287,23 @@ public sealed interface Stmt {
 
     record ProductComponent(Token name, TypeDescriptor type) {}
 
-    record NewtypeDecl(Token name, TypeDescriptor underlyingType, Expr validator,
+    record NewtypeDecl(Token name, List<TypeParameterDescriptor> typeParameters,
+                       TypeDescriptor underlyingType, Expr validator,
                        boolean isPublic, List<Token> derivedContracts) implements Stmt, Decl {
         public NewtypeDecl {
+            typeParameters = List.copyOf(typeParameters);
             derivedContracts = List.copyOf(derivedContracts);
         }
 
         public NewtypeDecl(final Token name, final TypeDescriptor underlyingType,
+                           final Expr validator, final boolean isPublic,
+                           final List<Token> derivedContracts) {
+            this(name, List.of(), underlyingType, validator, isPublic, derivedContracts);
+        }
+
+        public NewtypeDecl(final Token name, final TypeDescriptor underlyingType,
                            final Expr validator, final boolean isPublic) {
-            this(name, underlyingType, validator, isPublic, List.of());
+            this(name, List.of(), underlyingType, validator, isPublic, List.of());
         }
     }
 

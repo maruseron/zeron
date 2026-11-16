@@ -246,10 +246,10 @@ are not yet synthesized as a recursive evidence group. See
 
 ### Declaration, representation, and construction
 
-A newtype declares a distinct nominal type over one concrete, non-generic immutable built-in
-representation. The initial supported representations are `Int`, `Float`, `Boolean`, and `String`.
-[ZEP-0070](../zeps/ZEP-0070.md) accepts generic and nominal representations for `0.8.0`; the current
-MVP remains scalar-only until that work is implemented.
+A newtype declares a distinct nominal type over one statically known representation, including
+type parameters, nominal classes, products, sums, function types, and explicitly declared Java
+external classes. [ZEP-0070](../zeps/ZEP-0070.md) implements generic and nominal representations
+for `0.8.0`.
 For example:
 
 ```zeron
@@ -266,23 +266,21 @@ determinism for validator expressions; invariant validity is established at cons
 the built-in representation restriction ensures that the wrapped value cannot later mutate.
 
 Validated newtypes have no source-accessible unchecked constructor. Unvalidated newtypes use the
-ordinary `.new(value)` constructor. The current implementation exposes a generated read-only
-`.value` property with the visibility of the declaration. [ZEP-0070](../zeps/ZEP-0070.md) is accepted
-for `0.8.0` and removes that accessor and the wrapper field in favor of direct representation;
-implementation is pending. Under the accepted direction, a newtype-owned extension or witness sees
-the representation through `this`, and ordinary callers use an explicit extension when they need the
-representation.
+ordinary `.new(value)` constructor. There is no `.value` property: the representation is the value.
+A newtype-owned extension, witness, or namespace body is a representation context, so `this` and
+newtype-typed parameters have the carrier type directly. Ordinary callers use an explicit extension
+or namespace accessor when they need the representation.
 
 Newtypes do not implicitly inherit `Eq`, `Comparable`, or any other evidence from the underlying
 type. Equality and other behavior require explicit ordinary witnesses or extensions. JVM identity
 comparison (`===`) is not defined for newtypes; use value equality only when the corresponding
 evidence is available.
 
-The current implementation uses a final JVM wrapper class. ZEP-0070's accepted direction replaces it
-with a direct carrier: concrete fields, parameters, and returns use the representation, while
-generic, nullable, `Any`, array, and other erased positions may box. Any representation change must
-preserve the source-level distinction and define boxing/adaptation at nullable, generic, contract,
-function, Java, and library ABI boundaries.
+The implementation uses a direct carrier: concrete fields, parameters, and returns use the
+representation, while generic, nullable, `Any`, array, and other erased positions may box. The
+source-level distinction is preserved by nominal checking; no wrapper object or generated class
+exists for the newtype. Boxing and adaptation are defined at nullable, generic, contract, function,
+Java, and library ABI boundaries.
 
 ## Compilation strategies to evaluate
 
@@ -309,26 +307,21 @@ Changing the metadata schema is distinct from changing the standard-library API 
 ### Product and newtype representation
 
 Products lower to final nominal classes with private-final component storage, a canonical constructor,
-and generated read-only accessors. Newtypes currently lower to final wrapper classes with
-private-final representation storage and a generated read-only accessor. [ZEP-0070](../zeps/ZEP-0070.md)
-is accepted for `0.8.0` and replaces that wrapper with a direct carrier; concrete fields,
-parameters, and returns use the representation, while erased positions may box. Any representation
-change must preserve nominal checks, validated construction, generic behavior, and stable public
-library metadata.
+and generated read-only accessors. Newtypes lower directly to their representation; concrete fields,
+parameters, and returns use the carrier, while erased positions may box. Nominal checks, validated
+construction, generic behavior, and public library metadata remain stable across that boundary.
 
 ## Deferred design questions
 
-Newtype deserialization and host interop must not bypass validated construction. Mutable or
-user-defined representations, guarded reference newtypes, derived equality, and identity-sensitive
-operations remain deferred. [ZEP-0070](../zeps/ZEP-0070.md) is accepted for `0.8.0` and settles
-generic and nominal backing representations over direct carriers; its implementation is pending.
-Guarded newtypes remain limited to immutable scalar and `String` representations.
+Newtype deserialization and host interop must not bypass validated construction. Guarded reference
+newtypes remain deferred and guarded newtypes remain limited to immutable scalar and `String`
+representations. [ZEP-0070](../zeps/ZEP-0070.md) implements generic and nominal backing
+representations over direct carriers.
 
 ## Suggested sequencing
 
 1. Sum MVP implementation is complete, including generated nominal case classes and singleton
    nullary cases. Product MVP implementation is complete; mutual-recursion evidence between
    declarations remains a separate extension.
-2. The concrete newtype MVP is implemented using wrapper classes and guarded `tryNew` construction.
-   ZEP-0070's accepted direction replaces the wrapper with direct carriers and removes `.value`; that
-   is an explicit ABI change, not an invisible optimization.
+2. Newtypes use direct carriers and guarded `tryNew` construction. The wrapper and `.value` ABI were
+   removed by ZEP-0070; that is an explicit ABI change, not an invisible optimization.

@@ -24,6 +24,7 @@ final class ResolutionContext {
     final Map<String, Stmt.SumDecl> sums = new LinkedHashMap<>();
     final Map<String, Stmt.ProductDecl> products = new LinkedHashMap<>();
     final Map<String, Stmt.NewtypeDecl> newtypes = new LinkedHashMap<>();
+    boolean representationContext;
     final Map<String, Stmt.AnnotationDeclaration> annotationDeclarations = new LinkedHashMap<>();
     final List<TypeClassEvidence.WitnessEntry> typeClassWitnesses = new ArrayList<>();
     final Map<String, Stmt.FunctionDeclaration> functions = new LinkedHashMap<>();

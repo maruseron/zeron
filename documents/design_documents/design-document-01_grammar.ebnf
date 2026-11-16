@@ -137,13 +137,12 @@ typeDecl = "type", IDENTIFIER, [ typeParameters ], [ derivingClause ], "=",
 derivingClause = 'deriving', IDENTIFIER, { ",", IDENTIFIER } ;
 productComponents = "(", productComponent, ",", productComponent, { ",", productComponent }, ")" ;
 productComponent = IDENTIFIER, ":", type ;
-newtypeDecl = 'newtype', IDENTIFIER, [ derivingClause ], "=", type, [ 'where', expression ],
+newtypeDecl = 'newtype', IDENTIFIER, [ typeParameters ], [ derivingClause ], "=", type, [ 'where', expression ],
                 ";" ;
 
-(* [CHANGED] The parser accepts any source `type` after `=`, then requires the representation to
-   resolve to Int, Float, Boolean or String; Long, Byte, ByteArray, arrays and other nominal
-   types are rejected with a declaration-structure diagnostic. `deriving` on a newtype is valid
-   grammar and is rejected semantically for now. *)
+(* [CHANGED] ZEP-0070: newtypes may bind type parameters and accept any statically known source
+   type after `=`. Guarded newtypes still require an immutable Int, Float, Boolean or String
+   representation. `deriving` on a newtype is valid grammar and resolves through the carrier. *)
 sumCase = IDENTIFIER, [ "(", [ sumPayload, { ",", sumPayload } ], ")" ] ;
 sumPayload = IDENTIFIER, ":", type ;
 declaration = varDecl | funDecl | handlerDecl | statement ;

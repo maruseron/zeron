@@ -2,7 +2,7 @@
 
 | Field | Value |
 | ----- | ----- |
-| Date | 2026-11-14 |
+| Date | 2026-11-15 |
 | Scope | Current release state in `documents/zeps/ZEP.md` and near-term sequencing |
 | Purpose | Planning companion for bundle contents, acceptance gates, and backlog order |
 
@@ -13,9 +13,9 @@ when bundle scope or sequencing changes.
 
 ## Current state
 
-The tracker records 136 ZEPs: 77 shipped, 0 planned, 14 candidates, and 39 unscheduled. The
+The tracker records 138 ZEPs: 77 shipped, 0 planned, 16 candidates, and 39 unscheduled. The
 remaining six rows are process entries, deferred work, or not applicable. `0.7.0` shipped on
-2026-11-14; `0.8.0` is the normalization bundle with fourteen candidates, and `0.9.0` is the proposed
+2026-11-14; `0.8.0` is the normalization bundle with sixteen candidates, and `0.9.0` is the proposed
 effect-control follow-on.
 
 ### Bundle summary
@@ -24,16 +24,16 @@ effect-control follow-on.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization of already implemented work | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 14 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0135; ZEP-0132 lands first |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 16 candidates | ZEP-0070, ZEP-0117, ZEP-0124–ZEP-0137; ZEP-0132 lands first |
 | `0.9.0` | Effect control and response typing | Proposed; no candidates | ZEP-0118 and ZEP-0110 headline the bundle |
 
 `0.7.0` shipped on 2026-11-14. Its 15 rows are `Shipped`; release scope is approved and complete.
-`0.8.0` is the next target: its fourteen candidates include five implemented designs, eight accepted
+`0.8.0` is the next target: its sixteen candidates include seven implemented designs, eight accepted
 designs, and one draft targeted proposal, and cover normalization, nominal representation,
-standard-library ownership,
-refinement correctness, a bounded operator-inference improvement, function-valued expression
-invocation, and witness provision rather than control flow. `0.9.0` is a planning target with no candidates yet, not a
-scheduled release.
+standard-library ownership, refinement correctness, a bounded operator-inference improvement,
+function-valued expression invocation, witness provision, and witness bundles with explicit selection
+rather than control flow. `0.9.0` is a planning target with no candidates yet, not a scheduled
+release.
 
 The bundles stay separate because `0.7.0` changes type identity, runtime descriptors, type-bound
 tests, and effect payload identity, while `0.9.0` changes control flow through response-typed
@@ -122,15 +122,14 @@ not add a second ABI alongside ZEP-0106.
 
 ## `0.8.0` — Normalization and nominal implementation
 
-`0.8.0` is the proposed normalization release. Its fourteen candidates include five implemented
-designs, eight accepted designs, and one draft target, and cover project configuration, nominal
-static evidence, optional
-HKT blocks, the entry-point contract, data-class structural access, generalized newtypes, sum
-parameter bounds, intrinsic declaration ownership, refinement correctness, operator-constraint
-inference for typeless lambdas, invocation of function-valued expressions, and witness provision.
-None changes
-`raise` or `handle` typing, and none introduces a new runtime control-flow mechanism. ZEP-0132 is
-a correctness fix and should land before the rest.
+`0.8.0` is the proposed normalization release. Its sixteen candidates include seven implemented
+designs, eight accepted designs, and one draft target, and cover project configuration, nominal static
+evidence, optional HKT blocks, the entry-point contract, data-class structural access, generalized
+newtypes, sum parameter bounds, intrinsic declaration ownership, refinement correctness,
+operator-constraint inference for typeless lambdas, invocation of function-valued expressions, witness
+provision, witness bundles, and explicit witness selection. None changes `raise` or `handle` typing,
+and none introduces a new runtime control-flow mechanism. ZEP-0132 is a correctness fix and should
+land before the rest.
 
 ### Candidate set
 
@@ -140,8 +139,8 @@ a correctness fix and should land before the rest.
 | ZEP-0124 | Nominal Static Contract Implementation | Implemented | Nominal static evidence through public class static functions and first-order block entries |
 | ZEP-0125 | Optional Higher-Kinded Implementation Blocks | Implemented | Header `is` conformance plus public members replaces the mandatory block |
 | ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Implemented | Entry values are interpreted through `Main<A>` evidence; standard witnesses for `Unit`, `Int`, and `Result` |
-| ZEP-0127 | Data Class Component Access and Positional Destructuring | Accepted | Canonical components are readable structural accessors; positional patterns use canonical components at root and nested positions |
-| ZEP-0070 | Generic and Nominal Newtype Representations | Accepted | Generic and nominal direct carriers; no `.value` field or wrapper; `this` is the representation in newtype-owned bodies |
+| ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented | Canonical components are readable structural accessors; positional patterns use canonical components at root and nested positions |
+| ZEP-0070 | Generic and Nominal Newtype Representations | Implemented | Generic and nominal direct carriers; no `.value` field or wrapper; `this` is the representation in newtype-owned bodies |
 | ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Accepted | Contract bounds on sum parameters; existential case-local parameters such as `Bind<B>`; context-resolved unqualified case names |
 | ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Accepted | Keep products binary; use ZEP-0070 direct-representation newtypes for single-value shapes |
 | ZEP-0130 | Standard-Library-Owned Intrinsic Declarations | Accepted | Intrinsic identity stays compiler-owned; a comprehensive `String` inventory lives in `zeron.lang` modules |
@@ -150,6 +149,8 @@ a correctness fix and should land before the rest.
 | ZEP-0133 | Operator-Constraint Inference for Typeless Lambdas | Accepted | Infer a rank-1 numeric or comparison scheme for eligible typeless lambdas; `(a, b) -> a + b` becomes `<T: Numeric<T>> (T, T) -> T` and `(a, b) -> a < b` becomes `<T: Comparable<T>> (T, T) -> Boolean` |
 | ZEP-0134 | Invocation of Function-Valued Expressions | Draft | Allow a postfix argument list after any function-valued expression, so `makeFunction()()` and `add(2)(3)` work without a temporary binding or new runtime representation |
 | ZEP-0135 | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Direct provision, canonical prerequisite evidence, and owner-directed method dispatch remove shared-ancestor ambiguity |
+| ZEP-0136 | Witness Bundles and Coherent Prerequisite Evidence | Accepted | Group a target's providers into a named or `default` bundle with a recorded prerequisite closure; named bundles are selection-only |
+| ZEP-0137 | Explicit Witness Selection and Witness Contexts | Accepted | `using witness (...)` selects bundles or named witnesses lexically, shadows ambient defaults locally, and has no runtime lookup |
 
 ZEP-0132 is the first implementation item. It is a localized correctness fix, and leaving the old
 behavior in place while ZEP-0131 adds chained refinement would let new conditions rely on an
@@ -163,6 +164,13 @@ resolver changed by ZEP-0132. ZEP-0130 is independent and can land as a standard
 its `String` inventory should follow the same API-index and separate-compilation cycle. ZEP-0133 is
 independent of the representation track: it extends the existing ZEP-0003 constrained-lambda path
 and needs focused lambda, operator, and resolver validation rather than an API-index schema bump.
+
+ZEP-0136 and ZEP-0137 form the witness-bundle track. ZEP-0136 adds the declaration form and the
+exported prerequisite closure; ZEP-0137 consumes that metadata in a lexical selection environment.
+Implement ZEP-0136 first, then thread its selected provider pairs through the same evidence paths
+changed by ZEP-0135. The bundle export record and the selection stack should share one API-index
+schema pass where practical, and neither may change ambient overlap checking outside a selection
+block.
 
 ZEP-0117 is independent. It landed in two stages: command, option, and manifest-schema metadata
 with generated reference pages and a staleness test, then `[build]`, `[targets]`, default-target
@@ -187,14 +195,14 @@ launcher, zero-argument and argument-taking forms, `Result` success, and a user 
 ### Acceptance queue for `0.8.0`
 
 The queue is open for further normalization items. ZEP-0126 and ZEP-0127 were the first reviewed
-entries, and ZEP-0128–ZEP-0133 were added in the second pass; all are promoted. ZEP-0070 moved from
-the backlog into the same bundle:
+entries, ZEP-0128–ZEP-0133 were added in the second pass, and ZEP-0136 and ZEP-0137 were added in the
+third pass; all are promoted. ZEP-0070 moved from the backlog into the same bundle:
 
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
 | ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Implemented / `Candidate` | Formalize `main` return values, entry evidence, and effectful entry interpretation |
-| ZEP-0127 | Data Class Component Access and Positional Destructuring | Accepted / `Candidate` | Make canonical components readable and add positional data-class patterns |
-| ZEP-0070 | Generic and Nominal Newtype Representations | Accepted / `Candidate` | Promote direct-carrier single-value representations from the backlog |
+| ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented / `Candidate` | Make canonical components readable and add positional data-class patterns |
+| ZEP-0070 | Generic and Nominal Newtype Representations | Implemented / `Candidate` | Promote direct-carrier single-value representations from the backlog |
 | ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Accepted / `Candidate` | Remove the sealed-contract workaround for polymorphic cases and bounded sums |
 | ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Accepted / `Candidate` | Keep unary products illegal and route single-value shapes through ZEP-0070 |
 | ZEP-0130 | Standard-Library-Owned Intrinsic Declarations | Accepted / `Candidate` | Settle intrinsic-operation ownership and add the practical `String` inventory |
@@ -203,6 +211,8 @@ the backlog into the same bundle:
 | ZEP-0133 | Operator-Constraint Inference for Typeless Lambdas | Accepted / `Candidate` | Infer numeric or comparable operator bounds for eligible typeless let-bound lambdas without defaulting to a concrete type |
 | ZEP-0134 | Invocation of Function-Valued Expressions | Draft / `Candidate` | Allow invocation of any non-null function-valued expression; candidate target recorded while design review remains open |
 | ZEP-0135 | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented / `Candidate` | Separate provided contracts from prerequisite evidence and resolve operations by declaring contract |
+| ZEP-0136 | Witness Bundles and Coherent Prerequisite Evidence | Accepted / `Candidate` | Group a target's providers into a coherent bundle and record prerequisite evidence at declaration time |
+| ZEP-0137 | Explicit Witness Selection and Witness Contexts | Accepted / `Candidate` | Select bundles or named witnesses lexically with `using witness`; no dynamic scope or runtime lookup |
 
 ZEP-0126 was accepted on 2026-11-13 and implemented on 2026-11-14. The implementation keeps the
 `Main.run` effect row (`raises Effect`, with pure witnesses allowed by row subtyping), places the
@@ -232,6 +242,13 @@ trimming, replacement, lines, parsing, and joining. ZEP-0133 extends the existin
 let-bound lambda path with numeric and comparison operator-constraint inference, but does not add a
 general constraint solver or a runtime ABI.
 
+ZEP-0136 and ZEP-0137 were accepted on 2026-11-15 and added as `Candidate` rows for `0.8.0`.
+ZEP-0136 makes a bundle declaration the unit of coherent prerequisite evidence: named bundles are
+selection-only, `default` bundles are ambient canonical evidence, and the closure is resolved and
+exported at declaration time. ZEP-0137 adds the statement-only `using witness (...)` block, which
+consumes bundle metadata, shadows ambient defaults locally, and captures selected handles in
+closures. ZEP-0137 depends on ZEP-0136 metadata; implement them in that order.
+
 ZEP-0070 was promoted from the backlog. It supplies the generic and nominal newtype representations
 that ZEP-0129 depends on. Its initial scope uses direct carriers, removes `.value`, makes `this` the
 representation in newtype-owned extensions and witnesses, keeps guarded newtypes scalar-only, and
@@ -250,6 +267,15 @@ change also alters generated descriptors, so its separate-compilation and byteco
 part of the same release validation cycle. ZEP-0133 is independent of that schema work, but its
 inferred schemes must reuse the existing constrained-lambda template and stay local-only; check
 that it does not accidentally become a general-purpose solver or change contextual inference.
+
+ZEP-0136 and ZEP-0137 add a new witness-declaration surface and a new statement form, but they are
+normalization work: they do not change `raise` or `handle`, ambient overlap checks, or resource
+`using` disposal. Their main risk is silent divergence between evidence paths. The selection stack
+must be consulted by direct member lookup, generic evidence forwarding, `Display` and
+string-concatenation lowering, user-defined equality, and `do` notation; missing one path would make
+a selected provider apply inconsistently. The bundle export record should join the existing `0.8.0`
+API-index schema pass rather than forcing a second bump, and `default` bundle adoption by the
+standard library should follow the normal standard-library version policy.
 
 The established risks remain: ZEP-0124 and ZEP-0125 must not diverge on static matching,
 diagnostics, or separate-compilation resolution; ZEP-0117 makes generated documentation part of
@@ -321,12 +347,12 @@ cycle. ZEP-0119 is prototype-gated, ZEP-0120 depends on two other proposals, and
 - `0.7.0` was published on 2026-11-14; its 15 rows are `Shipped` / `0.7.0`, and its acceptance
   queue is closed.
 - ZEP-0111 shipped in `0.7.0`; it does not fall back to `0.9.0`.
-- The `0.8.0` candidate set now has fourteen rows: five implemented designs, eight accepted designs,
+- The `0.8.0` candidate set now has sixteen rows: seven implemented designs, eight accepted designs,
   plus the draft ZEP-0134. Decide whether to freeze scope there or admit further normalization items.
 - Sequence ZEP-0132 first as the immediate safe-cast correction, then ZEP-0131, then the
   representation track (ZEP-0070, ZEP-0129, ZEP-0128), with ZEP-0130, ZEP-0133, and ZEP-0134
-  independent. Confirm that ordering before implementation begins, and accept ZEP-0134 before
-  implementing it.
+  independent. Implement ZEP-0136 before ZEP-0137 for the witness-bundle track. Confirm that
+  ordering before implementation begins, and accept ZEP-0134 before implementing it.
 - Settle the `String.split` empty-separator and return-type questions, the `charAt`/`at` shape, and
   the regex dialect questions in ZEP-0130 before treating the inventory as complete.
 - ZEP-0126 implementation details are settled: `Result` failures print `error.toString()` to
@@ -433,7 +459,7 @@ These decisions shape the current plan. Details live in each ZEP.
   `value` field, and `.value` accessor are removed; `this` and newtype-typed parameters are the
   representation inside newtype-owned extensions and witnesses. Admissible representations include
   type parameters, function types, nominal Zeron types, and explicit Java external classes; guarded
-  newtypes remain scalar-only. Accepted 2026-11-14 and `Candidate` for `0.8.0`.
+  newtypes remain scalar-only. Implemented 2026-11-15 and `Candidate` for `0.8.0`.
 - **ZEP-0128:** sum type parameters accept contract bounds; cases may declare marker-bounded
   existential type parameters; construction infers them, matching opens them with a branch-local
   `let` binder, and concrete case-local pattern arguments are rejected. Unqualified case names are
@@ -441,7 +467,7 @@ These decisions shape the current plan. Details live in each ZEP.
   ordinary values shadow case names and ambiguity requires qualification. Accepted 2026-11-14 and
   `Candidate` for `0.8.0`.
 - **ZEP-0129:** products remain binary; unary products are not legalized; single-value shapes use
-  ZEP-0070 direct-representation newtypes with no `.value` accessor. Accepted 2026-11-14 and
+  ZEP-0070 direct-representation newtypes with no `.value` accessor. Implemented 2026-11-15 and
   `Candidate` for `0.8.0`.
 - **ZEP-0130:** intrinsic types keep compiler-owned identity and operations live in canonical
   `zeron.lang` extension/namespace modules, not in a second class. The initial `String` inventory
@@ -459,6 +485,18 @@ These decisions shape the current plan. Details live in each ZEP.
   `<T: Comparable<T>> (T, T) -> Boolean`. Each use resolves evidence independently; string
   concatenation, equality, arbitrary member operations, concrete defaults, and arbitrary lambda
   positions remain outside the rule. Accepted 2026-11-14 and `Candidate` for `0.8.0`.
+- **ZEP-0136:** witness bundles group the providers for one target into a named or `default`
+  declaration. Members are unnamed; identity is bundle plus applied contract and target. The
+  prerequisite closure is resolved at declaration time; only canonical default dependencies are
+  recorded and exported, while nominal and compiler-provided evidence stays authoritative. Named
+  bundles are selection-only, `default` bundles are ambient canonical evidence, and an exported
+  bundle may not expose package-local types. Accepted 2026-11-15 and `Candidate` for `0.8.0`.
+- **ZEP-0137:** a statement-only `using witness (...)` block selects named bundles and named
+  standalone witnesses lexically. Bundle members and recorded canonical default dependencies enter a
+  scoped evidence map; ambient defaults are shadowed locally, nested blocks may re-pair one pair, and
+  closures capture selected handles at creation. There is no runtime lookup or dynamic scope.
+  Compiler-owned structural and built-in `Eq`/`Hashable`, derived serialization, `Main<A>`, and
+  intrinsic arithmetic lowering are not selectable. Accepted 2026-11-15 and `Candidate` for `0.8.0`.
 
 ## Planning rules
 
@@ -469,13 +507,13 @@ These decisions shape the current plan. Details live in each ZEP.
   `Candidate` row as proposed until its design review is complete.
 - `Candidate` is a proposed release target, not a commitment. `Planned` records an approved bundle.
 - The `0.7.0` description is shipped scope: its 15 rows are `Shipped` / `0.7.0`. The `0.8.0`
-  description has fourteen candidates (five implemented designs, eight accepted designs, plus draft ZEP-0134); its
-  acceptance queue remains open. The `0.9.0` description remains a planning record.
+  description has sixteen candidates (seven implemented designs, eight accepted designs, plus draft
+  ZEP-0134); its acceptance queue remains open. The `0.9.0` description remains a planning record.
 - The `0.7.0` acceptance queue is closed. The 15 shipped rows are the release set; ZEP-0107 and
   ZEP-0108 are outside the program bundle.
 - `0.6.0` shipped with 24 rows. ZEP-0068 remains `Accepted` because its external-name and adapter
   scope stays open under ZEP-0091, ZEP-0097, and ZEP-0098.
-- Do not reuse a ZEP number. The next available number is `0136`.
+- Do not reuse a ZEP number. The next available number is `0138`.
 - Routine fixes and contained changes do not need a ZEP.
 - `pom.xml` records `0.7.0`; `CHANGELOG.md` retains the `0.6.0` history and released `0.7.0` from
   the current entry. The `0.7.0` rows are `Shipped` / `0.7.0`; the next version bump belongs to the

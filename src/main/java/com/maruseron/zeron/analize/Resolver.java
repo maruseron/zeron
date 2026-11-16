@@ -738,6 +738,10 @@ public final class Resolver {
     static TypeDescriptor ensureAssignable(final ResolutionContext context, TypeDescriptor expectedType,
                                             TypeDescriptor resolvedType,
                                             Token where) {
+        if (context.representationContext) {
+            expectedType = NewtypeRepresentations.resolve(expectedType);
+            resolvedType = NewtypeRepresentations.resolve(resolvedType);
+        }
         return context.typeCompatibility.ensureAssignable(expectedType, resolvedType, where);
     }
 

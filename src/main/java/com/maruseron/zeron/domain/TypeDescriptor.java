@@ -236,7 +236,9 @@ public sealed interface TypeDescriptor
             case FloatDescriptor         _ -> ConstantDescs.CD_double;
             case BooleanDescriptor       _ -> ConstantDescs.CD_boolean;
             case StringDescriptor        _ -> ConstantDescs.CD_String;
-            case NominalDescriptor      nd -> ClassDesc.of(nd.name());
+            case NominalDescriptor      nd -> NewtypeRepresentations.isNewtype(nd.name())
+                    ? toJavaClassDesc(NewtypeRepresentations.resolve(nd))
+                    : ClassDesc.of(nd.name());
             case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
             case AppliedConstructorDescriptor _ -> ConstantDescs.CD_Object;
             case TypeConstructorDescriptor _ -> ConstantDescs.CD_Object;
@@ -258,10 +260,12 @@ public sealed interface TypeDescriptor
                 default -> toJavaClassDesc(nd.baseType());
             };
             case NullDescriptor _ -> ConstantDescs.CD_Object;
-            case GenericDescriptor generic -> StoredExistentialSupport.requiresHolder(generic)
-                    ? ClassDesc.of(StoredExistentialSupport.holderClassName(
-                            StoredExistentialSupport.holderSlotCount(generic)))
-                    : ClassDesc.of(generic.baseType().name());
+            case GenericDescriptor generic -> NewtypeRepresentations.isNewtype(generic.baseType().name())
+                    ? toJavaClassDesc(NewtypeRepresentations.resolve(generic))
+                    : StoredExistentialSupport.requiresHolder(generic)
+                            ? ClassDesc.of(StoredExistentialSupport.holderClassName(
+                                    StoredExistentialSupport.holderSlotCount(generic)))
+                            : ClassDesc.of(generic.baseType().name());
             case TypeProjectionDescriptor projection -> toJavaClassDesc(projection.bound());
             case CapturedTypeDescriptor capture -> toJavaClassDesc(capture.upperBound());
             case EffectRowDescriptor _ ->
@@ -288,9 +292,13 @@ public sealed interface TypeDescriptor
             case StringDescriptor        _ ->
                     throw new IllegalArgumentException(
                             "Illegal conversion: StringDescriptor to java.constant.ClassDesc");
-            case NominalDescriptor       _ ->
-                    throw new IllegalArgumentException(
-                            "Illegal conversion: NominalDescriptor to java.constant.ClassDesc");
+            case NominalDescriptor nominal -> {
+                if (NewtypeRepresentations.isNewtype(nominal.name())) {
+                    yield toJavaWrapper(NewtypeRepresentations.resolve(nominal));
+                }
+                throw new IllegalArgumentException(
+                        "Illegal conversion: NominalDescriptor to java.constant.ClassDesc");
+            }
             case TypeParameterDescriptor _ -> ConstantDescs.CD_Object;
             case AppliedConstructorDescriptor _ -> ConstantDescs.CD_Object;
             case TypeConstructorDescriptor _ ->
@@ -303,7 +311,9 @@ public sealed interface TypeDescriptor
             case ByteArrayDescriptor     _ -> ClassDesc.ofDescriptor("[B");
             case NullableDescriptor     nd -> toJavaClassDesc(nd);
             case NullDescriptor          _ -> ConstantDescs.CD_Object;
-            case GenericDescriptor generic -> ClassDesc.of(generic.baseType().name());
+            case GenericDescriptor generic -> NewtypeRepresentations.isNewtype(generic.baseType().name())
+                    ? toJavaWrapper(NewtypeRepresentations.resolve(generic))
+                    : ClassDesc.of(generic.baseType().name());
             case TypeProjectionDescriptor projection -> toJavaWrapper(projection.bound());
             case CapturedTypeDescriptor capture -> toJavaWrapper(capture.upperBound());
             case EffectRowDescriptor _ ->

@@ -135,6 +135,10 @@ public final class TypeSubstitution {
             case NullableDescriptor nullable -> erase(nullable.baseType()).toNullable();
             case ReferenceDescriptor reference -> new ReferenceDescriptor(erase(reference.baseType()));
             case ArrayDescriptor array -> TypeDescriptor.arrayOf(erase(array.elementType()));
+            case NominalDescriptor nominal when NewtypeRepresentations.isNewtype(nominal.name()) ->
+                    erase(NewtypeRepresentations.resolve(nominal));
+            case GenericDescriptor generic when NewtypeRepresentations.isNewtype(generic.baseType().name()) ->
+                    erase(NewtypeRepresentations.resolve(generic));
             case GenericDescriptor generic -> StoredExistentialSupport.requiresHolder(generic)
                     ? StoredExistentialSupport.holderType(generic) : generic.baseType();
             case TypeProjectionDescriptor projection -> erase(projection.bound());

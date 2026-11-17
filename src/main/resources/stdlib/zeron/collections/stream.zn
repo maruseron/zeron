@@ -289,8 +289,8 @@ fn streamMonadAp<A: mut, B: mut>(values: Stream<A>, functions: Stream<(A) -> B>)
 /// underlying source, so a stream can be traversed again whenever its source can; results are not
 /// cached, and a transformation's function may run once per traversal.
 ///
-/// The terminal operations `fold`, `collect`, `count`, `any`, `all`, and `toList` consume the
-/// traversal they start, and `any`/`all` stop at the first decisive element.
+/// The terminal operations `fold`, `collect`, `collectWith`, `count`, `any`, `all`, and `toList`
+/// consume the traversal they start, and `any`/`all` stop at the first decisive element.
 public class Stream<T: mut> 
     is Iterable<T>, 
        Functor<Stream<_>>, 
@@ -361,13 +361,21 @@ public class Stream<T: mut>
     /// Counts the elements by traversing the stream.
     public count(): Int = fold(0, (a, _) -> a + 1);
 
-    /// Adds every element to `collector` and returns its result.
+    /// Collects the elements through the operations that build a collector.
     ///
-    /// `collect` is the terminal operation for reusable collection strategies: the collector
-    /// decides how items accumulate, and its `finish` produces the value. `StringJoiner` is one
-    /// such collector, so a join needs no intermediate collection and no per-call folding
-    /// function.
-    public collect<R: mut>(collector: Collector<T, R>): R {
+    /// `initial` starts the accumulation, `add` combines the accumulator with an element, and
+    /// `finish` produces the result. The operations are handed to `Collector.of`, so the same
+    /// three arguments can be built once as a collector and passed to `collectWith` instead.
+    public collect<R: mut, S: mut>(initial: S, add: (S, T) -> S, finish: (S) -> R): R =
+        this.collectWith(Collector.of<S, T, R>(initial, add, finish));
+
+    /// Adds every element to an already-built `collector` and returns its result.
+    ///
+    /// `collectWith` is the terminal operation for reusable collection strategies: the collector
+    /// decides how items accumulate, and its `finish` produces the value. `StringJoiner`,
+    /// `Collector.toArrayList`, and `Collector.summing` are such collectors, so a join, a list
+    /// build, or a sum needs no intermediate collection and no per-call folding function.
+    public collectWith<R: mut>(collector: Collector<T, R>): R {
         let mut current = collector;
         for (let item in this) current = current.add(item);
         return current.finish();

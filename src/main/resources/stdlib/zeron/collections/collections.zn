@@ -1,5 +1,16 @@
 package zeron.collections;
 
+import zeron.lang.Hashable;
+import zeron.lang.Pair;
+import zeron.numeric.Integer;
+import zeron.numeric.Numeric;
+
+fn reversedConsList<T: mut>(values: ConsList<T>): ConsList<T> {
+    let mut result: ConsList<T> = ConsList<T>.empty();
+    for (let item in values) result = result.prepend(item);
+    return result;
+}
+
 /// A collection whose elements are addressed by position in constant time.
 ///
 /// Implementations must guarantee `O(1)` access for `at`.
@@ -180,6 +191,64 @@ namespace Collector {
         add: (S, T) -> S,
         finish: (S) -> R
     ): Collector<T, R> = CollectorImpl<T, S, R>.of(initial, add, finish);
+    /// Creates a collector that gathers the items into a new `ArrayList`, in encounter order.
+    public fn toArrayList<T: mut>(): Collector<T, &ArrayList<T>> =
+        Collector.of<& ArrayList<T>, T, &ArrayList<T>>(
+            ArrayList<T>.empty(),
+            (values, item) -> {
+                values.add(item);
+                return values;
+            },
+            (values) -> values
+        );
+    /// Creates a collector that gathers the items into a new `LinkedList`, in encounter order.
+    public fn toLinkedList<T: mut>(): Collector<T, &LinkedList<T>> =
+        Collector.of<& LinkedList<T>, T, &LinkedList<T>>(
+            LinkedList<T>.empty(),
+            (values, item) -> {
+                values.add(item);
+                return values;
+            },
+            (values) -> values
+        );
+    /// Creates a collector that gathers the items into a new `ConsList`, in encounter order.
+    ///
+    /// A cons list prepends, so the collector builds in reverse and `finish` reverses the result.
+    public fn toConsList<T: mut>(): Collector<T, ConsList<T>> =
+        Collector.of<ConsList<T>, T, ConsList<T>>(
+            ConsList<T>.empty(),
+            (values, item) -> values.prepend(item),
+            (values) -> reversedConsList(values)
+        );
+    /// Creates a collector that gathers `key`/`value` pairs into a new `HashMap`.
+    ///
+    /// A later entry for an existing key replaces the earlier value.
+    public fn toHashMap<K: Hashable<K>, V: mut>(): Collector<Pair<K, V>, &HashMap<K, V>> =
+        Collector.of<& HashMap<K, V>, Pair<K, V>, &HashMap<K, V>>(
+            HashMap<K, V>.empty(),
+            (entries, entry) -> {
+                entries.put(entry.fst, entry.snd);
+                return entries;
+            },
+            (entries) -> entries
+        );
+    /// Creates a collector that gathers the items into a new `HashSet`, dropping duplicates.
+    public fn toHashSet<T: Hashable<T>>(): Collector<T, &HashSet<T>> =
+        Collector.of<& HashSet<T>, T, &HashSet<T>>(
+            HashSet<T>.empty(),
+            (elements, item) -> {
+                elements.add(item);
+                return elements;
+            },
+            (elements) -> elements
+        );
+    /// Creates a collector that adds the items together, starting from zero.
+    public fn summing<T: Numeric<T>>(): Collector<T, T> =
+        Collector.of<T, T, T>(
+            T.fromInteger(Integer.fromInt(0)),
+            (total, value) -> total.add(value),
+            (total) -> total
+        );
 }
 
 /// The canonical collector returned by `Collector.of`.

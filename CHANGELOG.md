@@ -114,8 +114,11 @@
   `toFloat`. Multi-value results are `Stream<String>` so they compose with the existing stream
   operations. `StringJoiner` is the reusable joining collector and `String.join` delegates to it.
   `zeron.collections.Collector<T, R>` now names the value-level collector capability, with `add` and
-  `finish`, `Collector.of` supplies the canonical `CollectorImpl` for ad-hoc strategies, and
-  `Stream.collect` reduces a stream through a collector. The higher-kinded collection-construction
+  `finish`; `Stream.collect` builds a collector from an initial accumulator, a step, and a
+  conversion, `Stream.collectWith` drives an already-built collector, and `Collector.of` supplies
+  the canonical `CollectorImpl` for ad-hoc strategies. The `Collector` namespace also provides
+  concrete collectors: `toArrayList`, `toLinkedList`, `toConsList`, `toHashMap`, `toHashSet`, and
+  the `Numeric<T>`-generic `summing`. The higher-kinded collection-construction
   capability keeps its members under the clearer name `CollectionBuilder<C<_>>`. The platform
   primitives live in `zeron.runtime.StringUnicode`, no intrinsic ID was added, and the
   standard-library API version advanced to `18`.

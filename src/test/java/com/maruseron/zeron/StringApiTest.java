@@ -68,19 +68,24 @@ public final class StringApiTest {
                 fn joinSingle(): String = String.join(", ", ["solo"]);
                 fn joinMultiple(): String = String.join(", ", ["a", "b", "c"]);
                 fn collectThroughJoiner(): String =
-                    "abc".split("").collect(StringJoiner.withSeparator(":"));
+                    "abc".split("").collectWith(StringJoiner.withSeparator(":"));
                 fn collectFromLocalJoiner(): String {
                     let joiner = StringJoiner.withSeparator(":");
-                    let first = "ab".split("").collect(joiner);
-                    let second = "cd".split("").collect(joiner);
+                    let first = "ab".split("").collectWith(joiner);
+                    let second = "cd".split("").collectWith(joiner);
                     return first + "|" + second;
                 }
                 fn collectThroughFactory(): String {
                     let collector = Collector.of<String, Int, String>("",
                         (text, value) -> text + value.toString(),
                         (text) -> "[" + text + "]");
-                    return Stream<Int>.fromArray([1, 2, 3]).collect(collector);
+                    return Stream<Int>.fromArray([1, 2, 3]).collectWith(collector);
                 }
+                fn collectThroughOperations(): String =
+                    Stream<Int>.fromArray([1, 2, 3]).collect("",
+                        (text, value) -> if (text.isEmpty()) then value.toString()
+                            else text + "-" + value.toString(),
+                        (text) -> "[" + text + "]");
                 fn joinerOnStreamDirectly(): String =
                     StringJoiner.withSeparator("-").join(Stream<Int>.fromArray([1, 2, 3])
                         .map(value -> value.toString()));
@@ -129,6 +134,7 @@ public final class StringApiTest {
                 assertEquals("a:b:c", test.getMethod("collectThroughJoiner").invoke(null));
                 assertEquals("a:b|c:d", test.getMethod("collectFromLocalJoiner").invoke(null));
                 assertEquals("[123]", test.getMethod("collectThroughFactory").invoke(null));
+                assertEquals("[1-2-3]", test.getMethod("collectThroughOperations").invoke(null));
                 assertEquals("1-2-3", test.getMethod("joinerOnStreamDirectly").invoke(null));
                 assertEquals(6, test.getMethod("splitDoesNotShareIterators").invoke(null));
             }

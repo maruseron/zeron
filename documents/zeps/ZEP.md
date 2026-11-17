@@ -237,7 +237,8 @@ Its nineteen candidates are:
   `charAt`/`at`, case conversion, trimming, replacement, lines, parsing, and `StringJoiner`-backed
   joining, all over `Stream<String>` results—is declared in canonical `zeron.lang` extension
   modules rather than in a second class or intrinsic ID. Joining is a `Collector`, and
-  `Stream.collect` drives any collector.
+  `Stream.collectWith` drives any collector, and the `Collector` namespace ships the concrete
+  builders for lists, maps, sets, and numeric sums.
 - [ZEP-0131](./ZEP-0131.md) — chained flow refinement and implicit receiver access. `is` and
   `matches` transfer through composed conditions and stable member paths, and unqualified field or
   property reads use the implicit `this` receiver.
@@ -291,7 +292,8 @@ accepted on 2026-11-15 and are `Accepted` / `Candidate`. All count in the bundle
 
 ZEP-0130 was implemented on 2026-11-17 and is `Implemented` / `Candidate`. The `String` inventory is
 declared in standard-library source, multi-value results are `Stream<String>`, `StringJoiner` owns
-joining, and `Stream.collect` is the general terminal operation behind it. No intrinsic ID was added.
+joining, and `Stream.collectWith` is the general terminal operation behind it, over collectors the
+`Collector` namespace provides. No intrinsic ID was added.
 
 ### `0.9.0` — effect control and response typing
 

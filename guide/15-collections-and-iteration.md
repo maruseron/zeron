@@ -190,27 +190,51 @@ Values are requested when an operation consumes the stream, such as `toList()`, 
 `for` loop. Use a stream to express a sequence of transformations, and use a list when you need to
 store the resulting values and change or revisit them.
 
-`collect` reduces a stream through a collector: a value that adds items with `add` and returns its
-result from `finish`. The collector owns how items accumulate, so the call site passes no folding
-functions:
+`collect` reduces a stream through the operations that build a collector: an initial accumulator, a
+step that combines the accumulator with an element, and a conversion of the final accumulator.
 
 ```zeron
-import zeron.collections.Collector;
-
-let csv = names.collect(StringJoiner.withSeparator(", "));
+let total = numbers.collect(0, (sum, value) -> sum + value, (sum) -> sum * 2);
 ```
 
-`StringJoiner` is one collector. `Collector.of` builds another from an initial accumulator and two
-functions when no dedicated implementation exists:
+`collectWith` takes a collector that is already built: a value that adds items with `add` and
+returns its result from `finish`. The collector owns how items accumulate, so the call site passes
+no functions at all:
 
 ```zeron
-let bracket = Collector.of<String, Int, String>("",
-    (text, value) -> text + value.toString(), (text) -> "[" + text + "]");
-let text = numbers.collect(bracket);
+let csv = names.collectWith(StringJoiner.withSeparator(", "));
 ```
 
 A collector is an ordinary value: `add` returns the updated collector instead of changing the old
 one, so the same collector can start as many accumulations as you like.
+
+The `Collector` namespace also holds the collectors for the concrete collections and for numeric
+summaries, so a stream is gathered without naming the target class at the call site:
+
+```zeron
+import zeron.collections.Collector;
+
+let list = values.collectWith(Collector.toArrayList<Int>());
+let queue = values.collectWith(Collector.toLinkedList<Int>());
+let chain = values.collectWith(Collector.toConsList<Int>());
+let set = values.collectWith(Collector.toHashSet<Int>());
+let map = entries.collectWith(Collector.toHashMap<String, Int>());
+let sum = values.collectWith(Collector.summing<Int>());
+```
+
+`toArray`-style collectors fill a mutable collection and hand back a mutable reference to it, so
+the result can be read and extended in place. `toHashMap` needs `Hashable` keys, `toHashSet` needs
+`Hashable` elements, and `summing` works for any `Numeric<T>`, starting from its zero.
+
+These are the canonical `Collector.of` implementation wherever the accumulation allows it, and
+`Collector.of` also builds a collector from an initial accumulator and two functions when no
+dedicated implementation exists:
+
+```zeron
+let bracket = Collector.of<String, Int, String>("",
+    (text, value) -> text + value.toString(), (text) -> "[" + text + "]");
+let text = numbers.collectWith(bracket);
+```
 
 ## Collections of anonymous existential elements
 

@@ -28,9 +28,9 @@ class StringCodePoints is Iterable<Char> {
 
 /// Joins strings with a separator.
 ///
-/// A joiner is a `Collector`, so `Stream.collect` can drive it directly and `String.join` simply
-/// delegates to it. The separator is written between adjacent elements; there is no prefix or
-/// suffix, and elements are not converted from another type.
+/// A joiner is a `Collector`, so `Stream.collectWith` can drive it directly and `String.join`
+/// simply delegates to it. The separator is written between adjacent elements; there is no prefix
+/// or suffix, and elements are not converted from another type.
 public class StringJoiner is Collector<String, String> {
     separator: String;
     joined: Option<String>;
@@ -56,7 +56,7 @@ public class StringJoiner is Collector<String, String> {
     public finish(): String = this.joined.getOrElse("");
 
     /// Adds every element of `values`, in order, and returns the joined text.
-    public join(values: Iterable<String>): String = values.stream().collect(this);
+    public join(values: Iterable<String>): String = values.stream().collectWith(this);
 }
 
 /// A failure produced by a regular-expression operation.

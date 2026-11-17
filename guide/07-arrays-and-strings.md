@@ -83,8 +83,8 @@ let csv = String.join(", ", headers);
 let path = StringJoiner.withSeparator("/").join(segments);
 ```
 
-A joiner is a `Collector`, so a stream can be joined directly; see
-[collections and iteration](15-collections-and-iteration.md) for `collect`.
+A joiner is a `Collector`, so a stream can be joined directly with `collectWith`; see
+[collections and iteration](15-collections-and-iteration.md) for collecting.
 
 ## A fixed sequence with `Array<T>`
 

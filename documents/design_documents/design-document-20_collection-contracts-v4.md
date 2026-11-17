@@ -21,6 +21,11 @@ axes, the options, and a tentative recommendation for each, and ends with experi
 is [ZEP-0094](../zeps/ZEP-0094.md), which is accepted and settles the questions this document leaves
 open; this document remains the discussion record.
 
+**Naming note.** This document was written while the collection-construction capability was called
+`Collector<C<_>>`; it now uses the shipped name `CollectionBuilder<C<_>>`. The value-level
+`zeron.collections.Collector<T, R>` — which adds items with `add` and returns one result from
+`finish`, and which `Stream.collectWith` drives — is a different capability that took the name later.
+
 ## Current state
 
 This section is taken from `list.zn`, `map.zn`, `set.zn`, `stream.zn`, and the definition of
@@ -33,8 +38,8 @@ which were wrong.
 
 **`List<T: mut>`** is a final, array-backed class. It conforms to `Iterable<T>`, `Sink<T>`,
 `RandomAccess<T>`, `Sequenced<T>`, `Reversible<List<_>>`, `Foldable<List<_>>`, and
-`Collector<List<_>>`. Its members are `size`, `isEmpty`, `at(index): Option<T>`, `first`, `last`,
-`replaceAt`, `add` (returns `Boolean`), `insert`, `removeAt`, `clear`, and `foldLeft`. Its
+`CollectionBuilder<List<_>>`. Its members are `size`, `isEmpty`, `at(index): Option<T>`, `first`,
+`last`, `replaceAt`, `add` (returns `Boolean`), `insert`, `removeAt`, `clear`, and `foldLeft`. Its
 constructors are `of(T...)`, `empty()`, and `fromArray`. It has no `map` or `filter`, and no `Eq` or
 `Hashable`. Its iterator reads through the class's own `at` and `size`.
 
@@ -62,7 +67,8 @@ constructors such as `List<_>`, with `implementation` and `delegating implementa
 - `Sink<T>` requires `mut add(value): Boolean`.
 - `Reversible<C<_>>` requires `mut reverse` (in place) and `reversed` (copy); `Sortable<C<_>>`
   requires `mut sortBy` and `sortedBy`, with `sort` and `sorted` as defaults.
-- `Collector<C<_>>` requires `empty<A>(): &C<A>` and `mut add`, and is the generic builder.
+- `CollectionBuilder<C<_>>` requires `empty<A>(): &C<A>` and `mut add`, and is the generic
+  builder.
 - `Foldable<F<_>>` requires `foldLeft`, with `count` and `isEmpty` as defaults. `Functor`,
   `Applicative`, `Monad`, and `Traversable` exist beside it; `List` has no `Functor` instance.
 - Contracts may declare `static` members (`Monoid.empty`).
@@ -86,8 +92,8 @@ Mutation is therefore already expressed by small capability contracts named for 
 5. **`List` has no equality, hashing, or transformations.** Equality across implementations is a
    missing feature, not a migration risk. Transformations already go through `stream()`.
 6. **Existing capability instances are keyed to the class.** `Reversible<List<_>>`,
-   `Foldable<List<_>>`, and `Collector<List<_>>` are tied to the class, and `Reversible` uses its
-   private fields.
+   `Foldable<List<_>>`, and `CollectionBuilder<List<_>>` are tied to the class, and `Reversible`
+   uses its private fields.
 7. **Mutation is already expressed as capabilities.** `Sink.add`, `Reversible.reverse`, and
    `Sortable.sort` are named for what they do. A `MutableList` bundle would be the first contract
    named for a state (see the section on mutation below).
@@ -125,7 +131,8 @@ What remains is the first two, and the ergonomics of naming.
    library has not yet adopted rows.
 7. **Two kinds of contract that do not connect.** Ordinary contracts are parameterized by element
    types (`Iterable<T>`, `Sink<T>`). Capability contracts over type constructors (`Foldable<F<_>>`,
-   `Reversible<C<_>>`, `Collector<C<_>>`) cannot bound their constructor parameter, and `requires`
+   `Reversible<C<_>>`, `CollectionBuilder<C<_>>`) cannot bound their constructor parameter, and
+   `requires`
    cannot relate one kind to the other in either direction. Method-level generics can carry bounds,
    including intersections (`T: A + B`) and constructor bounds (`G<_>: Applicative<G>`).
 
@@ -260,14 +267,14 @@ that choice should be kept.
 Constructors (`of`, `empty`, `fromArray`, `withMap`, `withOperations`) are declared on the classes.
 If `List` becomes a contract, `List.of(...)` has no home. Contracts can declare `static` members
 (as `Monoid.empty` does), but a static member is resolved through an implementing type, and a bare
-contract name has none. Factories therefore live on the default classes (`ArrayList.of`), and generic
-code builds through `Collector`. Inference changes: `let xs = ArrayList.empty()` yields a concrete class, whereas an API
-returning `List<Int>` hides it.
+contract name has none. Factories therefore live on the default classes (`ArrayList.of`), and
+generic code builds through `CollectionBuilder`. Inference changes: `let xs = ArrayList.empty()`
+yields a concrete class, whereas an API returning `List<Int>` hides it.
 
 ### 6. Return types and building
 
 `List` has no transformations, so the absence of `Self` matters less than it would elsewhere. The
-existing `Collector<List<_>>` is the mechanism for building a collection generically, and
+existing `CollectionBuilder<List<_>>` is the mechanism for building a collection generically, and
 `Stream.toList()` could be expressed through it rather than hard-wiring `List`. The `Reversible`
 instance is more constrained: `reversed` returns a `List<A>`, and `reverse` swaps in place through a
 private method. With a contract, in-place reversal needs indexed read and write capabilities or an
@@ -332,9 +339,9 @@ operators would duplicate code without adding behavior. `Stream` as a final clas
 ### Relationship to `List`
 
 - `Iterable.stream()` starts a lazy pipeline over any collection. It already exists.
-- `Stream.toList()` collects into the default list; it can be generalized through `Collector` with
-  a method-level constructor bound (`collect<C<_>: Collector<C>>()`) so it does not hard-wire the
-  class.
+- `Stream.toList()` collects into the default list; it can be generalized through
+  `CollectionBuilder` with a method-level constructor bound
+  (`collect<C<_>: CollectionBuilder<C>>()`) so it does not hard-wire the class.
 - `Stream` does not conform to any list contract: it has no length and no random access, and it
   re-evaluates.
 - Terminal operations (`fold`, `count`, `any`, `all`) are currently on `Stream` only. Because
@@ -399,14 +406,14 @@ If Option 1 is chosen, the breakage is concentrated in a few categories:
 1. **Construction.** `List.of`, `Map.empty`, and similar must name a concrete class.
 2. **Mutation through the plain names.** Code that mutates through `List<T>` must take `&L` with
    capability bounds (`Sink`, the positional editing capability).
-3. **Capability instances.** `Reversible`, `Foldable`, and `Collector` instances move to the concrete
-   classes; contract-typed values use default methods.
+3. **Capability instances.** `Reversible`, `Foldable`, and `CollectionBuilder` instances move to the
+   concrete classes; contract-typed values use default methods.
 4. **Inference.** Unannotated bindings infer a concrete class.
 5. **Serialization.** Decoding contract-typed fields picks the default implementation.
 
 A phased approach: first the changes that are independent of the migration (generalizing
-`Set.withMap`, generalizing `Stream.toList` through `Collector`, hoisting terminal operations to
-`Iterable`); then the
+`Set.withMap`, generalizing `Stream.toList` through `CollectionBuilder`, hoisting terminal operations
+to `Iterable`); then the
 bundle contracts and renamed classes with behavior identical to today; then widening of standard
 library parameters to the contracts; and only then alternative implementations.
 

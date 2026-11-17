@@ -267,6 +267,18 @@
         },
         {
           "name": "keyword.control.zeron",
+          "match": "\\brequires\\b(?=\\s+[A-Za-z_][A-Za-z0-9_]*(?:\\s*<[^{};]*>)?(?:\\s*\\+|\\s*\\{|\\s+permits\\b))"
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\byield\\b(?=\\s+[^-=+*/%<>&|])"
+        },
+        {
+          "name": "keyword.control.zeron",
+          "match": "\\binto\\b(?=\\s+[A-Za-z_][A-Za-z0-9_]*)"
+        },
+        {
+          "name": "keyword.control.zeron",
           "match": "\\bderiving\\b(?=\\s+[A-Z][A-Za-z0-9_]*(?:\\s*,\\s*[A-Z][A-Za-z0-9_]*)*\\s*(?:=|\\{))"
         },
         {

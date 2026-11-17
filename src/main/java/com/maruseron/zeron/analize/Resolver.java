@@ -448,12 +448,12 @@ public final class Resolver {
         if (selected == null) return null;
         final var passArguments = !withArguments.isEmpty();
         if (!zeroArgument.isEmpty() && !withArguments.isEmpty()
-                && !zeroArgument.getFirst().typeDescriptor().returnType()
-                        .equals(withArguments.getFirst().typeDescriptor().returnType())) {
+                && !effectiveEntryType(context, zeroArgument.getFirst()).returnType()
+                        .equals(effectiveEntryType(context, withArguments.getFirst()).returnType())) {
             entryError(context, selected.name(),
                     "The zero-argument and Array<String> 'main' forms return different entry value types.");
         }
-        final var valueType = selected.typeDescriptor().returnType();
+        final var valueType = effectiveEntryType(context, selected).returnType();
         if (valueType instanceof UnitDescriptor) {
             return new ResolutionResult.EntryPoint(selected, passArguments, valueType, null);
         }
@@ -465,6 +465,16 @@ public final class Resolver {
                             + "> evidence is available. Declare a witness for that type or return Unit.");
         }
         return new ResolutionResult.EntryPoint(selected, passArguments, valueType, evidence);
+    }
+
+    private static FunctionDescriptor effectiveEntryType(final ResolutionContext context,
+                                                         final Stmt.Function main) {
+        if (!(main.typeDescriptor().returnType() instanceof InferDescriptor)) {
+            return main.typeDescriptor();
+        }
+        final var symbol = MemberInteropResolver.functionSymbolToken(context, main.name());
+        final var resolved = context.symbols.getFunctionType(symbol);
+        return resolved instanceof FunctionDescriptor function ? function : main.typeDescriptor();
     }
 
     private static void entryError(final ResolutionContext context, final Token token,

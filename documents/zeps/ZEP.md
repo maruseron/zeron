@@ -120,7 +120,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0107](./ZEP-0107.md) | Ancestor-Aware Runtime Type Descriptors | Accepted | Unscheduled | — |
 | [ZEP-0108](./ZEP-0108.md) | Contract-Bound Runtime Tests | Deferred | Deferred | — |
 | [ZEP-0109](./ZEP-0109.md) | Rank-2 Polymorphism: Polymorphic Function Types and Generic Lambdas | Implemented | Shipped | 0.7.0 |
-| [ZEP-0110](./ZEP-0110.md) | Block-Bodied Handler Expressions | Draft | Unscheduled | — |
+| [ZEP-0110](./ZEP-0110.md) | Block-Bodied Handler Expressions | Superseded | Unscheduled | — |
 | [ZEP-0111](./ZEP-0111.md) | Witness-Dispatched Do-Notation | Implemented | Shipped | 0.7.0 |
 | [ZEP-0112](./ZEP-0112.md) | Structured Concurrency on Virtual Threads | Draft | Unscheduled | — |
 | [ZEP-0113](./ZEP-0113.md) | Declaration-Site Covariance for Sum and Product Types | Implemented | Candidate | 0.8.0 |
@@ -148,6 +148,16 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0135](./ZEP-0135.md) | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Candidate | 0.8.0 |
 | [ZEP-0136](./ZEP-0136.md) | Witness Bundles and Coherent Prerequisite Evidence | Accepted | Candidate | 0.8.0 |
 | [ZEP-0137](./ZEP-0137.md) | Explicit Witness Selection and Witness Contexts | Accepted | Candidate | 0.8.0 |
+| [ZEP-0138](./ZEP-0138.md) | Predicate and Fact IR for Static Verification | Draft | Unscheduled | - |
+| [ZEP-0139](./ZEP-0139.md) | Checked Construction for Guarded Newtypes | Draft | Unscheduled | - |
+| [ZEP-0140](./ZEP-0140.md) | Comparison and Refined-Type Flow Facts | Draft | Unscheduled | - |
+| [ZEP-0141](./ZEP-0141.md) | Predicate Functions and Fact Transfer | Draft | Unscheduled | - |
+| [ZEP-0142](./ZEP-0142.md) | Interval and Difference-Bound Flow Facts | Draft | Unscheduled | - |
+| [ZEP-0143](./ZEP-0143.md) | IntRange Bounds and Loop Facts | Draft | Unscheduled | - |
+| [ZEP-0144](./ZEP-0144.md) | Parameter Type Refinement and Call-Site Preconditions | Draft | Unscheduled | - |
+| [ZEP-0145](./ZEP-0145.md) | Unified Namespace and Extension Container | Draft | Unscheduled | - |
+| [ZEP-0146](./ZEP-0146.md) | Value-Producing Block Expressions | Draft | Candidate | 0.8.0 |
+| [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Draft | Candidate | 0.9.0 |
 
 ## Release bundles
 
@@ -161,8 +171,8 @@ sequencing.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 18 candidates | ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137; ZEP-0132 is the immediate corrective |
-| `0.9.0` | Effect control and response typing | Proposed | No candidates; ZEP-0118 and ZEP-0110 headline the bundle |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 19 candidates | ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146; ZEP-0132 is the immediate corrective |
+| `0.9.0` | Effect control and response typing | Proposed; 1 candidate | ZEP-0118 and ZEP-0147 headline the bundle |
 
 ### `0.7.0` — type identity, reification, and type bounds
 
@@ -190,7 +200,7 @@ and is likewise outside the bundle. The bundle shipped on 2026-11-14; its rows a
 ### `0.8.0` — normalization and nominal implementation
 
 The bundle targets smaller normalization and smoothing work rather than new control-flow semantics.
-Its eighteen candidates are:
+Its nineteen candidates are:
 
 - [ZEP-0117](./ZEP-0117.md) — declarative project targets and generated CLI/manifest reference.
   A tooling and configuration change with no language, runtime, standard-library, compiled-library,
@@ -251,6 +261,10 @@ Its eighteen candidates are:
 - [ZEP-0137](./ZEP-0137.md) — explicit witness selection and witness contexts. A statement-only
   `using witness (...)` block selects bundles or named witnesses lexically, shadows ambient defaults
   locally, and captures evidence in closures without runtime lookup or dynamic scope.
+- [ZEP-0146](./ZEP-0146.md) — value-producing block expressions. A brace block in expression
+  position ends with one final `yield` and produces that value; statement blocks and every
+  statement-block consumer remain unchanged. The proposal is still `Draft`; its `0.8.0` candidacy
+  records the intended target, not an accepted design.
 
 ZEP-0124 and ZEP-0125 are implementation-coupled through one static/receiverless matcher, even
 though they are independently decidable designs. They should be implemented and validated together
@@ -260,39 +274,66 @@ runtime ABI. ZEP-0126 is the only candidate that changes the entry-point rule; i
 static-requirement work in ZEP-0124 for nominal `Main<A>` conformance, but its witness-only form can
 ship independently. The bundle does not change `raise` or `handle` typing.
 
-These eighteen are the current target; further small normalization items may join `0.8.0` as additional
+These nineteen are the current target; further small normalization items may join `0.8.0` as additional
 candidates. The acceptance queue remains open. ZEP-0098 and ZEP-0113 were accepted and implemented on
-2026-11-16; ZEP-0134 remains a draft row and must be accepted before implementation, and its
-`Candidate` state records the intended bundle only. ZEP-0135 was accepted, implemented, and added as
+2026-11-16; ZEP-0134 and ZEP-0146 remain draft rows and must be accepted before implementation, and
+their `Candidate` states record the intended bundle only. ZEP-0135 was accepted, implemented, and added as
 a candidate for the same bundle; ZEP-0136 and ZEP-0137 were accepted and added on 2026-11-15.
 
 The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
 ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135, ZEP-0128, ZEP-0127, and ZEP-0070 are
 now `Implemented` / `Candidate`, while the others are `Accepted` / `Candidate`.
-ZEP-0070 was promoted from the backlog. ZEP-0134 was added directly as a `Draft` / `Candidate` for `0.8.0`;
-its acceptance review is still pending. ZEP-0136 and ZEP-0137 were accepted on 2026-11-15 and are
-`Accepted` / `Candidate`. All count in the bundle above.
+ZEP-0070 was promoted from the backlog. ZEP-0134 and ZEP-0146 were added directly as `Draft` /
+`Candidate` rows for `0.8.0`; their acceptance reviews are still pending. ZEP-0136 and ZEP-0137 were
+accepted on 2026-11-15 and are `Accepted` / `Candidate`. All count in the bundle above.
 
 ### `0.9.0` — effect control and response typing
 
-The effect-control bundle moves to `0.9.0` now that `0.8.0` is reserved for normalization. No row is
-a candidate yet. The bundle is proposed around the effect-control work, and its headline proposals
-remain `Draft`. ZEP-0107 is `Accepted` but has been removed from the program bundle and stays
+The effect-control bundle moves to `0.9.0` now that `0.8.0` is reserved for normalization. Its first
+candidate is ZEP-0147, whose design remains `Draft`; the rest of the bundle is still proposed around
+the effect-control work. ZEP-0107 is `Accepted` but has been removed from the program bundle and stays
 `Unscheduled`. Its implementation would require the generic-effect propagation work that ZEP-0005
 leaves deferred: applications containing type parameters, forwarding through generic calls, and
 omitted handler arguments.
 
 Proposed headline bundle: [ZEP-0118](./ZEP-0118.md) (response-typed effects and tail-resumptive
-handlers), then [ZEP-0110](./ZEP-0110.md) (block-bodied handlers).
-[ZEP-0111](./ZEP-0111.md) shipped in `0.7.0`; it is not part of `0.9.0`.
+handlers), then [ZEP-0147](./ZEP-0147.md) (replace `raise`/`raises` with `perform`/`performs`).
+[ZEP-0111](./ZEP-0111.md) shipped in `0.7.0`; it is not part of `0.9.0`. ZEP-0110 is superseded by
+[ZEP-0146](./ZEP-0146.md), which targets `0.8.0`, so it no longer heads this bundle.
 
 [ZEP-0112](./ZEP-0112.md) is an independent library track. [ZEP-0120](./ZEP-0120.md) depends on
 ZEP-0118 and ZEP-0112. [ZEP-0119](./ZEP-0119.md) is prototype-gated, and
 [ZEP-0121](./ZEP-0121.md) is `Deferred`.
 
-ZEP-0118 and ZEP-0110 remain `Draft`; ZEP-0000 requires an Accepted design before either can be
-marked `Candidate` or `Planned` for `0.9.0`.
+ZEP-0118 and ZEP-0147 remain `Draft`; ZEP-0147's `Candidate` row records the intended `0.9.0`
+target, and ZEP-0000 requires an Accepted design before either can be marked `Planned` for `0.9.0`.
+The rename does not change response typing or handler behavior; it changes the effect-operation
+vocabulary for both abortive and resumptive effects.
 
 [ZEP-0123](./ZEP-0123.md) is a `Draft` syntax companion to this bundle: it proposes the `admits`
 clause and response-indexed effect markers, and its `effect<R>` form depends on ZEP-0118. It
 remains `Unscheduled` and is not a candidate.
+
+### Post-`0.9.0` — static newtype verification (proposed)
+
+Seven `Draft` / `Unscheduled` proposals record a static-verification track intended to follow the
+effect-control bundle. They are not candidates, do not change the `0.9.0` scope, and have no release
+target. The proposed order is dependency-driven:
+
+1. [ZEP-0138](./ZEP-0138.md) — predicate and fact IR. This is the shared foundation and should be
+   designed and accepted before the feature ZEPs.
+2. [ZEP-0139](./ZEP-0139.md) — checked `new` for guarded newtypes. It is the most separable feature
+   and can start with constant evaluation plus a runtime fallback.
+3. [ZEP-0140](./ZEP-0140.md) — comparison and refined-type flow facts. It builds on ZEP-0131 and
+   supplies the first useful proofs for checked construction.
+4. [ZEP-0141](./ZEP-0141.md) — predicate functions. It depends on the fact IR and the flow-fact
+   transfer.
+5. [ZEP-0142](./ZEP-0142.md) — interval and difference-bound facts. It is the largest analysis
+   component and supplies the relational proofs used by ranges and parameter refinements.
+6. [ZEP-0143](./ZEP-0143.md) — `IntRange` bounds and loop facts. It depends on the interval backend.
+7. [ZEP-0144](./ZEP-0144.md) — parameter refinements. It is the capstone and consumes the fact
+   stores, predicate metadata, interval proofs, and range facts.
+
+The foundation and the first feature slice should be reviewed before a bundle is named. Promoting
+these rows to `Candidate` is a separate release decision and should not imply that all seven ship
+together.

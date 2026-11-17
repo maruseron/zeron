@@ -94,6 +94,23 @@ rest of the block is skipped and that value becomes the block's result, so a lat
 on a missing value. The final `yield` produces the success value. The same shape works for
 `Option`, `Result<_, E>`, `Stream`, and any library constructor with a `Monad` implementation.
 
+When the last step already produces the monadic value, write it as the final expression instead of
+yielding it. This avoids a `Monad<Monad<T>>` result and keeps the block's result type unchanged:
+
+```zeron
+fn next(flag: Boolean): Option<Int> = do {
+    let base <- if (flag) then Option.Some(4) else Option<Int>.None();
+    match (if (base > 0) then Option.Some(base + 1) else Option<Int>.None()) {
+        case Option.Some(found) -> Option.Some(found);
+        case Option.None() -> Option<Int>.None();
+    };
+};
+```
+
+The trailing `match` produces `Option<Int>`, so the last bind uses `flatMap` rather than adding
+another `Option` layer with `yield`. The same applies to `IO<Unit>` and any other constructor with a
+`Monad` implementation.
+
 A plain `let name = expression` clause computes a local for the clauses that follow it. It must
 appear after the first bind:
 

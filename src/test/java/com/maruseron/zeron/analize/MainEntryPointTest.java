@@ -21,6 +21,31 @@ import static org.junit.Assert.fail;
 
 public final class MainEntryPointTest {
     @Test
+    public void infersUnitEntryReturnFromTheBody() throws Exception {
+        final var compiled = compile("""
+                package %s;
+                fn main() = println("inferred");
+                """, "inferredunit");
+        try (final var loader = loader(compiled.output())) {
+            final var capture = captureOut(() -> loader.loadClass(compiled.packageName() + ".Main")
+                    .getMethod("main", String[].class).invoke(null, (Object) new String[0]));
+            assertEquals("inferred", capture.strip());
+        }
+    }
+
+    @Test
+    public void infersIntEntryReturnFromTheBody() throws Exception {
+        final var compiled = compile("""
+                package %s;
+                fn main() = 0;
+                """, "inferredint");
+        try (final var loader = loader(compiled.output())) {
+            loader.loadClass(compiled.packageName() + ".Main")
+                    .getMethod("main", String[].class).invoke(null, (Object) new String[0]);
+        }
+    }
+
+    @Test
     public void unitMainUsesTheGeneratedLauncher() throws Exception {
         final var compiled = compile("""
                 package %s;

@@ -50,11 +50,19 @@ A non-`Unit` `main` without exactly one applicable `Main` witness is an error. T
 launcher has the usual `public static void main(String[])` shape, and effects raised while producing
 or interpreting the entry value escape at that boundary.
 
+The return type may be inferred from the body. Entry selection uses the resolved type, so a short
+program can omit the annotation and the launcher's `raises` row:
+
+```zeron
+fn main() = println("hello");
+```
+
 ## Standard input and output
 
 The `zeron.io` helpers are ordinary functions with an explicit effect, not wrappers around an
-action monad. `print`, `println`, `readln`, and `prompt` all raise `IoFailure`, so a caller declares
-that effect in turn:
+action monad. `print`, `println`, `readln`, and `prompt` all raise `IoFailure`, so an ordinary
+caller declares that effect in turn. An inferred `main` is the host boundary and may leave the
+effect implicit:
 
 ```zeron
 fn main(): Unit raises IoFailure {

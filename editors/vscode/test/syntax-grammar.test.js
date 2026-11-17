@@ -57,6 +57,29 @@ test('highlights under as a keyword and where in newtype validators', () => {
   assert.equal(Array.from('let where = 1;'.matchAll(matcher)).length, 0);
 });
 
+test('highlights requires, monadic yield, and collect-into contextually', () => {
+  const contextual = grammar.repository['contextual-keywords'].patterns;
+  const requiresPattern = contextual.find(pattern => pattern.match.includes('requires'));
+  const yieldPattern = contextual.find(pattern => pattern.match.includes('yield'));
+  const intoPattern = contextual.find(pattern => pattern.match.includes('into'));
+
+  assert.ok(requiresPattern);
+  assert.ok(yieldPattern);
+  assert.ok(intoPattern);
+
+  const requires = new RegExp(requiresPattern.match);
+  assert.ok(requires.test('contract Hashable<T> requires Eq<T> {}'));
+  assert.equal(requires.test('fn requires(value: Int): Int = value;'), false);
+
+  const yieldKeyword = new RegExp(yieldPattern.match);
+  assert.ok(yieldKeyword.test('do { let value <- source; yield value; }'));
+  assert.equal(yieldKeyword.test('let yield = 1;'), false);
+
+  const into = new RegExp(intoPattern.match);
+  assert.ok(into.test('collect item into sink'));
+  assert.equal(into.test('let into = 1;'), false);
+});
+
 test('highlights matches only before a pattern', () => {
   const matchesPattern = grammar.repository['contextual-keywords'].patterns
     .find(pattern => pattern.match.includes('matches'));

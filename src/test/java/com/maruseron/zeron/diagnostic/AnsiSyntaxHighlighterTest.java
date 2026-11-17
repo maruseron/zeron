@@ -116,8 +116,25 @@ public class AnsiSyntaxHighlighterTest {
 
         assertEquals(1, occurrences(highlighted, AnsiColor.apply("yield", "35")));
         assertEquals(1, occurrences(highlighted, AnsiColor.apply("collect", "35")));
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("into", "35")));
         assertFalse(highlighted.contains(AnsiColor.apply("yield", "35") + " ="));
         assertFalse(highlighted.contains(AnsiColor.apply("collect", "35") + " ="));
+    }
+
+    @Test
+    public void highlightsDoYieldAndContractRequiresContextually() {
+        final var highlighted = AnsiSyntaxHighlighter.highlight("""
+                public contract Hashable<T> requires Eq<T> {}
+                fn load(items: Array<Int>): Int = do {
+                    let first <- items;
+                    yield first;
+                };
+                let requires = 1;
+                let yield = 2;
+                """);
+
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("requires", "35")));
+        assertEquals(1, occurrences(highlighted, AnsiColor.apply("yield", "35")));
     }
 
     @Test

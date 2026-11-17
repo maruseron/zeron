@@ -18,6 +18,32 @@ import static org.junit.Assert.assertTrue;
 
 public final class DoNotationTest {
     @Test
+    public void finalMonadValuedExpressionIsReturnedWithoutAnExtraPure() throws Exception {
+        final var packageName = "doTail" + suffix();
+        final var source = """
+                package %s;
+
+                fn next(flag: Boolean): Option<Int> = do {
+                    let base <- if (flag) then Option.Some(4) else Option<Int>.None();
+                    match (if (base > 0) then Option.Some(base + 1) else Option<Int>.None()) {
+                        case Option.Some(found) -> Option.Some(found);
+                        case Option.None() -> Option<Int>.None();
+                    };
+                };
+
+                fn value(flag: Boolean): Int = match (next(flag)) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+                """.formatted(packageName);
+        try (final var loader = compile(packageName, source)) {
+            final var main = loader.loadClass(packageName + ".Main");
+            assertEquals(5, main.getMethod("value", boolean.class).invoke(null, true));
+            assertEquals(-1, main.getMethod("value", boolean.class).invoke(null, false));
+        }
+    }
+
+    @Test
     public void optionChainShortCircuitsAndProjectsTheYield() throws Exception {
         final var packageName = "doOption" + suffix();
         final var source = """

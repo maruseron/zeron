@@ -21,6 +21,42 @@ import static org.junit.Assert.assertTrue;
 
 public final class NewtypeTest {
     @Test
+    public void witnessHelpersForFunctionNewtypesUseCarrierSignatures() throws Exception {
+        final var programName = "NewtypeWitnessProgram" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory("zeron-newtype-witness-");
+        final var unit = parse("newtype-witness.zn", """
+                import zeron.control.Functor;
+                public newtype IO<A: mut> = () -> A;
+                public extension<A: mut> IO<A> { public fn run(): A = this(); }
+                default witness Functor<IO<_>> for IO<_> {
+                    fn map<A, B>(this: IO<A>, transform: A -> B): IO<B> =
+                        IO.new(() -> transform(this()));
+                }
+                fn value(): Int = IO.new(() -> 41).map(item -> item + 1).run();
+                """);
+        try {
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(unit), programName, "", List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(programName).getMethod("value").invoke(null));
+            }
+            try (final var classes = Files.walk(output)) {
+                for (final var path : classes.filter(file -> file.toString().endsWith(".class")).toList()) {
+                    final var bytes = Files.readAllBytes(path);
+                    final var text = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
+                    assertFalse(path + " retains a newtype generic signature",
+                            text.contains("LIO<"));
+                }
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
     public void newtypeRepresentationsDoNotLeakAcrossCompilations() throws Exception {
         final var firstOutput = Files.createTempDirectory("zeron-newtype-isolation-first");
         final var secondOutput = Files.createTempDirectory("zeron-newtype-isolation-second");

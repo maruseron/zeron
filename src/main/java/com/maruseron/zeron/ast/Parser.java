@@ -56,6 +56,9 @@ public final class Parser {
     private final String anonymousClassSourceId;
     private final List<Token> forExpressionResultKeywords = new ArrayList<>();
     private final List<Token> dataClassInitializerNames = new ArrayList<>();
+    private final List<Token> doYieldKeywords = new ArrayList<>();
+    private final List<Token> collectIntoKeywords = new ArrayList<>();
+    private final List<Token> contractRequiresKeywords = new ArrayList<>();
     private int current = 0;
     private String packageName = "";
     private String currentNamespaceName;
@@ -203,6 +206,18 @@ public final class Parser {
 
     public List<Token> dataClassInitializerNames() {
         return List.copyOf(dataClassInitializerNames);
+    }
+
+    public List<Token> doYieldKeywords() {
+        return List.copyOf(doYieldKeywords);
+    }
+
+    public List<Token> collectIntoKeywords() {
+        return List.copyOf(collectIntoKeywords);
+    }
+
+    public List<Token> contractRequiresKeywords() {
+        return List.copyOf(contractRequiresKeywords);
     }
 
     public List<Stmt> parse() {
@@ -2173,7 +2188,8 @@ public final class Parser {
         activeTypeParameters = typeParameters;
         try {
             final var requiredContracts = new ArrayList<Stmt.ContractUse>();
-            if (matchSoftKeyword("requires")) {
+            if (isSoftKeyword("requires")) {
+                contractRequiresKeywords.add(consumeSoftKeyword("requires"));
                 do {
                     final var requiredName = unresolvedTypeToken(
                             consume(IDENTIFIER, "Expect required contract name."));
@@ -4234,6 +4250,7 @@ public final class Parser {
                 forExpressionResultKeywords.add(collect);
                 final var projection = expression();
                 final var into = consumeSoftKeyword("into");
+                collectIntoKeywords.add(into);
                 return new Expr.Pipeline(keyword, clauses,
                         new Expr.PipelineResult.Collect(collect, projection, into, expression()));
             } else {
@@ -4266,6 +4283,7 @@ public final class Parser {
 
         final var binds = new ArrayList<DoBind>();
         Expr yieldExpression = null;
+        var monadicResult = false;
         while (!check(RIGHT_BRACE) && !isAtEnd()) {
             if (match(LET)) {
                 final var let = previous();
@@ -4291,12 +4309,19 @@ public final class Parser {
                 }
             } else if (isSoftKeyword("yield")) {
                 final var yield = consumeSoftKeyword("yield");
+                doYieldKeywords.add(yield);
                 yieldExpression = expression();
                 consume(SEMICOLON, "Expect ';' after 'yield' in a 'do' block.");
                 break;
             } else {
-                throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX,
-                        "Expect 'let', 'yield', or '}' in a 'do' expression.");
+                yieldExpression = expression();
+                consume(SEMICOLON, "Expect ';' after the final expression in a 'do' block.");
+                if (!check(RIGHT_BRACE)) {
+                    throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX,
+                            "A final monad-valued expression must be the last clause in a 'do' block.");
+                }
+                monadicResult = true;
+                break;
             }
         }
         consume(RIGHT_BRACE, "Expect '}' after 'do' clauses.");
@@ -4306,7 +4331,7 @@ public final class Parser {
         }
         if (yieldExpression == null) {
             throw error(keyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                    "A 'do' expression must end with a 'yield' clause.");
+                    "A 'do' expression must end with a 'yield' clause or a final monad-valued expression.");
         }
 
         Expr lowered = null;
@@ -4320,7 +4345,7 @@ public final class Parser {
             body.add(new Stmt.Return(lowered == null ? yieldExpression : lowered, bind.keyword()));
             final var lambda = new Expr.Lambda(bind.keyword(), List.of(bind.name()), body,
                     TypeDescriptor.ofInfer());
-            final var method = index == binds.size() - 1 ? "map" : "flatMap";
+            final var method = index == binds.size() - 1 && !monadicResult ? "map" : "flatMap";
             final var name = new Token(TokenType.IDENTIFIER, method, null, bind.keyword().span());
             final var call = new Expr.MemberCall(bind.source(), name, bind.keyword(), List.of(lambda),
                     List.of(), TypeDescriptor.ofInfer());

@@ -1507,6 +1507,8 @@ public sealed interface Expr {
 
     /// A `do` expression. The parser lowers the clause chain to witness-dispatched `flatMap`/`map`
     /// calls and keeps the original keyword and optional declared constructor for diagnostics.
+    /// An explicit `yield` maps its value through `pure`; a final monad-valued expression uses
+    /// `flatMap` so it is returned without an extra monadic layer.
     final class Do implements Expr {
         public final Token keyword;
         private final TypeDescriptor constructorType;

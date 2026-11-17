@@ -4,6 +4,13 @@
 
 ### Compiler and language work
 
+- Closed four implementation gaps around existing features. `do` blocks accept a final
+  monad-valued expression in place of `yield`, avoiding nested monadic results. Entry-point
+  selection uses the resolved return type, so `fn main() = println("...")` infers `Unit` and its
+  host-boundary effects without an explicit annotation. Handler results unify with the protected
+  result through their common assignable parent, allowing a non-null arm to handle a nullable
+  computation. Synthetic witness helpers for newtype targets now resolve representation context,
+  emit carrier descriptors, and omit nonexistent newtype names from generic signatures.
 - Implemented ZEP-0129 unary products versus arbitrary-valued newtypes. Products remain at two or
   more components, while single-value shapes use ZEP-0070 direct-representation newtypes. Carrier
   resolution now recurses through function types and generic applications, extension declarations

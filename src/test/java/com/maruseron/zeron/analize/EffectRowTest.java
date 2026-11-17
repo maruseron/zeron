@@ -16,6 +16,30 @@ import static org.junit.Assert.assertTrue;
 
 public final class EffectRowTest {
     @Test
+    public void handlerResultMayWidenTheProtectedNullableResult() {
+        final var result = resolve("""
+                effect IoFailure {}
+                fn readln(): String? raises IoFailure = raise IoFailure.new();
+                handler SwallowToString { case IoFailure -> ""; }
+                fn line(): String? = handle (readln()) with SwallowToString;
+                """);
+
+        assertTrue(result.errors().toString(), result.errors().isEmpty());
+    }
+
+    @Test
+    public void incompatibleHandlerResultsAreStillRejected() {
+        final var result = resolve("""
+                effect IoFailure {}
+                fn readln(): String? raises IoFailure = raise IoFailure.new();
+                handler SwallowToInt { case IoFailure -> 0; }
+                fn line(): String? = handle (readln()) with SwallowToInt;
+                """);
+
+        assertFalse(result.errors().isEmpty());
+    }
+
+    @Test
     public void infersEmptyRowsForPureCallbacksAndPropagatesEffectfulCallbacks() {
         final var result = resolve("""
                 effect Failure {}

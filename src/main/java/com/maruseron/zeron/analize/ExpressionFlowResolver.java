@@ -1745,12 +1745,24 @@ final class ExpressionFlowResolver {
             RaisedEffectFlow.endHandledExpression(context, enclosingEffects,
                     Set.copyOf(function.handledEffects()), handle.keyword);
         }
-        if (!(protectedType instanceof NeverDescriptor)) {
-            ensureExact(context, handle.keyword, function.returnType(), protectedType);
+        final TypeDescriptor resultType;
+        if (protectedType instanceof NeverDescriptor) {
+            resultType = function.returnType();
+        } else {
+            final var handlerResult = function.returnType();
+            resultType = ensureCommonParent(context, handle.keyword, handlerResult, protectedType);
+            if (!(handlerResult instanceof InferDescriptor)
+                    && !(protectedType instanceof InferDescriptor)
+                    && !context.typeCompatibility.canAssign(handlerResult, protectedType)
+                    && !context.typeCompatibility.canAssign(protectedType, handlerResult)) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE, handle.keyword,
+                        "The handler result type " + TypeFormatter.format(handlerResult)
+                                + " is not compatible with the protected result type "
+                                + TypeFormatter.format(protectedType) + "."));
+            }
         }
         RaisedEffectFlow.add(context, Set.copyOf(function.raisedEffects()), handle.keyword);
-        final var resultType = protectedType instanceof NeverDescriptor
-                ? function.returnType() : protectedType;
         handle.setType(resultType);
         return resultType;
     }

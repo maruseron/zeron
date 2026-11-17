@@ -92,10 +92,7 @@ try {
     $smokeSource = Join-Path $smokeRoot "src\Main.zn"
     New-Item -ItemType Directory -Path (Split-Path -Parent $smokeSource) -Force | Out-Null
     $smokeProgram = @'
-import zeron.io.println;
-fn main(): Unit {
-    println("zeron-release-smoke-ok");
-}
+fn main(): Unit raises IoFailure = println("zeron-release-smoke-ok");
 '@
     [System.IO.File]::WriteAllText($smokeSource, $smokeProgram, (New-Object System.Text.UTF8Encoding($false)))
     $smokeManifest = @"

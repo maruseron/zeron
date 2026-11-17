@@ -138,7 +138,25 @@ final class TypeClassEvidence {
             if (!validateWitnessMethods(context, witness, contract)) return;
         }
 
+        markNewtypeWitnessHelpers(context, witness);
         context.typeClassWitnesses.add(new WitnessEntry(witness, packageName));
+    }
+
+    private static void markNewtypeWitnessHelpers(final ResolutionContext context,
+                                                  final Stmt.Witness witness) {
+        if (!isNewtypeTarget(witness.targetType())) return;
+        witness.methods().forEach(method ->
+                context.newtypeWitnessHelpers.add(method.implementation()));
+    }
+
+    private static boolean isNewtypeTarget(final TypeDescriptor type) {
+        final var name = switch (type) {
+            case GenericDescriptor generic -> generic.baseType().name();
+            case TypeConstructorDescriptor constructor -> constructor.name();
+            case NominalDescriptor nominal -> nominal.name();
+            default -> null;
+        };
+        return name != null && NewtypeRepresentations.isNewtype(name);
     }
 
     static void synthesizeDelegatingClassHktImplementations(final ResolutionContext context) {
@@ -567,6 +585,7 @@ final class TypeClassEvidence {
             }
         }
         if (!validateWitnessMethods(context, witness, contract)) return;
+        markNewtypeWitnessHelpers(context, witness);
         context.typeClassWitnesses.add(new WitnessEntry(witness, packageName));
     }
 

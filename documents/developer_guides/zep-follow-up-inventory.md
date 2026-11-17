@@ -26,7 +26,7 @@ These are confirmed gaps, but they should extend an existing proposal rather tha
 | 64-bit hashing, mutable projections, unchecked casts | 0008, 0085, 0089 | ZEP-0084, 0085, 0089 |
 | Annotation consumption | 0031 | ZEP-0091 (Accepted) |
 | Annotation target for model mapping clauses | 0079 | ZEP-0097 (Accepted) |
-| Block handlers, `do` notation, suspension | 0007, 0058, 0019 | ZEP-0110, ZEP-0111, ZEP-0112 (Draft; ZEP-0111 Implemented); resumption split across ZEP-0118–ZEP-0121 |
+| Block values, `do` notation, suspension | 0007, 0058, 0019 | ZEP-0146 (supersedes ZEP-0110), ZEP-0111, ZEP-0112; resumption split across ZEP-0118–ZEP-0121 |
 
 **Overlap:** ZEP-0092 is implemented and closed the generated serialization operations for
 ZEP-0068/0069. The remaining serialization follow-ups are annotation consumption in ZEP-0091 and the

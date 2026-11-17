@@ -14,8 +14,11 @@ public final class AnsiSyntaxHighlighter {
         final var scanResult = Scanner.from(source).scanWithDiagnostics();
         final var parser = Parser.of(scanResult);
         parser.parseCompilationUnitWithDiagnostics(null);
-        final var forExpressionResultKeywords = java.util.Set.copyOf(
-                parser.forExpressionResultKeywords());
+        final var parsedContextualKeywords = new java.util.HashSet<Token>();
+        parsedContextualKeywords.addAll(parser.forExpressionResultKeywords());
+        parsedContextualKeywords.addAll(parser.doYieldKeywords());
+        parsedContextualKeywords.addAll(parser.collectIntoKeywords());
+        parsedContextualKeywords.addAll(parser.contractRequiresKeywords());
         final var dataClassInitializerNames = java.util.Set.copyOf(parser.dataClassInitializerNames());
         final var tokens = scanResult.tokens();
         final var output = new StringBuilder();
@@ -44,7 +47,7 @@ public final class AnsiSyntaxHighlighter {
                 color = "36";
             }
             if (color == null && dataClassInitializerNames.contains(token)) color = "36";
-            if (color == null && (forExpressionResultKeywords.contains(token)
+            if (color == null && (parsedContextualKeywords.contains(token)
                     || isContextualKeyword(tokens, index))) color = "35";
             final var text = source.substring(start, end);
             output.append(color == null ? text : AnsiColor.apply(text, color));

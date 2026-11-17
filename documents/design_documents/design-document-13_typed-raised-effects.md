@@ -26,9 +26,9 @@ translation.
 
 Declared effects may escape from the entry-point `main`; top-level initializers remain effect-free.
 Handlers remain expression-scoped; no statement-level `try`/`catch` form is introduced. The protected
-operand is a single expression. [ZEP-0110](../zeps/ZEP-0110.md) proposes allowing a statement block
-in that operand position, which keeps the handler an expression and changes no coverage or runtime
-rule; it is `Draft` and not implemented.
+operand is a single expression. [ZEP-0146](../zeps/ZEP-0146.md) proposes value-producing block
+expressions with a final `yield`, which lets a handler protect a block while keeping the handler an
+expression and changing no coverage or runtime rule; it supersedes ZEP-0110 and is `Draft`.
 
 Synchronous resource cleanup is provided separately by statement-style `using` scopes and the
 `zeron.resource.Disposable` contract. Such scopes contribute body and disposal effects to the
@@ -356,8 +356,8 @@ Other follow-up areas:
    continuations, before committing to this direction.
    [ZEP-0007](../zeps/ZEP-0007.md) records the mechanism analysis, including why a monadic lowering
    of a handled block is a resumption mechanism and which type-system pieces it needs. The
-   separable parts are proposed separately: block-bodied abortive handlers
-   ([ZEP-0110](../zeps/ZEP-0110.md)), witness-dispatched `do` notation at library level
+   separable parts are proposed separately: value-producing block expressions
+   ([ZEP-0146](../zeps/ZEP-0146.md)), witness-dispatched `do` notation at library level
    ([ZEP-0111](../zeps/ZEP-0111.md)), and direct-style suspension with structured concurrency
    ([ZEP-0112](../zeps/ZEP-0112.md)). None of them changes `raise` or `handle` semantics.
    The scoped resumption design is now [ZEP-0118](../zeps/ZEP-0118.md) (response types and

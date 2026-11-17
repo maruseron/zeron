@@ -876,7 +876,8 @@ final class LambdaResolver {
         final var exported = function.isPublic();
         final var typeParameters = function.typeDescriptor().typeParameters();
         context.enterInferableReifiedScope(exported, typeParameters);
-        context.representationContext = isNewtypeNamespace(context);
+        context.representationContext = isNewtypeNamespace(context)
+                || context.newtypeWitnessHelpers.contains(function);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
         beginScope(context);
@@ -896,7 +897,13 @@ final class LambdaResolver {
                 context.symbols.setResolvedReturnType(
                         MemberInteropResolver.functionSymbolToken(context, function.name()), resolvedType);
             }
-            RaisedEffectFlow.verifyCallable(context, function.typeDescriptor().raisedEffects(), function.name());
+            final var inferredEntryEffects = function.name().lexeme().equals("main")
+                    && function.typeDescriptor().returnType() instanceof InferDescriptor
+                    && function.typeDescriptor().raisedEffects().isEmpty()
+                    && Objects.equals(context.currentSourcePath, context.entrySourcePath);
+            if (!inferredEntryEffects) {
+                RaisedEffectFlow.verifyCallable(context, function.typeDescriptor().raisedEffects(), function.name());
+            }
 
                 Zeron.debug(" resolved function " + function.name().lexeme()
                     + " -> " + context.symbols.getFunction(

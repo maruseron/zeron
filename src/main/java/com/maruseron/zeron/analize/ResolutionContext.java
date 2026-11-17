@@ -42,6 +42,8 @@ final class ResolutionContext {
     final Map<Token, Resolver.SinkProtocol> sinkProtocols = new IdentityHashMap<>();
     final Map<Token, Token> referenceTargets = new IdentityHashMap<>();
     final Set<Token> mutableUses = new java.util.LinkedHashSet<>();
+    final Set<Stmt.Function> newtypeWitnessHelpers =
+            Collections.newSetFromMap(new IdentityHashMap<>());
     final Map<Token, TypeDescriptor> referenceTypes = new IdentityHashMap<>();
     final Map<Token, FunctionDescriptor> callSiteFunctionTypes = new IdentityHashMap<>();
     private final Deque<OpeningScope> openingScopes = new ArrayDeque<>();

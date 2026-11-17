@@ -489,9 +489,10 @@ forClause = "for", IDENTIFIER, "in", expression
           | "let", IDENTIFIER, "=", expression
           | "if", expression ;
 forResult = 'yield', expression | 'collect', expression, 'into', expression ;
-doExpr = "do", [ "<", type, ">" ], "{", doClause, { doClause }, "yield", expression, ";", "}" ;
+doExpr = "do", [ "<", type, ">" ], "{", doClause, { doClause }, doResult, "}" ;
 doClause = "let", IDENTIFIER, "<-", expression, ";"
          | "let", IDENTIFIER, "=", expression, ";" ;
+doResult = "yield", expression, ";" | expression, ";" ;
 (* [NEW] ZEP-0109: a leading binder list makes a generic lambda; generic lambdas use the
    parenthesized parameter form. *)
 lambda = IDENTIFIER, "->", lambdaBody
@@ -549,8 +550,9 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    - The words `yield`, `collect`, and `into` are contextual identifiers used in for-expression result
    clauses, not globally reserved keywords.
    - A `do` block is an expression with at least one bind clause (`let name <- expression;`), plain
-   local clauses (`let name = expression;`) only after the first bind, and exactly one final
-   `yield expression;`. `do` is a contextual identifier in expression position, and `<-` is a single
+   local clauses (`let name = expression;`) only after the first bind, and one final result clause:
+   either `yield expression;` or a monad-valued expression ending in `;`. `do` is a contextual
+   identifier in expression position, and `<-` is a single
    token that appears nowhere else. An optional constructor prefix (`do<Option<_>>`,
    `do<Result<_, E>>`) must be an applied type with exactly one open slot and is checked against the
    inferred result constructor.

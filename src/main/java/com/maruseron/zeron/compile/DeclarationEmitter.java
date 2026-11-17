@@ -51,11 +51,16 @@ final class DeclarationEmitter {
                             && NewtypeRepresentations.isNewtype(extensionMethod.receiverType()
                                     instanceof NominalDescriptor nominal ? nominal.name()
                                     : extensionMethod.receiverType() instanceof GenericDescriptor generic
-                                            ? generic.baseType().name() : "");
+                                            ? generic.baseType().name() : "")
+                            || sourceFunction != null
+                                    && isNewtypeWitnessHelper(context, sourceFunction);
+                    final var emittedFunctionType = newtypeReceiver
+                            ? (FunctionDescriptor) NewtypeRepresentations.resolve(functionType)
+                            : functionType;
                     final var witnessSlots = BytecodeEmitter.witnessSlots(context, typeDescriptor);
                     final var reifiedSlots = BytecodeEmitter.reifiedSlots(typeDescriptor);
                     final var methodDescriptor = BytecodeEmitter.withEvidenceParameters(
-                            toJavaMethodDescriptor(functionType), witnessSlots.size());
+                            toJavaMethodDescriptor(emittedFunctionType), witnessSlots.size());
                     final var completeMethodDescriptor = BytecodeEmitter.withReifiedParameters(
                             methodDescriptor, reifiedSlots.size());
                     if (entryHolder && name.lexeme().equals("main")
@@ -75,7 +80,8 @@ final class DeclarationEmitter {
                             completeMethodDescriptor,
                             ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_FINAL,
                             methodBuilder -> {
-                                final var signature = ClassSignatureEmitter.methodSignature(typeDescriptor);
+                                final var signature = ClassSignatureEmitter.methodSignature(
+                                        newtypeReceiver ? emittedFunctionType : typeDescriptor);
                                 if (signature != null && witnessSlots.isEmpty() && reifiedSlots.isEmpty()) {
                                     methodBuilder.with(SignatureAttribute.of(
                                             methodBuilder.constantPool().utf8Entry(signature)));
@@ -83,13 +89,8 @@ final class DeclarationEmitter {
                                 methodBuilder.withCode(composer -> {
                                     beginScope(context);
                                     final var previousReturnType = context.currentReturnType;
-                                    context.currentReturnType = newtypeReceiver
-                                            ? NewtypeRepresentations.resolve(functionType.returnType())
-                                            : functionType.returnType();
-                                    final var paramTypes = newtypeReceiver
-                                            ? typeDescriptor.parameters().stream()
-                                                    .map(NewtypeRepresentations::resolve).toList()
-                                            : typeDescriptor.parameters();
+                                    context.currentReturnType = emittedFunctionType.returnType();
+                                    final var paramTypes = emittedFunctionType.parameters();
                                     for (int i = 0; i < parameters.size(); i++) {
                                         context.symbols.declareSymbol(declaration, parameters.get(i), paramTypes.get(i),
                                                 BindingMutability.IMMUTABLE);
@@ -519,6 +520,22 @@ final class DeclarationEmitter {
 
     static String topLevelValueAccessorName(final String fieldName) {
         return "$zeron$get$" + fieldName;
+    }
+
+    private static boolean isNewtypeWitnessHelper(final CompilationContext context,
+                                                  final Stmt.Function function) {
+        for (final var witness : context.resolution.witnesses()) {
+            final var target = witness.targetType();
+            final var targetName = target instanceof GenericDescriptor generic
+                    ? generic.baseType().name()
+                    : target instanceof TypeConstructorDescriptor constructor ? constructor.name()
+                    : target instanceof NominalDescriptor nominal ? nominal.name() : null;
+            if (targetName == null || !NewtypeRepresentations.isNewtype(targetName)) continue;
+            for (final var method : witness.methods()) {
+                if (method.implementation() == function) return true;
+            }
+        }
+        return false;
     }
 
 }

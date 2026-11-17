@@ -66,8 +66,12 @@ final class ClassSignatureEmitter {
             case ReferenceDescriptor reference -> typeSignature(reference.baseType(), typeArgument);
             case ArrayDescriptor _ -> "[Ljava/lang/Object;";
             case ByteArrayDescriptor _ -> "[B";
-            case GenericDescriptor generic -> classTypeSignature(
-                    generic.baseType().name(), generic.typeParameters());
+            case GenericDescriptor generic -> {
+                final var resolved = NewtypeRepresentations.resolve(generic);
+                yield resolved.equals(generic)
+                        ? classTypeSignature(generic.baseType().name(), generic.typeParameters())
+                        : typeSignature(resolved, typeArgument);
+            }
             case TypeProjectionDescriptor projection -> (typeArgument
                     ? projection.kind() == TypeProjectionDescriptor.Kind.OUT ? "+" : "-"
                     : "") + typeSignature(projection.bound(), true);

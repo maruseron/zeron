@@ -15,7 +15,9 @@ import java.lang.constant.MethodTypeDesc;
 import java.util.*;
 
 final class DeclarationRegistry {
-    private static final ClassDesc HTTP_SUPPORT_OWNER = ClassDesc.of("zeron.runtime.HttpSupport");
+    private static final Set<ClassDesc> COMPILER_RUNTIME_OWNERS = Set.of(
+            ClassDesc.of("zeron.runtime.HttpSupport"),
+            ClassDesc.of("zeron.runtime.StringUnicode"));
 
     private final Set<String> types;
     private final Map<String, Stmt.ClassDecl> classes;
@@ -539,7 +541,7 @@ final class DeclarationRegistry {
         if (target instanceof FunctionBindingRegistry.StaticMethod methodTarget) {
             methodDescriptor = methodTarget.descriptor();
             final var ownerName = binaryName(methodTarget.owner());
-            if (!HTTP_SUPPORT_OWNER.equals(methodTarget.owner())) {
+            if (!COMPILER_RUNTIME_OWNERS.contains(methodTarget.owner())) {
                 final var javaClass = javaClassPath.find(ownerName);
                 if (javaClass == null) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP, name,

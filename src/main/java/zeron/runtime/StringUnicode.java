@@ -1,5 +1,10 @@
 package zeron.runtime;
 
+import java.util.ArrayList;
+import java.util.Locale;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+
 public final class StringUnicode {
     private static final int REPLACEMENT_CHARACTER = 0xFFFD;
     private static final int MAX_CODE_POINT = 0x10FFFF;
@@ -87,6 +92,174 @@ public final class StringUnicode {
     public static String charToString(final int value) {
         if (!isScalar(value)) throw new IllegalArgumentException("Not a Unicode scalar value: " + value);
         return new String(Character.toChars(value));
+    }
+
+    public static String toLowerCase(final String value) {
+        return value.toLowerCase(Locale.ROOT);
+    }
+
+    public static String toUpperCase(final String value) {
+        return value.toUpperCase(Locale.ROOT);
+    }
+
+    public static String trim(final String value) {
+        return value.substring(leadingWhitespaceEnd(value), trailingWhitespaceStart(value));
+    }
+
+    public static String trimStart(final String value) {
+        return value.substring(leadingWhitespaceEnd(value));
+    }
+
+    public static String trimEnd(final String value) {
+        return value.substring(0, trailingWhitespaceStart(value));
+    }
+
+    public static boolean isBlank(final String value) {
+        return leadingWhitespaceEnd(value) == value.length();
+    }
+
+    public static String replace(final String value, final String target, final String replacement) {
+        return value.replace(target, replacement);
+    }
+
+    public static Object[] split(final String value, final String separator) {
+        if (separator.isEmpty()) {
+            final var scalars = new ArrayList<Object>();
+            for (var offset = 0; offset < value.length(); ) {
+                scalars.add(new String(Character.toChars(scalarAtOffset(value, offset))));
+                offset += scalarWidthAtOffset(value, offset);
+            }
+            return scalars.toArray();
+        }
+        final var parts = new ArrayList<Object>();
+        var start = 0;
+        while (true) {
+            final var index = value.indexOf(separator, start);
+            if (index < 0) {
+                parts.add(value.substring(start));
+                return parts.toArray();
+            }
+            parts.add(value.substring(start, index));
+            start = index + separator.length();
+        }
+    }
+
+    public static String regexErrorMessage(final String pattern) {
+        try {
+            Pattern.compile(pattern);
+            return null;
+        } catch (final PatternSyntaxException exception) {
+            return exception.getMessage();
+        }
+    }
+
+    public static Object[] splitRegex(final String value, final String pattern) {
+        return Pattern.compile(pattern).split(value, -1);
+    }
+
+    public static Object[] lines(final String value) {
+        final var parts = new ArrayList<Object>();
+        var start = 0;
+        var offset = 0;
+        while (offset < value.length()) {
+            final var current = value.charAt(offset);
+            if (current != '\n' && current != '\r') {
+                offset++;
+                continue;
+            }
+            parts.add(value.substring(start, offset));
+            if (current == '\r' && offset + 1 < value.length() && value.charAt(offset + 1) == '\n') {
+                offset++;
+            }
+            offset++;
+            start = offset;
+        }
+        if (start < value.length()) parts.add(value.substring(start));
+        return parts.toArray();
+    }
+
+    public static boolean isDecimalInt(final String value) {
+        try {
+            Integer.parseInt(value);
+            return true;
+        } catch (final NumberFormatException exception) {
+            return false;
+        }
+    }
+
+    public static int parseInt(final String value) {
+        return Integer.parseInt(value);
+    }
+
+    public static boolean isDecimalFloat(final String value) {
+        if (value.isEmpty()) return false;
+        var offset = 0;
+        if (value.charAt(offset) == '+' || value.charAt(offset) == '-') offset++;
+        var digits = 0;
+        while (offset < value.length() && isAsciiDigit(value.charAt(offset))) {
+            offset++;
+            digits++;
+        }
+        if (offset < value.length() && value.charAt(offset) == '.') {
+            offset++;
+            while (offset < value.length() && isAsciiDigit(value.charAt(offset))) {
+                offset++;
+                digits++;
+            }
+        }
+        if (digits == 0) return false;
+        if (offset < value.length() && (value.charAt(offset) == 'e' || value.charAt(offset) == 'E')) {
+            offset++;
+            if (offset < value.length() && (value.charAt(offset) == '+' || value.charAt(offset) == '-')) {
+                offset++;
+            }
+            var exponentDigits = 0;
+            while (offset < value.length() && isAsciiDigit(value.charAt(offset))) {
+                offset++;
+                exponentDigits++;
+            }
+            if (exponentDigits == 0) return false;
+        }
+        if (offset != value.length()) return false;
+        return Double.isFinite(Double.parseDouble(value));
+    }
+
+    public static double parseFloat(final String value) {
+        return Double.parseDouble(value);
+    }
+
+    public static int charCodePointAt(final String value, final int index) {
+        if (index < 0 || index >= value.length()) return -1;
+        final var current = value.charAt(index);
+        if (Character.isLowSurrogate(current)
+                && index > 0 && Character.isHighSurrogate(value.charAt(index - 1))) {
+            return -1;
+        }
+        return scalarAt(value, index);
+    }
+
+    private static int leadingWhitespaceEnd(final String value) {
+        var offset = 0;
+        while (offset < value.length()) {
+            final var scalar = value.codePointAt(offset);
+            if (!Character.isWhitespace(scalar)) return offset;
+            offset += Character.charCount(scalar);
+        }
+        return offset;
+    }
+
+    private static int trailingWhitespaceStart(final String value) {
+        var end = value.length();
+        while (end > 0) {
+            final var scalar = value.codePointBefore(end);
+            if (!Character.isWhitespace(scalar)) return end;
+            end -= Character.charCount(scalar);
+        }
+        return end;
+    }
+
+    private static boolean isAsciiDigit(final char value) {
+        return value >= '0' && value <= '9';
     }
 
     public static boolean isCharValue(final Object value) {

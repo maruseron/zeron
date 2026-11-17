@@ -140,7 +140,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0127](./ZEP-0127.md) | Data Class Component Access and Positional Destructuring | Implemented | Candidate | 0.8.0 |
 | [ZEP-0128](./ZEP-0128.md) | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented | Candidate | 0.8.0 |
 | [ZEP-0129](./ZEP-0129.md) | Unary Products versus Arbitrary-Valued Newtypes | Implemented | Candidate | 0.8.0 |
-| [ZEP-0130](./ZEP-0130.md) | Standard-Library-Owned Intrinsic Declarations | Accepted | Candidate | 0.8.0 |
+| [ZEP-0130](./ZEP-0130.md) | Standard-Library-Owned Intrinsic Declarations | Implemented | Candidate | 0.8.0 |
 | [ZEP-0131](./ZEP-0131.md) | Chained Flow Refinement and Implicit Receiver Access | Accepted | Candidate | 0.8.0 |
 | [ZEP-0132](./ZEP-0132.md) | Nullable Safe-Cast Correction | Accepted | Candidate | 0.8.0 |
 | [ZEP-0133](./ZEP-0133.md) | Operator-Constraint Inference for Typeless Lambdas | Accepted | Candidate | 0.8.0 |
@@ -234,8 +234,10 @@ Its nineteen candidates are:
   safely at API boundaries without mapping every value.
 - [ZEP-0130](./ZEP-0130.md) — standard-library-owned intrinsic declarations. Intrinsic types keep
   compiler-owned identity, while a broad `String` inventory—including `split`, `splitRegex`,
-  `charAt`/`at`, case conversion, trimming, replacement, lines, parsing, and joining—is declared in
-  canonical `zeron.lang` extension modules rather than in a second class or intrinsic ID.
+  `charAt`/`at`, case conversion, trimming, replacement, lines, parsing, and `StringJoiner`-backed
+  joining, all over `Stream<String>` results—is declared in canonical `zeron.lang` extension
+  modules rather than in a second class or intrinsic ID. Joining is a `Collector`, and
+  `Stream.collect` drives any collector.
 - [ZEP-0131](./ZEP-0131.md) — chained flow refinement and implicit receiver access. `is` and
   `matches` transfer through composed conditions and stable member paths, and unqualified field or
   property reads use the implicit `this` receiver.
@@ -286,6 +288,10 @@ now `Implemented` / `Candidate`, while the others are `Accepted` / `Candidate`.
 ZEP-0070 was promoted from the backlog. ZEP-0134 and ZEP-0146 were added directly as `Draft` /
 `Candidate` rows for `0.8.0`; their acceptance reviews are still pending. ZEP-0136 and ZEP-0137 were
 accepted on 2026-11-15 and are `Accepted` / `Candidate`. All count in the bundle above.
+
+ZEP-0130 was implemented on 2026-11-17 and is `Implemented` / `Candidate`. The `String` inventory is
+declared in standard-library source, multi-value results are `Stream<String>`, `StringJoiner` owns
+joining, and `Stream.collect` is the general terminal operation behind it. No intrinsic ID was added.
 
 ### `0.9.0` — effect control and response typing
 

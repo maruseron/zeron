@@ -282,18 +282,20 @@ checks.
 Contracts describe behavior of existing values and do not declare class-side constructor
 requirements. Call named class constructors directly; pass a factory value explicitly when a
 generic API needs to construct one particular type. For generic collection families, use
-`zeron.collections.Collector<C<_>>`:
+`zeron.collections.CollectionBuilder<C<_>>`:
 
 ```zeron
-public contract Collector<C<_>> {
+public contract CollectionBuilder<C<_>> {
     empty<A: nullable + mut>(): &C<A>;
 
     mut add<A: nullable + mut>(this: C<A>, value: A): Boolean;
 }
 ```
 
-`Collector.empty` returns a mutable reference so the caller can populate the new value through its
-mutating `add` operation. `Sink<T>` remains the behavioral contract for adding to an existing sink
+`CollectionBuilder.empty` returns a mutable reference so the caller can populate the new value
+through its mutating `add` operation. The value-level `zeron.collections.Collector<T, R>` capability
+is separate: it accumulates items with `add` and returns one result from `finish`, so a stream,
+joiner, or summary can share one terminal operation. `Sink<T>` remains the behavioral contract for adding to an existing sink
 when the generic API does not need to create a collection. For receiver calls with both kinds of
 evidence, concrete methods win, behavioral contract methods take precedence over HKT receiver
 operations, and HKT operations are the fallback; an explicit constructor-qualified call selects an

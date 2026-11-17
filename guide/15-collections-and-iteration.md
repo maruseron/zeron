@@ -190,6 +190,28 @@ Values are requested when an operation consumes the stream, such as `toList()`, 
 `for` loop. Use a stream to express a sequence of transformations, and use a list when you need to
 store the resulting values and change or revisit them.
 
+`collect` reduces a stream through a collector: a value that adds items with `add` and returns its
+result from `finish`. The collector owns how items accumulate, so the call site passes no folding
+functions:
+
+```zeron
+import zeron.collections.Collector;
+
+let csv = names.collect(StringJoiner.withSeparator(", "));
+```
+
+`StringJoiner` is one collector. `Collector.of` builds another from an initial accumulator and two
+functions when no dedicated implementation exists:
+
+```zeron
+let bracket = Collector.of<String, Int, String>("",
+    (text, value) -> text + value.toString(), (text) -> "[" + text + "]");
+let text = numbers.collect(bracket);
+```
+
+A collector is an ordinary value: `add` returns the updated collector instead of changing the old
+one, so the same collector can start as many accumulations as you like.
+
 ## Collections of anonymous existential elements
 
 A collection element type can be a stored anonymous existential. Each element then keeps its own

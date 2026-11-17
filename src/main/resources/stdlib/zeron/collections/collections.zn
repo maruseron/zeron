@@ -144,11 +144,57 @@ public contract Clearable {
     mut clear(): Unit;
 }
 
-/// A collection that can be built incrementally from its elements.
-public contract Collector<C<_>> {
+/// A collection family that can be constructed and populated generically.
+public contract CollectionBuilder<C<_>> {
     /// Creates a new empty, mutable collection.
     empty<A: mut>(): &C<A>;
 
     /// Adds `value` to `this`, returning `true` when it was accepted.
     mut add<A: mut>(this: C<A>, value: A): Boolean;
+}
+
+/// Accumulates items into one result.
+///
+/// A collector adds one item at a time with `add` and returns the final value from `finish`. How an
+/// implementation accumulates is its own business: a joiner appends text, a list builder appends
+/// elements, and a summary computes along the way. `add` returns the updated collector, so a
+/// collector is an ordinary value and one instance can start many accumulations. Use
+/// `Collector.of` when no dedicated implementation exists.
+public contract Collector<T: mut, R: mut> {
+    /// Returns a collector that holds `value` after the items already collected.
+    add(value: T): Collector<T, R>;
+
+    /// Returns the collected result.
+    finish(): R;
+}
+
+/// Builders for collectors that have no dedicated implementation.
+namespace Collector {
+    /// Creates a collector that starts from `initial`, folds with `add`, and converts the final
+    /// accumulator with `finish`.
+    ///
+    /// The accumulator and its conversions are an implementation detail of the returned collector;
+    /// callers see only `add` and `finish`.
+    public fn of<S: mut, T: mut, R: mut>(
+        initial: S,
+        add: (S, T) -> S,
+        finish: (S) -> R
+    ): Collector<T, R> = CollectorImpl<T, S, R>.of(initial, add, finish);
+}
+
+/// The canonical collector returned by `Collector.of`.
+class CollectorImpl<T: mut, S: mut, R: mut> is Collector<T, R> {
+    state: S;
+    step: (S, T) -> S;
+    conversion: (S) -> R;
+
+    private constructor new;
+
+    public constructor of(initial: S, add: (S, T) -> S, finish: (S) -> R) =
+        CollectorImpl<T, S, R>.new(initial, add, finish);
+
+    public add(value: T): Collector<T, R> =
+        CollectorImpl<T, S, R>.of(this.step(this.state, value), this.step, this.conversion);
+
+    public finish(): R = this.conversion(this.state);
 }

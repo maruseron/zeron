@@ -41,12 +41,12 @@ covariance, and use-site projections; see
 current system-wide status.
 
 Generic functions and methods may bind a type parameter to an applied contract. Construction for a
-generic family uses an HKT capability such as `Collector<C<_>>`, not a behavioral contract:
+generic family uses an HKT capability such as `CollectionBuilder<C<_>>`, not a behavioral contract:
 
 ```zeron
-import zeron.collections.Collector;
+import zeron.collections.CollectionBuilder;
 
-fn collectInto<E: nullable + mut, C<_>: Collector<C>>(
+fn collectInto<E: nullable + mut, C<_>: CollectionBuilder<C>>(
     source: Iterable<E>
 ): &C<E> {
     let result = C.empty<E>();

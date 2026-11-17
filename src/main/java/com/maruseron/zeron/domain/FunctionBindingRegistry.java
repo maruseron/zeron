@@ -234,6 +234,39 @@ public final class FunctionBindingRegistry {
                 TypeDescriptor.ofChar(), string, TypeDescriptor.ofInt());
         final var stringCodePointWidthAtOffset = TypeDescriptor.functionOf("stringCodePointWidthAtOffset",
                 TypeDescriptor.ofInt(), string, TypeDescriptor.ofInt());
+        final var stringUnicode = ClassDesc.of("zeron.runtime.StringUnicode");
+        final var stringCharCodePointAt = TypeDescriptor.functionOf("stringCharCodePointAt",
+                TypeDescriptor.ofInt(), string, TypeDescriptor.ofInt());
+        final var stringToLowerCase = TypeDescriptor.functionOf("stringToLowerCase",
+                TypeDescriptor.ofString(), string);
+        final var stringToUpperCase = TypeDescriptor.functionOf("stringToUpperCase",
+                TypeDescriptor.ofString(), string);
+        final var stringTrim = TypeDescriptor.functionOf("stringTrim",
+                TypeDescriptor.ofString(), string);
+        final var stringTrimStart = TypeDescriptor.functionOf("stringTrimStart",
+                TypeDescriptor.ofString(), string);
+        final var stringTrimEnd = TypeDescriptor.functionOf("stringTrimEnd",
+                TypeDescriptor.ofString(), string);
+        final var stringIsBlank = TypeDescriptor.functionOf("stringIsBlank",
+                TypeDescriptor.ofBoolean(), string);
+        final var stringReplace = TypeDescriptor.functionOf("stringReplace",
+                TypeDescriptor.ofString(), string, string, string);
+        final var stringSplit = TypeDescriptor.functionOf("stringSplit",
+                TypeDescriptor.arrayOf(TypeDescriptor.ofString()), string, string);
+        final var stringRegexErrorMessage = TypeDescriptor.functionOf("stringRegexErrorMessage",
+                string, string);
+        final var stringSplitRegex = TypeDescriptor.functionOf("stringSplitRegex",
+                TypeDescriptor.arrayOf(TypeDescriptor.ofString()), string, string);
+        final var stringLines = TypeDescriptor.functionOf("stringLines",
+                TypeDescriptor.arrayOf(TypeDescriptor.ofString()), string);
+        final var stringIsDecimalInt = TypeDescriptor.functionOf("stringIsDecimalInt",
+                TypeDescriptor.ofBoolean(), string);
+        final var stringToInt = TypeDescriptor.functionOf("stringToInt",
+                TypeDescriptor.ofInt(), string);
+        final var stringIsDecimalFloat = TypeDescriptor.functionOf("stringIsDecimalFloat",
+                TypeDescriptor.ofBoolean(), string);
+        final var stringToFloat = TypeDescriptor.functionOf("stringToFloat",
+                TypeDescriptor.ofFloat(), string);
         final var charToInt = TypeDescriptor.functionOf("charToInt",
                 TypeDescriptor.ofInt(), TypeDescriptor.ofChar());
         final var intToChar = TypeDescriptor.functionOf("intToChar",
@@ -474,6 +507,38 @@ public final class FunctionBindingRegistry {
                         intrinsicBinding(intToChar, IntrinsicId.INT_TO_CHAR)),
                 Map.entry("zeron.lang.charToString",
                         intrinsicBinding(charToString, IntrinsicId.CHAR_TO_STRING)),
+                Map.entry("zeron.lang.stringCharCodePointAt",
+                        staticBinding(stringCharCodePointAt, stringUnicode, "charCodePointAt")),
+                Map.entry("zeron.lang.stringToLowerCase",
+                        staticBinding(stringToLowerCase, stringUnicode, "toLowerCase")),
+                Map.entry("zeron.lang.stringToUpperCase",
+                        staticBinding(stringToUpperCase, stringUnicode, "toUpperCase")),
+                Map.entry("zeron.lang.stringTrim",
+                        staticBinding(stringTrim, stringUnicode, "trim")),
+                Map.entry("zeron.lang.stringTrimStart",
+                        staticBinding(stringTrimStart, stringUnicode, "trimStart")),
+                Map.entry("zeron.lang.stringTrimEnd",
+                        staticBinding(stringTrimEnd, stringUnicode, "trimEnd")),
+                Map.entry("zeron.lang.stringIsBlank",
+                        staticBinding(stringIsBlank, stringUnicode, "isBlank")),
+                Map.entry("zeron.lang.stringReplace",
+                        staticBinding(stringReplace, stringUnicode, "replace")),
+                Map.entry("zeron.lang.stringSplit",
+                        staticBinding(stringSplit, stringUnicode, "split")),
+                Map.entry("zeron.lang.stringRegexErrorMessage",
+                        staticBinding(stringRegexErrorMessage, stringUnicode, "regexErrorMessage")),
+                Map.entry("zeron.lang.stringSplitRegex",
+                        staticBinding(stringSplitRegex, stringUnicode, "splitRegex")),
+                Map.entry("zeron.lang.stringLines",
+                        staticBinding(stringLines, stringUnicode, "lines")),
+                Map.entry("zeron.lang.stringIsDecimalInt",
+                        staticBinding(stringIsDecimalInt, stringUnicode, "isDecimalInt")),
+                Map.entry("zeron.lang.stringToInt",
+                        staticBinding(stringToInt, stringUnicode, "parseInt")),
+                Map.entry("zeron.lang.stringIsDecimalFloat",
+                        staticBinding(stringIsDecimalFloat, stringUnicode, "isDecimalFloat")),
+                Map.entry("zeron.lang.stringToFloat",
+                        staticBinding(stringToFloat, stringUnicode, "parseFloat")),
                 Map.entry("zeron.net.httpValidateUri",
                         httpBinding(httpSupport, "validateUri", TypeDescriptor.ofInt(),
                                 httpString)),
@@ -536,6 +601,17 @@ public final class FunctionBindingRegistry {
 
     private static Binding intrinsicBinding(final FunctionDescriptor signature, final IntrinsicId id) {
         return new Binding(signature, new IntrinsicBinding(id));
+    }
+
+    private static Binding staticBinding(final FunctionDescriptor signature,
+                                         final ClassDesc owner,
+                                         final String methodName) {
+        final var parameterClasses = signature.parameters().stream()
+                .map(TypeDescriptor::toJavaClassDesc)
+                .toArray(ClassDesc[]::new);
+        return new Binding(signature, new StaticMethod(owner, methodName,
+                MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(signature.returnType()),
+                        parameterClasses)));
     }
 
     private static Binding httpBinding(final ClassDesc owner,

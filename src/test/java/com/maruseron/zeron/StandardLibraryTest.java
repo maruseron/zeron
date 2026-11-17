@@ -2433,6 +2433,8 @@ public final class StandardLibraryTest {
                 import zeron.io.print;
                 import zeron.io.println;
                 fn cellResult(): Int = Cell<Int>.new(42).get();
+                fn stringSplitResult(): Int = "a b".split(" ").count();
+                fn stringJoinResult(): String = String.join("-", "a b".split(" "));
                 fn sum(values: Iterable<Int>): Int {
                     let mut total = 0;
                     for (let value in values) total += value;
@@ -2523,6 +2525,8 @@ public final class StandardLibraryTest {
                         Path.of("dist").toUri().toURL(), libraryJar.toUri().toURL()}, getClass().getClassLoader())) {
                     final var client = loader.loadClass(appPackage + "." + entryName);
                     assertEquals(42, client.getMethod("cellResult").invoke(null));
+                    assertEquals(2, client.getMethod("stringSplitResult").invoke(null));
+                    assertEquals("a-b", client.getMethod("stringJoinResult").invoke(null));
                     assertEquals(6, client.getMethod("result").invoke(null));
                     assertEquals(10, client.getMethod("arrayIteratorResult").invoke(null));
                     assertEquals(1, client.getMethod("nullableArrayIteratorResult").invoke(null));

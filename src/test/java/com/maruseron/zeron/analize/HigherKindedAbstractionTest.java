@@ -476,11 +476,11 @@ public final class HigherKindedAbstractionTest {
     }
 
     @Test
-    public void collectorSupportsCreationAndMutatingReceiverDispatch() throws Exception {
+    public void collectionBuilderSupportsCreationAndMutatingReceiverDispatch() throws Exception {
         final var source = """
-                import zeron.collections.Collector;
+                import zeron.collections.CollectionBuilder;
                 import zeron.collections.Sink;
-                class Bag<T: mut> is Sink<T>, Collector<Bag<_>> {
+                class Bag<T: mut> is Sink<T>, CollectionBuilder<Bag<_>> {
                     public mut property count: Int = 0;
                     public constructor empty() = Bag<T>.new();
                     public mut add(value: T): Boolean {
@@ -488,7 +488,7 @@ public final class HigherKindedAbstractionTest {
                         return true;
                     }
                     public read(): Int = this.count;
-                    implementation Collector<Bag<_>> {
+                    implementation CollectionBuilder<Bag<_>> {
                         fn empty<A: mut>(): &Bag<A> = Bag<A>.empty();
                         fn add<A: mut>(this: &Bag<A>, value: A): Boolean {
                             this.add(value);
@@ -497,13 +497,13 @@ public final class HigherKindedAbstractionTest {
                         }
                     }
                 }
-                fn empty<C<_>: Collector<C>, A: mut>(): &C<A> = C.empty<A>();
-                fn append<C<_>: Collector<C>, A: mut>(values: &C<A>, value: A): Boolean =
+                fn empty<C<_>: CollectionBuilder<C>, A: mut>(): &C<A> = C.empty<A>();
+                fn append<C<_>: CollectionBuilder<C>, A: mut>(values: &C<A>, value: A): Boolean =
                     values.add(value);
-                fn appendWithBoth<A: mut, C<_>: Sink<A> + Collector<C>>(
+                fn appendWithBoth<A: mut, C<_>: Sink<A> + CollectionBuilder<C>>(
                     values: &C<A>, value: A
                 ): Boolean = values.add(value);
-                fn appendStatically<A: mut, C<_>: Sink<A> + Collector<C>>(
+                fn appendStatically<A: mut, C<_>: Sink<A> + CollectionBuilder<C>>(
                     values: &C<A>, value: A
                 ): Boolean = C.add(values, value);
                 fn run(): Int {
@@ -530,17 +530,17 @@ public final class HigherKindedAbstractionTest {
         }
 
         final var immutableCall = """
-                import zeron.collections.Collector;
-                fn append<C<_>: Collector<C>, A: mut>(values: C<A>, value: A): Boolean =
+                import zeron.collections.CollectionBuilder;
+                fn append<C<_>: CollectionBuilder<C>, A: mut>(values: C<A>, value: A): Boolean =
                     values.add(value);
                 """;
         assertThrows(ResolutionError.class,
                 () -> new CompilationService(parse(immutableCall), "ImmutableCollectorMain").resolve());
 
         final var immutableBehavioralCall = """
-                import zeron.collections.Collector;
+                import zeron.collections.CollectionBuilder;
                 import zeron.collections.Sink;
-                fn append<A, C<_>: Sink<A> + Collector<C>>(
+                fn append<A, C<_>: Sink<A> + CollectionBuilder<C>>(
                     values: C<A>, value: A
                 ): Boolean = values.add(value);
                 """;
@@ -551,8 +551,8 @@ public final class HigherKindedAbstractionTest {
         assertTrue(error.getMessage().contains("Mutating methods require"));
 
         final var immutableStaticCall = """
-                import zeron.collections.Collector;
-                fn append<A, C<_>: Collector<C>>(
+                import zeron.collections.CollectionBuilder;
+                fn append<A, C<_>: CollectionBuilder<C>>(
                     values: C<A>, value: A
                 ): Boolean = C.add(values, value);
                 """;

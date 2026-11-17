@@ -1,5 +1,6 @@
 package zeron.lang;
 
+import zeron.collections.Collector;
 import zeron.collections.Iterable;
 import zeron.collections.Iterator;
 import zeron.collections.Step;
@@ -24,6 +25,43 @@ class StringCodePoints is Iterable<Char> {
         };
     }
 }
+
+/// Joins strings with a separator.
+///
+/// A joiner is a `Collector`, so `Stream.collect` can drive it directly and `String.join` simply
+/// delegates to it. The separator is written between adjacent elements; there is no prefix or
+/// suffix, and elements are not converted from another type.
+public class StringJoiner is Collector<String, String> {
+    separator: String;
+    joined: Option<String>;
+
+    private constructor new;
+
+    /// Creates a joiner that writes `separator` between adjacent elements.
+    public constructor withSeparator(separator: String) =
+        StringJoiner.new(separator, Option<String>.None());
+
+    /// Returns a joiner that holds `value` after the elements already collected, inserting the
+    /// separator between them.
+    public add(value: String): Collector<String, String> {
+        let joined =
+            match (this.joined) {
+                case Option.Some(text) -> Option.Some(text + this.separator + value);
+                case Option.None() -> Option.Some(value);
+            };
+        return StringJoiner.new(this.separator, joined);
+    }
+
+    /// Returns the joined text, or the empty string when nothing was added.
+    public finish(): String = this.joined.getOrElse("");
+
+    /// Adds every element of `values`, in order, and returns the joined text.
+    public join(values: Iterable<String>): String = values.stream().collect(this);
+}
+
+/// A failure produced by a regular-expression operation.
+public type RegexError =
+      InvalidPattern(message: String);
 
 /// Inspection and slicing of `String` values.
 ///
@@ -165,6 +203,108 @@ public extension String {
         }
         return Result<Option<Char>, UnicodeError>.Ok(this.singleChar());
     }
+
+    /// Returns the character at UTF-16 code-unit index `index`, or `None` when the index is out of
+    /// range or points at the second unit of a surrogate pair.
+    ///
+    /// The index is measured in code units, like `length()` and `substring`. An unpaired surrogate
+    /// is reported as U+FFFD, matching the scalar operations.
+    public fn charAt(index: Int): Option<Char> {
+        let value = stringCharCodePointAt(this, index);
+        if (value < 0) return Option<Char>.None();
+        return Option.Some(intToChar(value));
+    }
+
+    /// Alias of `charAt`, for code that reads collections with `at`.
+    public fn at(index: Int): Option<Char> = this.charAt(index);
+
+    /// Returns the parts of this string separated by `separator`.
+    ///
+    /// `separator` is literal text, not a pattern, and empty parts are preserved, including a
+    /// leading, repeated, or trailing one: `"a,".split(",")` is `["a", ""]` and
+    /// `"".split(",")` is `["", ""]`.
+    ///
+    /// An empty separator splits into Unicode scalar values, so `"abc".split("")` is
+    /// `["a", "b", "c"]` and `"".split("")` is empty. Malformed text is normalized to U+FFFD.
+    /// A single-character separator is written as text: `text.split(" ")`.
+    public fn split(separator: String): Stream<String> =
+        Stream<String>.fromArray(stringSplit(this, separator));
+
+    /// Returns the parts of this string separated by the regular expression `regex`.
+    ///
+    /// The expression uses the host regular-expression dialect. An invalid expression returns
+    /// `RegexError.InvalidPattern` instead of failing; use `split` for literal separators.
+    public fn splitRegex(regex: String): Result<Stream<String>, RegexError> {
+        let message = stringRegexErrorMessage(regex);
+        if (message != null) {
+            return Result<Stream<String>, RegexError>.Err(RegexError.InvalidPattern(message));
+        }
+        return Result<Stream<String>, RegexError>.Ok(
+            Stream<String>.fromArray(stringSplitRegex(this, regex))
+        );
+    }
+
+    /// Returns this string with every character mapped to lower case.
+    ///
+    /// The mapping is locale-independent and performs no normalization or grapheme-aware casing.
+    public fn toLowerCase(): String = stringToLowerCase(this);
+
+    /// Returns this string with every character mapped to upper case.
+    public fn toUpperCase(): String = stringToUpperCase(this);
+
+    /// Returns this string with its leading and trailing whitespace removed.
+    public fn trim(): String = stringTrim(this);
+
+    /// Returns this string with its leading whitespace removed.
+    public fn trimStart(): String = stringTrimStart(this);
+
+    /// Returns this string with its trailing whitespace removed.
+    public fn trimEnd(): String = stringTrimEnd(this);
+
+    /// Whether this string is empty or holds only whitespace.
+    public fn isBlank(): Boolean = stringIsBlank(this);
+
+    /// Returns this string with every non-overlapping occurrence of `target` replaced by
+    /// `replacement`.
+    ///
+    /// `target` is literal text, not a pattern.
+    public fn replace(target: String, replacement: String): String =
+        stringReplace(this, target, replacement);
+
+    /// Returns this string's lines as a stream.
+    ///
+    /// Lines end at `\n`, `\r\n`, or `\r`. A terminal line break does not add an empty line, and an
+    /// empty input has no lines.
+    public fn lines(): Stream<String> = Stream<String>.fromArray(stringLines(this));
+
+    /// Parses this string as a decimal `Int`.
+    ///
+    /// Accepts an optional leading sign followed by one or more decimal digits, with no surrounding
+    /// whitespace. Returns `None` for invalid or out-of-range text; callers trim first when
+    /// surrounding whitespace is acceptable.
+    public fn toInt(): Option<Int> {
+        if (not stringIsDecimalInt(this)) return Option<Int>.None();
+        return Option.Some(stringToInt(this));
+    }
+
+    /// Parses this string as a decimal `Float`.
+    ///
+    /// Accepts the ordinary decimal and exponent forms, with no surrounding whitespace. Returns
+    /// `None` for invalid or non-finite text.
+    public fn toFloat(): Option<Float> {
+        if (not stringIsDecimalFloat(this)) return Option<Float>.None();
+        return Option.Some(stringToFloat(this));
+    }
+}
+
+/// Functions of `String` that are not receiver methods.
+namespace String {
+    /// Joins `values` into one string, inserting `separator` between adjacent elements.
+    ///
+    /// `String.join` delegates to `StringJoiner`; use that type directly to join a stream or to
+    /// reuse one separator across calls.
+    public fn join(separator: String, values: Iterable<String>): String =
+        StringJoiner.withSeparator(separator).join(values);
 }
 
 external fn stringLength(value: String?): Int;
@@ -181,3 +321,19 @@ external fn stringIndexOfCodePoint(value: String?, codePoint: Char): Int;
 external fn stringFirstMalformedOffset(value: String?): Int;
 external fn stringCodePointAtOffset(value: String?, offset: Int): Char;
 external fn stringCodePointWidthAtOffset(value: String?, offset: Int): Int;
+external fn stringCharCodePointAt(value: String?, index: Int): Int;
+external fn stringToLowerCase(value: String?): String;
+external fn stringToUpperCase(value: String?): String;
+external fn stringTrim(value: String?): String;
+external fn stringTrimStart(value: String?): String;
+external fn stringTrimEnd(value: String?): String;
+external fn stringIsBlank(value: String?): Boolean;
+external fn stringReplace(value: String?, target: String?, replacement: String?): String;
+external fn stringSplit(value: String?, separator: String?): Array<String>;
+external fn stringRegexErrorMessage(regex: String?): String?;
+external fn stringSplitRegex(value: String?, regex: String?): Array<String>;
+external fn stringLines(value: String?): Array<String>;
+external fn stringIsDecimalInt(value: String?): Boolean;
+external fn stringToInt(value: String?): Int;
+external fn stringIsDecimalFloat(value: String?): Boolean;
+external fn stringToFloat(value: String?): Float;

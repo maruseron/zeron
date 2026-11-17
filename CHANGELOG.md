@@ -104,6 +104,22 @@
   the checked-in pages are stale. No language, runtime, standard-library, or API-index compatibility
   changes are expected.
 
+### Standard library
+
+- Implemented ZEP-0130 standard-library-owned intrinsic declarations and its `String` inventory.
+  Intrinsic types keep compiler-owned identity, while `zeron.lang.string` now owns the public
+  operations: `split` (literal text, including a one-character separator), `splitRegex` returning
+  `Result<Stream<String>, RegexError>`, `lines`, `charAt`/`at`, locale-independent `toLowerCase`
+  and `toUpperCase`, `trim`/`trimStart`/`trimEnd`, `isBlank`, literal `replace`, and `toInt`/
+  `toFloat`. Multi-value results are `Stream<String>` so they compose with the existing stream
+  operations. `StringJoiner` is the reusable joining collector and `String.join` delegates to it.
+  `zeron.collections.Collector<T, R>` now names the value-level collector capability, with `add` and
+  `finish`, `Collector.of` supplies the canonical `CollectorImpl` for ad-hoc strategies, and
+  `Stream.collect` reduces a stream through a collector. The higher-kinded collection-construction
+  capability keeps its members under the clearer name `CollectionBuilder<C<_>>`. The platform
+  primitives live in `zeron.runtime.StringUnicode`, no intrinsic ID was added, and the
+  standard-library API version advanced to `18`.
+
 ## [0.7.0] - 2026, 13 NOV
 
 ### Compiler and language work

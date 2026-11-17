@@ -32,7 +32,7 @@ public class ArrayDeque<T: mut>
        Reversible<ArrayDeque<_>>,
        InPlaceReversible<ArrayDeque<_>>,
        Foldable<ArrayDeque<_>>,
-       Collector<ArrayDeque<_>> {
+       CollectionBuilder<ArrayDeque<_>> {
     values: &Array<T>;
     head: Int;
     elementCount: Int;
@@ -201,7 +201,7 @@ public class ArrayDeque<T: mut>
     delegating implementation Foldable<ArrayDeque<_>> {
     }
 
-    delegating implementation Collector<ArrayDeque<_>> {
+    delegating implementation CollectionBuilder<ArrayDeque<_>> {
         fn empty<A: mut>(): &ArrayDeque<A> = ArrayDeque<A>.empty();
     }
 

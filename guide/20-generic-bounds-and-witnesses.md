@@ -32,12 +32,12 @@ contract's admissibility requirements. The JVM erases generic type arguments, bu
 the applied arguments during compilation.
 
 Contracts no longer declare class-side factories. To create and populate a generic collection,
-bound its type constructor by `Collector<C<_>>`:
+bound its type constructor by `CollectionBuilder<C<_>>`:
 
 ```zeron
-import zeron.collections.Collector;
+import zeron.collections.CollectionBuilder;
 
-fn collectInto<C<_>: Collector<C>, E: nullable + mut>(
+fn collectInto<C<_>: CollectionBuilder<C>, E: nullable + mut>(
     source: Iterable<E>
 ): &C<E> {
     let result = C.empty<E>();
@@ -46,8 +46,9 @@ fn collectInto<C<_>: Collector<C>, E: nullable + mut>(
 }
 ```
 
-`Collector` is a higher-kinded contract: it describes operations on a whole family of types such as
-`List<T>`. A `Sink<T>` bound remains useful when code only needs to add to an existing value. See
+`CollectionBuilder` is a higher-kinded contract: it describes operations on a whole family of types
+such as `List<T>`. A `Sink<T>` bound remains useful when code only needs to add to an existing value,
+and `Collector<T, R>` describes a value that accumulates items and returns one result. See
 [Higher-kinded abstractions](30-higher-kinded-abstractions.md) for constructor bounds and dispatch.
 
 ## When a type does not declare the required contract

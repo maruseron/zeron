@@ -85,18 +85,18 @@ let incremented = mapValues<Box<_>, Int, Int>(box, value -> value + 1);
 Here `F.map(...)` is an explicit static call through the constructor bound. The same type parameter
 and bound syntax appears in the standard library's `Functor<F<_>>`, `Applicative<F<_>>`,
 `Monad<F<_>>`, and `Foldable<F<_>>` contracts. `Stream` implements `Functor`, `Applicative`,
-`Monad`, and `Foldable`; `List` implements `Foldable` and `Collector`.
+`Monad`, and `Foldable`; `List` implements `Foldable` and `CollectionBuilder`.
 
 Higher-kinded capabilities also describe construction and mutation for a generic family:
 
 ```zeron
-import zeron.collections.Collector;
+import zeron.collections.CollectionBuilder;
 
-fn emptyCollection<C<_>: Collector<C>, T: nullable + mut>(): &C<T> =
+fn emptyCollection<C<_>: CollectionBuilder<C>, T: nullable + mut>(): &C<T> =
     C.empty<T>();
 ```
 
-`Collector<C<_>>` combines an `empty` factory with an `add` operation. `Sink<T>` remains a
+`CollectionBuilder<C<_>>` combines an `empty` factory with an `add` operation. `Sink<T>` remains a
 behavioral contract for an existing sink. These contracts can both constrain a type family; when
 their receiver operations share a name, a behavioral contract wins receiver lookup and the HKT
 operation remains available through explicit static syntax such as `C.add(values, item)`.

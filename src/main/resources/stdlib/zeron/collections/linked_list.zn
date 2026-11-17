@@ -62,7 +62,7 @@ public class LinkedList<T: mut>
        Reversible<LinkedList<_>>,
        InPlaceReversible<LinkedList<_>>,
        Foldable<LinkedList<_>>,
-       Collector<LinkedList<_>> {
+       CollectionBuilder<LinkedList<_>> {
     head: &LinkedListNode<T>?;
     tail: &LinkedListNode<T>?;
     elementCount: Int;
@@ -252,7 +252,7 @@ public class LinkedList<T: mut>
     delegating implementation Foldable<LinkedList<_>> {
     }
 
-    delegating implementation Collector<LinkedList<_>> {
+    delegating implementation CollectionBuilder<LinkedList<_>> {
         fn empty<A: mut>(): &LinkedList<A> = LinkedList<A>.empty();
     }
 

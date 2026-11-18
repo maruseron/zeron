@@ -10,12 +10,13 @@ public class AnsiSyntaxHighlighterTest {
     @Test
     public void highlightsCurrentLiteralAndKeywordTokens() {
         final var highlighted = AnsiSyntaxHighlighter.highlight(
-                "'x' 42L object throws using");
+                "'x' 42L object throws unsafe using");
 
         assertTrue(highlighted.contains(AnsiColor.apply("'x'", "32")));
         assertTrue(highlighted.contains(AnsiColor.apply("42L", "36")));
         assertTrue(highlighted.contains(AnsiColor.apply("object", "35")));
         assertTrue(highlighted.contains(AnsiColor.apply("throws", "35")));
+        assertTrue(highlighted.contains(AnsiColor.apply("unsafe", "35")));
         assertTrue(highlighted.contains(AnsiColor.apply("using", "35")));
     }
 

@@ -277,10 +277,10 @@ boundary.
 Raised effects are not a purity system. A callable with an empty `raises` set can still mutate
 through a `&T` receiver, write output, read the environment, or perform other observable work.
 `raises` records which typed effects may escape; it does not promise referential transparency. The
-Java host boundary follows the same rule. [ZEP-0050](../documents/zeps/ZEP-0050.md) (Accepted for
-`0.8.0`) records the intended direction: curated `external class` facades remain the trusted, typed
-tier, and direct Java access becomes an explicit `unsafe` boundary rather than an implicit purity
-claim. [ZEP-0148](../documents/zeps/ZEP-0148.md) adds Java SAM conversion: a lambda or top-level
+Java host boundary follows the same rule. Curated `external class` facades remain the trusted, typed
+tier, and direct Java access requires an explicit `unsafe` boundary rather than an implicit purity
+claim. A Zeron effect raised inside an `unsafe` operand still escapes and must be handled or declared
+by the enclosing function. [ZEP-0148](../documents/zeps/ZEP-0148.md) adds Java SAM conversion: a lambda or top-level
 function reference converted to a Java functional interface must have an empty `raises` row, so a
 `RaisedEffect` never crosses into Java; handle or map the effect inside the callback instead.
 

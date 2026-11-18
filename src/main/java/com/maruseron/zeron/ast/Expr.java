@@ -927,6 +927,20 @@ public sealed interface Expr {
         }
     }
 
+    final class Unsafe implements Expr {
+        public final Token keyword;
+        public final Expr expression;
+        private TypeDescriptor type = TypeDescriptor.ofInfer();
+
+        public Unsafe(final Token keyword, final Expr expression) {
+            this.keyword = keyword;
+            this.expression = expression;
+        }
+
+        @Override public TypeDescriptor getType() { return type; }
+        @Override public void setType(final TypeDescriptor type) { this.type = type; }
+    }
+
     final class HandleArm {
         private final Token keyword;
         private final TypeDescriptor effectType;

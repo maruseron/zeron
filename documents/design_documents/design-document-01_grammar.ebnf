@@ -349,7 +349,7 @@ comparison = shift, { ( ">" | ">=" | "<" | "<=" ), shift } ;
 shift = term, { ( "<<" | ">>" | ">>>" ), term } ;
 term = factor, { ( "-" | "+" ), factor } ;
 factor = unary, { ( "/" | "*" | "%" ), unary } ;
-unary = "raise", unary | ( "not" | "-" | "+" | "~" | "typeof" ), unary | postfix ;
+unary = "raise", unary | "unsafe", unary | ( "not" | "-" | "+" | "~" | "typeof" ), unary | postfix ;
 postfix = call, { "as", [ "?" ], type | "!!" } ;
 
 (* [CHANGED] ZEP-0090: property references T::p. *)

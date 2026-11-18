@@ -79,6 +79,7 @@ public final class Scanner {
             entry("true",        TRUE),
             entry("type",        TYPE),
             entry("typeof",      TYPEOF),
+            entry("unsafe",      UNSAFE),
             entry("until",       UNTIL),
             entry("using",       USING),
             entry("witness",     WITNESS),

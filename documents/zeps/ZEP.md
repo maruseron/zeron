@@ -60,7 +60,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0047](./ZEP-0047.md) | Java Type and Array Mapping Semantics | Implemented | Shipped | 0.5.0 |
 | [ZEP-0048](./ZEP-0048.md) | Java Generic Interoperability | Implemented | Shipped | 0.5.0 |
 | [ZEP-0049](./ZEP-0049.md) | Java Exceptions and Typed Effects | Implemented | Shipped | 0.5.0 |
-| [ZEP-0050](./ZEP-0050.md) | Java Host-Access Trust Boundary | Accepted | Candidate | 0.8.0 |
+| [ZEP-0050](./ZEP-0050.md) | Java Host-Access Trust Boundary | Implemented | Candidate | 0.8.0 |
 | [ZEP-0051](./ZEP-0051.md) | Generic Covariance for Zeron | Implemented | Shipped | 0.5.0 |
 | [ZEP-0052](./ZEP-0052.md) | Use-Site Variance and Type Projections | Implemented | Shipped | 0.5.0 |
 | [ZEP-0053](./ZEP-0053.md) | Generic-Aware Runtime Type Tests and Safe Casts | Implemented | Shipped | 0.5.0 |
@@ -305,8 +305,8 @@ ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135, ZEP-0128, ZEP-0
 now `Implemented` / `Candidate`, while the others are `Accepted` / `Candidate`.
 ZEP-0070 was promoted from the backlog. ZEP-0134 and ZEP-0146 were added directly as `Draft` /
 `Candidate` rows for `0.8.0`; their acceptance reviews are still pending. ZEP-0136 and ZEP-0137 were
-accepted on 2026-11-15 and are `Accepted` / `Candidate`. ZEP-0050 owns the `unsafe` host-access
-boundary and ZEP-0148 owns Java SAM conversion; together they replace the original interop
+accepted on 2026-11-15 and are `Accepted` / `Candidate`. ZEP-0050 owns the implemented `unsafe`
+host-access boundary and ZEP-0148 owns Java SAM conversion; together they replace the original interop
 umbrella's `0.8.0` slice. ZEP-0149 holds the remaining interop inventory, including external
 contracts for Java interfaces and external enums, and is `Draft` / `Unscheduled`, so it does not
 count in the bundle above.

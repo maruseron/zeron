@@ -2556,7 +2556,7 @@ public final class StandardLibraryTest {
         Files.writeString(sourceFile, """
                 package %s;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
-                fn result(): Int = Fixture.add(19, 23);
+                fn result(): Int = unsafe Fixture.add(19, 23);
                 """.formatted(packageName));
 
         try {

@@ -138,7 +138,7 @@ fix and should land before the rest.
 
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
-| ZEP-0050 | Java Host-Access Trust Boundary | Accepted | Make direct Java access an explicit `unsafe` boundary; keep facades as the trusted, compiler-validated tier; keep `raises` as control flow, not purity |
+| ZEP-0050 | Java Host-Access Trust Boundary | Implemented | Make direct Java access an explicit `unsafe` boundary; keep facades as the trusted, compiler-validated tier; keep `raises` as control flow, not purity |
 | ZEP-0148 | Java SAM Conversion | Accepted | Convert effect-free lambdas and top-level function references to explicitly written Java functional interfaces; discover SAMs from class-file metadata; lower through `LambdaMetafactory` with no new ABI |
 | ZEP-0098 | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Add annotation sites for product/sum declarations, product components, and sum cases; metadata smoothing with no runtime ABI |
 | ZEP-0113 | Declaration-Site Covariance for Sum and Product Types | Implemented | Extend checked `out` parameters to immutable sums and products, including `Option`, `Result`, and `Pair`; variance smoothing |
@@ -213,7 +213,7 @@ ZEP-0113 were added as smoothing candidates and accepted and implemented on 2026
 
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
-| ZEP-0050 | Java Host-Access Trust Boundary | Accepted / `Candidate` | Make direct Java access an explicit `unsafe` boundary; keep facades as the trusted tier; keep `raises` as control flow, not purity |
+| ZEP-0050 | Java Host-Access Trust Boundary | Implemented / `Candidate` | Make direct Java access an explicit `unsafe` boundary; keep facades as the trusted tier; keep `raises` as control flow, not purity |
 | ZEP-0148 | Java SAM Conversion | Accepted / `Candidate` | Convert effect-free lambdas and top-level function references to explicitly written Java functional interfaces; discover SAMs from class-file metadata; lower through `LambdaMetafactory` |
 | ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Implemented / `Candidate` | Formalize `main` return values, entry evidence, and effectful entry interpretation |
 | ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented / `Candidate` | Make canonical components readable and add positional data-class patterns |
@@ -272,8 +272,8 @@ that ZEP-0129 depends on. Its initial scope uses direct carriers, removes `.valu
 representation in newtype-owned extensions and witnesses, keeps guarded newtypes scalar-only, and
 records the newtype metadata in the API index.
 
-ZEP-0050 was accepted on 2026-11-17 and added as a `Candidate` for `0.8.0`; it now owns the Java
-host-access trust boundary. `external class` and `external fn` declarations stay the trusted,
+ZEP-0050 was accepted on 2026-11-17, implemented on 2026-11-18, and remains a `Candidate` for
+`0.8.0`; it owns the Java host-access trust boundary. `external class` and `external fn` declarations stay the trusted,
 descriptor-checked tier; direct Java invocation, construction, and field access require an explicit
 `unsafe` expression; checked exceptions still require mappings for facades, while `unsafe` lets a
 one-off call bypass mapping and accept host pass-through. `raises` remains a typed control-flow
@@ -412,9 +412,9 @@ and ZEP-0121 is `Deferred`. None of those is a defensible `0.9.0` commitment.
 - The `0.8.0` candidate set now has twenty-one rows: twelve implemented designs, seven accepted
   designs, plus the draft ZEP-0134 and ZEP-0146. Decide whether to freeze scope there or admit
   further normalization items.
-- ZEP-0050 was accepted on 2026-11-17 as the host-access trust boundary and `0.8.0` candidate. Direct
-  Java access requires `unsafe`, facades stay the trusted tier, and `raises` stays control flow
-  rather than purity.
+- ZEP-0050 was accepted on 2026-11-17 and implemented on 2026-11-18 as the host-access trust
+  boundary and `0.8.0` candidate. Direct Java access requires `unsafe`, facades stay the trusted
+  tier, and `raises` stays control flow rather than purity.
 - ZEP-0148 was split from ZEP-0050, accepted on 2026-11-17, and added as a `0.8.0` candidate. It owns
   Java SAM conversion for effect-free lambdas and function references. A converted callback may not
   carry a Zeron effect row. ZEP-0149 was split as a `Draft` / `Unscheduled` inventory for general

@@ -1650,6 +1650,22 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void completionOffersUnsafeKeyword() throws Exception {
+        final var source = """
+                fn main() {
+                    uns
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+        final var completion = LspFeatures.completion(snapshot, project.entry(),
+                DocumentCoordinates.positionAt(source, source.indexOf("uns") + 3));
+
+        assertTrue(completion.getItems().toString(), completion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("unsafe")));
+    }
+
+    @Test
     public void sumTypeCompletionPrefersLocalTypeAndOffersCaseConstructors() throws Exception {
         final var source = """
                 type List<T> = Nil | Cons(head: T, tail: List<T>);

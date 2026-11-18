@@ -44,9 +44,9 @@ public final class JavaInteropTest {
         final var source = parse("JavaGenericProjection.zn", """
                 package java.generic.projection;
                 import java.util.List;
-                fn read(values: &List<out String>): String? = values.get(0);
-                fn write(values: &List<in String?>, value: String?): Boolean = values.add(value);
-                fn readIn(values: &List<in String?>): Any? = values.get(0);
+                fn read(values: &List<out String>): String? = unsafe values.get(0);
+                fn write(values: &List<in String?>, value: String?): Boolean = unsafe values.add(value);
+                fn readIn(values: &List<in String?>): Any? = unsafe values.get(0);
                 """);
         new ResolutionService().resolveUnits(List.of(source));
     }
@@ -69,9 +69,9 @@ public final class JavaInteropTest {
                 package java.generic.projection;
                 import java.util.List;
                 import com.maruseron.zeron.fixtures.JavaWildcardFixture as Fixture;
-                fn upper(): List<out String?>? = Fixture.upper;
-                fn lower(): List<in String?>? = Fixture.lower;
-                fn unbounded(): List<out Any?>? = Fixture.unbounded;
+                fn upper(): List<out String?>? = unsafe Fixture.upper;
+                fn lower(): List<in String?>? = unsafe Fixture.lower;
+                fn unbounded(): List<out Any?>? = unsafe Fixture.unbounded;
                 """);
         try {
             final var compiler = CompilationService.forCompilationUnits(
@@ -88,7 +88,7 @@ public final class JavaInteropTest {
         final var source = parse("JavaGenericProjection.zn", """
                 package java.generic.projection;
                 import java.util.List;
-                fn write(values: &List<out String>, value: String?): Boolean = values.add(value);
+                fn write(values: &List<out String>, value: String?): Boolean = unsafe values.add(value);
                 """);
         assertThrows(ResolutionError.class,
                 () -> new ResolutionService().resolveUnits(List.of(source)));
@@ -111,8 +111,8 @@ public final class JavaInteropTest {
         final var source = parse("JavaGenericProjection.zn", """
                 package interop.generic.projection;
                 import java.util.List;
-                fn read(values: &List<out String>): String? = values.get(0);
-                fn write(values: &List<in String?>, value: String?): Boolean = values.add(value);
+                fn read(values: &List<out String>): String? = unsafe values.get(0);
+                fn write(values: &List<in String?>, value: String?): Boolean = unsafe values.add(value);
                 """);
         try {
             final var compiler = CompilationService.forCompilationUnits(
@@ -143,21 +143,21 @@ public final class JavaInteropTest {
                 import com.maruseron.zeron.fixtures.JavaGenericCallableFixture as Host;
                 import com.maruseron.zeron.fixtures.JavaGenericBox as Box;
                 import java.util.List;
-                fn identityInt(): Int = Host.identity(42);
-                fn emptyString(): String? = Host.empty<String?>();
-                fn boundedString(): String = Host.stringOnly("value");
-                fn numberInt(): Int = Host.numberIdentity(42);
-                fn singletonString(): List<String>? = Host.singleton("item");
-                fn newGenericConstructor(): &Host = Host.new<Int>(42);
+                fn identityInt(): Int = unsafe Host.identity(42);
+                fn emptyString(): String? = unsafe Host.empty<String?>();
+                fn boundedString(): String = unsafe Host.stringOnly("value");
+                fn numberInt(): Int = unsafe Host.numberIdentity(42);
+                fn singletonString(): List<String>? = unsafe Host.singleton("item");
+                fn newGenericConstructor(): &Host = unsafe Host.new<Int>(42);
                 fn boxInt(): Int {
-                    let box: &Box<String> = Box<String>.new<Int>("value", 42);
-                    return box.echo(73);
+                    let box: &Box<String> = unsafe Box<String>.new<Int>("value", 42);
+                    return unsafe box.echo(73);
                 }
                 fn boxValue(): String {
-                    let box: &Box<String> = Box<String>.new<Int>("value", 42);
-                    return box.value();
+                    let box: &Box<String> = unsafe Box<String>.new<Int>("value", 42);
+                    return unsafe box.value();
                 }
-                fn inferBoxArguments(): &Box<String> = Box.new("value", 42);
+                fn inferBoxArguments(): &Box<String> = unsafe Box.new("value", 42);
                 """);
         try {
             final var compiler = CompilationService.forCompilationUnits(
@@ -293,8 +293,8 @@ public final class JavaInteropTest {
         final var client = parse("NonNullFacadeResult.zn", """
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
-                fn read(): String = Fixture.nullableString();
-                fn readArray(): Array<Int> = Fixture.nullableIntArray();
+                fn read(): String = unsafe Fixture.nullableString();
+                fn readArray(): Array<Int> = unsafe Fixture.nullableIntArray();
                 """);
         final var className = "interop.NonNullFacadeResult" + UUID.randomUUID().toString().replace("-", "");
         final var compiler = CompilationService.forCompilationUnits(
@@ -507,17 +507,93 @@ public final class JavaInteropTest {
     }
 
     @Test
-    public void rejectsDirectJavaCallsWithUnmappedCheckedExceptions() {
+    public void rejectsBareDirectJavaHostAccess() {
+        for (final var sourceText : List.of(
+                """
+                package interop;
+                import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
+                fn invalid(): Int = Fixture.add(1, 2);
+                """,
+                """
+                package interop;
+                import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
+                fn invalid(): &Fixture = Fixture.new(1);
+                """,
+                """
+                package interop;
+                import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
+                fn invalid(fixture: &Fixture): Int = fixture.publicValue;
+                """,
+                """
+                package interop;
+                import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
+                fn invalid(): Int = Fixture.publicStaticValue;
+                """)) {
+            final var source = parse("UnsafeRequired.zn", sourceText);
+            final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                    "interop.UnsafeRequired", "interop",
+                    List.of(), true, List.of(JAVA_FIXTURE_ROOT));
+            final var failure = assertThrows(ResolutionError.class, compiler::resolve);
+            assertTrue(failure.getMessage().contains("requires an unsafe expression"));
+        }
+    }
+
+    @Test
+    public void allowsConstantStaticFinalFieldsWithoutUnsafe() {
+        final var source = parse("ConstantField.zn", """
+                package interop;
+                import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
+                fn constant(): Int = Fixture.finalStaticValue;
+                """);
+        final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                "interop.ConstantField", "interop", List.of(), true, List.of(JAVA_FIXTURE_ROOT));
+        compiler.resolve();
+    }
+
+    @Test
+    public void letsCheckedJavaExceptionsEscapeUnderUnsafe() throws Exception {
         final var packageName = "com.maruseron.zeron.analize";
-        final var source = parse("UnmappedCheckedException.zn", """
+        final var className = packageName + ".UnsafeCheckedExceptionClient";
+        final var source = parse("UnsafeCheckedExceptionClient.zn", """
                 package %s;
                 import com.maruseron.zeron.analize.CheckedExceptionHost;
-                fn invalid(host: &CheckedExceptionHost): String? = host.checked();
+                fn checked(host: &CheckedExceptionHost): String? = unsafe host.checked();
                 """.formatted(packageName));
-        final var compiler = CompilationService.forCompilationUnits(
-                List.of(source), packageName + ".UnmappedCheckedException", packageName,
-                List.of(), false, List.of(JAVA_FIXTURE_ROOT));
-        assertThrows(ResolutionError.class, compiler::resolve);
+        final var compiler = CompilationService.forCompilationUnits(List.of(source), className,
+                packageName, List.of(), true, List.of(JAVA_FIXTURE_ROOT));
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL(), JAVA_FIXTURE_ROOT.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                final var program = loader.loadClass(className);
+                final var host = new CheckedExceptionHost();
+                final var failure = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                        () -> program.getMethod("checked", CheckedExceptionHost.class)
+                                .invoke(null, host));
+                assertTrue(failure.getCause() instanceof java.io.IOException);
+            }
+        } finally {
+            deleteTree(Path.of("dist", packageName.replace('.', '/')));
+        }
+    }
+
+    @Test
+    public void preservesZeronRaisedEffectsInsideUnsafe() {
+        final var packageName = "unsafeeffects" + UUID.randomUUID().toString().replace("-", "");
+        final var source = parse("UnsafeEffect.zn", """
+                package %s;
+                public effect Boom {
+                    public property cause: String;
+                    public constructor fromCause(cause: String) = Boom.new(cause);
+                }
+                fn boom(): Int raises Boom = raise Boom.fromCause("boom");
+                fn call(): Int raises Boom = unsafe boom();
+                """.formatted(packageName));
+        final var compiler = CompilationService.forCompilationUnits(List.of(source),
+                packageName + ".UnsafeEffect", packageName);
+        compiler.resolve();
     }
 
     @Test
@@ -676,58 +752,58 @@ public final class JavaInteropTest {
         final var source = parse("JavaInteropClient.zn", """
             package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
-                fn staticCall(): Int = Fixture.add(2, 3);
-                fn overloadInt(): Int = Fixture.choose(7);
-                fn overloadFloat(): Float = Fixture.choose(2.5);
-                fn formatted(): String? = Fixture.format("%s:%d", "item", 7);
-                fn summed(): Int = Fixture.sum(3, 4, 5);
-                fn summedFloat(): Float = Fixture.sum(1.5, 2.5);
-                fn joined(): String? = Fixture.join("|", "a", "b");
-                fn emptyJoin(): String? = Fixture.join("|");
-                fn fixedOverVarargs(): String? = Fixture.choose("fixed");
-                fn emptyVarargs(): String? = Fixture.choose();
+                fn staticCall(): Int = unsafe Fixture.add(2, 3);
+                fn overloadInt(): Int = unsafe Fixture.choose(7);
+                fn overloadFloat(): Float = unsafe Fixture.choose(2.5);
+                fn formatted(): String? = unsafe Fixture.format("%s:%d", "item", 7);
+                fn summed(): Int = unsafe Fixture.sum(3, 4, 5);
+                fn summedFloat(): Float = unsafe Fixture.sum(1.5, 2.5);
+                fn joined(): String? = unsafe Fixture.join("|", "a", "b");
+                fn emptyJoin(): String? = unsafe Fixture.join("|");
+                fn fixedOverVarargs(): String? = unsafe Fixture.choose("fixed");
+                fn emptyVarargs(): String? = unsafe Fixture.choose();
                 fn passMutableReference(): Int {
-                    let fixture: &Fixture = Fixture.new(10);
-                    return Fixture.readValue(fixture) + fixture.increment(5);
+                    let fixture: &Fixture = unsafe Fixture.new(10);
+                    return unsafe Fixture.readValue(fixture) + unsafe fixture.increment(5);
                 }
-                fn stringReturn(): String? = Fixture.echo("java");
-                fn nullStringArgument(): String? = Fixture.echo(null);
-                fn nullStringResult(): String? = Fixture.nullableString();
-                fn floatResult(): Float = Fixture.floatResult();
+                fn stringReturn(): String? = unsafe Fixture.echo("java");
+                fn nullStringArgument(): String? = unsafe Fixture.echo(null);
+                fn nullStringResult(): String? = unsafe Fixture.nullableString();
+                fn floatResult(): Float = unsafe Fixture.floatResult();
                 fn floatField(): Float {
-                    let fixture: &Fixture = Fixture.new(0);
-                    return fixture.publicFloat;
+                    let fixture: &Fixture = unsafe Fixture.new(0);
+                    return unsafe fixture.publicFloat;
                 }
-                fn intArrayResult(): Array<Int>? = Fixture.echoInts([1, 2]);
-                fn nullIntArrayResult(): Array<Int>? = Fixture.echoInts(null);
-                fn longArrayResult(): Array<Long>? = Fixture.echoLongs([3L, 4L]);
-                fn doubleArrayResult(): Array<Float>? = Fixture.echoDoubles([1.5, 2.5]);
-                fn booleanArrayResult(): Array<Boolean>? = Fixture.echoBooleans([true, false]);
+                fn intArrayResult(): Array<Int>? = unsafe Fixture.echoInts([1, 2]);
+                fn nullIntArrayResult(): Array<Int>? = unsafe Fixture.echoInts(null);
+                fn longArrayResult(): Array<Long>? = unsafe Fixture.echoLongs([3L, 4L]);
+                fn doubleArrayResult(): Array<Float>? = unsafe Fixture.echoDoubles([1.5, 2.5]);
+                fn booleanArrayResult(): Array<Boolean>? = unsafe Fixture.echoBooleans([true, false]);
                 fn intArrayArgumentCopy(): Int {
                     let mut values: &Array<Int> = [2];
-                    Fixture.overwriteFirstInt(values);
+                    unsafe Fixture.overwriteFirstInt(values);
                     return values[0];
                 }
-                fn intArrayConstructor(): Int = Fixture.new([6, 7, 8]).current();
-                fn sharedIntArray(): Array<Int>? = Fixture.sharedIntValues();
-                fn sharedObjectArray(): Array<Any?>? = Fixture.sharedObjectValues();
+                fn intArrayConstructor(): Int = unsafe Fixture.new([6, 7, 8]).current();
+                fn sharedIntArray(): Array<Int>? = unsafe Fixture.sharedIntValues();
+                fn sharedObjectArray(): Array<Any?>? = unsafe Fixture.sharedObjectValues();
                 fn objectArrayLength(): Int {
                     let values: Array<Int> = [2, 3, 5];
-                    return Fixture.objectArrayLength(values);
+                    return unsafe Fixture.objectArrayLength(values);
                 }
                 fn objectArrayRoundTrip(): Array<Any?>? {
                     let values: Array<Int> = [2, 3, 5];
-                    return Fixture.echoObjects(values);
+                    return unsafe Fixture.echoObjects(values);
                 }
-                fn nullObjectArray(): Array<Any?>? = Fixture.echoObjects(null);
+                fn nullObjectArray(): Array<Any?>? = unsafe Fixture.echoObjects(null);
                 fn objectArrayCopyIsolated(): Int {
                     let values: &Array<Int> = [2];
-                    Fixture.overwriteFirstObject(values);
+                    unsafe Fixture.overwriteFirstObject(values);
                     return values[0];
                 }
                 fn voidReturn(): Unit {
-                    let fixture: &Fixture = Fixture.new(12);
-                    fixture.reset();
+                    let fixture: &Fixture = unsafe Fixture.new(12);
+                    unsafe fixture.reset();
                     return ();
                 }
                 """);
@@ -798,7 +874,7 @@ public final class JavaInteropTest {
         final var supported = parse("SupportedIntArray.zn", """
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
-                fn supported(): Array<Int>? = Fixture.echoInts([1, 2]);
+                fn supported(): Array<Int>? = unsafe Fixture.echoInts([1, 2]);
                 """);
         final var supportedCompiler = CompilationService.forCompilationUnits(List.of(supported),
                 "interop.SupportedIntArray", "interop", List.of(), true, List.of(JAVA_FIXTURE_ROOT));
@@ -809,19 +885,19 @@ public final class JavaInteropTest {
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
                 fn invalid(): String? {
                     let values: Array<String> = ["a"];
-                    return Fixture.echoStrings(values);
+                    return unsafe Fixture.echoStrings(values);
                 }
                 """,
                 """
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
-                fn invalid(): Float = Fixture.floatParameter(1.5);
+                fn invalid(): Float = unsafe Fixture.floatParameter(1.5);
                 """,
                 """
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
                 fn invalid(fixture: &Fixture): Unit {
-                    fixture.publicFloat = 2.5;
+                    unsafe (fixture.publicFloat = 2.5);
                 }
                 """)) {
             final var unit = parse("UnsupportedJavaArray.zn", source);
@@ -909,21 +985,21 @@ public final class JavaInteropTest {
         final var source = parse("JavaFieldClient.zn", """
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
-                fn staticRead(): Int = Fixture.publicStaticValue;
-                fn finalStaticRead(): Int = Fixture.finalStaticValue;
+                fn staticRead(): Int = unsafe Fixture.publicStaticValue;
+                fn finalStaticRead(): Int = unsafe Fixture.finalStaticValue;
                 fn instanceRead(): Int {
-                    let fixture: &Fixture = Fixture.new(1);
-                    return fixture.finalValue;
+                    let fixture: &Fixture = unsafe Fixture.new(1);
+                    return unsafe fixture.finalValue;
                 }
                 fn instanceWrite(): Int {
-                    let fixture: &Fixture = Fixture.new(1);
-                    let assigned = fixture.publicValue = 31;
-                    return assigned * 100 + fixture.publicValue;
+                    let fixture: &Fixture = unsafe Fixture.new(1);
+                    let assigned = unsafe (fixture.publicValue = 31);
+                    return assigned * 100 + unsafe fixture.publicValue;
                 }
                 fn instanceCompoundWrite(): Int {
-                    let fixture: &Fixture = Fixture.new(1);
-                    let assigned = fixture.publicValue += 5;
-                    return assigned * 10 + fixture.publicValue;
+                    let fixture: &Fixture = unsafe Fixture.new(1);
+                    let assigned = unsafe (fixture.publicValue += 5);
+                    return assigned * 10 + unsafe fixture.publicValue;
                 }
                 """);
         final var compiler = CompilationService.forCompilationUnits(List.of(source), className, "interop",
@@ -949,14 +1025,14 @@ public final class JavaInteropTest {
     @Test
     public void rejectsWritesToFinalAndStaticJavaFields() {
         for (final var assignment : List.of(
-                "fixture.finalValue = 1;",
-                "Fixture.publicStaticValue = 1;",
-                "Fixture.finalStaticValue = 1;")) {
+                "unsafe (fixture.finalValue = 1);",
+                "unsafe (Fixture.publicStaticValue = 1);",
+                "unsafe (Fixture.finalStaticValue = 1);")) {
             final var source = parse("JavaFieldWrite.zn", """
                     package interop;
                     import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
                     fn invalid(): Unit {
-                        let fixture: &Fixture = Fixture.new(1);
+                        let fixture: &Fixture = unsafe Fixture.new(1);
                         %s
                     }
                     """.formatted(assignment));
@@ -974,21 +1050,21 @@ public final class JavaInteropTest {
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
                 fn invalid(fixture: Fixture): Unit {
-                    fixture.publicValue = 1;
+                    unsafe (fixture.publicValue = 1);
                 }
                 """,
                 """
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
                 fn invalid(fixture: &Fixture): Int {
-                    return fixture.publicArray.length;
+                    return unsafe fixture.publicArray.length;
                 }
                 """,
                 """
                 package interop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
                 fn invalid(fixture: &Fixture): Int {
-                    return fixture.value;
+                    return unsafe fixture.value;
                 }
                 """)) {
             final var source = parse("InvalidJavaField.zn", sourceText);
@@ -1009,7 +1085,7 @@ public final class JavaInteropTest {
         final var source = parse("JarInteropClient.zn", """
                 package %s;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
-                fn result(): Int = Fixture.add(19, 23);
+                fn result(): Int = unsafe Fixture.add(19, 23);
                 """.formatted(packageName));
         try {
             writeFixtureJar(jar);
@@ -1050,7 +1126,7 @@ public final class JavaInteropTest {
                     package %s;
                     import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
                     fn main(): Unit {
-                        let value: Int = Fixture.add(19, 23);
+                        let value: Int = unsafe Fixture.add(19, 23);
                     }
                     """.formatted(packageName));
             Files.writeString(manifest, """
@@ -1136,7 +1212,7 @@ public final class JavaInteropTest {
         final var source = parse("MalformedJavaInterop.zn", """
                 package malformedInterop;
                 import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture;
-                fn result(): Int = Fixture.add(19, 23);
+                fn result(): Int = unsafe Fixture.add(19, 23);
                 """);
         try {
             try (final var out = new JarOutputStream(Files.newOutputStream(malformedJar))) {
@@ -1181,9 +1257,9 @@ public final class JavaInteropTest {
     public void rejectsAmbiguousNullOverloads() {
         for (final var source : List.of(
                 "import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture; "
-                        + "fn invalid(): String? = Fixture.choose(null);",
+                        + "fn invalid(): String? = unsafe Fixture.choose(null);",
                 "import com.maruseron.zeron.fixtures.JavaInteropFixture as Fixture; "
-                    + "fn invalid(): String? = Fixture.ambiguous(null);")) {
+                    + "fn invalid(): String? = unsafe Fixture.ambiguous(null);")) {
             final var unit = parse("JavaInvalidClient.zn", "package interop; " + source);
             final var compiler = CompilationService.forCompilationUnits(List.of(unit), "interop.JavaInvalidClient", "interop",
                     List.of(), true, List.of(JAVA_FIXTURE_ROOT));

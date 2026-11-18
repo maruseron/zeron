@@ -324,6 +324,20 @@ public final class SourceFormatterTest {
     }
 
     @Test
+    public void formatsUnsafeHostAccessAsAPrefixExpression() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = "fn value(): Int = unsafe(host.length());";
+
+        final var result = SourceFormatter.format(source, "Unsafe.zn", style);
+        assertTrue(result.diagnostics().toString(), result.formattedSource().isPresent());
+        final var formatted = result.formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains("= unsafe (host.length());"));
+        assertEquals(formatted, SourceFormatter.format(formatted, "Unsafe.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
+    @Test
     public void keepsExternalDeclarationsCompactAndBreaksBeforeEffectsBeforeParameters() throws Exception {
         final var style = new CanonicalStyle(4, 56, true);
         final var source = """

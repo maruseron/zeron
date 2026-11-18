@@ -261,9 +261,13 @@ The supported source mappings are intentionally narrow:
   array fields. Passing an already-packed array to a Java varargs method remains unsupported.
 - Java `float[]`, `short[]`, `char[]`, typed reference arrays other than `Object[]`, and
   multidimensional arrays remain unsupported.
-- Java exceptions from direct Java interop propagate to the host, except that calls declaring
-  checked exceptions are rejected unless they resolve through an explicitly mapped declaration.
-  External-class methods and constructors can map checked exceptions to declared Zeron effects;
+- Direct Java invocations, constructors, and field accesses require an `unsafe` expression; curated
+  facades do not. A public `static final` field with a class-file `ConstantValue` is exempt.
+  `unsafe` changes only the trust classification and checked-exception policy, not descriptor,
+  visibility, module-export, overload, or generic-signature checks.
+- Java exceptions from direct Java interop propagate to the host. Under `unsafe`, calls declaring
+  checked exceptions may let them escape without a mapping or raised effect. External-class methods
+  and constructors can map checked exceptions to declared Zeron effects;
   external functions can do so when their configured Java binding exposes class-file exception
   metadata. Every declared checked exception must be covered, and the original exception object is
   retained as the effect payload. Unchecked exceptions and `Error`s always propagate unchanged.
@@ -336,9 +340,9 @@ compiled consumers do not need the compiler JAR at runtime.
    `PrintStream.print`/`println`.
 4. **Expand distribution and host integration deliberately.** Add each Java feature as a separately
    tested mapping rather than broadening metadata lookup implicitly. [ZEP-0050](../zeps/ZEP-0050.md)
-   (Accepted for `0.8.0`) owns the trust boundary: curated facades remain the typed tier, direct
-   Java access requires an explicit `unsafe` expression, and `raises` remains a control-flow channel
-   rather than a purity effect. [ZEP-0148](../zeps/ZEP-0148.md) adds contextual Java SAM conversion
+   owns the implemented trust boundary: curated facades remain the typed tier, direct Java access
+   requires an explicit `unsafe` expression, and `raises` remains a control-flow channel rather than a
+   purity effect. [ZEP-0148](../zeps/ZEP-0148.md) adds contextual Java SAM conversion
    for effect-free lambdas and top-level function references, using class-file SAM discovery and the
    existing
    `LambdaMetafactory` lowering. Intrinsic architecture is tracked in doc 12.

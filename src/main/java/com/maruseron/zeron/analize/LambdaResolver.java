@@ -285,9 +285,11 @@ final class LambdaResolver {
     static FunctionDescriptor inferLambdaType(final ResolutionContext context, final Expr.Lambda lambda) {
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
+        final var enclosingUnsafeDepth = context.frame.unsafeDepth;
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
+        context.frame.unsafeDepth = 0;
         beginScope(context);
         try {
             for (int i = 0; i < lambda.params.size(); i++) {
@@ -323,6 +325,7 @@ final class LambdaResolver {
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            context.frame.unsafeDepth = enclosingUnsafeDepth;
             RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
     }
@@ -591,6 +594,7 @@ final class LambdaResolver {
                             || referencesAnyVariable(context, arm.expression(), armNames);
                 });
             case Expr.Raise raise -> referencesAnyVariable(context, raise.effect, names);
+            case Expr.Unsafe unsafe -> referencesAnyVariable(context, unsafe.expression, names);
             case Expr.Handle handle -> referencesAnyVariable(context, handle.expression, names)
                 || handle.handler != null && referencesAnyVariable(context, handle.handler, names)
                 || handle.arms.stream().anyMatch(arm -> {
@@ -654,6 +658,7 @@ final class LambdaResolver {
 
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
+        final var enclosingUnsafeDepth = context.frame.unsafeDepth;
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         TypeResolver.validateType(context, expectedType, lambda.arrow);
         final var expectedBinders = expectedType.typeParameters();
@@ -668,6 +673,7 @@ final class LambdaResolver {
         context.enterInferableReifiedScope(false, lambdaTypeParameters);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
+        context.frame.unsafeDepth = 0;
         beginScope(context);
         Token receiverToken = null;
         try {
@@ -748,6 +754,7 @@ final class LambdaResolver {
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            context.frame.unsafeDepth = enclosingUnsafeDepth;
             context.exitInferableReifiedScope(false, lambdaTypeParameters);
             RaisedEffectFlow.endCallable(context, enclosingEffects);
         }
@@ -871,6 +878,7 @@ final class LambdaResolver {
     static void resolveFunction(final ResolutionContext context, final Stmt.Function function) {
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
+        final var enclosingUnsafeDepth = context.frame.unsafeDepth;
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         final var enclosingRepresentationContext = context.representationContext;
         final var exported = function.isPublic();
@@ -880,6 +888,7 @@ final class LambdaResolver {
                 || context.newtypeWitnessHelpers.contains(function);
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
+        context.frame.unsafeDepth = 0;
         beginScope(context);
         context.frame.expectedReturnTypes.push(context.representationContext
                 ? NewtypeRepresentations.resolve(function.typeDescriptor().returnType())
@@ -913,6 +922,7 @@ final class LambdaResolver {
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            context.frame.unsafeDepth = enclosingUnsafeDepth;
             context.exitInferableReifiedScope(exported, typeParameters);
             context.representationContext = enclosingRepresentationContext;
             RaisedEffectFlow.endCallable(context, enclosingEffects);
@@ -930,6 +940,7 @@ final class LambdaResolver {
                                        final Stmt.ExtensionMethod extension) {
         final var enclosingLoopDepth = context.frame.loopDepth;
         final var enclosingFlow = context.frame.flowState;
+        final var enclosingUnsafeDepth = context.frame.unsafeDepth;
         final var enclosingEffects = RaisedEffectFlow.beginCallable(context);
         final var exported = extension.isPublic();
         final var enclosingRepresentationContext = context.representationContext;
@@ -941,6 +952,7 @@ final class LambdaResolver {
                                 ? generic.baseType().name() : "");
         context.frame.loopDepth = 0;
         context.frame.flowState = new FlowState();
+        context.frame.unsafeDepth = 0;
         beginScope(context);
         context.frame.expectedReturnTypes.push(context.representationContext
                 ? NewtypeRepresentations.resolve(extension.typeDescriptor().returnType())
@@ -958,6 +970,7 @@ final class LambdaResolver {
             endScope(context);
             context.frame.loopDepth = enclosingLoopDepth;
             context.frame.flowState = enclosingFlow;
+            context.frame.unsafeDepth = enclosingUnsafeDepth;
             context.exitInferableReifiedScope(exported, typeParameters);
             context.representationContext = enclosingRepresentationContext;
             RaisedEffectFlow.endCallable(context, enclosingEffects);

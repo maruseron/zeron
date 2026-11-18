@@ -340,8 +340,8 @@ Other follow-up areas:
    quantification; higher-rank row-polymorphic function values remain unsupported.
 7. Observable I/O remains outside the raised-effect system. `raises` describes typed control-flow
    effects, not purity or the absence of observable side effects, so `println` can have no declared
-   raised effects without being pure. [ZEP-0050](../zeps/ZEP-0050.md) (Accepted for `0.8.0`) settles
-   the interop trust boundary: curated facades carry reviewed effect signatures, direct Java access
+   raised effects without being pure. [ZEP-0050](../zeps/ZEP-0050.md) settles
+   the implemented interop trust boundary: curated facades carry reviewed effect signatures, direct Java access
    requires an explicit `unsafe` expression, and no implicit `IO` effect is introduced.
    [ZEP-0148](../zeps/ZEP-0148.md) adds contextual Java SAM conversion; a converted lambda or
    top-level function reference must have an empty `raises` row, so a `zeron.runtime.RaisedEffect`

@@ -53,7 +53,7 @@ final class LspFeatures {
             "handle", "if", "implement", "import", "in", "is", "let", "loop",
             "match", "mut", "namespace", "newtype", "not", "null", "object", "or",
             "package", "pattern", "property", "public", "raise", "return", "sealed",
-            "super", "this", "throw", "true", "try", "type", "using", "var", "while",
+            "super", "this", "throw", "true", "try", "type", "unsafe", "using", "var", "while",
             "witness");
     private LspFeatures() {}
 

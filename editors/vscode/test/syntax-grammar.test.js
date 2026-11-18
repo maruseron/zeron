@@ -70,6 +70,7 @@ test('highlights yield and collect as for-expression result clauses', () => {
 
 test('highlights under as a keyword and where in newtype validators', () => {
   assert.ok(grammar.repository.keywords.match.includes('|under|'));
+  assert.ok(grammar.repository.keywords.match.includes('|unsafe|'));
 
   const wherePattern = grammar.repository['contextual-keywords'].patterns
     .find(pattern => pattern.match.includes('(where)'));

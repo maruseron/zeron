@@ -3359,6 +3359,10 @@ public final class Parser {
     }
 
     private Expr unary() {
+        if (match(UNSAFE)) {
+            final var keyword = previous();
+            return new Expr.Unsafe(keyword, unary());
+        }
         if (match(RAISE)) {
             final var keyword = previous();
             return new Expr.Raise(keyword, unary());

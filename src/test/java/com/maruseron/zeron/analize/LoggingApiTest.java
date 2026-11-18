@@ -131,9 +131,9 @@ public final class LoggingApiTest {
 
                 final var formatted = (String) generated.getMethod("formattedRecordIncludesFields")
                         .invoke(null);
-                assertTrue(formatted.startsWith("INFO [app] message {"));
-                assertTrue(formatted.contains("key=\"value\""));
-                assertTrue(formatted.contains("list=[1, true]"));
+                assertTrue(formatted, formatted.startsWith("INFO [app] message {"));
+                assertTrue(formatted, formatted.contains("key=\"value\""));
+                assertTrue(formatted, formatted.contains("list=[1, true]"));
                 assertEquals('}', formatted.charAt(formatted.length() - 1));
             }
         } finally {

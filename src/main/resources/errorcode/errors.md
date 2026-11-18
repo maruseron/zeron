@@ -184,6 +184,7 @@
 - `Registered JVM method arity does not match the external function signature.`
 - `Registered JVM parameter descriptor does not match the external function signature.`
 - `Registered JVM return descriptor does not match the external function signature.`
+- `Direct Java host access requires an unsafe expression.`
 - `Duplicate contract method.`
 - `Duplicate contract member.`
 - `Only sealed contracts may declare permitted classes.`

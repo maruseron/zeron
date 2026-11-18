@@ -26,7 +26,7 @@ public final class DiagnosticCatalogTest {
             }
             assertEquals(entry, DiagnosticCatalog.find(entry.code()).orElseThrow());
         }
-        assertEquals(59, DiagnosticCatalog.entries().size());
+        assertEquals(60, DiagnosticCatalog.entries().size());
     }
 
     @Test

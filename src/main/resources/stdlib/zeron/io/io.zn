@@ -12,9 +12,9 @@ public fn println(value: Any?): Unit {
 }
 
 public fn readln(): String? {
-    return JavaIO.readln();
+    return unsafe JavaIO.readln();
 }
 
 public fn prompt(prompt: String): String? {
-    return JavaIO.readln(prompt);
+    return unsafe JavaIO.readln(prompt);
 }

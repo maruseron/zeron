@@ -246,7 +246,7 @@
     },
     "keywords": {
       "name": "keyword.control.zeron",
-      "match": "\\b(?:and|annotation|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|private|property|public|raise|raises|return|sealed|static|then|this|throws|type|typeof|under|until|using|witness|while)\\b"
+      "match": "\\b(?:and|annotation|as|break|case|class|contract|constructor|continue|default|else|effect|extension|external|fn|for|handle|if|implement|import|in|is|let|loop|match|mut|namespace|not|object|or|package|pattern|private|property|public|raise|raises|return|sealed|static|then|this|throws|type|typeof|under|unsafe|until|using|witness|while)\\b"
     },
     "contextual-keywords": {
       "patterns": [

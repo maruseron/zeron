@@ -3,68 +3,68 @@ package zeron.math;
 import java.lang.Math;
 
 public extension Int {
-    public fn abs(): Int = Math.abs(this);
+    public fn abs(): Int = unsafe Math.abs(this);
 
-    public fn min(other: Int): Int = Math.min(this, other);
+    public fn min(other: Int): Int = unsafe Math.min(this, other);
 
-    public fn max(other: Int): Int = Math.max(this, other);
+    public fn max(other: Int): Int = unsafe Math.max(this, other);
 
-    public fn clamp(min: Int, max: Int): Int = Math.clamp(this.toLong(), min, max);
+    public fn clamp(min: Int, max: Int): Int = unsafe Math.clamp(this.toLong(), min, max);
 }
 
 public extension Long {
-    public fn abs(): Long = Math.abs(this);
+    public fn abs(): Long = unsafe Math.abs(this);
 
-    public fn min(other: Long): Long = Math.min(this, other);
+    public fn min(other: Long): Long = unsafe Math.min(this, other);
 
-    public fn max(other: Long): Long = Math.max(this, other);
+    public fn max(other: Long): Long = unsafe Math.max(this, other);
 
-    public fn clamp(min: Long, max: Long): Long = Math.clamp(this, min, max);
+    public fn clamp(min: Long, max: Long): Long = unsafe Math.clamp(this, min, max);
 }
 
 public extension Float {
-    public fn abs(): Float = Math.abs(this);
+    public fn abs(): Float = unsafe Math.abs(this);
 
-    public fn min(other: Float): Float = Math.min(this, other);
+    public fn min(other: Float): Float = unsafe Math.min(this, other);
 
-    public fn max(other: Float): Float = Math.max(this, other);
+    public fn max(other: Float): Float = unsafe Math.max(this, other);
 
-    public fn clamp(min: Float, max: Float): Float = Math.clamp(this, min, max);
+    public fn clamp(min: Float, max: Float): Float = unsafe Math.clamp(this, min, max);
 
-    public fn sqrt(): Float = Math.sqrt(this);
+    public fn sqrt(): Float = unsafe Math.sqrt(this);
 
-    public fn pow(exponent: Float): Float = Math.pow(this, exponent);
+    public fn pow(exponent: Float): Float = unsafe Math.pow(this, exponent);
 
-    public fn exp(): Float = Math.exp(this);
+    public fn exp(): Float = unsafe Math.exp(this);
 
-    public fn ln(): Float = Math.log(this);
+    public fn ln(): Float = unsafe Math.log(this);
 
-    public fn log10(): Float = Math.log10(this);
+    public fn log10(): Float = unsafe Math.log10(this);
 
-    public fn sin(): Float = Math.sin(this);
+    public fn sin(): Float = unsafe Math.sin(this);
 
-    public fn cos(): Float = Math.cos(this);
+    public fn cos(): Float = unsafe Math.cos(this);
 
-    public fn tan(): Float = Math.tan(this);
+    public fn tan(): Float = unsafe Math.tan(this);
 
-    public fn asin(): Float = Math.asin(this);
+    public fn asin(): Float = unsafe Math.asin(this);
 
-    public fn acos(): Float = Math.acos(this);
+    public fn acos(): Float = unsafe Math.acos(this);
 
-    public fn atan(): Float = Math.atan(this);
+    public fn atan(): Float = unsafe Math.atan(this);
 
-    public fn atan2(x: Float): Float = Math.atan2(this, x);
+    public fn atan2(x: Float): Float = unsafe Math.atan2(this, x);
 
-    public fn floor(): Float = Math.floor(this);
+    public fn floor(): Float = unsafe Math.floor(this);
 
-    public fn ceil(): Float = Math.ceil(this);
+    public fn ceil(): Float = unsafe Math.ceil(this);
 
     public fn trunc(): Float {
-        if (this < 0.0) return Math.ceil(this);
-        return Math.floor(this);
+        if (this < 0.0) return unsafe Math.ceil(this);
+        return unsafe Math.floor(this);
     }
 
-    public fn round(): Long = Math.round(this);
+    public fn round(): Long = unsafe Math.round(this);
 }
 
 public let PI: Float = 3.141592653589793;

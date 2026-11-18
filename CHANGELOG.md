@@ -4,6 +4,14 @@
 
 ### Compiler and language work
 
+- Implemented ZEP-0050 Java host-access trust boundary. Direct Java invocations, constructors, and
+  field accesses now require an explicit `unsafe` expression; curated `external class` and
+  `external fn` facades remain trusted and unchanged. Under `unsafe`, checked Java exceptions may
+  escape without a mapping and add no raised effect, while Zeron effects raised inside the operand
+  still escape normally. Public `static final` fields with a class-file `ConstantValue` are exempt.
+  The scanner, parser, formatter, ANSI highlighter, TextMate grammar, language-server keyword
+  completion, guides, and compiler diagnostics were updated, and direct JDK calls in the standard
+  library migrated to `unsafe`.
 - Implemented ZEP-0131 chained flow refinement and implicit receiver access. `is` and `matches`
   facts transfer through composed `and`, `or`, and `not` conditions; `matches` payload bindings are
   available in later operands and the successful branch, with OR alternatives checked for

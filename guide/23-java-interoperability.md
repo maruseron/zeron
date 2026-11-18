@@ -39,9 +39,24 @@ simpler declared API to Zeron.
 
 Treat interop as an explicit host boundary rather than a transparent import of the whole Java
 object model. A small adapter can hide unsupported signatures and expose only the operations the
-Zeron program needs. Java exceptions retain ordinary JVM behavior by default. Direct Java calls to
-methods declaring checked exceptions are rejected; an external-class method can instead map its
-declared checked exceptions explicitly:
+Zeron program needs. Direct Java invocations, constructor calls, and field accesses require an
+`unsafe` expression:
+
+```zeron
+import java.util.UUID;
+
+fn token(): String = unsafe (UUID.randomUUID().toString());
+```
+
+Curated external-class facades need no marker. `unsafe` acknowledges that unchecked host failures
+and observable side effects are outside the typed Zeron effect signature; it does not bypass
+descriptor support, visibility, module exports, overload checking, or generic-signature validation.
+A public `static final` Java field with a class-file `ConstantValue` is a compile-time constant and
+may be read without `unsafe`.
+
+Java exceptions retain ordinary JVM behavior by default. Under `unsafe`, a direct call may let
+checked Java exceptions escape without a mapping; those exceptions do not acquire a Zeron raised
+effect. An external-class method can instead map its declared checked exceptions explicitly:
 
 ```zeron
 public effect FileFailure {
@@ -62,12 +77,12 @@ multiple types match, the most-specific mapping is selected. `RuntimeException` 
 `Error`s always propagate unchanged, and checked-exception constructors are not yet supported.
 Mappings and the derived raised-effect signatures are preserved in compiled-library API indexes.
 
-A direct Java call that declares no checked exception currently contributes no raised effect. The
-compiler cannot verify that such a call is pure or that it cannot throw an unchecked exception, and
-the same is true of calls through a facade beyond the facade's declared mappings. [ZEP-0050](../documents/zeps/ZEP-0050.md)
-(Accepted for `0.8.0`) records the intended direction: direct Java access becomes an explicit
-`unsafe` boundary, while curated facades remain the trusted tier. Until that lands, prefer facades
-for reusable operations and review any direct Java call as an unchecked host boundary.
+A direct Java call that declares no checked exception contributes no raised effect. The compiler
+cannot verify that such a call is pure or that it cannot throw an unchecked exception, and the same
+is true of calls through a facade beyond the facade's declared mappings. `unsafe` is not a purity
+cast: a Zeron effect raised inside its operand still escapes and must be handled or declared by the
+enclosing function. Prefer curated facades for reusable operations, and review each direct Java call
+inside `unsafe` as an unchecked host boundary.
 
 Java functional-interface callback conversion is not implemented yet. [ZEP-0148](../documents/zeps/ZEP-0148.md)
 (Accepted for `0.8.0`) records the intended direction: an effect-free Zeron lambda or top-level

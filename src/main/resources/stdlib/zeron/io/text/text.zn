@@ -61,7 +61,7 @@ public class TextReader is Disposable {
             decoder.onUnmappableCharacter(CodingErrorAction.REPORT);
             return decoder.decode(ByteBuffer.wrap(output.toByteArray())).toString();
         }
-        raise IoFailure.new(java.io.IOException.new("UTF-8 charset unavailable"));
+        raise IoFailure.new(unsafe java.io.IOException.new("UTF-8 charset unavailable"));
     }
 
     public mut dispose(): Unit raises DisposeFailure = this.reader.dispose();

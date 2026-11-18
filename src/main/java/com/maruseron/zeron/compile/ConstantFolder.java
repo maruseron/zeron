@@ -25,6 +25,7 @@ final class ConstantFolder {
                 else yield null;
             }
             case Expr.Grouping grouping -> fold(grouping.expression);
+            case Expr.Unsafe unsafe -> fold(unsafe.expression);
             case Expr.Unary unary -> foldUnary(unary);
             case Expr.Binary bin -> foldBinary(bin);
             case Expr.Logical logical -> foldLogical(logical);

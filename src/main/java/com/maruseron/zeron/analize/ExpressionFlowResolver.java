@@ -915,6 +915,16 @@ final class ExpressionFlowResolver {
                 coalesce.setType(resultType);
                 yield resultType;
             }
+            case Expr.Unsafe unsafe -> {
+                context.frame.unsafeDepth++;
+                try {
+                    final var type = resolve(context, unsafe.expression);
+                    unsafe.setType(type);
+                    yield type;
+                } finally {
+                    context.frame.unsafeDepth--;
+                }
+            }
             // suggested type for lambdas will always be inferred,
             // but they need to be structurally inferred. we can extract
             // arity from the parameter count and infer a return type from
@@ -1198,7 +1208,13 @@ final class ExpressionFlowResolver {
         }
 
         if (!object.declarationResolved()) {
-            DeclarationResolver.resolveClass(context, object.declaration());
+            final var enclosingUnsafeDepth = context.frame.unsafeDepth;
+            context.frame.unsafeDepth = 0;
+            try {
+                DeclarationResolver.resolveClass(context, object.declaration());
+            } finally {
+                context.frame.unsafeDepth = enclosingUnsafeDepth;
+            }
             object.markDeclarationResolved();
         }
 

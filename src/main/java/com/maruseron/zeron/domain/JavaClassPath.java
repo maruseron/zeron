@@ -40,7 +40,7 @@ public final class JavaClassPath {
 
     public record JavaField(String name, java.lang.constant.ClassDesc descriptor,
                             boolean isStatic, boolean isFinal, boolean hasGenericSignature,
-                            String genericSignature) {}
+                            String genericSignature, boolean hasConstantValue) {}
 
     public record JavaClass(String binaryName,
                             String superclassName,
@@ -177,7 +177,8 @@ public final class JavaClassPath {
                         field.flags().has(AccessFlag.STATIC), field.flags().has(AccessFlag.FINAL),
                         field.findAttribute(Attributes.signature()).isPresent(),
                         field.findAttribute(Attributes.signature())
-                                .map(attribute -> attribute.signature().stringValue()).orElse(null)))
+                                .map(attribute -> attribute.signature().stringValue()).orElse(null),
+                        field.findAttribute(Attributes.constantValue()).isPresent()))
                 .toList();
         final var genericSignature = model.findAttribute(Attributes.signature())
                 .map(attribute -> attribute.signature().stringValue()).orElse(null);

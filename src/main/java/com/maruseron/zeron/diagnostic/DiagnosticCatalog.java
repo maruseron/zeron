@@ -115,6 +115,8 @@ public final class DiagnosticCatalog {
             entry("ZR2025", "Nullable type-parameter value requires a null check");
     public static final Entry HASHABLE_HASH_RETURN_TYPE =
             entry("ZR2026", "Hashable.hash must return Long");
+    public static final Entry UNSAFE_HOST_ACCESS_REQUIRED =
+            entry("ZR2027", "Direct Java access requires unsafe");
 
     public static final Entry GENERATED_PROGRAM_NAME_CONFLICT =
             entry("ZR3001", "Generated program name conflicts with a declared type");
@@ -177,7 +179,6 @@ public final class DiagnosticCatalog {
             NULLABLE_VALUE_REQUIRES_HANDLING,
             TYPE_MISMATCH_OR_FAILED_INFERENCE,
             INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-            HASHABLE_HASH_RETURN_TYPE,
             TOP_LEVEL_INITIALIZATION_CYCLE,
             INVALID_INITIALIZER,
             INVALID_PATTERN_OUTPUT_ASSIGNMENT,
@@ -188,6 +189,8 @@ public final class DiagnosticCatalog {
             TYPE_INFERENCE_FAILURE,
             UNSUPPORTED_JAVA_INTEROP_FEATURE,
             NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK,
+            HASHABLE_HASH_RETURN_TYPE,
+            UNSAFE_HOST_ACCESS_REQUIRED,
             GENERATED_PROGRAM_NAME_CONFLICT,
             ANONYMOUS_WITNESS_DEPRECATED,
             UNUSED_LOCAL_VARIABLE,

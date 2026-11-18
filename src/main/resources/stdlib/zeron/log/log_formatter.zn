@@ -22,7 +22,7 @@ fn renderFields(fields: Map<String, Value>): String {
         rendered.add(entry.fst + "=" + renderValue(entry.snd));
     }
     return String.join(rendered) { 
-        prefix = "{";
+        prefix = " {";
         separator = ", ";
         suffix = "}"; 
     };

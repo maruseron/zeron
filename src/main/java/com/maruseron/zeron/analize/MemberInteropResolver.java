@@ -200,6 +200,10 @@ final class MemberInteropResolver {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             property.name, "Unknown or unsupported external static property."));
                 }
+                if (externalClass == null
+                        && !(javaField.isFinal() && javaField.hasConstantValue())) {
+                    requireUnsafeHostAccess(context, property.name);
+                }
                 property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
                         javaField.descriptor().descriptorString(), true, javaField.isFinal()));
                 property.setType(fieldType);
@@ -372,6 +376,7 @@ final class MemberInteropResolver {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                             property.name, "Static Java fields must be accessed through their class."));
                 }
+                requireUnsafeHostAccess(context, property.name);
                 final var resolvedFieldType = javaFieldType(
                         context, javaClass, javaField, memberReceiverType, property.name);
                 if (resolvedFieldType == null) {
@@ -2210,6 +2215,12 @@ final class MemberInteropResolver {
                 receiverType instanceof ReferenceDescriptor, receiverType, null);
     }
 
+    private static void requireUnsafeHostAccess(final ResolutionContext context, final Token where) {
+        if (context.frame.unsafeDepth > 0) return;
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSAFE_HOST_ACCESS_REQUIRED, where,
+                "Direct Java host access requires an unsafe expression."));
+    }
+
     private static boolean externalFacadeAllows(final ResolutionContext context,
                                                 final JavaClassPath.JavaClass javaClass,
                                                 final JavaClassPath.JavaMethod method,
@@ -2497,11 +2508,12 @@ final class MemberInteropResolver {
         final var returnType = facadeMethod == null
                 ? selected.returnType()
                 : facadeMethod.typeDescriptor().returnType();
+        if (facade == null) requireUnsafeHostAccess(context, call.name);
         final var checkedExceptions = selected.method().exceptionTypes().stream()
                 .filter(exceptionType -> isCheckedJavaException(context, exceptionType))
                 .toList();
-        if (!checkedExceptions.isEmpty() && (constructor
-                ? facadeConstructor == null : facadeMethod == null)) {
+        if (!checkedExceptions.isEmpty() && context.frame.unsafeDepth == 0
+                && (constructor ? facadeConstructor == null : facadeMethod == null)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
                     call.name, "Java calls declaring checked exceptions require an external facade mapping."));
         }

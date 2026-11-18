@@ -14,7 +14,7 @@ default witness Numeric<Float> for Float {
     fn subtract(other: Float): Float = this - other;
     fn multiply(other: Float): Float = this * other;
     fn negate(): Float = -this;
-    fn abs(): Float = Math.abs(this);
+    fn abs(): Float = unsafe Math.abs(this);
     fn signum(): Float =
         if (this < 0.0) then -1.0 else if (this > 0.0) then 1.0 else if (this == 0.0) then 0.0 else this;
     static fn fromInteger(value: Integer): Float = value.toFloat();
@@ -27,18 +27,18 @@ default witness Fractional<Float> for Float {
 }
 
 default witness Floating<Float> for Float {
-    fn sqrt(): Float = Math.sqrt(this);
-    fn pow(exponent: Float): Float = Math.pow(this, exponent);
-    fn exp(): Float = Math.exp(this);
-    fn ln(): Float = Math.log(this);
-    fn log10(): Float = Math.log10(this);
-    fn sin(): Float = Math.sin(this);
-    fn cos(): Float = Math.cos(this);
-    fn tan(): Float = Math.tan(this);
-    fn asin(): Float = Math.asin(this);
-    fn acos(): Float = Math.acos(this);
-    fn atan(): Float = Math.atan(this);
-    fn atan2(x: Float): Float = Math.atan2(this, x);
+    fn sqrt(): Float = unsafe Math.sqrt(this);
+    fn pow(exponent: Float): Float = unsafe Math.pow(this, exponent);
+    fn exp(): Float = unsafe Math.exp(this);
+    fn ln(): Float = unsafe Math.log(this);
+    fn log10(): Float = unsafe Math.log10(this);
+    fn sin(): Float = unsafe Math.sin(this);
+    fn cos(): Float = unsafe Math.cos(this);
+    fn tan(): Float = unsafe Math.tan(this);
+    fn asin(): Float = unsafe Math.asin(this);
+    fn acos(): Float = unsafe Math.acos(this);
+    fn atan(): Float = unsafe Math.atan(this);
+    fn atan2(x: Float): Float = unsafe Math.atan2(this, x);
 }
 
 /// Derived properties and conversions of `Float`.
@@ -56,10 +56,10 @@ public extension Float {
     }
 
     /// Whether this value is `NaN`.
-    public fn isNaN(): Boolean = Double.isNaN(this);
+    public fn isNaN(): Boolean = unsafe Double.isNaN(this);
 
     /// Whether this value is neither `NaN` nor infinite.
-    public fn isFinite(): Boolean = Double.isFinite(this);
+    public fn isFinite(): Boolean = unsafe Double.isFinite(this);
 
     /// Returns this value truncated towards zero as an `Int`, or `None` when it is `NaN` or
     /// outside the range of `Int`.

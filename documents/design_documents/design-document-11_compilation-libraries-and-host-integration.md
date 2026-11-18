@@ -278,9 +278,9 @@ unbounded wildcards, are checked against the projected owner view; generated cal
 erased JVM descriptor. Raw Java generic types, generic `throws` type variables, and signatures with
 unsupported bounds or forms remain unsupported. Java generic arrays, typed reference arrays and
 remaining primitive-array shapes, general inherited members, static field writes, and JPMS
-module-path/readability configuration are deferred. Contextual Java SAM conversion is planned for
-the [ZEP-0148](../zeps/ZEP-0148.md) `0.8.0` slice; callback lifetime and threading guarantees are
-not. JDK module exports
+module-path/readability configuration are deferred. Contextual Java SAM conversion is implemented
+for effect-free lambdas and top-level function references under [ZEP-0148](../zeps/ZEP-0148.md);
+callback lifetime and threading guarantees are not. JDK module exports
 are honored for discovered classes; only unqualified exports are
 accessible to generated unnamed modules. Java classpath roots provide compile-time metadata lookup.
 Generated programs also require the corresponding Java classes at runtime: `zeron run` reuses the
@@ -335,17 +335,16 @@ compiled consumers do not need the compiler JAR at runtime.
    JDK symbols resolve; package scanning and implicit imports remain unsupported. Public declared
    fields with supported descriptors can be read; non-final instance fields can be written only
    through mutable receivers. Static writes, inherited fields, callback lifetime guarantees, and JDK
-   module-path configuration remain out of scope. Contextual Java SAM conversion is part of
-   [ZEP-0148](../zeps/ZEP-0148.md)'s `0.8.0` slice. The curated facade adds `System.out` and
-   `PrintStream.print`/`println`.
+   module-path configuration remain out of scope. Contextual Java SAM conversion for effect-free
+   lambdas and top-level function references is implemented under [ZEP-0148](../zeps/ZEP-0148.md).
+   The curated facade adds `System.out` and `PrintStream.print`/`println`.
 4. **Expand distribution and host integration deliberately.** Add each Java feature as a separately
    tested mapping rather than broadening metadata lookup implicitly. [ZEP-0050](../zeps/ZEP-0050.md)
    owns the implemented trust boundary: curated facades remain the typed tier, direct Java access
    requires an explicit `unsafe` expression, and `raises` remains a control-flow channel rather than a
-   purity effect. [ZEP-0148](../zeps/ZEP-0148.md) adds contextual Java SAM conversion
+   purity effect. [ZEP-0148](../zeps/ZEP-0148.md) implements contextual Java SAM conversion
    for effect-free lambdas and top-level function references, using class-file SAM discovery and the
-   existing
-   `LambdaMetafactory` lowering. Intrinsic architecture is tracked in doc 12.
+   existing `LambdaMetafactory` lowering. Intrinsic architecture is tracked in doc 12.
 
 ## Acceptance Boundaries
 

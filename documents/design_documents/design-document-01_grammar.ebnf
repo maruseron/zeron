@@ -352,7 +352,11 @@ factor = unary, { ( "/" | "*" | "%" ), unary } ;
 unary = "raise", unary | "unsafe", unary | ( "not" | "-" | "+" | "~" | "typeof" ), unary | postfix ;
 postfix = call, { "as", [ "?" ], type | "!!" } ;
 
+(* [CHANGED] ZEP-0132: `as? T?` normalizes to a T? result and tests the non-null base T. *)
+
 (* [CHANGED] ZEP-0090: property references T::p. *)
+(* [CHANGED] ZEP-0134: a call suffix may follow any expression whose resolved type is a non-null
+   function value, not only a name or property. *)
 
 call = ( genericFunctionCall | genericClassFactoryCall | functionValueReference | propertyReference | primary ),
          { callSuffix } ;

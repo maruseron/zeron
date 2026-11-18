@@ -162,6 +162,12 @@ final class LambdaCaptureValidator {
                     walkCaptureUsage(argument, localNames);
                 }
             }
+            case Expr.Invoke invoke -> {
+                walkCaptureUsage(invoke.callee, localNames);
+                for (final var argument : invoke.arguments) {
+                    walkCaptureUsage(argument, localNames);
+                }
+            }
             case Expr.Grouping grouping -> walkCaptureUsage(grouping.expression, localNames);
             case Expr.If iff -> {
                 walkCaptureUsage(iff.condition, localNames);

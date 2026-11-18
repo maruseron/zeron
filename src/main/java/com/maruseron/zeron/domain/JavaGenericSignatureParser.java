@@ -7,6 +7,14 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class JavaGenericSignatureParser {
+    public record ClassSignature(List<TypeParameterDescriptor> typeParameters,
+                                 TypeDescriptor superclass,
+                                 List<TypeDescriptor> interfaces) {
+        public ClassSignature {
+            interfaces = List.copyOf(interfaces);
+        }
+    }
+
     public record MethodSignature(List<TypeParameterDescriptor> typeParameters,
                                   List<TypeDescriptor> parameterTypes, TypeDescriptor returnType,
                                   List<TypeDescriptor> throwsTypes) {
@@ -32,6 +40,19 @@ public final class JavaGenericSignatureParser {
         this.signature = signature;
         typeParameters = new HashMap<>();
         classParameters.forEach(parameter -> typeParameters.put(parameter.name(), parameter));
+    }
+
+    public static ClassSignature parseClassSignature(final String signature) {
+        if (signature == null || signature.isEmpty()) {
+            return new ClassSignature(List.of(), null, List.of());
+        }
+        final var parser = new JavaGenericSignatureParser(signature, List.of());
+        final var typeParameters = parser.peek('<')
+                ? parser.readTypeParameters() : List.<TypeParameterDescriptor>of();
+        final var superclass = parser.readType();
+        final var interfaces = new ArrayList<TypeDescriptor>();
+        while (parser.offset < signature.length()) interfaces.add(parser.readType());
+        return new ClassSignature(typeParameters, superclass, interfaces);
     }
 
     public static List<TypeParameterDescriptor> parseClassTypeParameters(final String signature) {

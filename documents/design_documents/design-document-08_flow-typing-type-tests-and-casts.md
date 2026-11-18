@@ -113,10 +113,12 @@ Eliminating redundant checks is a future optimization.
 ### Safe cast: `as?`
 
 `value as? T` returns `T?`; it yields null if the source is null or has an incompatible runtime
-type. The compiler emits a runtime `instanceof` check and a null-producing failure path. This is a
-non-throwing alternative suitable for code that wants absence rather than an uncatchable cast
-failure. It intentionally does not distinguish “input was null” from “type did not match”; a future
-result/error type can represent that distinction if needed.
+type. A target already written as `T?` is normalized to the same result, so `value as? T?` has type
+`T?`, not `T` or `T??`, and the runtime test still uses the non-null base `T`. The compiler emits a
+runtime `instanceof` check and a null-producing failure path. This is a non-throwing alternative
+suitable for code that wants absence rather than an uncatchable cast failure. It intentionally does
+not distinguish “input was null” from “type did not match”; a future result/error type can
+represent that distinction if needed.
 
 Neither cast changes the flow facts for the original binding. For example, after `let candidate =
 value as? Person`, `candidate` has type `Person?`, while `value` retains its declared type unless

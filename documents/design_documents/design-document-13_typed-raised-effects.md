@@ -343,7 +343,7 @@ Other follow-up areas:
    raised effects without being pure. [ZEP-0050](../zeps/ZEP-0050.md) settles
    the implemented interop trust boundary: curated facades carry reviewed effect signatures, direct Java access
    requires an explicit `unsafe` expression, and no implicit `IO` effect is introduced.
-   [ZEP-0148](../zeps/ZEP-0148.md) adds contextual Java SAM conversion; a converted lambda or
+   [ZEP-0148](../zeps/ZEP-0148.md) implements contextual Java SAM conversion; a converted lambda or
    top-level function reference must have an empty `raises` row, so a `zeron.runtime.RaisedEffect`
    never crosses into Java. A general purity or IO effect would apply to the whole language and
    remains a separate design; `main` may declare such effects and let them escape to the host

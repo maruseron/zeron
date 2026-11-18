@@ -233,6 +233,7 @@ final class WarningAnalysis {
         return switch (expression) {
             case Expr.Variable variable -> variable.name;
             case Expr.Call call -> call.callee;
+            case Expr.Invoke invoke -> invoke.paren;
             case Expr.MemberCall call -> call.name;
             case Expr.Property property -> property.name;
             case Expr.Assignment assignment -> assignment.name;

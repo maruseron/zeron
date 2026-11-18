@@ -391,6 +391,28 @@ what it does, or when it needs its own generic type parameters. Use a lambda for
 one-off operation that is easiest to understand next to the call that uses it. Either way, a
 function value has a type that describes its inputs and result.
 
+## Calling a function value expression
+
+An argument list can follow any expression whose type is a non-null function value. This applies to
+call results, groupings, conditional expressions, array elements, and function-valued properties:
+
+```zeron
+let add: Int -> Int -> Int = (left) -> (right) -> left + right;
+let total = add(20)(22);           // curried application
+
+let choose = if (useAdd) then add else subtract;
+let value = choose(41)(1);
+
+let callbacks: Array<() -> Int> = [() -> 42];
+let answer = callbacks[0]();
+```
+
+The callee expression is evaluated exactly once, before its arguments. Calling a nullable function
+value requires a null check or `!!`; calling a receiver function through a bare expression is
+rejected because there is no receiver. Generic function values are instantiated from the arguments
+using the same rules as a generic function held in a variable. Effects from the callee expression
+and from the invoked function are both part of the call.
+
 ## How lambdas are represented
 
 At runtime, Zeron represents each distinct function shape with a generated interface that has one
@@ -400,11 +422,11 @@ function object when it is created.
 
 The exception is a lambda used where the expected parameter type is an explicit Java functional
 interface, such as `java.util.function.Function` or `Predicate`. [ZEP-0148](../documents/zeps/ZEP-0148.md)
-(Accepted for `0.8.0`) records the intended direction: the compiler discovers the interface's
-single abstract method from class-file metadata, infers the lambda parameters from that method, and
-uses the Java interface directly instead of a generated Zeron shape. A converted callback must have
-an empty `raises` row, because a Zeron raised effect would otherwise escape into Java. Until that
-lands, compile a small Java adapter or pass the behavior through a Zeron function-typed parameter.
+implements this conversion: the compiler discovers the interface's single abstract method from
+class-file metadata, infers the lambda parameters from that method, and uses the Java interface
+directly instead of a generated Zeron shape. A top-level function reference converts the same way,
+but a stored function value requires an explicit adapter. A converted callback must have an empty
+`raises` row, because a Zeron raised effect would otherwise escape into Java.
 
 Receiver functions have a distinct generated shape. Their receiver is the first runtime argument,
 followed by their explicit parameters.

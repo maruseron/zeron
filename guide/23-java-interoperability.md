@@ -19,11 +19,11 @@ external-class facades may expose static methods and may intentionally bind a fi
 a Java varargs method while hiding its optional tail. Imports and signatures are checked during
 resolution. Passing a prebuilt Java array as a varargs argument is not generally supported.
 
-Interop is not Java reflection or a general Java type system. Generic Java types, inherited-member
-search, Java fields beyond the implemented subset, arbitrary Java arrays, and callback/SAM
-conversions are unsupported today; callback/SAM conversion is planned for `0.8.0` under
-[ZEP-0148](../documents/zeps/ZEP-0148.md) and described below. The standard library also supplies an
-allowlisted `java.io.File` facade:
+Interop is not Java reflection or a general Java type system. Raw generic types, inherited-member
+search, Java fields beyond the implemented subset, arbitrary Java arrays, and implicit conversion
+of already-typed function values are unsupported. Effect-free lambdas and top-level function
+references can implement explicitly written Java functional interfaces, as described below. The
+standard library also supplies an allowlisted `java.io.File` facade:
 
 ```zeron
 import java.io.File;
@@ -84,14 +84,43 @@ cast: a Zeron effect raised inside its operand still escapes and must be handled
 enclosing function. Prefer curated facades for reusable operations, and review each direct Java call
 inside `unsafe` as an unchecked host boundary.
 
-Java functional-interface callback conversion is not implemented yet. [ZEP-0148](../documents/zeps/ZEP-0148.md)
-(Accepted for `0.8.0`) records the intended direction: an effect-free Zeron lambda or top-level
-function reference may implement a Java functional interface when the target parameter type is
-explicitly that interface. The compiler discovers the interface from class-file metadata, including
-inherited abstract methods, so `Function`, `Predicate`, `Comparator`, the primitive specializations,
-and classpath SAMs use one path. Lowering reuses `LambdaMetafactory`. A converted callback may not
-carry a non-empty `raises` row, and the slice makes no callback lifetime, identity, or thread-safety
-promise. Until then, pass behavior into Java through a small facade or adapter class.
+An effect-free Zeron lambda or top-level function reference may implement a Java functional
+interface when the target parameter type is explicitly that interface
+([ZEP-0148](../documents/zeps/ZEP-0148.md)). The compiler discovers the interface from class-file
+metadata, including inherited abstract methods, so `Function`, `Predicate`, `Consumer`, `Supplier`,
+`Comparator`, `Runnable`, `Callable`, the primitive specializations, and classpath SAMs use one path.
+Parameter and return types are inferred from the SAM method after the interface's type arguments are
+substituted:
+
+```zeron
+import java.util.function.Function;
+import java.util.function.Predicate;
+
+// Illustrative classpath facade.
+public external class Mapper = "example.Mapper" {
+    public static transform(values: Array<String>, function: Function<String?, String?>): Array<String>;
+    public static keep(values: Array<String>, predicate: Predicate<String?>): Array<String>;
+}
+
+fn trimmed(values: Array<String>): Array<String> =
+    Mapper.transform(values, (value) -> value!!.trim());
+fn present(values: Array<String>): Array<String> =
+    Mapper.keep(values, (value) -> value != null);
+```
+
+The target is the expected argument type, whether it is a direct Java call, a curated facade, or a
+Zeron function parameter whose type is a Java interface. A Zeron function parameter is preferred when
+both forms apply. Java overload resolution defers lambda and function-reference arguments and
+reports an ambiguity rather than guessing when several SAM targets remain possible. SAM conversion
+itself does not require `unsafe`; a direct Java call still does.
+
+Lowering reuses `LambdaMetafactory` with the Java interface as the call-site return type, so it adds
+no runtime class, generated interface, or API-index field. A converted callback may not carry a
+non-empty `raises` row; handle or map the effect inside the callback. Java reference types keep their
+ordinary nullability mapping, so a callback parameter may receive `null` even when written as a
+non-null Zeron reference. Java may retain the callback and invoke it later or on another thread; this
+slice makes no lifetime, identity, serialization, or thread-safety promise. Only an inline lambda or
+a top-level function reference converts; a stored Zeron function value requires an explicit adapter.
 
 ## Editor support
 

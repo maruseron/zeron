@@ -21,7 +21,7 @@ These are confirmed gaps, but they should extend an existing proposal rather tha
 | --- | --- | --- |
 | Numeric literals, newtypes, widening, heterogeneous operators | 0036, 0043, 0071 | ZEP-0041, 0042, 0044, 0045, 0046, 0070, 0074, 0075 |
 | Remaining Java interop (inherited members, external contracts/interfaces, external enums, JPMS, extensible bindings, conformance) | 0047-0050, 0148 | ZEP-0149 (Draft; unscheduled inventory) |
-| Java SAM conversion | 0047-0050 | ZEP-0148 (Accepted; `0.8.0` candidate) |
+| Java SAM conversion | 0047-0050 | ZEP-0148 (Implemented; `0.8.0` candidate) |
 | Standard-library testing/logging/TOML/XML | 0011, 0065 | ZEP-0063, 0064, 0066, 0067 |
 | Model, callable, and existential follow-ups | 0079, 0081, 0090, 0093 | ZEP-0100–0109 (implemented, accepted, deferred, or Draft) |
 | 64-bit hashing, mutable projections, unchecked casts | 0008, 0085, 0089 | ZEP-0084, 0085, 0089 |

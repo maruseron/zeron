@@ -48,7 +48,6 @@
 - `'??=' can only assign to a mutable local variable.`
 - `Indexed assignment only supports '='.`
 - `Invalid assignment target.`
-- `Only functions and named methods can be called.`
 - `Can't have more than 254 arguments.`
 - `Array literals must initialize at least one element.`
 - `Expect expression.`
@@ -163,6 +162,9 @@
 ## Resolution
 
 - `Callee is not a function.`
+- `Only a function value can be invoked.`
+- `A nullable function value requires a null check before invocation.`
+- `A receiver function value requires receiver-call syntax.`
 - `Unknown function '{name}'.`
 - `Unknown function '{name}' in the current scope.`
 - `This function does not declare type parameters.`

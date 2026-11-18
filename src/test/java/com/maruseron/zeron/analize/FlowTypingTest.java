@@ -403,6 +403,9 @@ public final class FlowTypingTest {
                     return 0;
                 }
                 fn safeUnit(value: Any?): Unit? = value as? Unit;
+                fn safeNullableInt(value: Any?): Int? = value as? Int?;
+                fn safeNullableString(value: Any?): String? = value as? String?;
+                fn safeNullableUnit(value: Any?): Unit? = value as? Unit?;
                 """);
 
         try {
@@ -438,6 +441,12 @@ public final class FlowTypingTest {
                 assertEquals(42, generated.getMethod("checkedAfterTest", Object.class).invoke(null, 42));
                 assertEquals(0, generated.getMethod("checkedAfterTest", Object.class).invoke(null, "text"));
                 assertSame(unitValue, generated.getMethod("safeUnit", Object.class).invoke(null, unitValue));
+                assertEquals(42, generated.getMethod("safeNullableInt", Object.class).invoke(null, 42));
+                assertNull(generated.getMethod("safeNullableInt", Object.class).invoke(null, "text"));
+                assertEquals("text", generated.getMethod("safeNullableString", Object.class).invoke(null, "text"));
+                assertNull(generated.getMethod("safeNullableString", Object.class).invoke(null, 42));
+                assertSame(unitValue, generated.getMethod("safeNullableUnit", Object.class).invoke(null, unitValue));
+                assertNull(generated.getMethod("safeNullableUnit", Object.class).invoke(null, 42));
             }
         } finally {
             Files.deleteIfExists(classFile);
@@ -448,6 +457,7 @@ public final class FlowTypingTest {
     public void checkedNullableCastNeedsProofAndCastsDoNotRefineTheirSource() {
         for (final var source : List.of(
                 "fn invalid(value: Int?): Int = value as Int;",
+                "fn invalid(value: Any?): Int { let converted = value as? Int?; return converted + 1; }",
                 "fn invalid(value: Int?): Int { let converted = value as? Int; return value + 1; }")) {
             assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse(source)));
         }

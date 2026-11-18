@@ -7,6 +7,7 @@ import com.maruseron.zeron.analize.Resolver.SinkProtocol;
 import com.maruseron.zeron.domain.FunctionDescriptor;
 import com.maruseron.zeron.domain.JavaCallTarget;
 import com.maruseron.zeron.domain.JavaFieldTarget;
+import com.maruseron.zeron.domain.JavaSamTarget;
 import com.maruseron.zeron.domain.ResolvedIntrinsicOperation;
 import com.maruseron.zeron.scan.Token;
 import com.maruseron.zeron.scan.TokenType;
@@ -1194,6 +1195,68 @@ public sealed interface Expr {
         }
     }
 
+    final class Invoke implements Expr {
+        public final Expr callee;
+        public final Token paren;
+        public List<Expr> arguments;
+        private TypeDescriptor type;
+        private FunctionDescriptor resolvedDescriptor;
+        private FunctionDescriptor genericFunctionType;
+        private FunctionDescriptor specializedFunctionType;
+        private List<EvidenceArgument> evidenceArguments = List.of();
+        private List<TypeDescriptor> reifiedArguments = List.of();
+
+        public Invoke(final Expr callee, final Token paren, final List<Expr> arguments,
+                      final TypeDescriptor type) {
+            this.callee = callee;
+            this.paren = paren;
+            this.arguments = new ArrayList<>(arguments);
+            this.type = type;
+        }
+
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor type) { this.type = type; }
+        public void appendArgument(final Expr argument) { arguments.add(argument); }
+        public FunctionDescriptor resolvedDescriptor() { return resolvedDescriptor; }
+        public void setResolvedDescriptor(final FunctionDescriptor descriptor) {
+            resolvedDescriptor = descriptor;
+        }
+        public FunctionDescriptor genericFunctionType() { return genericFunctionType; }
+        public void setGenericFunctionType(final FunctionDescriptor functionType) {
+            genericFunctionType = functionType;
+        }
+        public FunctionDescriptor specializedFunctionType() { return specializedFunctionType; }
+        public void setSpecializedFunctionType(final FunctionDescriptor functionType) {
+            specializedFunctionType = functionType;
+        }
+        public List<EvidenceArgument> evidenceArguments() { return evidenceArguments; }
+        public void setEvidenceArguments(final List<EvidenceArgument> arguments) {
+            evidenceArguments = List.copyOf(arguments);
+        }
+        public List<TypeDescriptor> reifiedArguments() { return reifiedArguments; }
+        public void setReifiedArguments(final List<TypeDescriptor> arguments) {
+            reifiedArguments = List.copyOf(arguments);
+        }
+
+        public boolean equals(final Object obj) {
+            if (obj == this) return true;
+            if (!(obj instanceof Invoke that)) return false;
+            return Objects.equals(this.callee, that.callee)
+                    && Objects.equals(this.paren, that.paren)
+                    && Objects.equals(this.arguments, that.arguments)
+                    && Objects.equals(this.type, that.type);
+        }
+
+        public int hashCode() {
+            return Objects.hash(callee, paren, arguments, type);
+        }
+
+        public String toString() {
+            return "Invoke[" + "callee=" + callee + ", " + "paren=" + paren + ", "
+                    + "arguments=" + arguments + ", " + "type=" + type + ']';
+        }
+    }
+
     final class Grouping implements Expr {
         public final Token paren;
         public final Expr expression;
@@ -1617,6 +1680,7 @@ public sealed interface Expr {
         private TypeDescriptor type;
         private TypeDescriptor codeModelType;
         private Token receiverSymbolToken;
+        private JavaSamTarget javaSamTarget;
 
         public Lambda(Token arrow, List<Token> params, List<Stmt> body, TypeDescriptor type) {
             this(arrow, params, params == null ? List.of() : params.stream()
@@ -1652,6 +1716,8 @@ public sealed interface Expr {
         public void setReceiverSymbolToken(final Token token) { receiverSymbolToken = token; }
         public TypeDescriptor codeModelType() { return codeModelType; }
         public void setCodeModelType(final TypeDescriptor value) { codeModelType = value; }
+        public JavaSamTarget javaSamTarget() { return javaSamTarget; }
+        public void setJavaSamTarget(final JavaSamTarget target) { javaSamTarget = target; }
         public List<Token> parameterTokens() {
             return implicitParameter != null
                     && type instanceof com.maruseron.zeron.domain.FunctionDescriptor function
@@ -1894,6 +1960,7 @@ public sealed interface Expr {
         private String implicitPropertyOwner;
         private TypeDescriptor implicitPropertyType;
         private boolean implicitPropertyReadOnly;
+        private JavaSamTarget javaSamTarget;
 
         public Variable(Token name, TypeDescriptor type) {
             this(name, type, List.of());
@@ -1933,6 +2000,8 @@ public sealed interface Expr {
         }
         public FunctionDescriptor storedFunctionType() { return storedFunctionType; }
         public void setStoredFunctionType(final FunctionDescriptor type) { storedFunctionType = type; }
+        public JavaSamTarget javaSamTarget() { return javaSamTarget; }
+        public void setJavaSamTarget(final JavaSamTarget target) { javaSamTarget = target; }
         public Token resolvedSymbolToken() { return resolvedSymbolToken == null ? name : resolvedSymbolToken; }
         public void setResolvedSymbolToken(final Token token) { resolvedSymbolToken = token; }
         public void setResolvedValue(final Token symbolToken, final Stmt.Var declaration) {

@@ -100,6 +100,20 @@ final class ExpressionFlowResolver {
         if (expression instanceof Expr.Call call) {
             return resolveCallWithExpected(context, call, expectedType);
         }
+        if (expression instanceof Expr.Invoke invoke) {
+            final var resolved = context.callResolver.resolve(invoke);
+            RaisedEffectFlow.add(context, new LinkedHashSet<>(
+                    invoke.specializedFunctionType() != null
+                            ? invoke.specializedFunctionType().raisedEffects()
+                            : invoke.genericFunctionType() != null
+                                    ? invoke.genericFunctionType().raisedEffects()
+                                    : invoke.resolvedDescriptor() == null
+                                            ? List.of()
+                                            : invoke.resolvedDescriptor().raisedEffects()),
+                    invoke.paren);
+            invoke.setType(resolved);
+            return resolved;
+        }
         if (expression instanceof Expr.Unary unary && unary.operator.type() == TokenType.MINUS
                 && isNumericExpression(unary.right)) {
             resolveExpectedExpression(context, unary.right, expectedType);
@@ -841,6 +855,20 @@ final class ExpressionFlowResolver {
             case Expr.Call call -> {
                 yield resolveCallWithExpected(context, call, null);
             }
+            case Expr.Invoke invoke -> {
+                final var resolved = context.callResolver.resolve(invoke);
+                RaisedEffectFlow.add(context, new LinkedHashSet<>(
+                        invoke.specializedFunctionType() != null
+                                ? invoke.specializedFunctionType().raisedEffects()
+                                : invoke.genericFunctionType() != null
+                                        ? invoke.genericFunctionType().raisedEffects()
+                                        : invoke.resolvedDescriptor() == null
+                                                ? List.of()
+                                                : invoke.resolvedDescriptor().raisedEffects()),
+                        invoke.paren);
+                invoke.setType(resolved);
+                yield resolved;
+            }
             case Expr.Grouping grouping -> {
                 final var resolvedType = resolve(context, grouping.expression);
                 grouping.setType(resolvedType);
@@ -947,11 +975,12 @@ final class ExpressionFlowResolver {
             }
             case Expr.Cast cast -> {
                 final var sourceType = resolve(context, cast.value);
-                validateRuntimeTestTarget(context, cast.targetType, sourceType, cast.operator, cast.safe);
-                if (!context.typeCompatibility.canTypeTest(sourceType, cast.targetType)) {
+                final var testTarget = safeCastTestTarget(cast);
+                validateRuntimeTestTarget(context, testTarget, sourceType, cast.operator, cast.safe);
+                if (!context.typeCompatibility.canTypeTest(sourceType, testTarget)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
                             cast.operator,
-                            "Cast is impossible between " + sourceType + " and " + cast.targetType + "."));
+                            "Cast is impossible between " + sourceType + " and " + testTarget + "."));
                 }
                 if (!cast.safe && (sourceType.isNullable() || sourceType instanceof NullDescriptor)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
@@ -3574,6 +3603,11 @@ final class ExpressionFlowResolver {
                     containsReifiedTypeParameter(projection.bound());
             default -> false;
         };
+    }
+
+    private static TypeDescriptor safeCastTestTarget(final Expr.Cast cast) {
+        return cast.safe && cast.targetType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : cast.targetType;
     }
 
     private static void validateRuntimeTestTarget(final ResolutionContext context, final TypeDescriptor targetType,

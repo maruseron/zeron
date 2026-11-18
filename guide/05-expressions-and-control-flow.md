@@ -101,8 +101,10 @@ true.
 
 Two related operators convert a value to another type instead of testing it. `as` converts the
 value and fails at runtime if the conversion is impossible, while `as?` produces null in that case
-instead of failing. There is also matches, which tests a value against a pattern. All three become
-much more useful once you’ve met [classes](09-classes-and-constructors.md) and
+instead of failing. A safe cast always produces a nullable result: `value as? T` and
+`value as? T?` both have type `T?`. The result must be null-checked or safely navigated before it
+is used as a non-null value. There is also matches, which tests a value against a pattern. All three
+become much more useful once you’ve met [classes](09-classes-and-constructors.md) and
 [pattern matching](18-pattern-matching.md), so we’ll come back to them there.
 
 ## Working with nullable values

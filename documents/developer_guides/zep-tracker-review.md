@@ -24,12 +24,12 @@ proposed effect-control follow-on.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization of already implemented work | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 21 candidates | ZEP-0050, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148; ZEP-0132 lands first |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 21 candidates | ZEP-0050, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148; ZEP-0132 and ZEP-0134 implemented |
 | `0.9.0` | Effect control and response typing | Proposed; 1 candidate | ZEP-0118 and ZEP-0147 headline the bundle |
 
 `0.7.0` shipped on 2026-11-14. Its 15 rows are `Shipped`; release scope is approved and complete.
-`0.8.0` is the next target: its twenty-one candidates include twelve implemented designs, seven
-accepted designs, and two draft targeted proposals, and cover normalization, nominal representation,
+`0.8.0` is the next target: its twenty-one candidates include fifteen implemented designs, five
+accepted designs, and one draft targeted proposal, and cover normalization, nominal representation,
 standard-library ownership, refinement correctness, a bounded operator-inference improvement,
 function-valued expression invocation, witness provision, and witness bundles with explicit selection
 rather than control flow, plus the annotation-target and variance smoothing items, the Java
@@ -139,7 +139,7 @@ fix and should land before the rest.
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
 | ZEP-0050 | Java Host-Access Trust Boundary | Implemented | Make direct Java access an explicit `unsafe` boundary; keep facades as the trusted, compiler-validated tier; keep `raises` as control flow, not purity |
-| ZEP-0148 | Java SAM Conversion | Accepted | Convert effect-free lambdas and top-level function references to explicitly written Java functional interfaces; discover SAMs from class-file metadata; lower through `LambdaMetafactory` with no new ABI |
+| ZEP-0148 | Java SAM Conversion | Implemented | Convert effect-free lambdas and top-level function references to explicitly written Java functional interfaces; discover SAMs from class-file metadata; lower through `LambdaMetafactory` with no new ABI |
 | ZEP-0098 | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Add annotation sites for product/sum declarations, product components, and sum cases; metadata smoothing with no runtime ABI |
 | ZEP-0113 | Declaration-Site Covariance for Sum and Product Types | Implemented | Extend checked `out` parameters to immutable sums and products, including `Option`, `Result`, and `Pair`; variance smoothing |
 | ZEP-0117 | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Tooling and configuration: `[build]`, `[targets]`, and generated CLI/manifest references; no runtime ABI |
@@ -151,10 +151,10 @@ fix and should land before the rest.
 | ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented | Contract bounds on sum and product parameters; existential case-local parameters such as `Bind<B>`; context-resolved unqualified case names |
 | ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Implemented | Keep products binary; use ZEP-0070 direct-representation newtypes for single-value shapes, including function carriers |
 | ZEP-0130 | Standard-Library-Owned Intrinsic Declarations | Implemented | Intrinsic identity stays compiler-owned; a comprehensive `String` inventory lives in `zeron.lang` modules |
-| ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Accepted | `is`/`matches` through composed conditions and stable paths; implicit `this` field/property reads |
-| ZEP-0132 | Nullable Safe-Cast Correction | Accepted | `as?` always yields a nullable target; immediate correctness fix before the rest of the bundle |
+| ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Implemented | `is`/`matches` through composed conditions and stable paths; implicit `this` field/property reads |
+| ZEP-0132 | Nullable Safe-Cast Correction | Implemented | `as?` always yields a nullable target; immediate correctness fix before the rest of the bundle |
 | ZEP-0133 | Operator-Constraint Inference for Typeless Lambdas | Accepted | Infer a rank-1 numeric or comparison scheme for eligible typeless lambdas; `(a, b) -> a + b` becomes `<T: Numeric<T>> (T, T) -> T` and `(a, b) -> a < b` becomes `<T: Comparable<T>> (T, T) -> Boolean` |
-| ZEP-0134 | Invocation of Function-Valued Expressions | Draft | Allow a postfix argument list after any function-valued expression, so `makeFunction()()` and `add(2)(3)` work without a temporary binding or new runtime representation |
+| ZEP-0134 | Invocation of Function-Valued Expressions | Implemented | Allow a postfix argument list after any function-valued expression, so `makeFunction()()` and `add(2)(3)` work without a temporary binding or new runtime representation |
 | ZEP-0135 | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Direct provision, canonical prerequisite evidence, and owner-directed method dispatch remove shared-ancestor ambiguity |
 | ZEP-0136 | Witness Bundles and Coherent Prerequisite Evidence | Accepted | Group a target's providers into a named or `default` bundle with a recorded prerequisite closure; named bundles are selection-only |
 | ZEP-0137 | Explicit Witness Selection and Witness Contexts | Accepted | `using witness (...)` selects bundles or named witnesses lexically, shadows ambient defaults locally, and has no runtime lookup |
@@ -214,17 +214,17 @@ ZEP-0113 were added as smoothing candidates and accepted and implemented on 2026
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
 | ZEP-0050 | Java Host-Access Trust Boundary | Implemented / `Candidate` | Make direct Java access an explicit `unsafe` boundary; keep facades as the trusted tier; keep `raises` as control flow, not purity |
-| ZEP-0148 | Java SAM Conversion | Accepted / `Candidate` | Convert effect-free lambdas and top-level function references to explicitly written Java functional interfaces; discover SAMs from class-file metadata; lower through `LambdaMetafactory` |
+| ZEP-0148 | Java SAM Conversion | Implemented / `Candidate` | Convert effect-free lambdas and top-level function references to explicitly written Java functional interfaces; discover SAMs from class-file metadata; lower through `LambdaMetafactory` |
 | ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Implemented / `Candidate` | Formalize `main` return values, entry evidence, and effectful entry interpretation |
 | ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented / `Candidate` | Make canonical components readable and add positional data-class patterns |
 | ZEP-0070 | Generic and Nominal Newtype Representations | Implemented / `Candidate` | Promote direct-carrier single-value representations from the backlog |
 | ZEP-0128 | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented / `Candidate` | Remove the sealed-contract workaround for polymorphic cases and bounded sums; product bounds are included by amendment |
 | ZEP-0129 | Unary Products versus Arbitrary-Valued Newtypes | Implemented / `Candidate` | Keep unary products illegal and route single-value shapes through ZEP-0070 |
 | ZEP-0130 | Standard-Library-Owned Intrinsic Declarations | Implemented / `Candidate` | Settle intrinsic-operation ownership and add the practical `String` inventory |
-| ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Accepted / `Candidate` | Complete guard-chain refinement and remove routine `this.` reads |
-| ZEP-0132 | Nullable Safe-Cast Correction | Accepted / `Candidate` | Correct `as?` to return `T?` and land before the broader refinement work |
+| ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Implemented / `Candidate` | Complete guard-chain refinement and remove routine `this.` reads |
+| ZEP-0132 | Nullable Safe-Cast Correction | Implemented / `Candidate` | Correct `as?` to return `T?` and land before the broader refinement work |
 | ZEP-0133 | Operator-Constraint Inference for Typeless Lambdas | Accepted / `Candidate` | Infer numeric or comparable operator bounds for eligible typeless let-bound lambdas without defaulting to a concrete type |
-| ZEP-0134 | Invocation of Function-Valued Expressions | Draft / `Candidate` | Allow invocation of any non-null function-valued expression; candidate target recorded while design review remains open |
+| ZEP-0134 | Invocation of Function-Valued Expressions | Implemented / `Candidate` | Allow invocation of any non-null function-valued expression; candidate target recorded while design review remains open |
 | ZEP-0135 | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented / `Candidate` | Separate provided contracts from prerequisite evidence and resolve operations by declaring contract |
 | ZEP-0136 | Witness Bundles and Coherent Prerequisite Evidence | Accepted / `Candidate` | Group a target's providers into a coherent bundle and record prerequisite evidence at declaration time |
 | ZEP-0137 | Explicit Witness Selection and Witness Contexts | Accepted / `Candidate` | Select bundles or named witnesses lexically with `using witness`; no dynamic scope or runtime lookup |
@@ -246,12 +246,11 @@ and fixes the false-unreachable diagnosis for refutable applied cases with the s
 ZEP-0128 through ZEP-0133 were accepted on 2026-11-14. ZEP-0135 was accepted and implemented on
 2026-11-15 and added as a `Candidate` for `0.8.0`; it separates direct provision from requirement
 evidence, makes method dispatch owner-directed, rejects inherited method implementations strictly,
-and splits the standard-library `Option`, `Result`, `Stream`, and numeric witness chains. ZEP-0134 was added as a
-`Draft` / `Candidate` for `0.8.0`; its invocation semantics are proposed but not yet accepted.
-ZEP-0132 is a
-corrective candidate: `as?`
-must not produce a non-null `T` from a nullable source or strip the `?` from a `T?` target. ZEP-0131
-then makes chained `is`/`matches` conditions carry refinement and allows implicit receiver reads.
+and splits the standard-library `Option`, `Result`, `Stream`, and numeric witness chains. ZEP-0134 was accepted and implemented on 2026-11-18 as a `Candidate` for `0.8.0`; its invocation
+semantics now cover function-valued expression callees. ZEP-0132 is an implemented corrective
+candidate: `as?` does not produce a non-null `T` from a nullable source or strip the `?` from a `T?`
+target. ZEP-0131 then makes chained `is`/`matches` conditions carry refinement and allows implicit
+receiver reads.
 ZEP-0128 adds bounded sum parameters, existential case-local parameters, and context-resolved
 unqualified case names; ZEP-0129 records why single-value shapes use ZEP-0070 direct-representation
 newtypes rather than unary products; ZEP-0130 settles intrinsic operation ownership and adds a
@@ -279,14 +278,14 @@ descriptor-checked tier; direct Java invocation, construction, and field access 
 one-off call bypass mapping and accept host pass-through. `raises` remains a typed control-flow
 channel, not a purity effect, so no implicit `IO` effect and no `try`/`catch` are introduced.
 
-ZEP-0148 was split from that umbrella and accepted on 2026-11-17 as a `Candidate` for `0.8.0`. An
-effect-free Zeron lambda or top-level function reference may implement a Java functional interface
-when the expected parameter type is explicitly that Java interface. Functional interfaces are
-discovered from class-file metadata, including inherited abstract methods, so the curated JDK set and
-classpath SAMs share one path. Lowering reuses `LambdaMetafactory` and adds no runtime or API-index
-ABI. A converted callback may not carry a `raises` row, and the slice makes no callback lifetime or
-thread-safety promise. A stored Zeron function value, a generic Zeron lambda, a Java method
-reference, and a multi-abstract-method interface remain unsupported.
+ZEP-0148 was split from that umbrella, accepted on 2026-11-17, and implemented on 2026-11-18 as a
+`Candidate` for `0.8.0`. An effect-free Zeron lambda or top-level function reference may implement a
+Java functional interface when the expected parameter type is explicitly that Java interface.
+Functional interfaces are discovered from class-file metadata, including inherited abstract methods,
+so the curated JDK set and classpath SAMs share one path. Lowering reuses `LambdaMetafactory` and
+adds no runtime or API-index ABI. A converted callback may not carry a `raises` row, and the slice
+makes no callback lifetime or thread-safety promise. A stored Zeron function value, a generic Zeron
+lambda, a Java method reference, and a multi-abstract-method interface remain unsupported.
 
 ZEP-0149 was split from the same umbrella as a `Draft` / `Unscheduled` inventory. It holds general
 inherited/interface member lookup, external contracts for Java interfaces, external enums, JPMS
@@ -409,23 +408,23 @@ and ZEP-0121 is `Deferred`. None of those is a defensible `0.9.0` commitment.
 - `0.7.0` was published on 2026-11-14; its 15 rows are `Shipped` / `0.7.0`, and its acceptance
   queue is closed.
 - ZEP-0111 shipped in `0.7.0`; it does not fall back to `0.9.0`.
-- The `0.8.0` candidate set now has twenty-one rows: twelve implemented designs, seven accepted
-  designs, plus the draft ZEP-0134 and ZEP-0146. Decide whether to freeze scope there or admit
-  further normalization items.
+- The `0.8.0` candidate set now has twenty-one rows: fifteen implemented designs, five accepted
+  designs, plus the draft ZEP-0146. Decide whether to freeze scope there or admit further
+  normalization items.
 - ZEP-0050 was accepted on 2026-11-17 and implemented on 2026-11-18 as the host-access trust
   boundary and `0.8.0` candidate. Direct Java access requires `unsafe`, facades stay the trusted
   tier, and `raises` stays control flow rather than purity.
-- ZEP-0148 was split from ZEP-0050, accepted on 2026-11-17, and added as a `0.8.0` candidate. It owns
-  Java SAM conversion for effect-free lambdas and function references. A converted callback may not
-  carry a Zeron effect row. ZEP-0149 was split as a `Draft` / `Unscheduled` inventory for general
+- ZEP-0148 was split from ZEP-0050, accepted on 2026-11-17, implemented on 2026-11-18, and remains a
+  `0.8.0` candidate. It owns Java SAM conversion for effect-free lambdas and function references. A
+  converted callback may not carry a Zeron effect row. ZEP-0149 was split as a `Draft` /
+  `Unscheduled` inventory for general
   inherited/interface member lookup, external contracts for Java interfaces, external enums, JPMS,
   and external-binding extensibility; none of it is implied by the `0.8.0` candidacy.
 - Sequence ZEP-0132 first as the immediate safe-cast correction, then ZEP-0131, then the
   representation track (ZEP-0070, ZEP-0129, ZEP-0128), with ZEP-0098, ZEP-0113, ZEP-0130,
-  ZEP-0133, ZEP-0134, ZEP-0146, ZEP-0050, and ZEP-0148 independent. Land ZEP-0050's `unsafe` gate
-  before ZEP-0148's SAM conversion. Implement ZEP-0136 before ZEP-0137 for the witness-bundle track.
-  ZEP-0098 and ZEP-0113 are implemented; confirm that ordering before implementation begins and
-  accept ZEP-0134 before implementing it.
+  ZEP-0133, ZEP-0134, ZEP-0146, ZEP-0050, and ZEP-0148 independent. ZEP-0050's `unsafe` gate and
+  ZEP-0148's SAM conversion are implemented; ZEP-0132, ZEP-0131, and ZEP-0134 are implemented.
+  Implement ZEP-0136 before ZEP-0137 for the witness-bundle track.
 - Settle the `String.split` empty-separator and return-type questions, the `charAt`/`at` shape, and
   the regex dialect questions in ZEP-0130 before treating the inventory as complete.
 - ZEP-0126 implementation details are settled: `Result` failures print `error.toString()` to
@@ -581,10 +580,31 @@ These decisions shape the current plan. Details live in each ZEP.
   simple parsing, and joining. Accepted 2026-11-14 and `Candidate` for `0.8.0`.
 - **ZEP-0131:** `is` and `matches` refine through `and`/`or`/`not`, stable read-only member paths
   participate, and unqualified field/property reads use the implicit `this` receiver. Accepted
-  2026-11-14 and `Candidate` for `0.8.0`.
+  2026-11-14, implemented 2026-11-18, and `Candidate` for `0.8.0`. Implementation decisions:
+  condition facts use the existing short-circuit transfer for `if`/`else if`/`while`/
+  value-producing `if`; `matches` payloads are successful-path scoped and obey OR binding-set
+  compatibility; stable paths are rooted at locals, parameters, or `this` with only final fields,
+  storage-backed read-only properties, or sum payloads as segments; writes invalidate facts; custom
+  getters, mutable members, array slots, and call results remain unrefined. Implicit receiver lookup
+  is a read-only fallback after lexical and top-level lookup, applies to class/accessor/initializer/
+  extension/contract-default bodies, and never retargets writes. Ambiguous reads are diagnosed;
+  nullability and safe-navigation rules are unchanged. The language server completes and hovers
+  implicit members and chained payload bindings, while the formatter preserves explicit `this.`
+  spelling. No runtime or API-index ABI changed.
 - **ZEP-0132:** `as?` always returns a nullable target, including for `T?`; null or mismatch yields
-  null; the result requires a null check or safe navigation. Accepted 2026-11-14 and `Candidate`
-  for `0.8.0`, with first implementation priority.
+  null; the result requires a null check or safe navigation. Accepted 2026-11-14, implemented
+  2026-11-18, and `Candidate` for `0.8.0`, with first implementation priority. Implementation
+  normalizes a nullable target before runtime-test validation and emission, so the test uses the
+  non-null base and the result keeps exactly one nullable layer.
+- **ZEP-0134:** a postfix argument list may follow any expression whose type is a non-null ordinary
+  function value. Accepted and implemented on 2026-11-18 and `Candidate` for `0.8.0`. The
+  implementation adds `Expr.Invoke`; named, constructor, generic, and member-property calls keep
+  their existing nodes. The callee resolves and emits once, arguments follow left to right, generic
+  values reuse the stored-function evidence/reified-slot path, and the invocation lowers through
+  the generated shape interface's `invokeinterface`. Nullable values require a null check,
+  receiver-function values require receiver-call syntax, and explicit type arguments after an
+  arbitrary expression callee remain unsupported. No runtime, API-index, or function-shape ABI
+  changed.
 - **ZEP-0133:** an uncontextualized typeless lambda written directly as an immutable local `let`
   initializer may infer a rank-1 scheme from numeric or comparison operator use. `(a, b) -> a + b`
   infers `<T: Numeric<T>> (T, T) -> T`; `/` infers `Fractional<T>`; `(a, b) -> a < b` infers

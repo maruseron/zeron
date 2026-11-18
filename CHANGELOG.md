@@ -12,6 +12,26 @@
   The scanner, parser, formatter, ANSI highlighter, TextMate grammar, language-server keyword
   completion, guides, and compiler diagnostics were updated, and direct JDK calls in the standard
   library migrated to `unsafe`.
+- Implemented ZEP-0148 Java SAM conversion. An effect-free Zeron lambda or top-level function
+  reference now implements an explicitly written Java functional interface at direct Java calls,
+  curated facades, and Zeron function parameters, including compiled-library signatures. The
+  resolver discovers the single abstract method from class-file metadata, including inherited and
+  classpath interfaces, substitutes the interface's type arguments, and defers callback arguments
+  during Java overload selection. Lowering reuses `LambdaMetafactory` with the Java interface as
+  the call-site type, so no runtime class, generated interface, or API-index field is added.
+  Converted callbacks must have an empty `raises` row, and Java nullability, callback lifetime, and
+  thread-safety limitations are documented in the Java interoperability guide.
+- Implemented ZEP-0132 nullable safe-cast correction. `as?` now always produces a nullable result,
+  and a nullable target such as `value as? T?` is normalized to `T?` before runtime-test validation
+  and emission. The runtime test uses the non-null base `T`, a null or mismatched source yields
+  null, and member access still requires a null check or safe navigation.
+- Implemented ZEP-0134 invocation of function-valued expressions. An argument list may follow any
+  non-null function-valued expression, so curried calls, call results, groupings, conditionals,
+  indexed values, function-valued properties, and trailing-lambda results can be invoked directly.
+  The callee is evaluated once before its arguments, generic and rank-2 values reuse the existing
+  evidence and reified-slot lowering, and effects from the callee expression and invocation are
+  both tracked. Named, member, constructor, and generic calls keep their existing paths, and no
+  runtime or API-index ABI changed.
 - Implemented ZEP-0131 chained flow refinement and implicit receiver access. `is` and `matches`
   facts transfer through composed `and`, `or`, and `not` conditions; `matches` payload bindings are
   available in later operands and the successful branch, with OR alternatives checked for

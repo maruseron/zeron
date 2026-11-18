@@ -32,6 +32,7 @@ public final class JavaClassPath {
                              boolean hasGenericSignature,
                              String genericSignature,
                              boolean isConstructor,
+                             boolean isAbstract,
                              List<String> exceptionTypes) {
         public JavaMethod {
             exceptionTypes = List.copyOf(exceptionTypes);
@@ -50,11 +51,13 @@ public final class JavaClassPath {
                             String genericSignature,
                             List<TypeParameterDescriptor> typeParameters,
                             List<JavaMethod> methods,
-                            List<JavaField> fields) {
+                            List<JavaField> fields,
+                            List<TypeDescriptor> interfaceTypes) {
         public JavaClass {
             typeParameters = List.copyOf(typeParameters);
             methods = List.copyOf(methods);
             fields = List.copyOf(fields);
+            interfaceTypes = List.copyOf(interfaceTypes);
         }
     }
 
@@ -139,6 +142,14 @@ public final class JavaClassPath {
         return false;
     }
 
+    private static JavaGenericSignatureParser.ClassSignature parseClassSignature(final String signature) {
+        try {
+            return JavaGenericSignatureParser.parseClassSignature(signature);
+        } catch (final IllegalArgumentException _) {
+            return new JavaGenericSignatureParser.ClassSignature(List.of(), null, List.of());
+        }
+    }
+
     private static JavaClass toJavaClass(final String binaryName, final Path root, final String classEntry,
                                          final ClassModel model) {
         final var expectedInternalName = classEntry.substring(0, classEntry.length() - ".class".length());
@@ -153,6 +164,13 @@ public final class JavaClassPath {
                 || flags.has(AccessFlag.MODULE)) {
             return null;
         }
+        final var genericSignature = model.findAttribute(Attributes.signature())
+                .map(attribute -> attribute.signature().stringValue()).orElse(null);
+        final var classSignature = parseClassSignature(genericSignature);
+        final var typeParameters = classSignature.typeParameters().isEmpty()
+                && genericSignature != null && genericSignature.startsWith("<")
+                        ? JavaGenericSignatureParser.parseClassTypeParameters(genericSignature)
+                        : classSignature.typeParameters();
         final var methods = model.methods().stream()
                 .filter(method -> method.flags().has(AccessFlag.PUBLIC))
                 .filter(method -> !method.flags().has(AccessFlag.SYNTHETIC)
@@ -165,6 +183,7 @@ public final class JavaClassPath {
                         method.findAttribute(Attributes.signature())
                                 .map(attribute -> attribute.signature().stringValue()).orElse(null),
                         method.methodName().equalsString("<init>"),
+                        method.flags().has(AccessFlag.ABSTRACT),
                         method.findAttribute(Attributes.exceptions())
                                 .map(attribute -> attribute.exceptions().stream()
                                         .map(entry -> entry.asInternalName().replace('/', '.'))
@@ -180,14 +199,17 @@ public final class JavaClassPath {
                                 .map(attribute -> attribute.signature().stringValue()).orElse(null),
                         field.findAttribute(Attributes.constantValue()).isPresent()))
                 .toList();
-        final var genericSignature = model.findAttribute(Attributes.signature())
-                .map(attribute -> attribute.signature().stringValue()).orElse(null);
-        final var typeParameters = JavaGenericSignatureParser.parseClassTypeParameters(genericSignature);
+        final var interfaceTypes = classSignature.interfaces().isEmpty()
+                ? model.interfaces().stream()
+                        .map(entry -> (TypeDescriptor) TypeDescriptor.ofName(
+                                entry.asInternalName().replace('/', '.')))
+                        .toList()
+                : classSignature.interfaces();
         return new JavaClass(binaryName,
                 model.superclass().map(entry -> entry.asInternalName().replace('/', '.')).orElse(null),
                 flags.has(AccessFlag.INTERFACE),
                 flags.has(AccessFlag.ABSTRACT), !typeParameters.isEmpty(), genericSignature, typeParameters,
-                methods, fields);
+                methods, fields, interfaceTypes);
     }
 
     private static Map<String, String> exportedJdkPackages() {

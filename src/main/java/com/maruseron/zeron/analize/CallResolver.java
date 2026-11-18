@@ -26,6 +26,51 @@ final class CallResolver {
         return resolve(call, null, expectedType);
     }
 
+    TypeDescriptor resolve(final Expr.Invoke invoke) {
+        final var calleeType = ExpressionFlowResolver.resolveExpression(context, invoke.callee);
+        final var unwrapped = calleeType instanceof ReferenceDescriptor reference
+                ? reference.baseType() : calleeType;
+        if (unwrapped instanceof NullableDescriptor) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
+                    invoke.paren, "A nullable function value requires a null check before invocation."));
+        }
+        if (!(unwrapped instanceof FunctionDescriptor function)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    invoke.paren, "Only a function value can be invoked."));
+            return TypeDescriptor.ofInfer();
+        }
+        if (function.isReceiverFunction()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    invoke.paren, "A receiver function value requires receiver-call syntax."));
+        }
+        if (function.isGeneric()) {
+            final var synthetic = new Expr.Call(invoke.paren, invoke.paren, invoke.arguments,
+                    List.of(), TypeDescriptor.ofInfer());
+            final var result = resolveGenericCall(synthetic, function);
+            invoke.setGenericFunctionType(synthetic.genericFunctionType());
+            invoke.setSpecializedFunctionType(synthetic.specializedFunctionType());
+            invoke.setEvidenceArguments(synthetic.evidenceArguments());
+            invoke.setReifiedArguments(synthetic.reifiedArguments());
+            invoke.setResolvedDescriptor(function);
+            invoke.setType(synthetic.getType());
+            return result;
+        }
+        if (invoke.arguments.size() != function.arity()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    invoke.paren, "Expected " + function.arity() + " arguments, found "
+                            + invoke.arguments.size() + "."));
+        }
+        for (int index = 0; index < invoke.arguments.size(); index++) {
+            final var expected = function.parameters().get(index);
+            Resolver.ensureAssignable(context, expected,
+                    MemberInteropResolver.resolveArgument(context, invoke.arguments.get(index), expected),
+                    invoke.paren);
+        }
+        invoke.setResolvedDescriptor(function);
+        invoke.setType(function.returnType());
+        return function.returnType();
+    }
+
     TypeDescriptor resolveNamespaceCall(final Expr.MemberCall memberCall, final String functionName) {
         final var call = new Expr.Call(memberCall.name, memberCall.paren, memberCall.arguments,
                 memberCall.explicitTypeArguments, TypeDescriptor.ofInfer());
@@ -415,6 +460,7 @@ final class CallResolver {
 
     private Stmt.Var localLambdaBinding(final Expr.Call call) {
         if (call.resolvedFunctionName() != null
+                || call.resolvedSymbolToken() == null
                 || !context.symbols.containsSymbol(call.resolvedSymbolToken())) return null;
         final var declaration = context.symbols.getSymbol(call.resolvedSymbolToken()).declaration();
         return declaration instanceof Stmt.Var variable

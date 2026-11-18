@@ -64,6 +64,7 @@ final class ResolutionContext {
     final EffectHierarchy effectHierarchy = new EffectHierarchy(classes);
     final IntrinsicRegistry intrinsics = IntrinsicRegistry.standard();
     final JavaClassPath javaClassPath;
+    final Map<String, Optional<JavaSamResolver.SamShape>> javaSamShapes = new HashMap<>();
     final ImportResolver importResolver;
     final TopLevelValuePlanner topLevelValuePlanner;
     final DeclarationRegistry declarationRegistrar;

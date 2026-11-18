@@ -2252,12 +2252,17 @@ final class MemberInteropResolver {
                                            final Boolean mutableReceiver,
                                            final TypeDescriptor receiverType,
                                            final TypeDescriptor expectedType) {
-        if (call.arguments.stream().anyMatch(Expr.Lambda.class::isInstance)) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
-                    call.name,
-                    "Java functional-interface callback conversion is not supported by this interop slice."));
+        final var callbackArguments = new boolean[call.arguments.size()];
+        final var actualTypes = new ArrayList<TypeDescriptor>(call.arguments.size());
+        for (int index = 0; index < call.arguments.size(); index++) {
+            final var argument = call.arguments.get(index);
+            if (javaCallbackArity(context, argument) >= 0) {
+                callbackArguments[index] = true;
+                actualTypes.add(null);
+            } else {
+                actualTypes.add(ExpressionFlowResolver.resolveExpression(context, argument));
+            }
         }
-        final var actualTypes = call.arguments.stream().map(expression -> ExpressionFlowResolver.resolveExpression(context, expression)).toList();
         final var namedCandidates = javaClass.methods().stream()
                 .filter(method -> method.name().equals(methodName))
                 .filter(method -> method.isConstructor() == constructor)
@@ -2389,6 +2394,16 @@ final class MemberInteropResolver {
                     applicable = false;
                     break;
                 }
+                if (callbackArguments[i]) {
+                    final var target = JavaSamResolver.probe(context, parameterType, call.name);
+                    if (target == null || target.functionType().arity()
+                            != javaCallbackArity(context, call.arguments.get(i))) {
+                        applicable = false;
+                        break;
+                    }
+                    parameterTypes.add(parameterType);
+                    continue;
+                }
                 final var acceptsObjectArray = isJavaObjectArray(javaParameterType)
                         && isZeronArrayType(actualTypes.get(i));
                 if (!acceptsObjectArray
@@ -2477,12 +2492,44 @@ final class MemberInteropResolver {
         final var bestCandidates = applicableCandidates.stream()
             .filter(candidate -> candidate.cost() == bestCost).toList();
         if (bestCandidates.size() != 1) {
+            var hasCallback = false;
+            for (final var callbackArgument : callbackArguments) hasCallback |= callbackArgument;
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_OR_INVALID_JAVA_INTEROP,
-                    call.name,
-                    "Java overload resolution is ambiguous; provide arguments with a more specific type."));
+                    call.name, hasCallback
+                            ? "Java overload resolution is ambiguous for a functional-interface argument; "
+                                    + "use a more specific method or an explicit adapter."
+                            : "Java overload resolution is ambiguous; provide arguments with a more specific type."));
         }
         final var selected = bestCandidates.getFirst();
         for (int i = 0; i < selected.parameterTypes().size(); i++) {
+            if (callbackArguments[i]) {
+                final var target = JavaSamResolver.resolve(context, selected.parameterTypes().get(i), call.name);
+                final var argument = call.arguments.get(i);
+                final var lambda = inlineLambda(argument);
+                if (lambda != null) {
+                    lambda.setJavaSamTarget(target);
+                } else if (argument instanceof Expr.Variable variable) {
+                    variable.setJavaSamTarget(target);
+                    final var functionName = variable.resolvedFunctionName() != null
+                            ? variable.resolvedFunctionName()
+                            : resolveFunctionName(context, variable.name.lexeme(), variable.name);
+                    final var declaration = functionName == null
+                            ? null : context.functions.get(functionName);
+                    if (declaration != null
+                            && !declaration.typeDescriptor().raisedEffects().isEmpty()) {
+                        requireEffectFreeConversion(declaration.typeDescriptor(), variable.name);
+                    }
+                }
+                final var resolved = resolveArgumentValue(context, argument, target.functionType());
+                if (!(resolved instanceof FunctionDescriptor resolvedFunction)
+                        || !resolvedFunction.raisedEffects().isEmpty()) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE, call.name,
+                            "A converted Java callback must have an empty raises row; handle or map "
+                                    + "its effects before the conversion."));
+                }
+                continue;
+            }
             final var javaParameterType = selected.method().isVarArgs()
                     && i >= selected.method().descriptor().parameterCount() - 1
                     ? selected.method().descriptor().parameterType(
@@ -3193,6 +3240,7 @@ final class MemberInteropResolver {
             case Expr.Variable variable -> variable.name;
             case Expr.Property property -> property.name;
             case Expr.MemberCall call -> call.name;
+            case Expr.Invoke invoke -> invoke.paren;
             case Expr.Grouping grouping -> argumentToken(grouping.expression);
             default -> SYNTHETIC_IDENTIFIER;
         };
@@ -3204,10 +3252,8 @@ final class MemberInteropResolver {
         return type instanceof TypeParameterDescriptor parameter
                 && receiver instanceof Expr.Variable variable
                 && variable.name.lexeme().equals(parameter.name());
-    }
-
-    private static TypeDescriptor resolveArgumentValue(final ResolutionContext context, final Expr argument,
-                                           final TypeDescriptor expectedType) {
+    }    private static TypeDescriptor resolveArgumentValue(final ResolutionContext context, final Expr argument,
+                                                      final TypeDescriptor expectedType) {
         if (argument instanceof Expr.PropertyReference reference) {
             if (codeModelArgument(expectedType) != null) {
                 return PropertyReferenceResolver.resolveCodeModel(context, reference, expectedType);
@@ -3287,6 +3333,14 @@ final class MemberInteropResolver {
                 && (variable.resolvedFunctionName() != null
                 || !context.symbols.containsSymbol(variable.name)
                 && resolveFunctionName(context, variable.name.lexeme(), variable.name) != null)) {
+            final var javaSam = JavaSamResolver.resolve(context, expectedType, variable.name);
+            if (javaSam != null) {
+                variable.setJavaSamTarget(javaSam);
+                final var converted = LambdaResolver.resolveFunctionReference(
+                        context, variable, javaSam.functionType());
+                requireEffectFreeConversion(converted, variable.name);
+                return javaSam.interfaceType();
+            }
             final var resolved = LambdaResolver.resolveFunctionReference(context, variable, expectedType);
             final var functionName = variable.resolvedFunctionName();
             if (functionName != null) {
@@ -3299,8 +3353,40 @@ final class MemberInteropResolver {
         if (argument instanceof Expr.Lambda lambda) {
             final var functionType = LambdaResolver.functionType(context, expectedType);
             if (functionType != null) return resolveLambda(context, lambda, functionType);
+            final var javaSam = JavaSamResolver.resolve(context, expectedType,
+                    lambda.implicitParameter() == null ? lambda.arrow : lambda.implicitParameter());
+            if (javaSam != null) {
+                lambda.setJavaSamTarget(javaSam);
+                final var converted = resolveLambda(context, lambda, javaSam.functionType());
+                requireEffectFreeConversion(converted, lambda.arrow);
+                return javaSam.interfaceType();
+            }
         }
         return ExpressionFlowResolver.resolveExpression(context, argument);
+    }
+
+    private static void requireEffectFreeConversion(final TypeDescriptor converted, final Token where) {
+        if (converted instanceof FunctionDescriptor function
+                && function.raisedEffects().isEmpty()) return;
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.UNSUPPORTED_JAVA_INTEROP_FEATURE,
+                where, "A converted Java callback must have an empty raises row; handle or map "
+                        + "its effects before the conversion."));
+    }
+
+    private static int javaCallbackArity(final ResolutionContext context, final Expr expression) {
+        final var lambda = inlineLambda(expression);
+        if (lambda != null) {
+            return lambda.implicitParameter() != null ? 1 : lambda.params.size();
+        }
+        if (!(expression instanceof Expr.Variable variable)) return -1;
+        final var functionName = variable.resolvedFunctionName() != null
+                ? variable.resolvedFunctionName()
+                : !context.symbols.containsSymbol(variable.name)
+                        ? resolveFunctionName(context, variable.name.lexeme(), variable.name)
+                        : null;
+        if (functionName == null) return -1;
+        final var declaration = context.functions.get(functionName);
+        return declaration == null ? -1 : declaration.typeDescriptor().arity();
     }
 
     private static Expr.Lambda inlineLambda(final Expr expression) {

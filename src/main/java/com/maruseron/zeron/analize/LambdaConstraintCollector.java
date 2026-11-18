@@ -189,6 +189,10 @@ final class LambdaConstraintCollector {
                 inferCalleeBounds(call);
                 call.arguments.forEach(this::scan);
             }
+            case Expr.Invoke invoke -> {
+                scan(invoke.callee);
+                invoke.arguments.forEach(this::scan);
+            }
             case Expr.Binary binary -> {
                 scan(binary.left);
                 scan(binary.right);

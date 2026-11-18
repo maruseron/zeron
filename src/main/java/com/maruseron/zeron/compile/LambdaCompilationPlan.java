@@ -14,7 +14,7 @@ final class LambdaCompilationPlan {
     record FunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
     record NullableFunctionAdapter(FunctionDescriptor source, FunctionDescriptor target, String name) {}
     record FunctionReference(String functionName, Stmt.FunctionDeclaration declaration, FunctionDescriptor sourceType,
-                             FunctionDescriptor targetType, String helperName,
+                             FunctionDescriptor targetType, String helperName, JavaSamTarget javaSamTarget,
                              List<Expr.EvidenceArgument> evidenceArguments,
                              List<TypeDescriptor> reifiedArguments) {}
 
@@ -22,7 +22,7 @@ final class LambdaCompilationPlan {
     private record FunctionAdapterDefinition(FunctionDescriptor source, FunctionDescriptor target,
                                              String name) {}
     private record FunctionReferenceKey(String functionName, Stmt.FunctionDeclaration declaration,
-                                        FunctionDescriptor targetType,
+                                        FunctionDescriptor targetType, JavaSamTarget javaSamTarget,
                                         List<TypeDescriptor> reifiedArguments) {}
     private record LambdaMemberKey(String owner, String member) {}
 
@@ -427,6 +427,10 @@ final class LambdaCompilationPlan {
                 }
                 for (final var argument : call.arguments) collectLambdaShapes(argument);
             }
+            case Expr.Invoke invoke -> {
+                collectLambdaShapes(invoke.callee);
+                for (final var argument : invoke.arguments) collectLambdaShapes(argument);
+            }
             case Expr.Grouping grouping -> collectLambdaShapes(grouping.expression);
             case Expr.If iff -> {
                 collectLambdaShapes(iff.condition);
@@ -531,12 +535,13 @@ final class LambdaCompilationPlan {
         final var sourceType = (FunctionDescriptor) TypeSubstitution.erase(expression.sourceFunctionType());
         final var targetType = (FunctionDescriptor) TypeSubstitution.erase(expression.specializedFunctionType());
         final var key = new FunctionReferenceKey(expression.resolvedFunctionName(),
-                expression.resolvedFunctionDeclaration(), targetType, expression.reifiedArguments());
+                expression.resolvedFunctionDeclaration(), targetType, expression.javaSamTarget(),
+                expression.reifiedArguments());
         final var reference = functionReferences.computeIfAbsent(key,
                 _ -> new FunctionReference(expression.resolvedFunctionName(),
                         expression.resolvedFunctionDeclaration(), sourceType, targetType,
-                        "$functionRef$" + functionReferences.size(), expression.evidenceArguments(),
-                        expression.reifiedArguments()));
+                        "$functionRef$" + functionReferences.size(), expression.javaSamTarget(),
+                        expression.evidenceArguments(), expression.reifiedArguments()));
         referencesByExpression.put(expression, reference);
         for (int i = 0; i < targetType.arity(); i++) {
             collectFunctionAdapters(targetType.parameters().get(i), sourceType.parameters().get(i));
@@ -722,6 +727,13 @@ final class LambdaCompilationPlan {
                 }
                 collectCapturedVariables(binary.left, localNames, captured, seen);
                 collectCapturedVariables(binary.right, localNames, captured, seen);
+            }
+            case Expr.Invoke invoke -> {
+                collectEvidenceCaptures(invoke.evidenceArguments(), localNames, captured, seen);
+                collectCapturedVariables(invoke.callee, localNames, captured, seen);
+                for (final var argument : invoke.arguments) {
+                    collectCapturedVariables(argument, localNames, captured, seen);
+                }
             }
             case Expr.Call call -> {
                 collectEvidenceCaptures(call.evidenceArguments(), localNames, captured, seen);

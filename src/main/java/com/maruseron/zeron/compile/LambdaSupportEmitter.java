@@ -16,8 +16,14 @@ final class LambdaSupportEmitter {
                                               final CodeBuilder composer,
                                               final Expr.Variable reference) {
         final var functionType = reference.specializedFunctionType();
-        final var generatedInterface = TypeDescriptor.toJavaClassDesc(functionType);
-        final var samMethodType = toJavaMethodDescriptor(functionType);
+        final var javaSam = reference.javaSamTarget();
+        final var generatedInterface = javaSam == null
+                ? TypeDescriptor.toJavaClassDesc(functionType)
+                : TypeDescriptor.toJavaClassDesc(javaSam.interfaceType());
+        final var samMethodType = javaSam == null
+                ? toJavaMethodDescriptor(functionType) : javaSam.erasedMethodType();
+        final var instantiatedMethodType = javaSam == null
+                ? samMethodType : javaSam.instantiatedMethodType();
         final var helper = context.lambdaPlan.functionReference(reference);
         if (helper == null) {
             throw new IllegalStateException("Missing specialization bridge for "
@@ -54,12 +60,12 @@ final class LambdaSupportEmitter {
         System.arraycopy(capturedReified, 0, captured, capturedEvidence.length, capturedReified.length);
         composer.invokedynamic(DynamicCallSiteDesc.of(
             metafactory,
-            "invoke",
+            javaSam == null ? "invoke" : javaSam.methodName(),
             MethodTypeDesc.of(generatedInterface, captured),
             samMethodType,
             implementation,
-            samMethodType));
-        context.lastEmittedType = functionType;
+            instantiatedMethodType));
+        context.lastEmittedType = javaSam == null ? functionType : javaSam.interfaceType();
     }
 
     static void emitFunctionReferenceImplementation(final CompilationContext context,
@@ -102,9 +108,19 @@ final class LambdaSupportEmitter {
             withHiddenParameters(toJavaMethodDescriptor(sourceType),
                     reference.evidenceArguments().size() + targetType.hiddenEvidenceCount(),
                     reference.reifiedArguments().size() + targetType.hiddenDescriptorCount()));
-        emitConversion(context, composer, sourceType.returnType(), targetType.returnType());
-        composer.return_(TypeKind.fromDescriptor(
-            TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));
+        final var voidReturn = reference.javaSamTarget() != null
+                && reference.javaSamTarget().erasedMethodType().returnType()
+                        .equals(ConstantDescs.CD_void);
+        if (voidReturn) {
+            if (!(sourceType.returnType() instanceof UnitDescriptor)) {
+                emitPop(context, composer, sourceType.returnType());
+            }
+            composer.return_();
+        } else {
+            emitConversion(context, composer, sourceType.returnType(), targetType.returnType());
+            composer.return_(TypeKind.fromDescriptor(
+                TypeDescriptor.toJavaClassDesc(targetType.returnType()).descriptorString()));
+        }
         }
 
     static MethodTypeDesc functionReferenceMethodType(
@@ -123,7 +139,10 @@ final class LambdaSupportEmitter {
         for (int index = 0; index < reference.targetType().hiddenDescriptorCount(); index++) {
             parameters.add(RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE);
         }
-        return toJavaMethodDescriptor(reference.targetType(), parameters);
+        return toJavaMethodDescriptor(reference.targetType(), parameters,
+                reference.javaSamTarget() != null
+                        && reference.javaSamTarget().erasedMethodType().returnType()
+                                .equals(ConstantDescs.CD_void));
     }
 
 
@@ -133,6 +152,9 @@ final class LambdaSupportEmitter {
         }
 
         final var captures = context.lambdaPlan.captures(lambda);
+        final var javaSam = lambda.javaSamTarget();
+        final var voidReturn = javaSam != null
+                && javaSam.erasedMethodType().returnType().equals(ConstantDescs.CD_void);
         final var evidenceFields = BytecodeEmitter.evidenceFields(
                 context, functionType.typeParameters(), "lambda",
                 context.lambdaPlan.lambdaMethodName(lambda));
@@ -191,19 +213,32 @@ final class LambdaSupportEmitter {
 
             if (lambda.body.size() == 1 && lambda.body.getFirst() instanceof Stmt.Return ret) {
                 if (ret.value() == null) {
-                    emitUnitValue(context, composer);
-                    context.lastEmittedType = TypeDescriptor.ofUnit();
+                    if (!voidReturn) {
+                        emitUnitValue(context, composer);
+                        context.lastEmittedType = TypeDescriptor.ofUnit();
+                    }
                 } else {
                     emitExpr(context, composer, ret.value());
                 }
-                emitConversion(context, composer, context.lastEmittedType, functionType.returnType());
-                composer.return_(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(functionType.returnType()).descriptorString()));
+                if (voidReturn) {
+                    if (ret.value() != null) emitPop(context, composer, context.lastEmittedType);
+                    composer.return_();
+                } else {
+                    emitConversion(context, composer, context.lastEmittedType, functionType.returnType());
+                    composer.return_(TypeKind.fromDescriptor(
+                            TypeDescriptor.toJavaClassDesc(functionType.returnType()).descriptorString()));
+                }
             } else {
                 StatementEmitter.emitStmts(context, composer, lambda.body);
-                if (functionType.returnType() instanceof UnitDescriptor) {
-                    emitUnitValue(context, composer);
+                if (voidReturn) {
+                    composer.return_();
+                } else {
+                    if (functionType.returnType() instanceof UnitDescriptor) {
+                        emitUnitValue(context, composer);
+                    }
+                    composer.return_(TypeKind.fromDescriptor(
+                            TypeDescriptor.toJavaClassDesc(functionType.returnType()).descriptorString()));
                 }
-                composer.return_(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(functionType.returnType()).descriptorString()));
             }
         } finally {
             endScope(context);

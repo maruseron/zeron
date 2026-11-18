@@ -1246,12 +1246,14 @@ final class ExpressionFlowEmitter {
     static void emitCast(CompilationContext context, final CodeBuilder composer, final Expr.Cast cast) {
         emitExpr(context, composer, cast.value);
         emitBox(context, composer, context.lastEmittedType);
-        final var targetClass = runtimeTypeTestClass(context, cast.targetType);
+        final var testTarget = cast.safe && cast.targetType instanceof NullableDescriptor nullable
+                ? nullable.baseType() : cast.targetType;
+        final var targetClass = runtimeTypeTestClass(context, testTarget);
         if (cast.safe) {
             final var failed = composer.newLabel();
             final var done = composer.newLabel();
             composer.dup();
-            if (cast.targetType instanceof CharDescriptor) {
+            if (testTarget instanceof CharDescriptor) {
                 composer.invokestatic(ClassDesc.of("zeron.runtime.StringUnicode"), "isCharValue",
                         MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
             } else {

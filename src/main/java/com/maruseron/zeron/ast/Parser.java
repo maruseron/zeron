@@ -3462,12 +3462,12 @@ public final class Parser {
                 } else if (expr instanceof Expr.Property property) {
                     expr = finishMemberCall(property);
                 } else {
-                    error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                            "Only functions and named methods can be called.");
+                    expr = finishInvoke(expr);
                 }
             } else if (check(LEFT_BRACE)
                     && (expr instanceof Expr.Variable || expr instanceof Expr.Property
-                    || expr instanceof Expr.Call || expr instanceof Expr.MemberCall)) {
+                    || expr instanceof Expr.Call || expr instanceof Expr.MemberCall
+                    || expr instanceof Expr.Invoke)) {
                 final var lambda = trailingLambda();
                 if (expr instanceof Expr.Variable variable) {
                     expr = new Expr.Call(variable.name, lambda.arrow, List.of(lambda),
@@ -3478,6 +3478,8 @@ public final class Parser {
                 } else if (expr instanceof Expr.Call call) {
                     call.appendArgument(lambda);
                 } else if (expr instanceof Expr.MemberCall call) {
+                    call.appendArgument(lambda);
+                } else if (expr instanceof Expr.Invoke call) {
                     call.appendArgument(lambda);
                 }
             } else if (match(BANG_BANG)) {
@@ -3570,6 +3572,21 @@ public final class Parser {
             }
         }
         return false;
+    }
+
+    private Expr finishInvoke(final Expr callee) {
+        final var arguments = new ArrayList<Expr>();
+        if (!check(RIGHT_PAREN)) {
+            do {
+                if (arguments.size() >= 254) {
+                    error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
+                            "Can't have more than 254 arguments.");
+                }
+                arguments.add(expression());
+            } while (match(COMMA));
+        }
+        final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
+        return new Expr.Invoke(callee, paren, arguments, TypeDescriptor.ofInfer());
     }
 
     private Expr finishMemberCall(final Expr.Property property) {

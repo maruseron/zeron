@@ -515,6 +515,8 @@ final class LambdaResolver {
                 || referencesAnyVariable(context, binary.right, names);
             case Expr.Call call -> names.contains(call.callee.lexeme())
                 || call.arguments.stream().anyMatch(argument -> referencesAnyVariable(context, argument, names));
+            case Expr.Invoke invoke -> referencesAnyVariable(context, invoke.callee, names)
+                || invoke.arguments.stream().anyMatch(argument -> referencesAnyVariable(context, argument, names));
             case Expr.MemberCall call -> referencesAnyVariable(context, call.receiver, names)
                 || call.arguments.stream().anyMatch(argument -> referencesAnyVariable(context, argument, names));
             case Expr.Property property -> referencesAnyVariable(context, property.receiver, names);

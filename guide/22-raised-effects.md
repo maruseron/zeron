@@ -280,9 +280,10 @@ through a `&T` receiver, write output, read the environment, or perform other ob
 Java host boundary follows the same rule. Curated `external class` facades remain the trusted, typed
 tier, and direct Java access requires an explicit `unsafe` boundary rather than an implicit purity
 claim. A Zeron effect raised inside an `unsafe` operand still escapes and must be handled or declared
-by the enclosing function. [ZEP-0148](../documents/zeps/ZEP-0148.md) adds Java SAM conversion: a lambda or top-level
-function reference converted to a Java functional interface must have an empty `raises` row, so a
-`RaisedEffect` never crosses into Java; handle or map the effect inside the callback instead.
+by the enclosing function. [ZEP-0148](../documents/zeps/ZEP-0148.md) implements Java SAM conversion: a
+lambda or top-level function reference converted to a Java functional interface must have an empty
+`raises` row, so a `RaisedEffect` never crosses into Java; handle or map the effect inside the
+callback instead.
 
 Effect payload declarations remain synchronous and nominal. Non-generic effects keep their
 descriptor-free payload ABI; generic effects add a descriptor for exact application identity.

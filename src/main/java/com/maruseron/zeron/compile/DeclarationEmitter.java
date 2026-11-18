@@ -227,9 +227,11 @@ final class DeclarationEmitter {
                     implementationParameters.addAll(Collections.nCopies(
                             functionType.hiddenDescriptorCount(),
                             RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE));
+                    final var javaSam = lambda.javaSamTarget();
                     classBuilder.withMethodBody(
                         context.lambdaPlan.lambdaMethodName(lambda),
-                        toJavaMethodDescriptor(functionType, implementationParameters),
+                        toJavaMethodDescriptor(functionType, implementationParameters, javaSam != null
+                                && javaSam.erasedMethodType().returnType().equals(ConstantDescs.CD_void)),
                         ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                         composer -> LambdaSupportEmitter.emitLambdaImplementation(context, composer, lambda));
                 }

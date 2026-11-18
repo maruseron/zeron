@@ -702,6 +702,7 @@ final class BytecodeEmitter {
             case Expr.SumCaseTest test -> ExpressionFlowEmitter.emitSumCaseTest(context, composer, test);
             case Expr.Cast cast -> ExpressionFlowEmitter.emitCast(context, composer, cast);
             case Expr.Call call -> emitCall(context, composer, call);
+            case Expr.Invoke invoke -> emitInvoke(context, composer, invoke);
             case Expr.MemberCall call -> emitMemberCall(context, composer, call);
             case Expr.AnonymousObject object -> {
                 final var declaration = object.declaration();
@@ -745,9 +746,17 @@ final class BytecodeEmitter {
                     emitConversion(context, composer, context.lastEmittedType, captureTypes.get(i));
                 }
 
-                final var generatedInterface = TypeDescriptor.toJavaClassDesc(functionType);
-                final var samMethodType = toJavaMethodDescriptor(functionType);
-                final var implementationType = toJavaMethodDescriptor(functionType, implementationParameters);
+                final var javaSam = lambda.javaSamTarget();
+                final var generatedInterface = javaSam == null
+                        ? TypeDescriptor.toJavaClassDesc(functionType)
+                        : TypeDescriptor.toJavaClassDesc(javaSam.interfaceType());
+                final var samMethodType = javaSam == null
+                        ? toJavaMethodDescriptor(functionType) : javaSam.erasedMethodType();
+                final var instantiatedMethodType = javaSam == null
+                        ? samMethodType : javaSam.instantiatedMethodType();
+                final var implementationType = toJavaMethodDescriptor(functionType,
+                        implementationParameters, javaSam != null
+                                && javaSam.erasedMethodType().returnType().equals(ConstantDescs.CD_void));
                 final var metafactoryType = MethodTypeDesc.of(
                     ClassDesc.of("java.lang.invoke.CallSite"),
                     ClassDesc.of("java.lang.invoke.MethodHandles$Lookup"),
@@ -768,13 +777,13 @@ final class BytecodeEmitter {
                         implementationType.descriptorString());
                 composer.invokedynamic(DynamicCallSiteDesc.of(
                     metafactory,
-                    "invoke",
+                    javaSam == null ? "invoke" : javaSam.methodName(),
                     MethodTypeDesc.of(generatedInterface,
                             captureTypes.stream().map(TypeDescriptor::toJavaClassDesc).toList()),
                     samMethodType,
                     implementation,
-                    samMethodType));
-                context.lastEmittedType = lambda.getType();
+                    instantiatedMethodType));
+                context.lastEmittedType = javaSam == null ? lambda.getType() : javaSam.interfaceType();
             }
             case Expr.SuffixedLiteral literal -> {
                 emitMemberCall(context, composer, literal.factoryCall());
@@ -1514,6 +1523,34 @@ final class BytecodeEmitter {
         if (type instanceof TypeProjectionDescriptor projection) return List.of(projection.bound());
         if (type instanceof CapturedTypeDescriptor capture) return codeTypeArguments(capture.upperBound());
         return List.of();
+    }
+
+    private static void emitInvoke(final CompilationContext context, final CodeBuilder composer,
+                                   final Expr.Invoke invoke) {
+        final var functionType = invoke.resolvedDescriptor();
+        if (functionType == null) {
+            throw new IllegalStateException("Resolved invocation has no function type.");
+        }
+        final var runtimeType = functionType.isGeneric()
+                ? (FunctionDescriptor) TypeSubstitution.erase(functionType) : functionType;
+        emitExpr(context, composer, invoke.callee);
+        for (int index = 0; index < invoke.arguments.size(); index++) {
+            emitExpr(context, composer, invoke.arguments.get(index));
+            emitConversion(context, composer, context.lastEmittedType,
+                    runtimeType.parameters().get(index));
+        }
+        if (runtimeType.hasHiddenSlots()) {
+            emitHiddenArguments(context, composer, invoke.evidenceArguments(), invoke.reifiedArguments());
+        }
+        composer.invokeinterface(TypeDescriptor.toJavaClassDesc(runtimeType), "invoke",
+                toJavaMethodDescriptor(runtimeType));
+        if (functionType.isGeneric()) {
+            final var instantiated = TypeSubstitution.erase(invoke.getType());
+            emitConversion(context, composer, runtimeType.returnType(), instantiated);
+            context.lastEmittedType = instantiated;
+        } else {
+            context.lastEmittedType = functionType.returnType();
+        }
     }
 
     private static void emitCall(CompilationContext context, final CodeBuilder composer, final Expr.Call call ){
@@ -3185,10 +3222,18 @@ final class BytecodeEmitter {
 
     static MethodTypeDesc toJavaMethodDescriptor(final FunctionDescriptor functionType,
                                                         final List<TypeDescriptor> parameters) {
+        return toJavaMethodDescriptor(functionType, parameters, false);
+    }
+
+    static MethodTypeDesc toJavaMethodDescriptor(final FunctionDescriptor functionType,
+                                                        final List<TypeDescriptor> parameters,
+                                                        final boolean voidReturn) {
         final var javaParameters = parameters.stream()
                 .map(TypeDescriptor::toJavaClassDesc)
                 .toList();
-        return MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(functionType.returnType()), javaParameters);
+        return MethodTypeDesc.of(voidReturn
+                ? ConstantDescs.CD_void
+                : TypeDescriptor.toJavaClassDesc(functionType.returnType()), javaParameters);
     }
 
     static void emitVariable(CompilationContext context, final CodeBuilder composer, final Token name) {

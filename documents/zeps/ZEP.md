@@ -142,9 +142,9 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0129](./ZEP-0129.md) | Unary Products versus Arbitrary-Valued Newtypes | Implemented | Candidate | 0.8.0 |
 | [ZEP-0130](./ZEP-0130.md) | Standard-Library-Owned Intrinsic Declarations | Implemented | Candidate | 0.8.0 |
 | [ZEP-0131](./ZEP-0131.md) | Chained Flow Refinement and Implicit Receiver Access | Implemented | Candidate | 0.8.0 |
-| [ZEP-0132](./ZEP-0132.md) | Nullable Safe-Cast Correction | Accepted | Candidate | 0.8.0 |
+| [ZEP-0132](./ZEP-0132.md) | Nullable Safe-Cast Correction | Implemented | Candidate | 0.8.0 |
 | [ZEP-0133](./ZEP-0133.md) | Operator-Constraint Inference for Typeless Lambdas | Accepted | Candidate | 0.8.0 |
-| [ZEP-0134](./ZEP-0134.md) | Invocation of Function-Valued Expressions | Draft | Candidate | 0.8.0 |
+| [ZEP-0134](./ZEP-0134.md) | Invocation of Function-Valued Expressions | Implemented | Candidate | 0.8.0 |
 | [ZEP-0135](./ZEP-0135.md) | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Candidate | 0.8.0 |
 | [ZEP-0136](./ZEP-0136.md) | Witness Bundles and Coherent Prerequisite Evidence | Accepted | Candidate | 0.8.0 |
 | [ZEP-0137](./ZEP-0137.md) | Explicit Witness Selection and Witness Contexts | Accepted | Candidate | 0.8.0 |
@@ -158,7 +158,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0145](./ZEP-0145.md) | Unified Namespace and Extension Container | Draft | Unscheduled | - |
 | [ZEP-0146](./ZEP-0146.md) | Value-Producing Block Expressions | Draft | Candidate | 0.8.0 |
 | [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Draft | Candidate | 0.9.0 |
-| [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Accepted | Candidate | 0.8.0 |
+| [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Implemented | Candidate | 0.8.0 |
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
 
 ## Release bundles
@@ -286,7 +286,7 @@ independent: it is the only candidate that changes the CLI and manifest surface,
 runtime ABI. ZEP-0126 is the only candidate that changes the entry-point rule; it depends on the
 static-requirement work in ZEP-0124 for nominal `Main<A>` conformance, but its witness-only form can
 ship independently. ZEP-0050 is the host-access trust boundary: it defines the direct-access gate and
-should land first. ZEP-0148 builds Java SAM conversion on the same call-resolution path after the
+should land first. ZEP-0148 implements Java SAM conversion on the same call-resolution path after the
 gate exists. ZEP-0149 carries the umbrella's remaining interop inventory: general inherited-member
 lookup, external contracts for Java interfaces, external enums, JPMS, binding extensibility, and
 conformance. It is unscheduled, so none of it ships with `0.8.0` by implication. The bundle does not
@@ -294,24 +294,27 @@ change `raise` or `handle` typing.
 
 These twenty-one are the current target; further small normalization items may join `0.8.0` as
 additional candidates. The acceptance queue remains open. ZEP-0098 and ZEP-0113 were accepted and
-implemented on 2026-11-16; ZEP-0134 and ZEP-0146 remain draft rows and must be accepted before
-implementation, and their `Candidate` states record the intended bundle only. ZEP-0135 was accepted,
+implemented on 2026-11-16; ZEP-0146 remains the only draft row and must be accepted before
+implementation, and its `Candidate` state records the intended bundle only. ZEP-0135 was accepted,
 implemented, and added as a candidate for the same bundle; ZEP-0136 and ZEP-0137 were accepted and
 added on 2026-11-15. ZEP-0050 and ZEP-0148 were accepted on 2026-11-17 and added as candidates for
-the bundle.
+the bundle; both are now `Implemented` / `Candidate`. ZEP-0148 was implemented on 2026-11-18.
 
 The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
-ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135, ZEP-0128, ZEP-0127, and ZEP-0070 are
-now `Implemented` / `Candidate`, while the others are `Accepted` / `Candidate`.
+ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135, ZEP-0128, ZEP-0127, ZEP-0070, ZEP-0131,
+ZEP-0132, and ZEP-0134 are now `Implemented` / `Candidate`, while the others are `Accepted` /
+`Candidate`.
 ZEP-0070 was promoted from the backlog. ZEP-0134 and ZEP-0146 were added directly as `Draft` /
-`Candidate` rows for `0.8.0`; their acceptance reviews are still pending. ZEP-0136 and ZEP-0137 were
+`Candidate` rows for `0.8.0`; ZEP-0134 was accepted and implemented on 2026-11-18, while ZEP-0146's
+acceptance review is still pending. ZEP-0136 and ZEP-0137 were
 accepted on 2026-11-15 and are `Accepted` / `Candidate`. ZEP-0050 owns the implemented `unsafe`
-host-access boundary and ZEP-0148 owns Java SAM conversion; together they replace the original interop
-umbrella's `0.8.0` slice. ZEP-0149 holds the remaining interop inventory, including external
+host-access boundary and ZEP-0148 implements Java SAM conversion; together they replace the original
+interop umbrella's `0.8.0` slice. ZEP-0149 holds the remaining interop inventory, including external
 contracts for Java interfaces and external enums, and is `Draft` / `Unscheduled`, so it does not
 count in the bundle above.
 
-ZEP-0130 was implemented on 2026-11-17 and is `Implemented` / `Candidate`. The `String` inventory is
+ZEP-0130 was implemented on 2026-11-17 and is `Implemented` / `Candidate`. ZEP-0132 and ZEP-0134
+were implemented on 2026-11-18 and are `Implemented` / `Candidate`. The `String` inventory is
 declared in standard-library source, multi-value results are `Stream<String>`, `StringJoiner` owns
 joining, and `Stream.collectWith` is the general terminal operation behind it, over collectors the
 `Collector` namespace provides. No intrinsic ID was added.

@@ -14,6 +14,31 @@ const dataClassPattern = grammar.repository.declarations.patterns
   .find(pattern => pattern.match.includes('(data)') && pattern.match.includes('(class)'));
 const dataClassInitializerPattern = grammar.repository.declarations.patterns
   .find(pattern => pattern.match.includes('(raises)'));
+const characterPattern = grammar.repository.characters;
+const stringPattern = grammar.repository.strings;
+
+test('highlights character literals before double-quoted strings', () => {
+  assert.ok(characterPattern);
+  const matcher = new RegExp(characterPattern.match);
+
+  assert.ok(matcher.test("'\"'"));
+  assert.ok(matcher.test("'\\''"));
+  assert.ok(matcher.test("'\\u{1F600}'"));
+
+  const includes = grammar.patterns.map(pattern => pattern.include);
+  assert.ok(includes.includes('#characters'));
+  assert.ok(includes.indexOf('#characters') < includes.indexOf('#strings'));
+  const forIncludes = forExpressionPattern.patterns.map(pattern => pattern.include);
+  assert.ok(forIncludes.indexOf('#characters') < forIncludes.indexOf('#strings'));
+});
+
+test('highlights escaped quotes inside double-quoted strings', () => {
+  assert.ok(stringPattern);
+  const escape = stringPattern.patterns
+    .find(pattern => pattern.name === 'constant.character.escape.zeron');
+  assert.ok(escape);
+  assert.ok(new RegExp(escape.match).test("\\\""));
+});
 
 test('highlights out only in generic type-argument positions', () => {
   const matcher = new RegExp(projectionPattern.match, 'g');

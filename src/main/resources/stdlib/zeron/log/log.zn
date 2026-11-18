@@ -1,0 +1,48 @@
+package zeron.log;
+
+import zeron.collections.Map;
+import zeron.time.Instant;
+
+public type Level =
+      Trace
+    | Debug
+    | Info
+    | Warn
+    | Error;
+
+public extension Level {
+    public property severity: Int {
+        get = match (this) {
+            case Trace() -> 0;
+            case Debug() -> 1;
+            case Info()  -> 2;
+            case Warn()  -> 3;
+            case Error() -> 4;
+        };
+    }
+}
+
+default witness Display for Level {
+    fn toString(): String = match (this) {
+        case Trace() -> "TRACE";
+        case Debug() -> "DEBUG";
+        case Info()  -> "INFO";
+        case Warn()  -> "WARN";
+        case Error() -> "ERROR";
+    };
+}
+
+public type Value =
+      Text(value: String)
+    | Integer(value: Long)
+    | Decimal(value: Float)
+    | Flag(value: Boolean)
+    | List(value: Array<Value>);
+
+public type Record = (
+    time: Instant,
+    level: Level,
+    logger: String,
+    message: String,
+    fields: Map<String, Value>,
+    cause: Option<Effect>);

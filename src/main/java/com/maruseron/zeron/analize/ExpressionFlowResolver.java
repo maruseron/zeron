@@ -400,6 +400,7 @@ final class ExpressionFlowResolver {
                     ensureAssignable(context, assignment.property.getType(),
                             MemberInteropResolver.resolveArgument(context, assignment.value,
                                     assignment.property.getType()), assignment.property.name);
+                    invalidateWrittenPath(context, assignment.property);
                     assignment.setType(assignment.property.getType());
                     yield assignment.property.getType();
                 }
@@ -442,6 +443,7 @@ final class ExpressionFlowResolver {
                     assignment.property.name);
                 final var resultType = TypeSubstitution.containsCapture(expectedType)
                         ? assignedType : expectedType;
+                invalidateWrittenPath(context, assignment.property);
                 assignment.setType(resultType);
                 yield resultType;
             }
@@ -477,6 +479,7 @@ final class ExpressionFlowResolver {
                     assignment.setResolvedOperation(operation);
                     ensureAssignable(context, assignment.property.getType(), valueType,
                             assignment.property.name);
+                    invalidateWrittenPath(context, assignment.property);
                     assignment.setType(assignment.property.getType());
                     yield assignment.property.getType();
                 }
@@ -512,6 +515,7 @@ final class ExpressionFlowResolver {
                 final var valueType = resolve(context, operation);
                 assignment.setResolvedOperation(operation);
                 ensureAssignable(context, assignment.property.getType(), valueType, assignment.property.name);
+                invalidateWrittenPath(context, assignment.property);
                 assignment.setType(assignment.property.getType());
                 yield assignment.property.getType();
             }
@@ -602,6 +606,11 @@ final class ExpressionFlowResolver {
                 final var symbolName = context.symbols.containsSymbol(assignment.name)
                         ? assignment.name : MemberInteropResolver.resolveTopLevelValueSymbol(context, assignment.name);
                 if (symbolName == null) {
+                    final var implicitPropertyType = resolveImplicitPropertyAssignment(context, assignment);
+                    if (implicitPropertyType != null) {
+                        assignment.setType(implicitPropertyType);
+                        yield implicitPropertyType;
+                    }
                     if (context.frame.dataInitializerOwner != null) {
                         final var field = context.frame.dataInitializerOwner.fields().stream()
                                 .filter(candidate -> candidate.name().lexeme().equals(assignment.name.lexeme()))
@@ -2857,17 +2866,13 @@ final class ExpressionFlowResolver {
     static List<Token> beginSuccessfulSumCaseTestScope(final ResolutionContext context,
                                                        final Expr condition,
                                                        final boolean conditionIsTrue) {
-        final var test = successfulSumCaseTest(condition, conditionIsTrue);
-        if (test == null) return List.of();
-        final var payloadBindings = test.pattern.arguments().stream()
-                .map(Expr.MatchPattern::binding).filter(Objects::nonNull).toList();
-        if (payloadBindings.isEmpty()) return List.of();
+        final var successfulBindings = successfulSumCaseBindings(context, condition, conditionIsTrue);
+        if (successfulBindings.isEmpty()) return List.of();
         context.symbols.beginScope();
         final var bindings = new ArrayList<Token>();
-        for (final var argument : test.pattern.arguments()) {
-            if (argument.binding() == null) continue;
-            final var name = argument.binding();
-            final var type = argument.resolvedType();
+        for (final var binding : successfulBindings) {
+            final var name = binding.name();
+            final var type = binding.type();
             Resolver.declare(context, new Stmt.Var(name, type, null,
                             BindingMutability.IMMUTABLE, false),
                     name, type, BindingMutability.IMMUTABLE);
@@ -2877,15 +2882,74 @@ final class ExpressionFlowResolver {
         return bindings;
     }
 
-    private static Expr.SumCaseTest successfulSumCaseTest(final Expr expression,
-                                                           final boolean conditionIsTrue) {
+    /// Payload bindings introduced by the `matches` tests that must have succeeded on the given
+    /// outcome path. Conjunctions collect both operands; disjunctions merge alternatives and
+    /// require the alternatives to agree on the bound types.
+    private static List<MatchBinding> successfulSumCaseBindings(final ResolutionContext context,
+                                                                final Expr expression,
+                                                                final boolean conditionIsTrue) {
         return switch (expression) {
-            case Expr.Grouping grouping -> successfulSumCaseTest(grouping.expression, conditionIsTrue);
+            case Expr.Grouping grouping ->
+                    successfulSumCaseBindings(context, grouping.expression, conditionIsTrue);
             case Expr.Unary unary when unary.operator.type() == TokenType.NOT ->
-                    successfulSumCaseTest(unary.right, !conditionIsTrue);
-            case Expr.SumCaseTest test -> conditionIsTrue ? test : null;
-            default -> null;
+                    successfulSumCaseBindings(context, unary.right, !conditionIsTrue);
+            case Expr.SumCaseTest test -> conditionIsTrue ? payloadBindings(test) : List.of();
+            case Expr.Logical logical -> {
+                final var left = successfulSumCaseBindings(context, logical.left, conditionIsTrue);
+                final var right = successfulSumCaseBindings(context, logical.right, conditionIsTrue);
+                final var conjunctionSucceeds = logical.operator.type() == TokenType.AND
+                        ? conditionIsTrue : !conditionIsTrue;
+                if (conjunctionSucceeds) {
+                    final var sequential = new ArrayList<MatchBinding>(left);
+                    sequential.addAll(right);
+                    yield sequential;
+                }
+                yield mergeAlternativeBindings(context, List.of(left, right), logical.operator);
+            }
+            default -> List.of();
         };
+    }
+
+    private static List<MatchBinding> payloadBindings(final Expr.SumCaseTest test) {
+        final var bindings = new ArrayList<MatchBinding>();
+        for (final var argument : test.pattern.arguments()) {
+            if (argument.binding() != null) {
+                bindings.add(new MatchBinding(argument.binding(), argument.resolvedType()));
+            }
+        }
+        return bindings;
+    }
+
+    private static List<MatchBinding> mergeAlternativeBindings(final ResolutionContext context,
+                                                               final List<List<MatchBinding>> alternatives,
+                                                               final Token where) {
+        final var merged = new LinkedHashMap<String, MatchBinding>();
+        Set<String> expectedNames = null;
+        for (final var alternative : alternatives) {
+            final var names = new LinkedHashSet<String>();
+            for (final var binding : alternative) names.add(binding.name().lexeme());
+            if (expectedNames == null) {
+                expectedNames = names;
+            } else if (!expectedNames.equals(names)) {
+                Zeron.resolutionError(new ResolutionError(
+                        DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH, where,
+                        "Every OR-pattern alternative must bind the same names."));
+            }
+            for (final var binding : alternative) {
+                final var existing = merged.get(binding.name().lexeme());
+                if (existing == null) {
+                    merged.put(binding.name().lexeme(), binding);
+                    continue;
+                }
+                if (!context.typeCompatibility.canAssign(existing.type(), binding.type())
+                        || !context.typeCompatibility.canAssign(binding.type(), existing.type())) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH, where,
+                            "OR-pattern bindings must have compatible types."));
+                }
+            }
+        }
+        return List.copyOf(merged.values());
     }
 
     static void endSuccessfulSumCaseTestScope(final ResolutionContext context,
@@ -3304,7 +3368,7 @@ final class ExpressionFlowResolver {
                                                        final Expr.SumCaseTest test) {
         if (!context.frame.resolvingSumCaseCondition) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                    test.operator, "'matches' is currently supported only as a direct if or while condition."));
+                    test.operator, "'matches' is currently supported only in a condition."));
         }
         final var sourceType = resolve(context, test.value);
         final var sumType = sumTypeForCaseTest(context, test.value, sourceType);
@@ -3355,6 +3419,16 @@ final class ExpressionFlowResolver {
         final var normalizedSource = source instanceof NullableDescriptor nullable
                 ? nullable.baseType() : source;
         if (context.sums.containsKey(normalizedSource.name())) return normalizedSource;
+
+        for (final var sum : context.sums.values()) {
+            for (final var sumCase : sum.cases()) {
+                if (!sum.generatedCaseName(sumCase).equals(normalizedSource.name())) continue;
+                final var sumName = TypeDescriptor.ofName(sum.name().lexeme());
+                return normalizedSource instanceof GenericDescriptor generic
+                        ? TypeDescriptor.genericOf(sumName, generic.typeParameters())
+                        : sumName;
+            }
+        }
 
         final var variable = directVariable(context, value);
         if (variable == null || !context.symbols.containsSymbol(variable.name)) return normalizedSource;
@@ -3421,6 +3495,26 @@ final class ExpressionFlowResolver {
         context.symbols.define(assignment.name);
         assignment.setType(binding.type());
         return binding.type();
+    }
+
+    private static TypeDescriptor resolveImplicitPropertyAssignment(
+            final ResolutionContext context, final Expr.Assignment assignment) {
+        final var receiverScope = context.frame.receiverScopes.peek();
+        if (receiverScope == null || receiverScope.token().type() == TokenType.THIS) return null;
+        final var ownerName = className(context, receiverScope.type());
+        if (ownerName == null) return null;
+        if (MemberInteropResolver.findProperty(context, ownerName, assignment.name) == null) {
+            return null;
+        }
+        final var receiver = new Expr.Variable(
+                new Token(TokenType.THIS, "this", null, assignment.name.span()),
+                TypeDescriptor.ofInfer());
+        final var property = new Expr.Property(receiver, assignment.name, TypeDescriptor.ofInfer());
+        final var propertyAssignment = new Expr.PropertyAssignment(property, assignment.value,
+                TypeDescriptor.ofInfer());
+        final var type = resolve(context, propertyAssignment);
+        assignment.setImplicitPropertyAssignment(propertyAssignment);
+        return type;
     }
 
     private static boolean isExactDescriptorTestTarget(final TypeDescriptor sourceType,
@@ -3521,10 +3615,6 @@ final class ExpressionFlowResolver {
         final var enclosingFlow = context.frame.flowState;
         try {
             final var condition = ungroupCondition(expression);
-            if (containsSumCaseTest(expression) && directSumCaseTest(expression) == null) {
-                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        where, "'matches' cannot be composed with other condition operators yet."));
-            }
             if (openingAllowed && containsOpeningTypeTest(expression)
                     && directOpeningTypeTest(expression) == null) {
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_OPERATOR_CAST_OR_TYPE_TEST,
@@ -3552,7 +3642,15 @@ final class ExpressionFlowResolver {
                 final var left = resolveCondition(context, logical.left, incoming, logical.operator, false);
                 final StatementResolver.ConditionFlows result;
                 if (logical.operator.type() == TokenType.AND) {
-                    final var right = resolveCondition(context, logical.right, left.whenTrue(), logical.operator, false);
+                    final var operandBindings = beginSuccessfulSumCaseTestScope(
+                            context, logical.left, true);
+                    final StatementResolver.ConditionFlows right;
+                    try {
+                        right = resolveCondition(context, logical.right, left.whenTrue(),
+                                logical.operator, false);
+                    } finally {
+                        endSuccessfulSumCaseTestScope(context, operandBindings);
+                    }
                     result = new StatementResolver.ConditionFlows(right.whenTrue(),
                             FlowState.join(left.whenFalse(), right.whenFalse()));
                 } else {
@@ -3580,56 +3678,57 @@ final class ExpressionFlowResolver {
             final var whenFalse = evaluated.copy();
 
             if (expression instanceof Expr.TypeTest test) {
-                final var variable = directVariable(context, test.value);
+                final var path = stablePath(context, test.value);
+                final var testedType = test.value.getType();
                 if (test.nullTest) {
-                    final var testedType = test.value.getType();
                     final var mayBeNull = testedType instanceof NullableDescriptor
                             || testedType instanceof NullDescriptor
                             || testedType.isNullableTypeParameter();
                     final var mayBeNonNull = !(testedType instanceof NullDescriptor);
                     if (!mayBeNull) whenTrue.markUnreachable();
                     if (!mayBeNonNull) whenFalse.markUnreachable();
-                    if (variable != null && isRefinable(context, variable.name)) {
-                        final var binding = context.symbols.getSymbol(variable.name);
-                        final var existing = evaluated.get(binding.name());
+                    if (path != null) {
+                        final var existing = evaluated.get(path);
                         final var nonNull = existing == null
-                                ? nonNullFact(context, binding.type())
+                                ? nonNullFact(context, testedType)
                                 : new FlowFact(false, existing.nonNullAlternatives());
-                        if (mayBeNull) whenTrue.put(binding.name(), new FlowFact(true, Set.of()));
-                        if (mayBeNonNull) whenFalse.put(binding.name(), nonNull);
+                        if (mayBeNull) whenTrue.put(path, new FlowFact(true, Set.of()));
+                        if (mayBeNonNull) whenFalse.put(path, nonNull);
                     }
-                } else if (variable != null && isRefinable(context, variable.name)) {
-                    final var binding = context.symbols.getSymbol(variable.name);
+                } else if (path != null) {
                     if (test.isOpeningPattern()) {
-                        whenTrue.put(binding.name(), new FlowFact(false, Set.of(test.resolvedTargetType())));
-                        if (test.openingPatternTotal()) whenFalse.markUnreachable();
+                        if (path.isRoot()) {
+                            whenTrue.put(path, new FlowFact(false, Set.of(test.resolvedTargetType())));
+                            if (test.openingPatternTotal()) whenFalse.markUnreachable();
+                        }
                     } else {
-                        whenTrue.put(binding.name(), refineTypeFact(context, binding.type(),
-                                evaluated.get(binding.name()), test.resolvedTargetType()));
+                        whenTrue.put(path, refineTypeFact(context, testedType,
+                                evaluated.get(path), test.resolvedTargetType()));
                     }
                 }
             } else if (expression instanceof Expr.SumCaseTest test) {
-                final var variable = directVariable(context, test.value);
-                if (variable != null && isRefinable(context, variable.name)) {
-                    final var binding = context.symbols.getSymbol(variable.name);
-                    final var partition = partitionSumCaseFact(context, binding.type(),
-                            evaluated.get(binding.name()), test.resolvedCaseType());
-                    whenTrue.put(binding.name(), partition.matching());
-                    whenFalse.put(binding.name(), partition.nonMatching());
+                final var path = stablePath(context, test.value);
+                if (path != null) {
+                    final var testedType = test.value.getType();
+                    final var partition = partitionSumCaseFact(context, testedType,
+                            evaluated.get(path), test.resolvedCaseType());
+                    whenTrue.put(path, partition.matching());
+                    whenFalse.put(path, partition.nonMatching());
                     if (!partition.canMatch()) whenTrue.markUnreachable();
                     if (!partition.canNotMatch()) whenFalse.markUnreachable();
                 }
             } else if (expression instanceof Expr.Binary binary
                     && isNullComparison(context, binary)) {
-                final var checked = directVariable(context, isNullLiteral(context, binary.left) ? binary.right : binary.left);
-                if (checked != null && isRefinable(context, checked.name)) {
-                    final var binding = context.symbols.getSymbol(checked.name);
+                final var checked = isNullLiteral(context, binary.left) ? binary.right : binary.left;
+                final var path = stablePath(context, checked);
+                if (path != null) {
+                    final var checkedType = checked.getType();
                     final var nullFact = new FlowFact(true, Set.of());
-                    final var nonNullFact = nonNullFact(context, binding.type());
+                    final var nonNullFact = nonNullFact(context, checkedType);
                     final var equalsNull = binary.operator.type() == TokenType.EQUAL_EQUAL
                             || binary.operator.type() == TokenType.EQUAL_EQUAL_EQUAL;
-                    whenTrue.put(binding.name(), equalsNull ? nullFact : nonNullFact);
-                    whenFalse.put(binding.name(), equalsNull ? nonNullFact : nullFact);
+                    whenTrue.put(path, equalsNull ? nullFact : nonNullFact);
+                    whenFalse.put(path, equalsNull ? nonNullFact : nullFact);
                 }
             }
             return new StatementResolver.ConditionFlows(whenTrue, whenFalse);
@@ -3757,25 +3856,29 @@ final class ExpressionFlowResolver {
     }
 
     private static TypeDescriptor effectiveType(final ResolutionContext context, final Bind binding) {
-        final var fact = context.frame.flowState.get(binding.name());
-        if (fact == null) return binding.type();
+        return effectiveType(context, binding.type(), context.frame.flowState.get(binding.name()));
+    }
+
+    static TypeDescriptor effectiveType(final ResolutionContext context, final TypeDescriptor declaredType,
+                                        final FlowFact fact) {
+        if (fact == null) return declaredType;
         if (fact.nonNullAlternatives() != null && fact.mayBeNull()
             && fact.nonNullAlternatives().isEmpty()) return TypeDescriptor.ofNull();
         if (fact.nonNullAlternatives() == null) {
-            if (!fact.mayBeNull() && binding.type() instanceof NullableDescriptor nullable) {
+            if (!fact.mayBeNull() && declaredType instanceof NullableDescriptor nullable) {
                 return nullable.baseType();
             }
-            if (!fact.mayBeNull() && binding.type().isNullableTypeParameter()) {
-                return ((TypeParameterDescriptor) binding.type()).asNonNull();
+            if (!fact.mayBeNull() && declaredType.isNullableTypeParameter()) {
+                return ((TypeParameterDescriptor) declaredType).asNonNull();
             }
-            return binding.type();
+            return declaredType;
         }
         if (fact.nonNullAlternatives().isEmpty()) return TypeDescriptor.ofNever();
 
         final var commonType = context.typeCompatibility.commonTypeForAlternatives(fact.nonNullAlternatives());
-        final var declaredBase = binding.type() instanceof NullableDescriptor nullable
+        final var declaredBase = declaredType instanceof NullableDescriptor nullable
             ? nullable.baseType()
-            : binding.type();
+            : declaredType;
         final var effectiveBase = declaredBase instanceof ReferenceDescriptor
             ? new ReferenceDescriptor(commonType)
             : commonType;
@@ -3789,6 +3892,70 @@ final class ExpressionFlowResolver {
     static boolean isRefinable(final ResolutionContext context, final Token name) {
         return context.symbols.containsSymbol(name)
                 && context.symbols.getSymbol(name).lvt() != SymbolTable.GLOBAL;
+    }
+
+    /// The refinement path of a read-only member chain: a root binding plus stable, read-only
+    /// fields, properties, and sum payloads. Call results, array slots, mutable members, and
+    /// custom getters deliberately have no path.
+    static FlowPath stablePath(final ResolutionContext context, final Expr expression) {
+        return switch (expression) {
+            case Expr.Grouping grouping -> stablePath(context, grouping.expression);
+            case Expr.Variable variable -> {
+                if (variable.implicitFieldReceiver() != null) {
+                    final var base = stablePath(context, variable.implicitFieldReceiver());
+                    yield base != null && variable.implicitFieldReadOnly()
+                            ? base.member(variable.name.lexeme()) : null;
+                }
+                if (variable.implicitPropertyReceiver() != null) {
+                    final var base = stablePath(context, variable.implicitPropertyReceiver());
+                    yield base != null && variable.implicitPropertyReadOnly()
+                            ? base.member(variable.name.lexeme()) : null;
+                }
+                yield rootPath(context, variable.name);
+            }
+            case Expr.Property property -> {
+                if (!property.stableMember() || property.safeNavigation()) yield null;
+                final var base = stablePath(context, property.receiver);
+                yield base == null ? null : base.member(property.name.lexeme());
+            }
+            default -> null;
+        };
+    }
+
+    /// The structural path of a write target. Unlike {@link #stablePath}, this ignores member
+    /// stability so a write invalidates any fact that was asserted about the target.
+    private static FlowPath structuralPath(final ResolutionContext context, final Expr expression) {
+        return switch (expression) {
+            case Expr.Grouping grouping -> structuralPath(context, grouping.expression);
+            case Expr.Variable variable -> {
+                if (variable.implicitFieldReceiver() != null) {
+                    final var base = structuralPath(context, variable.implicitFieldReceiver());
+                    yield base == null ? null : base.member(variable.name.lexeme());
+                }
+                if (variable.implicitPropertyReceiver() != null) {
+                    final var base = structuralPath(context, variable.implicitPropertyReceiver());
+                    yield base == null ? null : base.member(variable.name.lexeme());
+                }
+                yield rootPath(context, variable.name);
+            }
+            case Expr.Property property -> {
+                final var base = structuralPath(context, property.receiver);
+                yield base == null ? null : base.member(property.name.lexeme());
+            }
+            default -> null;
+        };
+    }
+
+    private static FlowPath rootPath(final ResolutionContext context, final Token name) {
+        if (!context.symbols.containsSymbol(name)) return null;
+        final var binding = context.symbols.getSymbol(name);
+        if (binding.lvt() == SymbolTable.GLOBAL) return null;
+        return FlowPath.of(binding.name());
+    }
+
+    private static void invalidateWrittenPath(final ResolutionContext context, final Expr.Property property) {
+        final var path = structuralPath(context, property);
+        if (path != null) context.frame.flowState.removePath(path);
     }
 
     static Expr.Variable directVariable(final ResolutionContext context, final Expr expression) {

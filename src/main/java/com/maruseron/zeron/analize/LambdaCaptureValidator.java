@@ -217,6 +217,10 @@ final class LambdaCaptureValidator {
                     walkCaptureUsage(variable.implicitFieldReceiver(), localNames);
                     return;
                 }
+                if (variable.implicitPropertyReceiver() != null) {
+                    walkCaptureUsage(variable.implicitPropertyReceiver(), localNames);
+                    return;
+                }
                 if (localNames.contains(variable.name.lexeme())) return;
                 if (symbols.containsSymbol(variable.name)
                         && symbols.getSymbol(variable.name).mutability().isReassignable()) {

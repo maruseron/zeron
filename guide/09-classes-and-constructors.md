@@ -134,6 +134,30 @@ Within a method, `this` means the particular object on which the method was call
 `this.count` is the `count` field belonging to that counter. Methods can calculate and return a
 value, as `current` does, or perform an action.
 
+Inside an instance body, an unqualified field or property read also uses the implicit `this`
+receiver when ordinary lookup finds no local, parameter, or top-level declaration with that name:
+
+```zeron
+public class Counter {
+    count: Int;
+    public constructor new;
+    public current(): Int = count;
+}
+```
+
+This works in methods, property accessors, initializers, contract default methods, and extension
+bodies. A local, parameter, or pattern binding with the same name still wins, and so does a
+top-level declaration. Implicit lookup is a fallback for an otherwise unresolved field or property
+read; it does not apply to method calls, type names, or namespace members. Reading an unqualified
+property calls its getter normally, so a custom getter is still reevaluated on each read.
+
+Only reads are implicit. Assigning to a field or property still requires the receiver:
+
+```zeron
+this.count = 0;       // required
+count = 0;            // rejected, or the local named count
+```
+
 ## Public and private members
 
 `public` means other code may use the class member; `private` means it is reserved for use inside

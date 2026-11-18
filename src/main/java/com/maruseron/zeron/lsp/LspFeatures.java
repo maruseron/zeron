@@ -30,6 +30,7 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
@@ -88,6 +89,9 @@ final class LspFeatures {
         }
 
         final var unique = new LinkedHashMap<String, CompletionItem>();
+        for (final var item : symbols.lexicalCompletions(path, tokens, offset, prefix)) {
+            unique.putIfAbsent("lexical:" + item.getLabel(), item);
+        }
         for (final var symbol : symbols.visibleSymbols(path)) {
             if (!symbol.name().startsWith(prefix)) continue;
             unique.putIfAbsent(symbol.qualifiedName(), completionItem(symbol));
@@ -1956,6 +1960,7 @@ final class LspFeatures {
         private final Map<String, List<String>> parameterNamesByQualifiedName = new LinkedHashMap<>();
         private final Map<Token, TypeParameterDescriptor> typeParametersByToken = new IdentityHashMap<>();
         private final List<TypeParameterScope> typeParameterScopes = new ArrayList<>();
+        private final Map<Token, Symbol> localSymbols = new IdentityHashMap<>();
         private final ProjectAnalysisWorkspace.Snapshot snapshot;
 
         private record TypeParameterScope(Path path, String name, TypeParameterDescriptor parameter,
@@ -2026,6 +2031,8 @@ final class LspFeatures {
             snapshot.resolution().ifPresent(this::indexResolvedFunctions);
             snapshot.memberCatalog().ifPresent(this::indexCatalogTypes);
             addCodeModelTypes();
+            indexTokenBindings();
+            snapshot.resolution().ifPresent(this::indexResolvedLocals);
         }
 
         private void indexCatalogTypes(final PublicMemberCatalog catalog) {
@@ -2088,6 +2095,187 @@ final class LspFeatures {
                 add(symbol);
                 byToken.put(symbolToken, symbol);
             }
+        }
+
+        private void indexTokenBindings() {
+            for (final var entry : snapshot.tokens().entrySet()) {
+                final var path = entry.getKey();
+                final var tokens = entry.getValue();
+                for (var index = 0; index < tokens.size(); index++) {
+                    if (tokens.get(index).type() != TokenType.IDENTIFIER
+                            || !tokens.get(index).lexeme().equals("matches")) continue;
+                    if (index + 1 >= tokens.size()
+                            || tokens.get(index + 1).type() != TokenType.IDENTIFIER) continue;
+                    var open = -1;
+                    for (var cursor = index + 1; cursor < tokens.size(); cursor++) {
+                        final var type = tokens.get(cursor).type();
+                        if (type == TokenType.LEFT_PAREN) {
+                            open = cursor;
+                            break;
+                        }
+                        if (type == TokenType.SEMICOLON || type == TokenType.LEFT_BRACE
+                                || type == TokenType.RIGHT_BRACE) break;
+                    }
+                    if (open < 0) continue;
+                    var depth = 0;
+                    for (var cursor = open; cursor < tokens.size(); cursor++) {
+                        final var token = tokens.get(cursor);
+                        final var type = token.type();
+                        if (type == TokenType.LEFT_PAREN) {
+                            depth++;
+                            continue;
+                        }
+                        if (type == TokenType.RIGHT_PAREN) {
+                            depth--;
+                            if (depth == 0) break;
+                            continue;
+                        }
+                        if (type != TokenType.IDENTIFIER || depth == 0
+                                || token.lexeme().equals("_")) continue;
+                        final var next = cursor + 1 < tokens.size()
+                                ? tokens.get(cursor + 1).type() : TokenType.EOF;
+                        if (next == TokenType.LEFT_PAREN || next == TokenType.DOT) continue;
+                        final var symbol = new Symbol(token.lexeme(), token.lexeme(),
+                                packagesByPath.getOrDefault(path, ""), null,
+                                "value " + token.lexeme(), CompletionItemKind.Variable,
+                                token, path, false, token.lexeme(), "");
+                        if (byToken.putIfAbsent(token, symbol) == null) {
+                            localSymbols.put(token, symbol);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void indexResolvedLocals(final ResolutionResult resolution) {
+            for (final var entry : resolution.referenceTargets().entrySet()) {
+                final var target = entry.getValue();
+                if (byToken.containsKey(target) && !localSymbols.containsKey(target)) continue;
+                final var span = target.span();
+                final var sourcePath = span == null ? null : span.sourcePath();
+                if (sourcePath == null) continue;
+                final var path = snapshot.filesByCompilerPath().get(sourcePath);
+                if (path == null) continue;
+                final var type = resolution.referenceType(entry.getKey());
+                if (type == null) continue;
+                final var formattedType = TypeFormatter.format(type);
+                final var symbol = new Symbol(target.lexeme(), target.lexeme(),
+                        packagesByPath.getOrDefault(path, ""), null,
+                        "value " + target.lexeme() + ": " + formattedType,
+                        CompletionItemKind.Variable, target, path, false,
+                        target.lexeme(), formattedType);
+                byToken.put(target, symbol);
+                localSymbols.put(target, symbol);
+            }
+        }
+
+        List<CompletionItem> lexicalCompletions(final Path path, final List<Token> tokens,
+                                                final int offset, final String prefix) {
+            final var items = new LinkedHashMap<String, CompletionItem>();
+            final var bracePairs = bracePairs(tokens);
+            for (final var symbol : localSymbols.values()) {
+                if (!symbol.path().equals(path) || !symbol.name().startsWith(prefix)) continue;
+                final var start = symbol.token().span().start().offset();
+                if (start == null || start >= offset) continue;
+                final var block = innermostBrace(bracePairs, start);
+                if (block == null || offset > block[3]) continue;
+                final var item = new CompletionItem(symbol.completionLabel());
+                item.setKind(CompletionItemKind.Variable);
+                item.setDetail(symbol.completionDetail());
+                item.setSortText("0" + symbol.name());
+                items.putIfAbsent(symbol.name(), item);
+            }
+            final var owner = enclosingReceiverOwner(path, tokens, bracePairs, offset);
+            if (owner instanceof Stmt.ClassDecl declaration) {
+                declaration.fields().forEach(field ->
+                        addMemberCompletion(items, field.name(), field.type(),
+                                CompletionItemKind.Field, prefix));
+                declaration.dataComponents().forEach(component ->
+                        addMemberCompletion(items, component.name(), component.type(),
+                                CompletionItemKind.Field, prefix));
+                declaration.properties().forEach(property ->
+                        addMemberCompletion(items, property.name(), property.type(),
+                                CompletionItemKind.Property, prefix));
+            } else if (owner instanceof Stmt.ContractDecl declaration) {
+                declaration.properties().forEach(property ->
+                        addMemberCompletion(items, property.name(), property.type(),
+                                CompletionItemKind.Property, prefix));
+            }
+            return List.copyOf(items.values());
+        }
+
+        private static void addMemberCompletion(
+                final Map<String, CompletionItem> items, final Token name,
+                final TypeDescriptor type, final CompletionItemKind kind,
+                final String prefix) {
+            if (!name.lexeme().startsWith(prefix)) return;
+            final var item = new CompletionItem(name.lexeme());
+            item.setKind(kind);
+            item.setDetail("this." + name.lexeme() + ": " + TypeFormatter.format(type));
+            item.setSortText("0" + name.lexeme());
+            items.putIfAbsent(name.lexeme(), item);
+        }
+
+        private Stmt enclosingReceiverOwner(final Path path, final List<Token> tokens,
+                                            final List<int[]> bracePairs, final int offset) {
+            Stmt owner = null;
+            var ownerWidth = Integer.MAX_VALUE;
+            for (final var pair : bracePairs) {
+                if (pair[2] >= offset || offset > pair[3]) continue;
+                final var width = pair[3] - pair[2];
+                if (width >= ownerWidth) continue;
+                final var name = receiverOwnerName(tokens, pair[0]);
+                if (name == null) continue;
+                final var declaration = sourceType(path, name.lexeme());
+                if (declaration == null) continue;
+                owner = declaration;
+                ownerWidth = width;
+            }
+            return owner;
+        }
+
+        private static Token receiverOwnerName(final List<Token> tokens, final int openBrace) {
+            for (var index = openBrace - 1; index >= 0; index--) {
+                final var type = tokens.get(index).type();
+                if (type == TokenType.LEFT_BRACE || type == TokenType.RIGHT_BRACE
+                        || type == TokenType.SEMICOLON) return null;
+                if (type != TokenType.CLASS && type != TokenType.CONTRACT) continue;
+                for (var nameIndex = index + 1; nameIndex < openBrace; nameIndex++) {
+                    if (tokens.get(nameIndex).type() == TokenType.IDENTIFIER) {
+                        return tokens.get(nameIndex);
+                    }
+                }
+                return null;
+            }
+            return null;
+        }
+
+        private static List<int[]> bracePairs(final List<Token> tokens) {
+            final var opens = new ArrayDeque<Integer>();
+            final var pairs = new ArrayList<int[]>();
+            for (var index = 0; index < tokens.size(); index++) {
+                final var type = tokens.get(index).type();
+                if (type == TokenType.LEFT_BRACE) {
+                    opens.push(index);
+                } else if (type == TokenType.RIGHT_BRACE && !opens.isEmpty()) {
+                    final var open = opens.pop();
+                    pairs.add(new int[]{open, index,
+                            tokens.get(open).span().start().offset(),
+                            tokens.get(index).span().start().offset()});
+                }
+            }
+            return pairs;
+        }
+
+        private static int[] innermostBrace(final List<int[]> bracePairs, final int offset) {
+            int[] innermost = null;
+            for (final var pair : bracePairs) {
+                if (pair[2] >= offset || offset > pair[3]) continue;
+                if (innermost == null || pair[3] - pair[2] < innermost[3] - innermost[2]) {
+                    innermost = pair;
+                }
+            }
+            return innermost;
         }
 
         private void indexResolvedExtensions(final ResolutionResult resolution) {
@@ -2230,6 +2418,23 @@ final class LspFeatures {
                             .forEach(method -> addMethod(method.name(), method.typeDescriptor(),
                                     unit.packageName(), value.name().lexeme(), path,
                                     method.parameters().stream().map(Token::lexeme).toList()));
+                    value.fields().forEach(field -> byToken.putIfAbsent(field.name(),
+                            new Symbol(field.name().lexeme(),
+                                    value.name().lexeme() + "." + field.name().lexeme(),
+                                    unit.packageName(), null,
+                                    "field " + field.name().lexeme() + ": "
+                                            + TypeFormatter.format(field.type()),
+                                    CompletionItemKind.Field, field.name(), path, false,
+                                    field.name().lexeme(), TypeFormatter.format(field.type()))));
+                    value.dataComponents().forEach(component -> byToken.putIfAbsent(component.name(),
+                            new Symbol(component.name().lexeme(),
+                                    value.name().lexeme() + "." + component.name().lexeme(),
+                                    unit.packageName(), null,
+                                    "field " + component.name().lexeme() + ": "
+                                            + TypeFormatter.format(component.type()),
+                                    CompletionItemKind.Field, component.name(), path, false,
+                                    component.name().lexeme(),
+                                    TypeFormatter.format(component.type()))));
                     value.properties().stream().filter(Stmt.Property::isPublic)
                             .forEach(property -> add(new Symbol(property.name().lexeme(),
                                     value.name().lexeme() + "." + property.name().lexeme(),
@@ -2238,6 +2443,16 @@ final class LspFeatures {
                                             + TypeFormatter.format(property.type()),
                                     CompletionItemKind.Property, property.name(), path, true,
                                     property.name().lexeme(), TypeFormatter.format(property.type()))));
+                    value.properties().stream().filter(property -> !property.isPublic())
+                            .forEach(property -> byToken.putIfAbsent(property.name(),
+                                    new Symbol(property.name().lexeme(),
+                                            value.name().lexeme() + "." + property.name().lexeme(),
+                                            unit.packageName(), null,
+                                            "property " + property.name().lexeme() + ": "
+                                                    + TypeFormatter.format(property.type()),
+                                            CompletionItemKind.Property, property.name(), path, false,
+                                            property.name().lexeme(),
+                                            TypeFormatter.format(property.type()))));
                     value.namedConstructors().forEach(constructor -> addConstructor(constructor.name(),
                                     constructor.typeDescriptor(), unit.packageName(),
                                     value.name().lexeme(), path, constructor.isPublic()));

@@ -1956,6 +1956,38 @@ public final class ClassContractTest {
     }
 
     @Test
+    public void resolvesImplicitPropertyReadsInContractDefaults() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "ImplicitContractDefault" + suffix;
+        final var viewName = "ImplicitContractView" + suffix;
+        final var implName = "ImplicitContractImpl" + suffix;
+        final var source = """
+                contract %s {
+                    property value: Int;
+                    default read(): Int = value;
+                }
+                class %s is %s {
+                    public property value: Int;
+                    public constructor new;
+                }
+                fn result(): Int = %s.new(42).read();
+                """.formatted(viewName, implName, viewName, implName);
+        try {
+            final var compiler = new CompilationService(parse(source), programName);
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(42, loader.loadClass(programName).getMethod("result").invoke(null));
+            }
+        } finally {
+            for (final var name : List.of(programName, viewName, implName)) {
+                Files.deleteIfExists(Path.of("dist", name + ".class"));
+            }
+        }
+    }
+
+    @Test
     public void competingDefaultMethodsRequireClassOverride() {
         final var source = """
                 contract First { default value(): String = "first"; }

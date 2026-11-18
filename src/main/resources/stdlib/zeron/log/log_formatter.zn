@@ -1,0 +1,59 @@
+package zeron.log;
+
+import zeron.collections.ArrayList;
+import zeron.collections.Map;
+
+public newtype LogFormatter = Record -> String;
+
+namespace LogFormatter {
+    /// Renders the level, logger name, message, and structured fields.
+    ///
+    /// The monotonic `Record.time` and the optional cause remain available to custom formatters.
+    public fn plain(): LogFormatter = 
+        LogFormatter.new(record ->
+            record.level.toString() + " [" + record.logger + "] " + record.message
+                + renderFields(record.fields));
+}
+
+fn renderFields(fields: Map<String, Value>): String {
+    if (fields.isEmpty()) return "";
+    let rendered = ArrayList<String>.empty();
+    for (let entry in fields) {
+        rendered.add(entry.fst + "=" + renderValue(entry.snd));
+    }
+    return String.join(rendered) { 
+        prefix = "{";
+        separator = ", ";
+        suffix = "}"; 
+    };
+}
+
+fn renderValue(value: Value): String = match (value) {
+    case Text(text) -> quote(text);
+    case Integer(number) -> number.toString();
+    case Decimal(number) -> number.toString();
+    case Flag(flag) -> flag.toString();
+    case List(items) -> renderList(items);
+};
+
+fn renderList(items: Array<Value>): String {
+    let rendered = ArrayList<String>.empty();
+    for (let item in items) rendered.add(renderValue(item));
+    return String.join(rendered) { 
+        prefix = "[";
+        separator = ", "; 
+        suffix = "]";
+    };
+}
+
+fn quote(text: String): String {
+    let backslash = '\\'.toString();
+    let quoteCharacter = '"'.toString();
+    let escaped = text
+        .replace(backslash, backslash + backslash)
+        .replace(quoteCharacter, backslash + quoteCharacter)
+        .replace('\n'.toString(), backslash + "n")
+        .replace('\r'.toString(), backslash + "r")
+        .replace('\t'.toString(), backslash + "t");
+    return quoteCharacter + escaped + quoteCharacter;
+}

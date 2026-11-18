@@ -199,26 +199,34 @@ final class TypeCompatibility implements TypeProjector {
     }
 
     TypeDescriptor inferenceView(final TypeDescriptor expectedType, final TypeDescriptor actualType) {
-        if (!(expectedType instanceof GenericDescriptor expected)) return actualType;
-        final var actualBase = actualType instanceof ReferenceDescriptor reference
+        // A mutable contract parameter such as `&Collector<T, R>` still needs the concrete
+        // implementation projected to the contract, so look through the capability wrapper.
+        final var expectedBase = expectedType instanceof ReferenceDescriptor reference
                 ? reference.baseType()
+                : expectedType;
+        if (!(expectedBase instanceof GenericDescriptor expected)) return actualType;
+        final var actualMutable = actualType instanceof ReferenceDescriptor;
+        final var actualBase = actualMutable
+                ? ((ReferenceDescriptor) actualType).baseType()
                 : actualType;
         if (actualBase instanceof GenericDescriptor actual) {
             final var declaration = classes.get(actual.baseType().name());
             if (declaration != null
                     && declaration.typeParameters().size() == actual.typeParameters().size()) {
                 final var projected = projectClassContracts(declaration, actual.typeParameters(), expected);
-                if (projected != null) return projected;
+                if (projected != null) return actualMutable ? new ReferenceDescriptor(projected) : projected;
             }
             // A contract value can stand in for one of its parent contracts, including a generic
             // model implementation standing in for `Model<T>`.
-            return projectTo(actualBase, expected.baseType()).orElse(actualType);
+            final var parent = projectTo(actualBase, expected.baseType()).orElse(null);
+            if (parent == null) return actualType;
+            return actualMutable ? new ReferenceDescriptor(parent) : parent;
         }
         if (actualBase instanceof NominalDescriptor nominal) {
             final var declaration = classes.get(nominal.name());
             if (declaration != null) {
                 final var projected = projectClassContracts(declaration, List.of(), expected);
-                if (projected != null) return projected;
+                if (projected != null) return actualMutable ? new ReferenceDescriptor(projected) : projected;
             }
         }
         return actualType;

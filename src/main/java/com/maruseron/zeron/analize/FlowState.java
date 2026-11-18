@@ -11,8 +11,40 @@ record FlowFact(boolean mayBeNull, Set<TypeDescriptor> nonNullAlternatives) {
     }
 }
 
+/**
+ * A refinement target: a binding root plus a chain of stable, read-only member reads.
+ * The root token is the declaration token of the binding, so two bindings that happen to
+ * share a name never share facts.
+ */
+record FlowPath(Token root, List<String> members) {
+    FlowPath {
+        members = List.copyOf(members);
+    }
+
+    static FlowPath of(final Token root) {
+        return new FlowPath(root, List.of());
+    }
+
+    boolean isRoot() {
+        return members.isEmpty();
+    }
+
+    FlowPath member(final String name) {
+        final var extended = new ArrayList<String>(members.size() + 1);
+        extended.addAll(members);
+        extended.add(name);
+        return new FlowPath(root, extended);
+    }
+
+    boolean startsWith(final FlowPath prefix) {
+        return root.equals(prefix.root)
+                && members.size() >= prefix.members.size()
+                && members.subList(0, prefix.members.size()).equals(prefix.members);
+    }
+}
+
 final class FlowState {
-    private final IdentityHashMap<Token, FlowFact> facts = new IdentityHashMap<>();
+    private final HashMap<FlowPath, FlowFact> facts = new HashMap<>();
     private final IdentityHashMap<Token, Integer> writeCounts = new IdentityHashMap<>();
     private boolean reachable = true;
 
@@ -47,15 +79,29 @@ final class FlowState {
     }
 
     FlowFact get(final Token bindingName) {
-        return facts.get(bindingName);
+        return facts.get(FlowPath.of(bindingName));
+    }
+
+    FlowFact get(final FlowPath path) {
+        return facts.get(path);
     }
 
     void put(final Token bindingName, final FlowFact fact) {
-        facts.put(bindingName, fact);
+        facts.put(FlowPath.of(bindingName), fact);
     }
 
+    void put(final FlowPath path, final FlowFact fact) {
+        facts.put(path, fact);
+    }
+
+    /** Removes the root fact and every fact whose path is rooted at {@code bindingName}. */
     void remove(final Token bindingName) {
-        facts.remove(bindingName);
+        facts.keySet().removeIf(path -> path.root().equals(bindingName));
+    }
+
+    /** Removes the fact at {@code path} and every fact beneath it. */
+    void removePath(final FlowPath path) {
+        facts.keySet().removeIf(candidate -> candidate.startsWith(path));
     }
 
     int writeCount(final Token bindingName) {

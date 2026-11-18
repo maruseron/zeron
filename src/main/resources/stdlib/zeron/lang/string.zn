@@ -32,31 +32,33 @@ class StringCodePoints is Iterable<Char> {
 /// simply delegates to it. The separator is written between adjacent elements; there is no prefix
 /// or suffix, and elements are not converted from another type.
 public class StringJoiner is Collector<String, String> {
-    separator: String;
-    joined: Option<String>;
+    config: JoinerConfig;
+    joined: String;
+    first: Boolean;
 
     private constructor new;
 
     /// Creates a joiner that writes `separator` between adjacent elements.
-    public constructor withSeparator(separator: String) =
-        StringJoiner.new(separator, Option<String>.None());
+    public constructor withConfig(config: JoinerConfig) =
+        StringJoiner.new(config, config.prefix, true);
 
     /// Returns a joiner that holds `value` after the elements already collected, inserting the
     /// separator between them.
-    public add(value: String): Collector<String, String> {
-        let joined =
-            match (this.joined) {
-                case Option.Some(text) -> Option.Some(text + this.separator + value);
-                case Option.None() -> Option.Some(value);
-            };
-        return StringJoiner.new(this.separator, joined);
+    public mut add(value: String): Boolean {
+        if (not first) {
+            this.joined = this.joined + this.config.separator;
+        }
+
+        this.joined = this.joined + value;
+        this.first = false;
+        return true;
     }
 
     /// Returns the joined text, or the empty string when nothing was added.
-    public finish(): String = this.joined.getOrElse("");
+    public finish(): String = this.joined + config.suffix;
 
     /// Adds every element of `values`, in order, and returns the joined text.
-    public join(values: Iterable<String>): String = values.stream().collectWith(this);
+    public mut join(values: Iterable<String>): String = values.stream().collectWith(this);
 }
 
 /// A failure produced by a regular-expression operation.
@@ -297,14 +299,24 @@ public extension String {
     }
 }
 
+public class JoinerConfig {
+    public mut property prefix: String = "";
+    public mut property separator: String = "";
+    public mut property suffix: String = "";
+}
+
 /// Functions of `String` that are not receiver methods.
 namespace String {
-    /// Joins `values` into one string, inserting `separator` between adjacent elements.
+    /// Joins `values` into one string, with a chosen configuration for prefix, separator and 
+    /// suffix.
     ///
     /// `String.join` delegates to `StringJoiner`; use that type directly to join a stream or to
     /// reuse one separator across calls.
-    public fn join(separator: String, values: Iterable<String>): String =
-        StringJoiner.withSeparator(separator).join(values);
+    public fn join(values: Iterable<String>, builder: &JoinerConfig.() -> Unit): String {
+        let config = JoinerConfig.new();
+        config.builder();
+        return StringJoiner.withConfig(config).join(values);
+    }
 }
 
 external fn stringLength(value: String?): Int;

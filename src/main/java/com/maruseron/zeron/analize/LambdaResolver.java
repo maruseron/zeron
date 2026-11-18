@@ -784,7 +784,7 @@ final class LambdaResolver {
                 }
             }
             case Expr.Variable variable -> {
-                if (variable.implicitFieldReceiver() != null) {
+                if (variable.implicitFieldReceiver() != null || variable.implicitPropertyReceiver() != null) {
                     rejectCodeModel(context, lambda, "Implicit member references are not supported in a CodeModel.");
                 }
                 final var symbol = variable.resolvedSymbolToken();

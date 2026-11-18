@@ -60,6 +60,67 @@ public final class ReceiverFunctionTest {
     }
 
     @Test
+    public void assignsPublicMutPropertiesThroughReceiverLambdaContext() throws Exception {
+        final var packageName = "receiverwrite" + UUID.randomUUID().toString().replace("-", "");
+        final var unit = parse("Main.zn", """
+                package %s;
+                public class Builder {
+                    public mut property value: Int = 0;
+                    public constructor new;
+                }
+                public fn configure(builder: &Builder, body: &Builder.() -> Unit): Unit =
+                    builder.body();
+                public fn result(): Int {
+                    let builder = Builder.new();
+                    configure(builder) {
+                        value = 41;
+                        value += 1;
+                    };
+                    return builder.value;
+                }
+                """.formatted(packageName));
+        deleteTree(Path.of("dist"));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(
+                    List.of(unit), packageName + ".Main", packageName);
+            compiler.resolve();
+            compiler.compile();
+
+            try (var loader = new URLClassLoader(new java.net.URL[]{
+                    Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + ".Main");
+                assertEquals(42, main.getMethod("result").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void rejectsImplicitPropertyWritesThroughReadOnlyReceiverLambdas() {
+        final var source = parse("ReadOnly.zn", """
+                public class Builder {
+                    public mut property value: Int = 0;
+                    public constructor new;
+                }
+                public fn configure(builder: Builder, body: Builder.() -> Unit): Unit =
+                    builder.body();
+                public fn result(): Int {
+                    let builder = Builder.new();
+                    configure(builder) {
+                        value = 41;
+                        value += 1;
+                    };
+                    return builder.value;
+                }
+                """);
+
+        final var error = assertThrows(ResolutionError.class,
+                () -> CompilationService.forCompilationUnits(List.of(source), "ReadOnly", "").resolve());
+        assertTrue(error.getMessage(), error.getMessage().contains("requires a mutable reference"));
+    }
+
+    @Test
     public void resolvesNearestMatchingEnclosingReceiverAndCapturesIt() throws Exception {
         final var packageName = "nestedreceiver" + UUID.randomUUID().toString().replace("-", "");
         final var unit = parse("Nested.zn", """

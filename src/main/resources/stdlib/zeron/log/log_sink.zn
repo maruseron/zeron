@@ -1,0 +1,63 @@
+package zeron.log;
+
+import java.lang.System;
+
+import zeron.log.Level.severity;
+import zeron.resource.Disposable;
+import zeron.resource.DisposeFailure;
+
+class ConsoleSink is LogSink {
+    formatter: LogFormatter;
+
+    public enabled(level: Level, target: String): Boolean = true;
+
+    public mut write(record: Record): Unit {
+        let line = formatter.value(record);
+        if (record.level.severity >= Level.Warn().severity) {
+            System.err?.println(line);
+        } else {
+            System.out?.println(line);
+        }
+    }
+
+    public mut flush(): Unit {
+        System.out?.flush();
+        System.err?.flush();
+    }
+
+    public mut dispose(): Unit raises DisposeFailure = ();
+}
+
+class FilteredSink is LogSink {
+    source: &LogSink;
+    min: Level;
+
+    public enabled(level: Level, target: String): Boolean = 
+        level.severity >= min.severity and source.enabled(level, target);
+
+    public mut write(record: Record): Unit {
+        if (record.level.severity < min.severity) return;
+        if (source.enabled(record.level, record.logger)) source.write(record);
+    }
+
+    public mut flush(): Unit = source.flush();
+
+    public mut dispose(): Unit raises DisposeFailure = source.dispose();
+}
+
+public contract LogSink requires Disposable {
+    enabled(level: Level, target: String): Boolean;
+    mut write(record: Record): Unit;
+    default mut flush(): Unit = ();
+}
+
+public extension LogSink {
+    /// Wraps this sink so that it only accepts records at or above `min`.
+    public mut fn minLevel(min: Level): &LogSink = FilteredSink.new(this, min);
+}
+
+namespace LogSink {
+    /// Returns a sink that writes formatted records to standard output and standard error.
+    public fn console(formatter: LogFormatter): &LogSink = 
+        ConsoleSink.new(formatter);
+}

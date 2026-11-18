@@ -471,16 +471,143 @@ public final class SumTypeTest {
     }
 
     @Test
-    public void limitsMatchesBindingsToDirectSuccessfulConditions() {
-        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
-                type Choice = Some(value: Int) | Empty;
-                fn invalid(choice: Choice): Int =
-                    if (choice matches Choice.Some(value) and true) then value else 0;
-                """)));
+    public void supportsMatchesBindingsInChainedConditions() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "ChainedMatch" + suffix;
+        final var choiceType = "ChainedChoice" + suffix;
+        final var source = """
+                public type %s = Some(value: Int) | Other(value: Int) | Empty;
+                fn some(value: Int): %s = %s.Some(value);
+                fn other(value: Int): %s = %s.Other(value);
+                fn empty(): %s = %s.Empty();
+                fn chained(choice: %s): Int =
+                    if (choice matches %s.Some(value) and value > 0) then value else 0;
+                fn alternatively(choice: %s): Int =
+                    if (choice matches %s.Some(value) or choice matches %s.Other(value))
+                    then value else 0;
+                """.formatted(choiceType, choiceType, choiceType, choiceType, choiceType,
+                choiceType, choiceType, choiceType, choiceType, choiceType, choiceType, choiceType);
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                final var choice = loader.loadClass(choiceType);
+                assertEquals(42, program.getMethod("chained", choice)
+                        .invoke(null, program.getMethod("some", int.class).invoke(null, 42)));
+                assertEquals(0, program.getMethod("chained", choice)
+                        .invoke(null, program.getMethod("some", int.class).invoke(null, 0)));
+                assertEquals(7, program.getMethod("alternatively", choice)
+                        .invoke(null, program.getMethod("other", int.class).invoke(null, 7)));
+                assertEquals(0, program.getMethod("alternatively", choice)
+                        .invoke(null, program.getMethod("empty").invoke(null)));
+            }
+        } finally {
+            Files.deleteIfExists(Path.of("dist", programName + ".class"));
+            Files.deleteIfExists(Path.of("dist", choiceType + ".class"));
+            for (final var caseName : List.of("Some", "Other", "Empty")) {
+                Files.deleteIfExists(Path.of("dist", choiceType + "$$sum$" + caseName + ".class"));
+            }
+        }
         assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
                 type Choice = Some(value: Int) | Empty;
                 fn invalid(choice: Choice): Int =
                     if (choice matches Choice.Some(value)) then 1 else value;
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type Choice = Some(value: Int) | Empty;
+                fn invalid(choice: Choice): Int =
+                    if (choice matches Choice.Some(value) or choice matches Choice.Empty())
+                    then value else 0;
+                """)));
+    }
+
+    @Test
+    public void refinesStableMemberPathsAndReadsImplicitProperties() throws Exception {
+        final var suffix = UUID.randomUUID().toString().replace("-", "");
+        final var programName = "StableMemberFlow" + suffix;
+        final var holderType = "Holder" + suffix;
+        final var treeType = "Tree" + suffix;
+        final var source = """
+                public type %s = Leaf(value: Int) | Branch(next: %s?);
+                public class %s {
+                    public property tree: %s?;
+                    public constructor new;
+                    public leafValue(): Int =
+                        if (tree matches %s.Leaf(value)) then tree.value else 0;
+                }
+                fn makeHolder(tree: %s?): %s = %s.new(tree);
+                fn makeLeaf(value: Int): %s = %s.Leaf(value);
+                fn read(holder: %s): Int =
+                    if (holder.tree matches %s.Leaf(value)) then holder.tree.value else 0;
+                fn isLeaf(holder: %s): Boolean =
+                    if (holder.tree is %s.Leaf) then holder.tree.value > 0 else false;
+                fn implicit(holder: %s): Int = holder.leafValue();
+                """.formatted(treeType, treeType, holderType, treeType, treeType,
+                treeType, holderType, holderType, treeType, treeType,
+                holderType, treeType, holderType, treeType, holderType);
+        final var compiler = new CompilationService(parse(source), programName);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                final var holder = loader.loadClass(holderType);
+                final var tree = loader.loadClass(treeType);
+                final var leaf = program.getMethod("makeLeaf", int.class).invoke(null, 42);
+                final var instance = program.getMethod("makeHolder", tree).invoke(null, leaf);
+                assertEquals(42, program.getMethod("read", holder).invoke(null, instance));
+                assertEquals(true, program.getMethod("isLeaf", holder).invoke(null, instance));
+                assertEquals(42, program.getMethod("implicit", holder).invoke(null, instance));
+            }
+        } finally {
+            for (final var name : List.of(programName, holderType, treeType)) {
+                Files.deleteIfExists(Path.of("dist", name + ".class"));
+            }
+            for (final var caseName : List.of("Leaf", "Branch")) {
+                Files.deleteIfExists(Path.of("dist", treeType + "$$sum$" + caseName + ".class"));
+            }
+        }
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                type FlowWriteTree = Leaf(value: Int) | Branch;
+                class FlowWriteHolder {
+                    public property tree: FlowWriteTree?;
+                    public constructor new;
+                }
+                fn invalid(holder: FlowWriteHolder): Int {
+                    let mut current = holder;
+                    if (current.tree is FlowWriteTree.Leaf) {
+                        current = FlowWriteHolder.new(null);
+                        return current.tree.value;
+                    }
+                    return 0;
+                }
+                """)));
+    }
+
+    @Test
+    public void doesNotRefineThroughCustomOrMutableMembers() {
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                class Custom {
+                    raw: Int;
+                    public constructor new;
+                    public property value: Any? {
+                        get = if (this.raw > 0) then this.raw else null;
+                    }
+                }
+                fn invalid(custom: Custom): Int =
+                    if (custom.value is Int) then custom.value + 1 else 0;
+                """)));
+        assertThrows(ResolutionError.class, () -> new ResolutionService().resolve(parse("""
+                class Mutable {
+                    public mut property value: Any?;
+                    public constructor new;
+                }
+                fn invalid(mutable: Mutable): Int =
+                    if (mutable.value is Int) then mutable.value + 1 else 0;
                 """)));
     }
 

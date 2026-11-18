@@ -9,9 +9,8 @@ class ArrayStream<T: mut> is Iterable<T> {
     values: Array<T>;
 
     public iterator(): &Iterator<T> {
-        let array = values;
         return object: Iterator<T> {
-            values: Array<T> = array;
+            values: Array<T> = values;
             current: Int = 0;
 
             public mut next(): Step<T> {
@@ -20,6 +19,34 @@ class ArrayStream<T: mut> is Iterable<T> {
                 this.current = this.current + 1;
                 return Step.Yield(value);
             }
+        };
+    }
+}
+
+class ConcatStream<T: mut> is Iterable<T> {
+    left: Iterable<T>;
+    right: Iterable<T>;
+
+    public iterator(): &Iterator<T> {
+        let l = left.iterator();
+        let r = right.iterator();
+        return object: Iterator<T> {
+            current: &Iterator<T> = l;
+
+            private mut extractNext(): Step<T> {
+                if (this.current === l) {
+                    this.current = r;
+                    return this.current.next();
+                }
+
+                return Step.Done();
+            }
+
+            public mut next(): Step<T> =
+                match (this.current.next()) {
+                    case Yield(value) -> Yield(value);
+                    case Done() -> extractNext();
+                };
         };
     }
 }
@@ -311,6 +338,9 @@ public class Stream<T: mut>
     public constructor fromArray(source: Array<T>) =
         Stream<T>.from(ArrayStream<T>.new(source));
 
+    public constructor concat(fst: Iterable<T>, snd: Iterable<T>) =
+        Stream.from(ConcatStream<T>.new(fst, snd));
+
     /// Returns a new iterator over this stream's elements.
     public iterator(): &Iterator<T> = source.iterator();
 
@@ -375,10 +405,9 @@ public class Stream<T: mut>
     /// decides how items accumulate, and its `finish` produces the value. `StringJoiner`,
     /// `Collector.toArrayList`, and `Collector.summing` are such collectors, so a join, a list
     /// build, or a sum needs no intermediate collection and no per-call folding function.
-    public collectWith<R: mut>(collector: Collector<T, R>): R {
-        let mut current = collector;
-        for (let item in this) current = current.add(item);
-        return current.finish();
+    public collectWith<R: mut>(collector: &Collector<T, R>): R {
+        for (let item in this) if (not collector.add(item)) break;
+        return collector.finish();
     }
 
     /// Whether any element is accepted by `predicate`, stopping at the first acceptance.

@@ -10,4 +10,5 @@ public external class System = "java.lang.System" {
     public static identityHashCode(value: Any?): Int;
     public static nanoTime(): Long;
     public static exit(status: Int): Unit;
+    public static currentTimeMillis(): Long;
 }

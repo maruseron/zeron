@@ -4,6 +4,9 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path as JavaPath;
 
+import com.maruseron.zeron.runtime.FileSystemSupport;
+
+import zeron.internal.generateArray;
 import zeron.io.IoFailure;
 import zeron.lang.Display;
 import zeron.lang.Eq;
@@ -52,6 +55,22 @@ public class Path is Eq<Path>, Display {
     public isFile(): Boolean = File.new(this.value).isFile();
 
     public isDirectory(): Boolean = File.new(this.value).isDirectory();
+
+    /// Returns this directory's immediate children, in no specified order.
+    ///
+    /// Raises `IoFailure` when this path is not a directory or cannot be read.
+    public list(): Array<Path> raises IoFailure {
+        let entries = FileSystemSupport.list(this.toJavaPath());
+        return generateArray<Path>(entries.length, (index) -> Path.from(entries[index]));
+    }
+
+    /// Returns this path and every entry beneath it, recursively, in no specified order.
+    ///
+    /// The starting path is included. Raises `IoFailure` when the tree cannot be walked.
+    public walk(): Array<Path> raises IoFailure {
+        let entries = FileSystemSupport.walk(this.toJavaPath());
+        return generateArray<Path>(entries.length, (index) -> Path.from(entries[index]));
+    }
 
     public createDirectory(): Unit raises IoFailure {
         Files.createDirectory(this.toJavaPath());

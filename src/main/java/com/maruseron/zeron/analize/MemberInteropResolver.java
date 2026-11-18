@@ -35,52 +35,116 @@ final class MemberInteropResolver {
         final var receiverLambdaType = receiverScope == null
                 || receiverScope.token().type() == TokenType.THIS
                 ? null : receiverScope.type();
-        final var owner = receiverLambdaType == null
-                ? context.frame.currentMethodOwner
-                : context.classes.get(Resolver.className(context, receiverLambdaType));
-        if (owner == null) return null;
-        final var availableFields = receiverLambdaType != null || context.frame.initializerVisibleFields == null
-                ? owner.fields() : context.frame.initializerVisibleFields;
-        var field = availableFields.stream()
-                .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
-                .findFirst()
-                .orElse(null);
-        if (field == null && owner.dataClass()) {
-            field = owner.dataComponentFields().stream()
+        final var receiverOwnerType = receiverLambdaType != null ? receiverLambdaType
+                : receiverScope == null ? null : receiverScope.type();
+        final var ownerName = receiverOwnerType == null
+                ? context.frame.currentMethodOwner == null ? null
+                        : context.frame.currentMethodOwner.name().lexeme()
+                : Resolver.className(context, receiverOwnerType);
+        if (ownerName == null) return null;
+        final var owner = context.classes.get(ownerName);
+        final var contract = owner == null ? context.contracts.get(ownerName) : null;
+        if (owner == null && contract == null) return null;
+
+        Stmt.Field field = null;
+        if (owner != null) {
+            final var availableFields = receiverLambdaType != null
+                    || context.frame.initializerVisibleFields == null
+                    ? owner.fields() : context.frame.initializerVisibleFields;
+            field = availableFields.stream()
                     .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
                     .findFirst()
                     .orElse(null);
-            if (field != null && receiverLambdaType == null
-                    && context.frame.initializerVisibleFields != null
-                    && context.frame.initializerVisibleFields.stream()
-                    .noneMatch(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))) {
-                field = null;
+            if (field == null && owner.dataClass()) {
+                field = owner.dataComponentFields().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
+                        .findFirst()
+                        .orElse(null);
+                if (field != null && receiverLambdaType == null
+                        && context.frame.initializerVisibleFields != null
+                        && context.frame.initializerVisibleFields.stream()
+                        .noneMatch(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))) {
+                    field = null;
+                }
             }
         }
-        if (field == null) return null;
+        final var classProperty = field == null && owner != null
+                && (receiverLambdaType != null || context.frame.initializerVisibleFields == null)
+                ? owner.properties().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
+                        .findFirst().orElse(null)
+                : null;
+        final var contractProperty = field == null && classProperty == null && contract != null
+                ? contract.properties().stream()
+                        .filter(candidate -> candidate.name().lexeme().equals(variable.name.lexeme()))
+                        .findFirst().orElse(null)
+                : null;
+        if (field == null && classProperty == null && contractProperty == null) return null;
 
         final var receiver = new Expr.Variable(
                 new Token(TokenType.THIS, "this", null, variable.name.span()),
                 TypeDescriptor.ofInfer());
         final var receiverType = ExpressionFlowResolver.resolveExpression(context, receiver);
-        ensureFieldAccessible(context, variable.name, owner.name().lexeme());
+        if (field != null) {
+            ensureFieldAccessible(context, variable.name, ownerName);
+        } else if (classProperty != null && !classProperty.isPublic()
+                && !Objects.equals(context.frame.currentClassName, ownerName)) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INACCESSIBLE_DECLARATION,
+                    variable.name, "Property is private."));
+        }
         final var thisToken = new Token(TokenType.THIS, "this", null, variable.name.span());
         final var implicitReceiverType = context.symbols.containsSymbol(thisToken)
                 ? context.symbols.getSymbol(thisToken).type()
-                : TypeDescriptor.of(owner.name().lexeme());
+                : TypeDescriptor.of(ownerName);
         final var effectiveReceiverType = receiverType == null ? implicitReceiverType : receiverType;
         final var receiverBaseType = effectiveReceiverType instanceof ReferenceDescriptor reference
                 ? reference.baseType() : effectiveReceiverType;
-        final var resolvedType = TypeSubstitution.substitute(field.type(),
-                TypeResolver.substitutionsFor(context, owner.typeParameters(), receiverBaseType));
-        variable.setImplicitFieldRead(receiver, owner.name().lexeme(), field.type());
+        final var declaredMemberType = field != null ? field.type()
+                : classProperty != null ? classProperty.type() : contractProperty.type();
+        final var typeParameters = owner != null ? owner.typeParameters() : contract.typeParameters();
+        final var resolvedType = TypeSubstitution.substitute(declaredMemberType,
+                TypeResolver.substitutionsFor(context, typeParameters, receiverBaseType));
+        if (field != null) {
+            variable.setImplicitFieldRead(receiver, ownerName, field.type(),
+                    field.readOnly());
+        } else {
+            final var readOnly = classProperty != null
+                    && !classProperty.isCustom() && !classProperty.isMutating();
+            variable.setImplicitPropertyRead(receiver, ownerName, declaredMemberType, readOnly);
+        }
         variable.setType(resolvedType);
-        context.recordReference(variable.name, field.name(), resolvedType);
+        context.recordReference(variable.name,
+                field != null ? field.name()
+                        : classProperty != null ? classProperty.name() : contractProperty.name(),
+                resolvedType);
+        final var path = ExpressionFlowResolver.stablePath(context, variable);
+        if (path != null) {
+            final var fact = context.frame.flowState.get(path);
+            if (fact != null) {
+                final var effective = ExpressionFlowResolver.effectiveType(context, resolvedType, fact);
+                variable.setType(effective);
+                return effective;
+            }
+        }
         return resolvedType;
     }
 
     static TypeDescriptor resolveProperty(final ResolutionContext context, final Expr.Property property) {
-        return resolveProperty(context, property, null, false);
+        final var resolved = resolveProperty(context, property, null, false);
+        return applyStableMemberFact(context, property, resolved);
+    }
+
+    private static TypeDescriptor applyStableMemberFact(final ResolutionContext context,
+                                                        final Expr.Property property,
+                                                        final TypeDescriptor resolvedType) {
+        if (!property.stableMember() || property.safeNavigation()) return resolvedType;
+        final var path = ExpressionFlowResolver.stablePath(context, property);
+        if (path == null) return resolvedType;
+        final var fact = context.frame.flowState.get(path);
+        if (fact == null) return resolvedType;
+        final var effective = ExpressionFlowResolver.effectiveType(context, resolvedType, fact);
+        property.setType(effective);
+        return effective;
     }
 
     private static TypeDescriptor resolveProperty(final ResolutionContext context, final Expr.Property property,
@@ -259,6 +323,7 @@ final class MemberInteropResolver {
                             TypeResolver.substitutionsFor(context, sum.typeParameters(), appliedSumType));
                     property.setResolvedOwnerName(ownerName);
                     property.setSumPayloadIndex(index);
+                    property.setStableMember(true);
                     final var resultType = property.safeNavigation()
                             ? payloadType.toNullable() : payloadType;
                     property.setType(resultType);
@@ -283,6 +348,7 @@ final class MemberInteropResolver {
                     resolvedPropertyType(context, ownerName, propertyDeclaration, memberReceiverType), property.name);
             property.setResolvedOwnerName(propertyDeclaration.ownerName());
             property.setResolvedAsProperty(true);
+            property.setStableMember(isStableZeronProperty(context, propertyDeclaration));
             context.recordReference(property.name, propertyDeclaration.nameToken(), propertyType);
             final var resultType = property.safeNavigation()
                     ? propertyType.toNullable()
@@ -315,6 +381,7 @@ final class MemberInteropResolver {
                 final var fieldType = exposeProjectedResult(resolvedFieldType, property.name);
                 property.setJavaFieldTarget(new JavaFieldTarget(ownerName, javaField.name(),
                         javaField.descriptor().descriptorString(), false, javaField.isFinal()));
+                property.setStableMember(javaField.isFinal());
                 final var resultType = property.safeNavigation() ? fieldType.toNullable() : fieldType;
                 property.setType(resultType);
                 finishSafeNavigation(context, safeFlows);
@@ -330,6 +397,7 @@ final class MemberInteropResolver {
                 ensureFieldAccessible(context, property.name, ownerName);
                 final var fieldType = TypeSubstitution.substitute(field.type(),
                         TypeResolver.substitutionsFor(context, owner.typeParameters(), memberReceiverType));
+                property.setStableMember(field.readOnly());
                 context.recordReference(property.name, field.name(), fieldType);
                 final var resultType = property.safeNavigation() ? fieldType.toNullable() : fieldType;
                 property.setType(resultType);
@@ -3254,6 +3322,17 @@ final class MemberInteropResolver {
                 .findFirst()
                 .orElseThrow(() -> new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                         name, "Unknown field."));
+    }
+
+    private static boolean isStableZeronProperty(final ResolutionContext context,
+                                                 final PropertyInfo property) {
+        final var owner = context.classes.get(property.ownerName());
+        if (owner == null) return false;
+        return owner.properties().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(property.name()))
+                .findFirst()
+                .map(candidate -> !candidate.isCustom() && !candidate.isMutating())
+                .orElse(false);
     }
 
     static PropertyInfo findProperty(final ResolutionContext context, final String ownerName, final Token name) {

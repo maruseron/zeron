@@ -97,10 +97,7 @@ final class ExpressionFlowEmitter {
     static List<Token> beginSumCaseTestBindings(final CompilationContext context,
                                                final CodeBuilder composer,
                                                final Expr condition) {
-        final var candidate = sumCaseTest(condition);
-        if (!(candidate instanceof Expr.SumCaseTest test)) return List.of();
-        final var bindings = test.pattern.arguments().stream()
-                .filter(argument -> argument.binding() != null).toList();
+        final var bindings = conditionPayloadBindings(condition);
         if (bindings.isEmpty()) return List.of();
         context.symbols.beginScope();
         final var names = new ArrayList<Token>();
@@ -127,12 +124,32 @@ final class ExpressionFlowEmitter {
         return names;
     }
 
-    private static Expr sumCaseTest(final Expr expression) {
-        return switch (expression) {
-            case Expr.Grouping grouping -> sumCaseTest(grouping.expression);
-            case Expr.Unary unary when unary.operator.type() == TokenType.NOT -> sumCaseTest(unary.right);
-            default -> expression;
-        };
+    /// Every payload binding that a `matches` test in the condition can store. The emitter
+    /// declares the whole set for the condition's scope, so both short-circuit operands and
+    /// both branches can address the slots their pattern writes.
+    private static List<Expr.MatchPattern> conditionPayloadBindings(final Expr expression) {
+        final var bindings = new java.util.LinkedHashMap<String, Expr.MatchPattern>();
+        collectConditionPayloadBindings(expression, bindings);
+        return List.copyOf(bindings.values());
+    }
+
+    private static void collectConditionPayloadBindings(
+            final Expr expression, final java.util.LinkedHashMap<String, Expr.MatchPattern> bindings) {
+        switch (expression) {
+            case Expr.Grouping grouping ->
+                    collectConditionPayloadBindings(grouping.expression, bindings);
+            case Expr.Unary unary when unary.operator.type() == TokenType.NOT ->
+                    collectConditionPayloadBindings(unary.right, bindings);
+            case Expr.Logical logical -> {
+                collectConditionPayloadBindings(logical.left, bindings);
+                collectConditionPayloadBindings(logical.right, bindings);
+            }
+            case Expr.SumCaseTest test -> test.pattern.arguments().stream()
+                    .filter(argument -> argument.binding() != null)
+                    .forEach(argument -> bindings.putIfAbsent(
+                            argument.binding().lexeme(), argument));
+            default -> {}
+        }
     }
 
     static void endSumCaseTestBindings(final CompilationContext context, final List<Token> bindings) {

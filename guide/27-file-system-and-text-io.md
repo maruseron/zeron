@@ -30,6 +30,18 @@ filesystem, normalize automatically, or resolve symbolic links.
 cannot confirm the requested condition, as with the underlying `java.io.File` queries. Use
 operations that raise `IoFailure` when distinguishing an I/O failure matters.
 
+`list()` returns this directory's immediate children, and `walk()` returns this path together with
+every entry beneath it, recursively. Both return an `Array<Path>` and raise `IoFailure` when the
+filesystem cannot be read; `list()` also fails when the path is not a directory. Entries are
+returned eagerly, and their order is not specified.
+
+```zeron
+import zeron.fs.Path;
+import zeron.io.IoFailure;
+
+fn entries(root: Path): Array<Path> raises IoFailure = root.walk();
+```
+
 `createDirectory()` requires the target's parent to exist and fails if the target already exists.
 `createDirectories()` creates missing parent directories. `deleteIfExists()` returns `true` when it
 deletes an entry and `false` when the entry was absent. These operations raise `zeron.io.IoFailure`
@@ -56,5 +68,5 @@ fn save(path: Path, text: String): Unit raises IoFailure, DisposeFailure =
 ```
 
 Unchecked Java exceptions retain their ordinary host behavior. The current API does not provide
-streaming readers or writers, directory iteration, byte-oriented I/O, append options, or asynchronous
-operations.
+streaming readers or writers, incremental directory iteration, byte-oriented I/O, append options, or
+asynchronous operations.

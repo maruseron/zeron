@@ -23,16 +23,47 @@ fn circleRadius(shape: Shape): Float =
     if (shape matches Shape.Circle(radius)) then radius else 0.0;
 ```
 
-`matches` is supported as a direct `if` or `while` condition, including in an `if` expression.
-Parentheses may group the test, and `not` reverses which branch represents a successful match.
-Payload bindings are available only on the successful-match branch:
+`matches` can be an operand of `and`, `or`, and `not` in an `if` or `while` condition, including
+in an `if` expression. Parentheses may group the test. Payload bindings are available only on the
+successful-match path:
 
 ```zeron
 type Option<T> = Some(value: T) | None;
 
 fn valueOrZero(option: Option<Int>): Int =
     if (not (option matches Option.Some(value))) then 0 else value;
+
+fn positive(option: Option<Int>): Int =
+    if (option matches Option.Some(value) and value > 0) then value else 0;
 ```
+
+A binding introduced in the left operand of `and` is visible in the right operand and in the
+combined true branch; it is not visible in the false branch or after the condition. In an `or`
+condition, every alternative must bind the same names with compatible types, and the bindings are
+available only on the joined successful path:
+
+```zeron
+type Outcome = Success(value: Int) | Failure(value: Int) | Empty;
+
+fn valueOrZero(outcome: Outcome): Int =
+    if (outcome matches Outcome.Success(value) or outcome matches Outcome.Failure(value))
+    then value else 0;
+```
+
+The tests may also refine stable read-only members, not only bare locals. A local, parameter, or
+`this` root followed by final fields, stored read-only properties, or sum payloads keeps its
+refinement through the chain:
+
+```zeron
+type Tree = Leaf(value: Int) | Branch(left: Tree, right: Tree);
+
+fn leftIsLeaf(tree: Tree): Boolean =
+    if (tree is Tree.Branch and tree.left is Tree.Leaf)
+    then tree.left.value > 0 else false;
+```
+
+Mutable fields, mutable properties, array slots, call results, and custom getters do not refine a
+later read; bind such a value to a local first.
 
 When a branch rules out all but one sum case, the remaining case's payload properties are available
 on that branch:
@@ -44,9 +75,9 @@ fn valueOrZero(option: Option<Int>): Int {
 }
 ```
 
-This negative refinement is limited to direct `matches` tests on closed sum types. It does not apply
-to `is` tests or to `matches` combined with `and` or `or`. Use a `match` expression for several
-alternatives or more involved conditions.
+This negative refinement is limited to `matches` tests on closed sum types. It does not apply to
+`is` tests or open class hierarchies. Use a `match` expression for several alternatives or more
+involved conditions.
 
 ## Choosing a case with `match`
 

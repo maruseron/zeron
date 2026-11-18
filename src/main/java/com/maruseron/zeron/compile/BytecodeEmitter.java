@@ -483,6 +483,14 @@ final class BytecodeEmitter {
                     emitIntrinsicOperation(context, composer, property, true);
                 } else if (property.resolvedAsProperty()) {
                     final var ownerName = property.resolvedOwnerName();
+                    if (isNewtypeValueAccess(context, ownerName, property)) {
+                        // A newtype's representation is the value itself, so reading `value` is
+                        // identity: leave the receiver carrier on the stack and skip the accessor
+                        // of the synthetic newtype class, which is never emitted.
+                        emitExpr(context, composer, property.receiver);
+                        context.lastEmittedType = property.getType();
+                        break;
+                    }
                     final var declaredType = declarationPropertyType(context, ownerName, property.name.lexeme());
                     final var erasedType = TypeSubstitution.erase(declaredType);
                     emitExpr(context, composer, property.receiver);
@@ -523,7 +531,10 @@ final class BytecodeEmitter {
             case Expr.Index index -> emitIntrinsicOperation(context, composer, index, true);
             case Expr.IndexAssignment assignment -> emitIntrinsicOperation(context, composer, assignment, true);
             case Expr.Assignment assignment -> {
-                if (assignment.dataFieldOwner() != null) {
+                if (assignment.implicitPropertyAssignment() != null) {
+                    emitPropertyAssignment(context, composer,
+                            assignment.implicitPropertyAssignment(), true);
+                } else if (assignment.dataFieldOwner() != null) {
                     final var fieldType = TypeSubstitution.erase(assignment.dataFieldType());
                     emitExpr(context, composer, assignment.value);
                     emitConversion(context, composer, context.lastEmittedType, fieldType);
@@ -907,6 +918,14 @@ final class BytecodeEmitter {
             case Expr.Variable variable -> {
                 if (variable.resolvedFunctionName() != null) {
                     LambdaSupportEmitter.emitFunctionReference(context, composer, variable);
+                } else if (variable.implicitPropertyReceiver() != null) {
+                    emitExpr(context, composer, variable.implicitPropertyReceiver());
+                    final var owner = variable.implicitPropertyOwner();
+                    final var declaredType = variable.implicitPropertyType();
+                    final var erasedType = TypeSubstitution.erase(declaredType);
+                    emitPropertyGetterCall(context, composer, owner, variable.name.lexeme(), declaredType);
+                    emitConversion(context, composer, erasedType, variable.getType());
+                    context.lastEmittedType = variable.getType();
                 } else if (variable.implicitFieldReceiver() != null) {
                     emitExpr(context, composer, variable.implicitFieldReceiver());
                     final var owner = variable.implicitFieldOwner();
@@ -2414,6 +2433,16 @@ final class BytecodeEmitter {
         context.lastEmittedType = call.getType();
     }
 
+    /// Whether `property` is the synthetic `value` accessor of a newtype. Newtypes have no emitted
+    /// class or accessor; the representation is the value itself.
+    private static boolean isNewtypeValueAccess(final CompilationContext context,
+                                                final String ownerName,
+                                                final Expr.Property property) {
+        return ownerName != null
+                && property.name.lexeme().equals("value")
+                && context.resolution.newtypes().containsKey(ownerName);
+    }
+
     private static void emitFunctionPropertyValueWithReceiverOnStack(final CompilationContext context,
                                                                      final CodeBuilder composer,
                                                                      final Expr.Property property) {
@@ -2443,6 +2472,10 @@ final class BytecodeEmitter {
         }
         if (property.resolvedAsProperty()) {
             final var owner = property.resolvedOwnerName();
+            if (isNewtypeValueAccess(context, owner, property)) {
+                context.lastEmittedType = property.getType();
+                return;
+            }
             final var declaredType = declarationPropertyType(context, owner, property.name.lexeme());
             final var erasedType = TypeSubstitution.erase(declaredType);
             emitPropertyGetterCall(context, composer, owner, property.name.lexeme(), declaredType);

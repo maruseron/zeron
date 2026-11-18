@@ -338,12 +338,16 @@ Other follow-up areas:
    opt-in boundary and do not alter ordinary Java exception propagation.
 6. [Effect-row polymorphism](../zeps/ZEP-0086.md) is implemented with declaration-level row
    quantification; higher-rank row-polymorphic function values remain unsupported.
-7. Decide whether observable I/O belongs in the raised-effect system. `raises` currently describes
-   typed control-flow effects, not purity or the absence of observable side effects, so `println`
-   can have no declared raised effects without being pure. If operations such as `println` were to
-   raise a hypothetical `IO` effect, weigh the semantic benefit against the learning burden of
-   introducing effect handling early; `main` may declare such effects and let them escape to the
-   host boundary.
+7. Observable I/O remains outside the raised-effect system. `raises` describes typed control-flow
+   effects, not purity or the absence of observable side effects, so `println` can have no declared
+   raised effects without being pure. [ZEP-0050](../zeps/ZEP-0050.md) (Accepted for `0.8.0`) settles
+   the interop trust boundary: curated facades carry reviewed effect signatures, direct Java access
+   requires an explicit `unsafe` expression, and no implicit `IO` effect is introduced.
+   [ZEP-0148](../zeps/ZEP-0148.md) adds contextual Java SAM conversion; a converted lambda or
+   top-level function reference must have an empty `raises` row, so a `zeron.runtime.RaisedEffect`
+   never crosses into Java. A general purity or IO effect would apply to the whole language and
+   remains a separate design; `main` may declare such effects and let them escape to the host
+   boundary if one is adopted.
 8. [ZEP-0056](../zeps/ZEP-0056.md) and [ZEP-0057](../zeps/ZEP-0057.md) implement named reusable
    handlers and first-class structural handler types. These remain abortive and preserve `match` for
    ordinary value inspection; resumable continuations are a separate design question.

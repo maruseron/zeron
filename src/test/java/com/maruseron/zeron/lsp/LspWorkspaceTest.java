@@ -1981,6 +1981,67 @@ public class LspWorkspaceTest {
     }
 
     @Test
+    public void hoversAndCompletesImplicitMembersAndChainedMatchesBindings() throws Exception {
+        final var source = """
+                type FlowChoice = Some(value: Int) | Empty;
+                class FlowBox {
+                    public property amount: Int;
+                    secret: Int;
+                    public constructor new;
+                    public read(): Int = amount + secret;
+                    public pick(choice: FlowChoice): Int =
+                        if (choice matches FlowChoice.Some(value) and value > 0)
+                        then value else 0;
+                }
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var memberHover = hoverAt(snapshot, project.entry(), source, "amount + secret");
+        final var fieldHover = hoverAt(snapshot, project.entry(), source, "amount + secret",
+                "amount + ".length());
+        final var operandHover = hoverAt(snapshot, project.entry(), source, "value > 0", 1);
+        final var branchHover = hoverAt(snapshot, project.entry(), source, "then value",
+                "then ".length() + 1);
+        assertTrue("hover=" + memberHover, memberHover.contains("property amount: Int"));
+        assertTrue("hover=" + fieldHover, fieldHover.contains("field secret: Int"));
+        assertTrue("hover=" + operandHover, operandHover.contains("value value: Int"));
+        assertTrue("hover=" + branchHover, branchHover.contains("value value: Int"));
+
+        final var memberCompletion = completionAt(snapshot, project.entry(), source,
+                "amount + secret", "amo".length());
+        final var fieldCompletion = completionAt(snapshot, project.entry(), source,
+                "amount + secret", "amount + sec".length());
+        final var operandCompletion = completionAt(snapshot, project.entry(), source,
+                "value > 0", "val".length());
+        final var branchCompletion = completionAt(snapshot, project.entry(), source,
+                "then value", "then val".length());
+        assertTrue("completion=" + memberCompletion.getItems(), memberCompletion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("amount")
+                        && item.getKind() == org.eclipse.lsp4j.CompletionItemKind.Property
+                        && "this.amount: Int".equals(item.getDetail())));
+        assertTrue("completion=" + fieldCompletion.getItems(), fieldCompletion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("secret")
+                        && item.getKind() == org.eclipse.lsp4j.CompletionItemKind.Field));
+        assertTrue("completion=" + operandCompletion.getItems(), operandCompletion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("value")
+                        && "Int".equals(item.getDetail())));
+        assertTrue("completion=" + branchCompletion.getItems(), branchCompletion.getItems().stream()
+                .anyMatch(item -> item.getLabel().equals("value")));
+
+        final var incomplete = source.replace("and value > 0", "and val")
+                .replace("then value else 0", "then 0 else 0");
+        final var incompleteSnapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of(
+                project.entry(), new ProjectAnalysisWorkspace.Overlay(1, incomplete)));
+        final var incompleteCompletion = LspFeatures.completion(incompleteSnapshot, project.entry(),
+                DocumentCoordinates.positionAt(incomplete,
+                        incomplete.indexOf("and val") + "and val".length()));
+        assertTrue("completion=" + incompleteCompletion.getItems(),
+                incompleteCompletion.getItems().stream()
+                        .anyMatch(item -> item.getLabel().equals("value")));
+    }
+
+    @Test
     public void completionContinuesForIncompleteMemberAccess() throws Exception {
         final var source = """
                 public class Predicate {

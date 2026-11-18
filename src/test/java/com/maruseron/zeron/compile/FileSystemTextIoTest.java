@@ -36,6 +36,7 @@ public final class FileSystemTextIoTest {
                 import zeron.io.text.openTextReader;
                 import zeron.io.text.openTextWriter;
                 import zeron.io.text.writeText;
+                import zeron.internal.generateArray;
                 import zeron.lang.Option;
                 import zeron.resource.DisposeFailure;
                 public fn normalized(value: String): String =
@@ -48,6 +49,20 @@ public final class FileSystemTextIoTest {
                 public fn exists(value: String): Boolean = Path.from(value).exists();
                 public fn isFile(value: String): Boolean = Path.from(value).isFile();
                 public fn isDirectory(value: String): Boolean = Path.from(value).isDirectory();
+                public fn listPaths(value: String): Array<String> raises IoFailure {
+                    let entries = Path.from(value).list();
+                    return generateArray<String>(
+                        entries.length,
+                        (index) -> entries[index].toString()
+                    );
+                }
+                public fn walkPaths(value: String): Array<String> raises IoFailure {
+                    let entries = Path.from(value).walk();
+                    return generateArray<String>(
+                        entries.length,
+                        (index) -> entries[index].toString()
+                    );
+                }
                 public fn createDirectories(value: String): Unit raises IoFailure {
                     Path.from(value).createDirectories();
                 }
@@ -145,6 +160,24 @@ public final class FileSystemTextIoTest {
                 assertTrue(Files.isDirectory(nested));
                 assertTrue((Boolean) main.getMethod("exists", String.class).invoke(null, nested.toString()));
                 assertTrue((Boolean) main.getMethod("isDirectory", String.class).invoke(null, nested.toString()));
+
+                final var tree = output.resolve("tree");
+                main.getMethod("createDirectories", String.class)
+                        .invoke(null, tree.resolve("sub").toString());
+                Files.writeString(tree.resolve("a.txt"), "a");
+                Files.writeString(tree.resolve("sub").resolve("b.txt"), "b");
+                assertEquals(java.util.Set.of(
+                                tree.resolve("a.txt").toString(),
+                                tree.resolve("sub").toString()),
+                        pathSet(main.getMethod("listPaths", String.class)
+                                .invoke(null, tree.toString())));
+                assertEquals(java.util.Set.of(
+                                tree.toString(),
+                                tree.resolve("a.txt").toString(),
+                                tree.resolve("sub").toString(),
+                                tree.resolve("sub").resolve("b.txt").toString()),
+                        pathSet(main.getMethod("walkPaths", String.class)
+                                .invoke(null, tree.toString())));
 
                 final var textFile = nested.resolve("sample.txt");
                 final var content = "café\r\nsecond line\n";
@@ -244,6 +277,13 @@ public final class FileSystemTextIoTest {
             Files.deleteIfExists(sourceFile);
             Files.deleteIfExists(outputPath);
         }
+    }
+
+    private static java.util.Set<String> pathSet(final Object result) {
+        final var entries = (Object[]) result;
+        final var paths = new java.util.HashSet<String>();
+        for (final var entry : entries) paths.add(entry.toString());
+        return paths;
     }
 
     private static CompilationUnit parse(final String sourceName, final String source) {

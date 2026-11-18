@@ -20,6 +20,16 @@ public class AnsiSyntaxHighlighterTest {
     }
 
     @Test
+    public void keepsHighlightingAfterCharacterLiteralContainingDoubleQuote() {
+        final var highlighted = AnsiSyntaxHighlighter.highlight(
+                "let quote: Char = '\"'; let text = \"ok\";");
+
+        assertTrue(highlighted.contains(AnsiColor.apply("'\"'", "32")));
+        assertTrue(highlighted.contains(AnsiColor.apply("\"ok\"", "32")));
+        assertEquals(2, occurrences(highlighted, AnsiColor.apply("let", "35")));
+    }
+
+    @Test
     public void highlightsRangeOperatorsWithExpressionEndpoints() {
         final var highlighted = AnsiSyntaxHighlighter.highlight("""
                 for (let index in 0..values.length - 1) {

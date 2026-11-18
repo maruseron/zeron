@@ -3,18 +3,18 @@ package zeron.io;
 import java.lang.IO as JavaIO;
 import java.lang.System;
 
-public fn print(value: Any?): Unit raises IoFailure {
+public fn print(value: Any?): Unit {
     System.out?.print(value);
 }
 
-public fn println(value: Any?): Unit raises IoFailure {
+public fn println(value: Any?): Unit {
     System.out?.println(value);
 }
 
-public fn readln(): String? raises IoFailure {
+public fn readln(): String? {
     return JavaIO.readln();
 }
 
-public fn prompt(prompt: String): String? raises IoFailure {
+public fn prompt(prompt: String): String? {
     return JavaIO.readln(prompt);
 }

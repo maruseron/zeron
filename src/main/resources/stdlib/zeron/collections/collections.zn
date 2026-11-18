@@ -173,7 +173,7 @@ public contract CollectionBuilder<C<_>> {
 /// `Collector.of` when no dedicated implementation exists.
 public contract Collector<T: mut, R: mut> {
     /// Returns a collector that holds `value` after the items already collected.
-    add(value: T): Collector<T, R>;
+    mut add(value: T): Boolean;
 
     /// Returns the collected result.
     finish(): R;
@@ -190,9 +190,10 @@ namespace Collector {
         initial: S,
         add: (S, T) -> S,
         finish: (S) -> R
-    ): Collector<T, R> = CollectorImpl<T, S, R>.of(initial, add, finish);
+    ): &Collector<T, R> = CollectorImpl<T, S, R>.of(initial, add, finish);
+
     /// Creates a collector that gathers the items into a new `ArrayList`, in encounter order.
-    public fn toArrayList<T: mut>(): Collector<T, &ArrayList<T>> =
+    public fn toArrayList<T: mut>(): &Collector<T, &ArrayList<T>> =
         Collector.of<& ArrayList<T>, T, &ArrayList<T>>(
             ArrayList<T>.empty(),
             (values, item) -> {
@@ -201,8 +202,9 @@ namespace Collector {
             },
             (values) -> values
         );
+
     /// Creates a collector that gathers the items into a new `LinkedList`, in encounter order.
-    public fn toLinkedList<T: mut>(): Collector<T, &LinkedList<T>> =
+    public fn toLinkedList<T: mut>(): &Collector<T, &LinkedList<T>> =
         Collector.of<& LinkedList<T>, T, &LinkedList<T>>(
             LinkedList<T>.empty(),
             (values, item) -> {
@@ -211,19 +213,21 @@ namespace Collector {
             },
             (values) -> values
         );
+
     /// Creates a collector that gathers the items into a new `ConsList`, in encounter order.
     ///
     /// A cons list prepends, so the collector builds in reverse and `finish` reverses the result.
-    public fn toConsList<T: mut>(): Collector<T, ConsList<T>> =
+    public fn toConsList<T: mut>(): &Collector<T, ConsList<T>> =
         Collector.of<ConsList<T>, T, ConsList<T>>(
             ConsList<T>.empty(),
             (values, item) -> values.prepend(item),
             (values) -> reversedConsList(values)
         );
+
     /// Creates a collector that gathers `key`/`value` pairs into a new `HashMap`.
     ///
     /// A later entry for an existing key replaces the earlier value.
-    public fn toHashMap<K: Hashable<K>, V: mut>(): Collector<Pair<K, V>, &HashMap<K, V>> =
+    public fn toHashMap<K: Hashable<K>, V: mut>(): &Collector<Pair<K, V>, &HashMap<K, V>> =
         Collector.of<& HashMap<K, V>, Pair<K, V>, &HashMap<K, V>>(
             HashMap<K, V>.empty(),
             (entries, entry) -> {
@@ -232,8 +236,9 @@ namespace Collector {
             },
             (entries) -> entries
         );
+
     /// Creates a collector that gathers the items into a new `HashSet`, dropping duplicates.
-    public fn toHashSet<T: Hashable<T>>(): Collector<T, &HashSet<T>> =
+    public fn toHashSet<T: Hashable<T>>(): &Collector<T, &HashSet<T>> =
         Collector.of<& HashSet<T>, T, &HashSet<T>>(
             HashSet<T>.empty(),
             (elements, item) -> {
@@ -242,8 +247,9 @@ namespace Collector {
             },
             (elements) -> elements
         );
+
     /// Creates a collector that adds the items together, starting from zero.
-    public fn summing<T: Numeric<T>>(): Collector<T, T> =
+    public fn summing<T: Numeric<T>>(): &Collector<T, T> =
         Collector.of<T, T, T>(
             T.fromInteger(Integer.fromInt(0)),
             (total, value) -> total.add(value),
@@ -262,8 +268,10 @@ class CollectorImpl<T: mut, S: mut, R: mut> is Collector<T, R> {
     public constructor of(initial: S, add: (S, T) -> S, finish: (S) -> R) =
         CollectorImpl<T, S, R>.new(initial, add, finish);
 
-    public add(value: T): Collector<T, R> =
-        CollectorImpl<T, S, R>.of(this.step(this.state, value), this.step, this.conversion);
+    public mut add(value: T): Boolean {
+        this.state = this.step(this.state, value);
+        return true;
+    }
 
     public finish(): R = this.conversion(this.state);
 }

@@ -30,12 +30,21 @@ public final class StringApiTest {
                     case Option.Some(char) -> char.toString();
                     case Option.None() -> "none";
                 };
-                fn splitLiteral(): String = String.join("|", "a,b,".split(","));
+                fn splitLiteral(): String = 
+                    String.join("a,b,".split(",")) {
+                        this.separator = "|";
+                    };
                 fn splitSingleSeparatorCount(): Int = "a b c".split(" ").count();
-                fn splitEmptySeparator(): String = String.join("|", "abc".split(""));
+                fn splitEmptySeparator(): String = 
+                    String.join("abc".split("")) {
+                        this.separator = "|";
+                    };
                 fn splitEmptyTextCount(): Int = "".split(",").count();
                 fn splitEmptySeparatorOnEmptyText(): Int = "".split("").count();
-                fn singleLine(): String = String.join("|", "only".lines());
+                fn singleLine(): String = 
+                    String.join("only".lines()) {
+                        this.separator = "|";
+                    };
                 fn emptyTextLinesCount(): Int = "".lines().count();
                 fn charAt(): String = describe("hello".charAt(1));
                 fn atAlias(): String = describe("hello".at(4));
@@ -56,21 +65,39 @@ public final class StringApiTest {
                 fn parseFloatOk(): Float = "2.5e2".toFloat().getOrElse(-1.0);
                 fn parseFloatInvalid(): Float = "1.2.3".toFloat().getOrElse(-1.0);
                 fn regexSplit(): String = match ("a1b22c".splitRegex("[0-9]+")) {
-                    case Result.Ok(parts) -> String.join("|", parts);
+                    case Result.Ok(parts) -> String.join(parts) { 
+                        this.separator = "|"; 
+                    };
                     case Result.Err(_) -> "unexpected";
                 };
                 fn regexSplitInvalid(): Boolean = match ("abc".splitRegex("[")) {
                     case Result.Ok(_) -> false;
                     case Result.Err(_) -> true;
                 };
-                fn joinEmpty(): String = "[" + String.join(", ", emptyStrings()) + "]";
+                fn joinEmpty(): String = 
+                    String.join(emptyStrings()) {
+                        this.prefix = "[";
+                        this.suffix = "]";
+                        this.separator = ", ";
+                    };
                 fn emptyStrings(): Array<String> = [];
-                fn joinSingle(): String = String.join(", ", ["solo"]);
-                fn joinMultiple(): String = String.join(", ", ["a", "b", "c"]);
-                fn collectThroughJoiner(): String =
-                    "abc".split("").collectWith(StringJoiner.withSeparator(":"));
+                fn joinSingle(): String = 
+                    String.join(["solo"]) {
+                        this.separator = ", ";
+                    };
+                fn joinMultiple(): String = 
+                    String.join(["a", "b", "c"]) {
+                        this.separator = ", ";
+                    };
+                fn collectThroughJoiner(): String {
+                    let config = JoinerConfig.new();
+                    config.separator = ":";
+                    return "abc".split("").collectWith(StringJoiner.withConfig(config));
+                }
                 fn collectFromLocalJoiner(): String {
-                    let joiner = StringJoiner.withSeparator(":");
+                    let config = JoinerConfig.new();
+                    config.separator = ":";
+                    let joiner = StringJoiner.withConfig(config);
                     let first = "ab".split("").collectWith(joiner);
                     let second = "cd".split("").collectWith(joiner);
                     return first + "|" + second;
@@ -86,9 +113,12 @@ public final class StringApiTest {
                         (text, value) -> if (text.isEmpty()) then value.toString()
                             else text + "-" + value.toString(),
                         (text) -> "[" + text + "]");
-                fn joinerOnStreamDirectly(): String =
-                    StringJoiner.withSeparator("-").join(Stream<Int>.fromArray([1, 2, 3])
+                fn joinerOnStreamDirectly(): String {
+                    let config = JoinerConfig.new();
+                    config.separator = "-";
+                    return StringJoiner.withConfig(config).join(Stream<Int>.fromArray([1, 2, 3])
                         .map(value -> value.toString()));
+                }
                 fn splitDoesNotShareIterators(): Int {
                     let parts = "a,b,c".split(",");
                     return parts.count() + parts.count();
@@ -132,7 +162,7 @@ public final class StringApiTest {
                 assertEquals("solo", test.getMethod("joinSingle").invoke(null));
                 assertEquals("a, b, c", test.getMethod("joinMultiple").invoke(null));
                 assertEquals("a:b:c", test.getMethod("collectThroughJoiner").invoke(null));
-                assertEquals("a:b|c:d", test.getMethod("collectFromLocalJoiner").invoke(null));
+                assertEquals("a:b|a:b:c:d", test.getMethod("collectFromLocalJoiner").invoke(null));
                 assertEquals("[123]", test.getMethod("collectThroughFactory").invoke(null));
                 assertEquals("[1-2-3]", test.getMethod("collectThroughOperations").invoke(null));
                 assertEquals("1-2-3", test.getMethod("joinerOnStreamDirectly").invoke(null));

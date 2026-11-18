@@ -10,6 +10,9 @@
       "include": "#annotations"
     },
     {
+      "include": "#characters"
+    },
+    {
       "include": "#strings"
     },
     {
@@ -69,10 +72,20 @@
         }
       ]
     },
+    "characters": {
+      "name": "string.quoted.single.zeron",
+      "match": "'(?:\\\\u\\{[0-9A-Fa-f]+\\}|\\\\.|[^'\\\\\\r\\n])'"
+    },
     "strings": {
       "name": "string.quoted.double.zeron",
       "begin": "\"",
-      "end": "\""
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.zeron",
+          "match": "\\\\."
+        }
+      ]
     },
     "for-expression": {
       "name": "meta.for-expression.zeron",
@@ -100,6 +113,9 @@
         },
         {
           "include": "#annotations"
+        },
+        {
+          "include": "#characters"
         },
         {
           "include": "#strings"

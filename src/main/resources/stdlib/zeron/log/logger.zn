@@ -1,0 +1,79 @@
+package zeron.log;
+
+import zeron.collections.HashMap;
+import zeron.collections.Map;
+import zeron.time.Clock;
+
+public class Logger {
+    public property name: String;
+    public property sink: &LogSink;
+    public property clock: Clock;
+    public property context: HashMap<String, Value>;
+
+    private constructor new;
+
+    public constructor of(name: String, sink: &LogSink) =
+        Logger.new(name, sink, Clock.system(), HashMap.empty());
+
+    public constructor withClock(name: String, sink: &LogSink, clock: Clock) =
+        Logger.new(name, sink, clock, HashMap.empty());
+
+    /// Whether `level` would be written by this logger's sink.
+    public isEnabled(level: Level): Boolean =
+        this.sink.enabled(level, this.name);
+
+    public log(
+        level: Level,
+        cause: Option<Effect>,
+        message: () -> String
+    ): Unit {
+        if (this.isEnabled(level)) {
+            this.sink.write(Record.new(
+                this.clock.now(),
+                level,
+                this.name,
+                message(),
+                this.context,
+                cause));
+        }
+    }
+
+    public trace(message: () -> String): Unit = 
+        log(Level.Trace(), Option.None(), message);
+
+    public debug(message: () -> String): Unit = 
+        log(Level.Debug(), Option.None(), message);
+
+    public info(message: () -> String): Unit = 
+        log(Level.Info(), Option.None(), message);
+
+    public warn(message: () -> String): Unit = 
+        log(Level.Warn(), Option.None(), message);
+
+    public error(message: () -> String): Unit = 
+        log(Level.Error(), Option.None(), message);
+
+    public errorWith(cause: Effect, message: () -> String): Unit = 
+        log(Level.Error(), Option.Some(cause), message);
+
+    public named(child: String): Logger = 
+        Logger.new(this.name + "." + child, this.sink, this.clock, this.context);
+
+    public with(fields: Map<String, Value>): Logger {
+        return Logger.new(this.name, this.sink, this.clock,
+            mergeFields(this.context, fields));
+    }
+
+    /// Flushes this logger's sink.
+    public flush(): Unit = this.sink.flush();
+}
+
+fn mergeFields(
+    a: Map<String, Value>,
+    b: Map<String, Value>
+): HashMap<String, Value> {
+    let merged = HashMap<String, Value>.empty();
+    for (let item in a) merged.put(item.fst, item.snd);
+    for (let item in b) merged.put(item.fst, item.snd);
+    return merged;
+}

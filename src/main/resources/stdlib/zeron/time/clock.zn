@@ -1,0 +1,39 @@
+package zeron.time;
+
+/// A source of `Instant` values for elapsed-time measurement.
+///
+/// `Clock` is the injection point for code that needs the current instant. `Clock.system()`
+/// samples the same monotonic clock as `Instant.now()`, while `Clock.fixed(instant)` always
+/// returns the supplied instant so tests and deterministic renders do not depend on the host
+/// clock. A clock is not a wall-clock timestamp; `Instant` remains monotonic as documented by
+/// `zeron.time`.
+public contract Clock {
+    /// Returns the current instant from this clock.
+    now(): Instant;
+}
+
+class SystemClock is Clock {
+    private constructor new;
+
+    public constructor system() = SystemClock.new();
+
+    public now(): Instant = Instant.now();
+}
+
+class FixedClock is Clock {
+    instant: Instant;
+
+    private constructor new;
+
+    public constructor at(instant: Instant) = FixedClock.new(instant);
+
+    public now(): Instant = this.instant;
+}
+
+namespace Clock {
+    /// Returns a clock backed by the host's monotonic time source.
+    public fn system(): Clock = SystemClock.system();
+
+    /// Returns a clock that always reports `instant`.
+    public fn fixed(instant: Instant): Clock = FixedClock.at(instant);
+}

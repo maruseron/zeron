@@ -104,7 +104,7 @@ public final class CollectorApiTest {
                 assertEquals(1.75, test.getMethod("sumFloats").invoke(null));
                 assertEquals(0, test.getMethod("sumOfNothing").invoke(null));
                 assertEquals(12, test.getMethod("operationsInsteadOfCollector").invoke(null));
-                assertEquals("2-1", test.getMethod("reusedCollector").invoke(null));
+                assertEquals("2-3", test.getMethod("reusedCollector").invoke(null));
             }
         } finally {
             deleteTree(Path.of("dist"));

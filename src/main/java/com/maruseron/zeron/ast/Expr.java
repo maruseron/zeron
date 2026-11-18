@@ -287,6 +287,7 @@ public sealed interface Expr {
         private ResolvedIntrinsicOperation intrinsicOperation;
         private String resolvedOwnerName;
         private boolean resolvedAsProperty;
+        private boolean stableMember;
         private int sumPayloadIndex = -1;
         private JavaFieldTarget javaFieldTarget;
         private Token namespaceValueSymbol;
@@ -313,6 +314,8 @@ public sealed interface Expr {
         public void setResolvedOwnerName(final String ownerName) { resolvedOwnerName = ownerName; }
         public boolean resolvedAsProperty() { return resolvedAsProperty; }
         public void setResolvedAsProperty(final boolean value) { resolvedAsProperty = value; }
+        public boolean stableMember() { return stableMember; }
+        public void setStableMember(final boolean value) { stableMember = value; }
         public int sumPayloadIndex() { return sumPayloadIndex; }
         public void setSumPayloadIndex(final int index) { sumPayloadIndex = index; }
         public JavaFieldTarget javaFieldTarget() { return javaFieldTarget; }
@@ -461,6 +464,7 @@ public sealed interface Expr {
         private Token resolvedSymbolToken;
         private String dataFieldOwner;
         private TypeDescriptor dataFieldType;
+        private PropertyAssignment implicitPropertyAssignment;
 
         public Assignment(Token name, Expr value, TypeDescriptor type) {
             this.name = name;
@@ -482,6 +486,10 @@ public sealed interface Expr {
         public void setDataFieldTarget(final String owner, final TypeDescriptor fieldType) {
             dataFieldOwner = owner;
             dataFieldType = fieldType;
+        }
+        public PropertyAssignment implicitPropertyAssignment() { return implicitPropertyAssignment; }
+        public void setImplicitPropertyAssignment(final PropertyAssignment assignment) {
+            implicitPropertyAssignment = assignment;
         }
 
         public boolean equals(Object obj) {
@@ -1867,6 +1875,11 @@ public sealed interface Expr {
         private Expr implicitFieldReceiver;
         private String implicitFieldOwner;
         private TypeDescriptor implicitFieldType;
+        private boolean implicitFieldReadOnly;
+        private Expr implicitPropertyReceiver;
+        private String implicitPropertyOwner;
+        private TypeDescriptor implicitPropertyType;
+        private boolean implicitPropertyReadOnly;
 
         public Variable(Token name, TypeDescriptor type) {
             this(name, type, List.of());
@@ -1916,10 +1929,24 @@ public sealed interface Expr {
         public Expr implicitFieldReceiver() { return implicitFieldReceiver; }
         public String implicitFieldOwner() { return implicitFieldOwner; }
         public TypeDescriptor implicitFieldType() { return implicitFieldType; }
-        public void setImplicitFieldRead(final Expr receiver, final String owner, final TypeDescriptor fieldType) {
+        public boolean implicitFieldReadOnly() { return implicitFieldReadOnly; }
+        public void setImplicitFieldRead(final Expr receiver, final String owner,
+                                         final TypeDescriptor fieldType, final boolean readOnly) {
             implicitFieldReceiver = receiver;
             implicitFieldOwner = owner;
             implicitFieldType = fieldType;
+            implicitFieldReadOnly = readOnly;
+        }
+        public Expr implicitPropertyReceiver() { return implicitPropertyReceiver; }
+        public String implicitPropertyOwner() { return implicitPropertyOwner; }
+        public TypeDescriptor implicitPropertyType() { return implicitPropertyType; }
+        public boolean implicitPropertyReadOnly() { return implicitPropertyReadOnly; }
+        public void setImplicitPropertyRead(final Expr receiver, final String owner,
+                                            final TypeDescriptor propertyType, final boolean readOnly) {
+            implicitPropertyReceiver = receiver;
+            implicitPropertyOwner = owner;
+            implicitPropertyType = propertyType;
+            implicitPropertyReadOnly = readOnly;
         }
 
         public boolean equals(Object obj) {

@@ -21,8 +21,9 @@ resolution. Passing a prebuilt Java array as a varargs argument is not generally
 
 Interop is not Java reflection or a general Java type system. Generic Java types, inherited-member
 search, Java fields beyond the implemented subset, arbitrary Java arrays, and callback/SAM
-conversions are unsupported. The standard library also supplies an allowlisted
-`java.io.File` facade:
+conversions are unsupported today; callback/SAM conversion is planned for `0.8.0` under
+[ZEP-0148](../documents/zeps/ZEP-0148.md) and described below. The standard library also supplies an
+allowlisted `java.io.File` facade:
 
 ```zeron
 import java.io.File;
@@ -60,6 +61,22 @@ type. Every checked exception in the Java method's declared exception list must 
 multiple types match, the most-specific mapping is selected. `RuntimeException` descendants and
 `Error`s always propagate unchanged, and checked-exception constructors are not yet supported.
 Mappings and the derived raised-effect signatures are preserved in compiled-library API indexes.
+
+A direct Java call that declares no checked exception currently contributes no raised effect. The
+compiler cannot verify that such a call is pure or that it cannot throw an unchecked exception, and
+the same is true of calls through a facade beyond the facade's declared mappings. [ZEP-0050](../documents/zeps/ZEP-0050.md)
+(Accepted for `0.8.0`) records the intended direction: direct Java access becomes an explicit
+`unsafe` boundary, while curated facades remain the trusted tier. Until that lands, prefer facades
+for reusable operations and review any direct Java call as an unchecked host boundary.
+
+Java functional-interface callback conversion is not implemented yet. [ZEP-0148](../documents/zeps/ZEP-0148.md)
+(Accepted for `0.8.0`) records the intended direction: an effect-free Zeron lambda or top-level
+function reference may implement a Java functional interface when the target parameter type is
+explicitly that interface. The compiler discovers the interface from class-file metadata, including
+inherited abstract methods, so `Function`, `Predicate`, `Comparator`, the primitive specializations,
+and classpath SAMs use one path. Lowering reuses `LambdaMetafactory`. A converted callback may not
+carry a non-empty `raises` row, and the slice makes no callback lifetime, identity, or thread-safety
+promise. Until then, pass behavior into Java through a small facade or adapter class.
 
 ## Editor support
 

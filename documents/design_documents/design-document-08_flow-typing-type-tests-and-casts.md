@@ -14,7 +14,8 @@ first-class union types. Flow typing is static type checking, not general error 
 ## Current Boundary
 
 - `T?`, the internal `Null` type, and widening from `T` to `T?` are implemented. Flow refinement
-  for direct local/parameter checks is implemented in statement-form branches and `if` expressions.
+  for stable local/parameter/`this`-rooted paths and composed conditions is implemented in
+  statement-form branches, `while`, and `if` expressions.
 - `Any` is implemented as a non-null top type. Non-null values widen to `Any`; nullable values and
   `null` widen to `Any?`. Supported `is` tests narrow `Any` and `Any?` on proven paths.
 - `Unit` uses a shared generated `zeron.lang.Unit` singleton in compiler output and the bundled
@@ -76,24 +77,26 @@ short-circuit evaluation. Casts may be chained; each applies to the preceding ex
 ### Type test: `is`
 
 `value is T` returns `Boolean` and does not throw. A null value fails any non-null target type test.
-When the expression is a direct stable variable read, the true outcome refines that binding to
-non-null `T`. The source binding is unchanged; outside a controlling flow region, its declared type
+When the tested expression is a stable read-only path, the true outcome refines that path to
+non-null `T`. The root binding is unchanged; outside a controlling flow region, its declared type
 still applies.
 
-Flow refinement recognizes direct variable reads (optionally parenthesized). It does not refine a
-property, array slot, or function-call result because reevaluating that expression may produce a
-different value. A test of `object.field` can still return a Boolean, but does not smart-cast a later
-read of that field.
+Flow refinement recognizes paths rooted at a local, a parameter, or `this`, followed by final
+fields, stored read-only properties, or sum payloads. It does not refine mutable fields, mutable
+properties, array slots, function-call results, or custom getters because reevaluating that
+expression may produce a different value. A test of `object.field` can still return a Boolean
+without smart-casting a later read when the member is mutable or computed. The same path rules
+apply through `and`, `or`, and `not`, with the existing short-circuit transfer.
 
 False outcomes may initially retain only facts already known on entry. `is not T` swaps the true and
 false flow outcomes of `is T`; it does not infer a negative type fact or prove non-null, since null
 also fails `is T`.
 
 `value is null` returns true exactly for a null value, and `value is not null` is its complement.
-These built-in null tests do not resolve a contract member or use runtime type reflection. A direct
-stable local or parameter read receives null/non-null flow facts on the respective branches;
-properties, array slots, and call results are tested without refining a later reevaluation. Testing
-a statically non-null value is valid and yields false for `is null` or true for `is not null` without
+These built-in null tests do not resolve a contract member or use runtime type reflection. A stable
+read-only path receives null/non-null flow facts on the respective branches; mutable members, array
+slots, call results, and custom getters are tested without refining a later reevaluation. Testing a
+statically non-null value is valid and yields false for `is null` or true for `is not null` without
 a diagnostic.
 
 ### Checked cast: `as`
@@ -163,14 +166,16 @@ fn incrementIfPresent(value: Int?): Int {
 The continuation has only the non-null path. Track normal completion separately from a type such as
 `Never`; do not overload `Never` to represent resolver reachability.
 
-For a stable binding of a closed sum type, a direct `value matches Sum.Case(...)` test narrows the
-true path to the tested case and removes that case from the false path. If one alternative remains,
-its payload properties are available there. Parenthesized tests behave the same, and unary `not`
-swaps the two outcomes. Payload names are available only on the outcome where the underlying case
-pattern succeeds. This initial complement rule does not apply to `is` tests or `matches` expressions
-composed with `and` or `or`; nullable values retain their null possibility on the false path.
-[ZEP-0131](../zeps/ZEP-0131.md) is accepted for `0.8.0` and extends this rule to composed
-conditions; the implementation remains pending.
+For a stable path of a closed sum type, a `value matches Sum.Case(...)` test narrows the true path
+to the tested case and removes that case from the false path. If one alternative remains, its
+payload properties are available there. Parenthesized tests behave the same, and unary `not` swaps
+the two outcomes. Payload names are available only on the outcome where the underlying case pattern
+succeeds: a binding from the left operand of `and` is visible in the right operand and the combined
+true path, while `or` alternatives must bind the same names with compatible types and share only
+the joined true path. This complement rule does not apply to `is` tests or open class hierarchies;
+nullable values retain their null possibility on the false path unless a null test removes it. The
+rule composes through `and`, `or`, and `not` under the same branch-join and write-invalidation
+rules as other facts, as specified by [ZEP-0131](../zeps/ZEP-0131.md).
 
 Statement-form `if` branches and value-producing `if` expressions resolve their branches under the
 corresponding true/false facts. An `if` expression joins the facts from both result branches after

@@ -498,6 +498,7 @@ final class LambdaCompilationPlan {
                     collectFunctionAdapters(variable.storedFunctionType(), variable.getType());
                 }
                 collectLambdaShapes(variable.implicitFieldReceiver());
+                collectLambdaShapes(variable.implicitPropertyReceiver());
             }
             case Expr.SuffixedLiteral literal -> collectLambdaShapes(literal.factoryCall());
             case Expr.PropertyReference reference -> {
@@ -853,6 +854,10 @@ final class LambdaCompilationPlan {
                     lambdaFieldReads.add(new LambdaMemberKey(
                             variable.implicitFieldOwner(), variable.name.lexeme()));
                     collectCapturedVariables(variable.implicitFieldReceiver(), localNames, captured, seen);
+                    return;
+                }
+                if (variable.implicitPropertyReceiver() != null) {
+                    collectCapturedVariables(variable.implicitPropertyReceiver(), localNames, captured, seen);
                     return;
                 }
                 final var sourceName = variable.name.lexeme();

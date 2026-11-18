@@ -2434,7 +2434,7 @@ public final class StandardLibraryTest {
                 import zeron.io.println;
                 fn cellResult(): Int = Cell<Int>.new(42).get();
                 fn stringSplitResult(): Int = "a b".split(" ").count();
-                fn stringJoinResult(): String = String.join("-", "a b".split(" "));
+                fn stringJoinResult(): String = String.join("a b".split(" ")) { this.separator = "-"; };
                 fn sum(values: Iterable<Int>): Int {
                     let mut total = 0;
                     for (let value in values) total += value;

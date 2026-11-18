@@ -4,6 +4,19 @@
 
 ### Compiler and language work
 
+- Implemented ZEP-0131 chained flow refinement and implicit receiver access. `is` and `matches`
+  facts transfer through composed `and`, `or`, and `not` conditions; `matches` payload bindings are
+  available in later operands and the successful branch, with OR alternatives checked for
+  compatible binding sets. Refinement now covers stable read-only member paths rooted at locals,
+  parameters, or `this`, including final fields, stored read-only properties, and sum payloads,
+  while mutable members, array slots, call results, and custom getters stay unrefined. Unqualified
+  field and property reads resolve to the implicit `this` receiver as a fallback after lexical and
+  top-level lookup, including in contract defaults; implicit writes remain rejected. The language
+  server now completes and hovers implicit receiver members and chained `matches` payload bindings,
+  including bindings before their first use.
+- Receiver lambdas now accept unqualified writes to the receiver's public `mut` properties when
+the receiver is mutable. `value = 42` resolves as `this.value = 42`; read-only receivers and
+non-`mut` properties continue to use the normal access diagnostics.
 - Closed four implementation gaps around existing features. `do` blocks accept a final
   monad-valued expression in place of `yield`, avoiding nested monadic results. Entry-point
   selection uses the resolved return type, so `fn main() = println("...")` infers `Unit` and its
@@ -94,6 +107,8 @@
 
 ### Tooling and project configuration
 
+- Fixed TextMate highlighting so a character literal containing a double quote (`'"'`) no longer
+  starts a double-quoted string, and escaped quotes inside strings no longer end them early.
 - Added ZEP-0117 declarative project targets and generated CLI/manifest references. `zeron.toml`
   accepts `[build].deny-warnings`, `[targets.<name>]` entries with optional `entry`, `output`, and
   `deny-warnings`, and `[project].default-target`. `zeron build [<target>]` and `zeron run
@@ -106,6 +121,9 @@
 
 ### Standard library
 
+- Added `Path.list()` and `Path.walk()`. `list` returns a directory's immediate children and
+  `walk` returns the starting path plus every descendant; both return `Array<Path>` and raise
+  `IoFailure` when the filesystem cannot be read.
 - Implemented ZEP-0130 standard-library-owned intrinsic declarations and its `String` inventory.
   Intrinsic types keep compiler-owned identity, while `zeron.lang.string` now owns the public
   operations: `split` (literal text, including a one-character separator), `splitRegex` returning

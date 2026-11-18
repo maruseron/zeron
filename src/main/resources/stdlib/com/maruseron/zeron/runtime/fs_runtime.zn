@@ -1,0 +1,12 @@
+package com.maruseron.zeron.runtime;
+
+import java.nio.file.Path as JavaPath;
+
+import zeron.io.IoFailure;
+
+public external class FileSystemSupport = "com.maruseron.zeron.runtime.FileSystemSupport" {
+    public static list(path: &JavaPath): Array<String>
+        throws java.io.IOException -> IoFailure::fromIOException;
+    public static walk(path: &JavaPath): Array<String>
+        throws java.io.IOException -> IoFailure::fromIOException;
+}

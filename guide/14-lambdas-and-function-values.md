@@ -287,6 +287,11 @@ Inside that lambda, unqualified members resolve against the receiver. Parameters
 declarations shadow receiver members; `this` refers to the current receiver. In nested receiver
 lambdas, qualify an enclosing receiver as `EnclosingType.this`.
 
+Unqualified writes use the same receiver context when it is clear enough: assigning to a public
+`mut` property on a mutable receiver such as `&Builder.() -> Unit` updates that property, so
+`value = 42` is equivalent to `this.value = 42`. A read-only receiver, a non-`mut` property, or a
+private property still uses its ordinary access rules and reports the corresponding error.
+
 Receiver functions remain first-class values: they can be stored, passed, and returned. Invoke a
 receiver function with receiver-call syntax, `receiver.callback(arguments)`. A compatible
 receiver-function value in scope takes precedence over ordinary member or extension lookup. The
@@ -392,6 +397,14 @@ At runtime, Zeron represents each distinct function shape with a generated inter
 callable method. Lambdas with the same input and result types share that interface, while each
 lambda keeps its own behavior. When a lambda captures values, those values are stored with the
 function object when it is created.
+
+The exception is a lambda used where the expected parameter type is an explicit Java functional
+interface, such as `java.util.function.Function` or `Predicate`. [ZEP-0148](../documents/zeps/ZEP-0148.md)
+(Accepted for `0.8.0`) records the intended direction: the compiler discovers the interface's
+single abstract method from class-file metadata, infers the lambda parameters from that method, and
+uses the Java interface directly instead of a generated Zeron shape. A converted callback must have
+an empty `raises` row, because a Zeron raised effect would otherwise escape into Java. Until that
+lands, compile a small Java adapter or pass the behavior through a Zeron function-typed parameter.
 
 Receiver functions have a distinct generated shape. Their receiver is the first runtime argument,
 followed by their explicit parameters.

@@ -73,8 +73,8 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0060](./ZEP-0060.md) | Treating Arrays as Iterable Values | Implemented | Shipped | 0.6.0 |
 | [ZEP-0061](./ZEP-0061.md) | Java and External Interop Language Support | Implemented | Shipped | 0.6.0 |
 | [ZEP-0062](./ZEP-0062.md) | Mutable-Type Admissibility for Generic Parameters | Superseded | Shipped | 0.5.0 |
-| [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Draft | Unscheduled | — |
-| [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Draft | Unscheduled | — |
+| [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Accepted | Candidate | 0.8.0 |
+| [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Implemented | Candidate | 0.8.0 |
 | [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Implemented | Shipped | 0.6.0 |
 | [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Draft | Unscheduled | — |
 | [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Unscheduled | — |
@@ -160,6 +160,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Draft | Candidate | 0.9.0 |
 | [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Implemented | Candidate | 0.8.0 |
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
+| [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Candidate | 0.8.0 |
 
 ## Release bundles
 
@@ -173,7 +174,7 @@ sequencing.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 21 candidates | ZEP-0050, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148; ZEP-0132 is the immediate corrective |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 24 candidates | ZEP-0050, ZEP-0063, ZEP-0064, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148, ZEP-0150; ZEP-0132 is the immediate corrective |
 | `0.9.0` | Effect control and response typing | Proposed; 1 candidate | ZEP-0118 and ZEP-0147 headline the bundle |
 
 ### `0.7.0` — type identity, reification, and type bounds
@@ -202,12 +203,21 @@ and is likewise outside the bundle. The bundle shipped on 2026-11-14; its rows a
 ### `0.8.0` — normalization and nominal implementation
 
 The bundle targets smaller normalization and smoothing work rather than new control-flow semantics.
-Its twenty-one candidates are:
+Its twenty-four candidates are:
 
 - [ZEP-0050](./ZEP-0050.md) — Java host-access trust boundary. Direct Java host access becomes an
   explicit `unsafe` boundary; curated facades remain the trusted, compiler-validated tier; checked
   exceptions still require mappings; unchecked exceptions and `Error`s propagate as host exceptions;
   and `raises` remains control-flow, not purity.
+- [ZEP-0063](./ZEP-0063.md) — standard-library testing APIs. Tests are top-level functions marked
+  `@Test`; `zeron.test` provides assertions that raise a typed `TestFailure` effect; the compiler
+  discovers tests and generates a runner; and `zeron test` builds and runs the `kind = "test"`
+  targets declared in the project manifest. Filtering, machine-readable output, fixtures, parallel
+  execution, and process isolation remain follow-up work.
+- [ZEP-0064](./ZEP-0064.md) — standard-library logging APIs. `zeron.log` provides severity levels,
+  structured fields, explicit sinks with filtering and console output, named loggers with copied
+  context, lazy message construction, and a plain formatter. Configuration is passed explicitly;
+  destination failure reporting and cross-thread guarantees remain follow-up work.
 - [ZEP-0148](./ZEP-0148.md) — Java SAM conversion. Effect-free lambdas and top-level function
   references may implement an explicitly written Java functional interface; the compiler discovers
   the interface from class-file metadata and lowers the conversion through `LambdaMetafactory`. No
@@ -261,8 +271,12 @@ Its twenty-one candidates are:
   `(a, b) -> a < b` becomes `<T: Comparable<T>> (T, T) -> Boolean`, rather than a concrete default.
 - [ZEP-0134](./ZEP-0134.md) — invocation of function-valued expressions. A postfix argument list
   may follow any non-null function-valued expression, so `makeFunction()()` and `add(2)(3)` work
-  without introducing a temporary binding or a new runtime representation. The proposal is still
-  `Draft`; its `0.8.0` candidacy records the intended target, not an accepted design.
+  without introducing a temporary binding or a new runtime representation. It is implemented and
+  accepted for `0.8.0`; nullable callees are handled by ZEP-0150.
+- [ZEP-0150](./ZEP-0150.md) — safe invocation of nullable function values. `couldBeNull?.()` reuses
+  safe-navigation syntax, skips the arguments and result when the callee is null, and otherwise
+  invokes the function value and produces a nullable result. Hover and signature help cover
+  function-valued expression calls.
 - [ZEP-0135](./ZEP-0135.md) — witness provision, requirement evidence, and owner-directed dispatch.
   A witness provides only its declared contract, `requires` contracts select their own canonical
   provider, and operations dispatch through their declaring contract. This removes the
@@ -292,7 +306,7 @@ lookup, external contracts for Java interfaces, external enums, JPMS, binding ex
 conformance. It is unscheduled, so none of it ships with `0.8.0` by implication. The bundle does not
 change `raise` or `handle` typing.
 
-These twenty-one are the current target; further small normalization items may join `0.8.0` as
+These twenty-four are the current target; further small normalization items may join `0.8.0` as
 additional candidates. The acceptance queue remains open. ZEP-0098 and ZEP-0113 were accepted and
 implemented on 2026-11-16; ZEP-0146 remains the only draft row and must be accepted before
 implementation, and its `Candidate` state records the intended bundle only. ZEP-0135 was accepted,
@@ -314,7 +328,11 @@ contracts for Java interfaces and external enums, and is `Draft` / `Unscheduled`
 count in the bundle above.
 
 ZEP-0130 was implemented on 2026-11-17 and is `Implemented` / `Candidate`. ZEP-0132 and ZEP-0134
-were implemented on 2026-11-18 and are `Implemented` / `Candidate`. The `String` inventory is
+were implemented on 2026-11-18 and are `Implemented` / `Candidate`. ZEP-0150 was accepted and
+implemented on 2026-11-18 as the safe-invocation companion to ZEP-0134 and is `Implemented` /
+`Candidate`. ZEP-0063 was accepted for `0.8.0` on 2026-11-19 as the testing and tooling companion
+to ZEP-0064 and ZEP-0117 and is `Accepted` / `Candidate`; the testing APIs are not implemented yet.
+The `String` inventory is
 declared in standard-library source, multi-value results are `Stream<String>`, `StringJoiner` owns
 joining, and `Stream.collectWith` is the general terminal operation behind it, over collectors the
 `Collector` namespace provides. No intrinsic ID was added.

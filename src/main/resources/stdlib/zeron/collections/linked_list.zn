@@ -259,3 +259,27 @@ public class LinkedList<T: mut>
     /// Returns an iterator over the elements, from first to last.
     public iterator(): &Iterator<T> = LinkedListIterator<T>.from(this.head);
 }
+
+/// A linked list is mutable, so it can produce a sorted copy and reorder itself in place.
+default witness Sortable<LinkedList<_>> for LinkedList<_> {
+    fn sortedBy<A: mut>(
+        this: LinkedList<A>,
+        compare: (A, A) -> Ordering
+    ): LinkedList<A> {
+        let sorted = sortedArrayList(arrayListOf(this), compare);
+        let mut result = LinkedList.empty<A>();
+        for (let value in sorted) result.add(value);
+        return result;
+    }
+}
+
+default witness InPlaceSortable<LinkedList<_>> for LinkedList<_> {
+    fn sortBy<A: mut>(
+        this: &LinkedList<A>,
+        compare: (A, A) -> Ordering
+    ): Unit {
+        let sorted = sortedArrayList(arrayListOf(this), compare);
+        this.clear();
+        for (let value in sorted) this.add(value);
+    }
+}

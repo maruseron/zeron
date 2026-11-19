@@ -9,6 +9,28 @@ let greeting: String = "Hello, Ada!";
 let language = "Zeron";
 ```
 
+Text can contain characters that are awkward to type or that would otherwise end the literal. Use a
+backslash escape: `\n` for a newline, `\r` for a carriage return, `\t` for a tab, `\\` for a
+backslash, `\"` for a double quote, `\'` for a single quote, and `\u{...}` for any Unicode scalar
+value:
+
+```zeron
+let twoLines = "first\nsecond";
+let quoted = "She said \"hello\".";
+let windowsPath = "C:\\temp";
+```
+
+`Char` literals accept the same escapes, so `'\n'`, `'\t'`, and `'\u{1F600}'` are character
+values. A string can still span lines without an escape.
+
+A backslash immediately before a line break continues the string on the next source line without
+adding a line break to the value, so a long literal can stay readable:
+
+```zeron
+let message = "This sentence continues \
+on the next source line.";
+```
+
 You can combine strings with `+`:
 
 ```zeron
@@ -66,6 +88,13 @@ or trailing one. A single-character separator is written as that text. An empty 
 into individual characters. `lines` ends a line at `\n`, `\r\n`, or `\r`, and a
 terminal line break does not add an empty line. Neither `split` nor `lines` consumes the stream, so
 `count`, `map`, or a `for` loop decides how much work happens.
+
+`splitWhitespace` splits on runs of Unicode whitespace and ignores leading and trailing whitespace,
+so an empty or whitespace-only string has no parts:
+
+```zeron
+let words = "  alpha \t beta\n gamma  ".splitWhitespace(); // "alpha", "beta", "gamma"
+```
 
 `splitRegex` takes a regular expression and reports an invalid one instead of failing:
 

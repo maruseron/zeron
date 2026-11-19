@@ -2,7 +2,7 @@
 
 | Field | Value |
 | ----- | ----- |
-| Date | 2026-11-16 |
+| Date | 2026-11-19 |
 | Scope | Current release state in `documents/zeps/ZEP.md` and near-term sequencing |
 | Purpose | Planning companion for bundle contents, acceptance gates, and backlog order |
 
@@ -13,9 +13,9 @@ when bundle scope or sequencing changes.
 
 ## Current state
 
-The tracker records 150 ZEPs: 77 shipped, 0 planned, 22 candidates, and 45 unscheduled. The
+The tracker records 151 ZEPs: 77 shipped, 0 planned, 25 candidates, and 43 unscheduled. The
 remaining six rows are process entries, deferred work, or not applicable. `0.7.0` shipped on
-2026-11-14; `0.8.0` is the normalization bundle with twenty-one candidates, and `0.9.0` is the
+2026-11-14; `0.8.0` is the normalization bundle with twenty-four candidates, and `0.9.0` is the
 proposed effect-control follow-on.
 
 ### Bundle summary
@@ -24,17 +24,18 @@ proposed effect-control follow-on.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization of already implemented work | Shipped | 24 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 21 candidates | ZEP-0050, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148; ZEP-0132 and ZEP-0134 implemented |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 24 candidates | ZEP-0050, ZEP-0063, ZEP-0064, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148, ZEP-0150; ZEP-0132 and ZEP-0134 implemented |
 | `0.9.0` | Effect control and response typing | Proposed; 1 candidate | ZEP-0118 and ZEP-0147 headline the bundle |
 
 `0.7.0` shipped on 2026-11-14. Its 15 rows are `Shipped`; release scope is approved and complete.
-`0.8.0` is the next target: its twenty-one candidates include fifteen implemented designs, five
+`0.8.0` is the next target: its twenty-four candidates include nineteen implemented designs, four
 accepted designs, and one draft targeted proposal, and cover normalization, nominal representation,
-standard-library ownership, refinement correctness, a bounded operator-inference improvement,
-function-valued expression invocation, witness provision, and witness bundles with explicit selection
-rather than control flow, plus the annotation-target and variance smoothing items, the Java
-host-access trust boundary, and Java SAM conversion. `0.9.0` is a planning target with one
-draft candidate, not a scheduled release.
+standard-library ownership plus testing and logging APIs, refinement correctness, a bounded
+operator-inference improvement, function-valued expression invocation including safe nullable
+invocation, witness provision, and witness bundles with explicit selection rather than control flow,
+plus the annotation-target and variance smoothing items, the Java host-access trust boundary, and
+Java SAM conversion. `0.9.0` is a planning target with one draft candidate, not a scheduled
+release.
 
 The bundles stay separate because `0.7.0` changes type identity, runtime descriptors, type-bound
 tests, and effect payload identity, while `0.9.0` changes control flow through response-typed
@@ -123,14 +124,15 @@ not add a second ABI alongside ZEP-0106.
 
 ## `0.8.0` — Normalization and nominal implementation
 
-`0.8.0` is the proposed normalization release. Its twenty-one candidates include twelve implemented
-designs, seven accepted designs, and two draft targets, and cover project configuration, nominal static
+`0.8.0` is the proposed normalization release. Its twenty-four candidates include nineteen implemented
+designs, four accepted designs, and one draft target, and cover project configuration, nominal static
 evidence, optional HKT blocks, the entry-point contract, data-class structural access, generalized
 newtypes, sum parameter bounds, annotation targets for the algebraic data forms, declaration-site
-covariance, intrinsic declaration ownership, refinement correctness,
-operator-constraint inference for typeless lambdas, invocation of function-valued expressions, value-producing
-block expressions, witness provision, witness bundles, explicit witness selection, the Java
-host-access trust boundary, and Java SAM conversion. None changes `raise` or `handle`
+covariance, intrinsic declaration ownership, standard-library testing and logging APIs, refinement
+correctness, operator-constraint inference for typeless lambdas, invocation of function-valued
+expressions and safe invocation of nullable function values, value-producing block expressions,
+witness provision, witness bundles, explicit witness selection, the Java host-access trust boundary,
+and Java SAM conversion. None changes `raise` or `handle`
 typing, and none introduces a new Zeron runtime control-flow mechanism. ZEP-0132 is a correctness
 fix and should land before the rest.
 
@@ -139,6 +141,8 @@ fix and should land before the rest.
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
 | ZEP-0050 | Java Host-Access Trust Boundary | Implemented | Make direct Java access an explicit `unsafe` boundary; keep facades as the trusted, compiler-validated tier; keep `raises` as control flow, not purity |
+| ZEP-0063 | Standard Library Testing APIs | Accepted | Top-level `@Test` functions, `zeron.test` assertions raising `TestFailure`, compiler-discovered tests with a generated runner, and `zeron test` over `kind = "test"` targets |
+| ZEP-0064 | Standard Library Logging APIs | Implemented | `zeron.log` severity levels, structured `Record` fields, filtered `LogSink` sinks with console output, named `Logger` context, lazy messages, and a plain formatter with explicit configuration |
 | ZEP-0148 | Java SAM Conversion | Implemented | Convert effect-free lambdas and top-level function references to explicitly written Java functional interfaces; discover SAMs from class-file metadata; lower through `LambdaMetafactory` with no new ABI |
 | ZEP-0098 | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Add annotation sites for product/sum declarations, product components, and sum cases; metadata smoothing with no runtime ABI |
 | ZEP-0113 | Declaration-Site Covariance for Sum and Product Types | Implemented | Extend checked `out` parameters to immutable sums and products, including `Option`, `Result`, and `Pair`; variance smoothing |
@@ -155,6 +159,7 @@ fix and should land before the rest.
 | ZEP-0132 | Nullable Safe-Cast Correction | Implemented | `as?` always yields a nullable target; immediate correctness fix before the rest of the bundle |
 | ZEP-0133 | Operator-Constraint Inference for Typeless Lambdas | Accepted | Infer a rank-1 numeric or comparison scheme for eligible typeless lambdas; `(a, b) -> a + b` becomes `<T: Numeric<T>> (T, T) -> T` and `(a, b) -> a < b` becomes `<T: Comparable<T>> (T, T) -> Boolean` |
 | ZEP-0134 | Invocation of Function-Valued Expressions | Implemented | Allow a postfix argument list after any function-valued expression, so `makeFunction()()` and `add(2)(3)` work without a temporary binding or new runtime representation |
+| ZEP-0150 | Safe Invocation of Nullable Function Values | Implemented | Allow `couldBeNull?.()` to reuse safe navigation: skip arguments and result on null, otherwise invoke and produce a nullable result; no new runtime representation |
 | ZEP-0135 | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Direct provision, canonical prerequisite evidence, and owner-directed method dispatch remove shared-ancestor ambiguity |
 | ZEP-0136 | Witness Bundles and Coherent Prerequisite Evidence | Accepted | Group a target's providers into a named or `default` bundle with a recorded prerequisite closure; named bundles are selection-only |
 | ZEP-0137 | Explicit Witness Selection and Witness Contexts | Accepted | `using witness (...)` selects bundles or named witnesses lexically, shadows ambient defaults locally, and has no runtime lookup |
@@ -214,6 +219,8 @@ ZEP-0113 were added as smoothing candidates and accepted and implemented on 2026
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
 | ZEP-0050 | Java Host-Access Trust Boundary | Implemented / `Candidate` | Make direct Java access an explicit `unsafe` boundary; keep facades as the trusted tier; keep `raises` as control flow, not purity |
+| ZEP-0063 | Standard Library Testing APIs | Accepted / `Candidate` | Add `@Test` discovery, `zeron.test` assertions, a generated runner, and the `zeron test` command over declarative test targets |
+| ZEP-0064 | Standard Library Logging APIs | Implemented / `Candidate` | Add `zeron.log` levels, structured fields, filtered sinks, named loggers with copied context, lazy messages, and a plain formatter |
 | ZEP-0148 | Java SAM Conversion | Implemented / `Candidate` | Convert effect-free lambdas and top-level function references to explicitly written Java functional interfaces; discover SAMs from class-file metadata; lower through `LambdaMetafactory` |
 | ZEP-0126 | Compiler-Owned Main Entry-Point Contract | Implemented / `Candidate` | Formalize `main` return values, entry evidence, and effectful entry interpretation |
 | ZEP-0127 | Data Class Component Access and Positional Destructuring | Implemented / `Candidate` | Make canonical components readable and add positional data-class patterns |
@@ -224,7 +231,8 @@ ZEP-0113 were added as smoothing candidates and accepted and implemented on 2026
 | ZEP-0131 | Chained Flow Refinement and Implicit Receiver Access | Implemented / `Candidate` | Complete guard-chain refinement and remove routine `this.` reads |
 | ZEP-0132 | Nullable Safe-Cast Correction | Implemented / `Candidate` | Correct `as?` to return `T?` and land before the broader refinement work |
 | ZEP-0133 | Operator-Constraint Inference for Typeless Lambdas | Accepted / `Candidate` | Infer numeric or comparable operator bounds for eligible typeless let-bound lambdas without defaulting to a concrete type |
-| ZEP-0134 | Invocation of Function-Valued Expressions | Implemented / `Candidate` | Allow invocation of any non-null function-valued expression; candidate target recorded while design review remains open |
+| ZEP-0134 | Invocation of Function-Valued Expressions | Implemented / `Candidate` | Allow invocation of any non-null function-valued expression, with nullable callees handled by ZEP-0150 |
+| ZEP-0150 | Safe Invocation of Nullable Function Values | Implemented / `Candidate` | Add `couldBeNull?.()` so a null callee skips the arguments and result and otherwise yields a nullable result |
 | ZEP-0135 | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented / `Candidate` | Separate provided contracts from prerequisite evidence and resolve operations by declaring contract |
 | ZEP-0136 | Witness Bundles and Coherent Prerequisite Evidence | Accepted / `Candidate` | Group a target's providers into a coherent bundle and record prerequisite evidence at declaration time |
 | ZEP-0137 | Explicit Witness Selection and Witness Contexts | Accepted / `Candidate` | Select bundles or named witnesses lexically with `using witness`; no dynamic scope or runtime lookup |
@@ -286,6 +294,25 @@ so the curated JDK set and classpath SAMs share one path. Lowering reuses `Lambd
 adds no runtime or API-index ABI. A converted callback may not carry a `raises` row, and the slice
 makes no callback lifetime or thread-safety promise. A stored Zeron function value, a generic Zeron
 lambda, a Java method reference, and a multi-abstract-method interface remain unsupported.
+
+ZEP-0064 was implemented on 2026-11-19 and is `Implemented` / `Candidate` for `0.8.0`. `zeron.log`
+ships `Level` with `Trace` through `Error`, a `Record` carriage with structured `Value` fields, a
+`LogSink` output boundary with a console sink and level filtering, and a `Logger` that binds a name,
+sink, clock, and copied context map. Message thunks are evaluated only when the sink accepts the
+level. Configuration stays explicit with no process-global registry; destination failure reporting
+and cross-thread guarantees remain follow-up work, so `LogSink.write` returns `Unit`.
+
+ZEP-0063 was accepted for `0.8.0` on 2026-11-19 and is `Accepted` / `Candidate` as the testing and
+tooling companion to ZEP-0064 and ZEP-0117. The committed surface is `zeron.test.Test` and
+`zeron.test.Ignore`, a `TestFailure` effect, project `test-roots`, the `kind = "test"` target, a
+compiler-generated runner, and `zeron test`. Filtering, machine-readable output, fixtures, parallel
+execution, and process isolation are explicitly deferred; implementation is still pending.
+
+ZEP-0150 was accepted and implemented on 2026-11-18 and is `Implemented` / `Candidate` for `0.8.0`
+as the safe-invocation companion to ZEP-0134. A nullable function value invoked as `couldBeNull?.()`
+skips the arguments and the result when the callee is null, and otherwise invokes the value and
+produces a nullable result. Hover and signature help cover function-valued expression calls. No
+runtime, API-index, or function-shape ABI changed.
 
 ZEP-0149 was split from the same umbrella as a `Draft` / `Unscheduled` inventory. It holds general
 inherited/interface member lookup, external contracts for Java interfaces, external enums, JPMS
@@ -408,7 +435,7 @@ and ZEP-0121 is `Deferred`. None of those is a defensible `0.9.0` commitment.
 - `0.7.0` was published on 2026-11-14; its 15 rows are `Shipped` / `0.7.0`, and its acceptance
   queue is closed.
 - ZEP-0111 shipped in `0.7.0`; it does not fall back to `0.9.0`.
-- The `0.8.0` candidate set now has twenty-one rows: fifteen implemented designs, five accepted
+- The `0.8.0` candidate set now has twenty-four rows: nineteen implemented designs, four accepted
   designs, plus the draft ZEP-0146. Decide whether to freeze scope there or admit further
   normalization items.
 - ZEP-0050 was accepted on 2026-11-17 and implemented on 2026-11-18 as the host-access trust
@@ -422,8 +449,9 @@ and ZEP-0121 is `Deferred`. None of those is a defensible `0.9.0` commitment.
   and external-binding extensibility; none of it is implied by the `0.8.0` candidacy.
 - Sequence ZEP-0132 first as the immediate safe-cast correction, then ZEP-0131, then the
   representation track (ZEP-0070, ZEP-0129, ZEP-0128), with ZEP-0098, ZEP-0113, ZEP-0130,
-  ZEP-0133, ZEP-0134, ZEP-0146, ZEP-0050, and ZEP-0148 independent. ZEP-0050's `unsafe` gate and
-  ZEP-0148's SAM conversion are implemented; ZEP-0132, ZEP-0131, and ZEP-0134 are implemented.
+  ZEP-0133, ZEP-0134, ZEP-0150, ZEP-0146, ZEP-0050, ZEP-0148, ZEP-0064, and ZEP-0063 independent.
+  ZEP-0050's `unsafe` gate and ZEP-0148's SAM conversion are implemented; ZEP-0132, ZEP-0131, and
+  ZEP-0134 are implemented.
   Implement ZEP-0136 before ZEP-0137 for the witness-bundle track.
 - Settle the `String.split` empty-separator and return-type questions, the `charAt`/`at` shape, and
   the regex dialect questions in ZEP-0130 before treating the inventory as complete.
@@ -601,16 +629,34 @@ These decisions shape the current plan. Details live in each ZEP.
   implementation adds `Expr.Invoke`; named, constructor, generic, and member-property calls keep
   their existing nodes. The callee resolves and emits once, arguments follow left to right, generic
   values reuse the stored-function evidence/reified-slot path, and the invocation lowers through
-  the generated shape interface's `invokeinterface`. Nullable values require a null check,
-  receiver-function values require receiver-call syntax, and explicit type arguments after an
-  arbitrary expression callee remain unsupported. No runtime, API-index, or function-shape ABI
-  changed.
+  the generated shape interface's `invokeinterface`. Nullable values use ZEP-0150's `?.()` safe
+  invocation, receiver-function values require receiver-call syntax, and explicit type arguments
+  after an arbitrary expression callee remain unsupported. No runtime, API-index, or function-shape
+  ABI changed.
+- **ZEP-0150:** a nullable function value invoked as `couldBeNull?.()` skips the argument list and
+  the result when the callee is null, and otherwise invokes the value and produces a nullable
+  result. It reuses safe-navigation parsing and the ZEP-0134 invocation shape rather than adding a
+  node family or runtime representation. Accepted and implemented on 2026-11-18 and `Candidate` for
+  `0.8.0`.
 - **ZEP-0133:** an uncontextualized typeless lambda written directly as an immutable local `let`
   initializer may infer a rank-1 scheme from numeric or comparison operator use. `(a, b) -> a + b`
   infers `<T: Numeric<T>> (T, T) -> T`; `/` infers `Fractional<T>`; `(a, b) -> a < b` infers
   `<T: Comparable<T>> (T, T) -> Boolean`. Each use resolves evidence independently; string
   concatenation, equality, arbitrary member operations, concrete defaults, and arbitrary lambda
   positions remain outside the rule. Accepted 2026-11-14 and `Candidate` for `0.8.0`.
+- **ZEP-0063:** tests are top-level functions marked `@Test`; `zeron.test` provides assertions that
+  raise a typed `TestFailure` effect, and `@Ignore` excludes a test. Test roots come from the project
+  manifest, `kind = "test"` targets get a compiler-generated runner, and `zeron test` builds and runs
+  them. Accepted for `0.8.0` on 2026-11-19 as the testing and tooling companion to ZEP-0064 and
+  ZEP-0117; filters, machine-readable output, fixtures, parallelism, and process isolation are
+  deferred.
+- **ZEP-0064:** `zeron.log` uses `Level` (`Trace` through `Error`), a `Record` with a monotonic
+  `Instant`, level, logger name, message, structured `Map<String, Value>` fields, and an optional
+  cause. `LogSink` is the output boundary, with a console sink and `minLevel` filtering, and `Logger`
+  binds a name, sink, clock, and context map whose `with` copies rather than aliases. Message thunks
+  run only when the level is enabled, configuration is explicit with no global registry, and writes
+  preserve call order per sink without cross-thread guarantees. Implemented 2026-11-19 and
+  `Candidate` for `0.8.0`; destination failure reporting remains open.
 - **ZEP-0136:** witness bundles group the providers for one target into a named or `default`
   declaration. Members are unnamed; identity is bundle plus applied contract and target. The
   prerequisite closure is resolved at declaration time; only canonical default dependencies are
@@ -637,19 +683,19 @@ These decisions shape the current plan. Details live in each ZEP.
 - Proposal status and release state are independent. A row can be `Implemented` and still
   `Unscheduled`; that is not an error by itself.
 - A ZEP normally cannot move to `Candidate` while it is `Draft` or `Deferred`; accept the design
-  first. ZEP-0098 and ZEP-0113 were accepted and implemented on 2026-11-16. ZEP-0134, ZEP-0146,
-  and ZEP-0147 are recorded as draft targets by explicit maintainer direction; treat their
-  `Candidate` rows as proposed until their design reviews are complete.
+  first. ZEP-0098 and ZEP-0113 were accepted and implemented on 2026-11-16. ZEP-0146 and ZEP-0147
+  are recorded as draft targets by explicit maintainer direction; treat their `Candidate` rows as
+  proposed until their design reviews are complete.
 - `Candidate` is a proposed release target, not a commitment. `Planned` records an approved bundle.
 - The `0.7.0` description is shipped scope: its 15 rows are `Shipped` / `0.7.0`. The `0.8.0`
-  description has twenty-one candidates (twelve implemented designs, seven accepted designs, plus
-  draft ZEP-0134 and ZEP-0146); its acceptance queue remains open. The `0.9.0` description has one
+  description has twenty-four candidates (nineteen implemented designs, four accepted designs, plus
+  draft ZEP-0146); its acceptance queue remains open. The `0.9.0` description has one
   draft candidate, ZEP-0147, and remains a planning record.
 - The `0.7.0` acceptance queue is closed. The 15 shipped rows are the release set; ZEP-0107 and
   ZEP-0108 are outside the program bundle.
 - `0.6.0` shipped with 24 rows. ZEP-0068 remains `Accepted` because its external-name and adapter
   scope stays open under ZEP-0091, ZEP-0097, and ZEP-0098 (whose annotation targets are implemented).
-- Do not reuse a ZEP number. The next available number is `0148`.
+- Do not reuse a ZEP number. The next available number is `0151`.
 - Routine fixes and contained changes do not need a ZEP.
 - `pom.xml` records `0.7.0`; `CHANGELOG.md` retains the `0.6.0` history and released `0.7.0` from
   the current entry. The `0.7.0` rows are `Shipped` / `0.7.0`; the next version bump belongs to the

@@ -215,3 +215,18 @@ public class ArrayList<T: mut>
     /// Returns an iterator over the elements, in index order.
     public iterator(): &Iterator<T> = ArrayListIterator<T>.from(this);
 }
+
+/// An `ArrayList` can produce a sorted copy and sort itself in place.
+default witness Sortable<ArrayList<_>> for ArrayList<_> {
+    fn sortedBy<A: mut>(
+        this: ArrayList<A>,
+        compare: (A, A) -> Ordering
+    ): ArrayList<A> = sortedArrayList(this, compare);
+}
+
+default witness InPlaceSortable<ArrayList<_>> for ArrayList<_> {
+    fn sortBy<A: mut>(
+        this: &ArrayList<A>,
+        compare: (A, A) -> Ordering
+    ): Unit = sortArrayList(this, compare);
+}

@@ -253,6 +253,8 @@ public final class FunctionBindingRegistry {
                 TypeDescriptor.ofString(), string, string, string);
         final var stringSplit = TypeDescriptor.functionOf("stringSplit",
                 TypeDescriptor.arrayOf(TypeDescriptor.ofString()), string, string);
+        final var stringSplitWhitespace = TypeDescriptor.functionOf("stringSplitWhitespace",
+                TypeDescriptor.arrayOf(TypeDescriptor.ofString()), string);
         final var stringRegexErrorMessage = TypeDescriptor.functionOf("stringRegexErrorMessage",
                 string, string);
         final var stringSplitRegex = TypeDescriptor.functionOf("stringSplitRegex",
@@ -525,6 +527,8 @@ public final class FunctionBindingRegistry {
                         staticBinding(stringReplace, stringUnicode, "replace")),
                 Map.entry("zeron.lang.stringSplit",
                         staticBinding(stringSplit, stringUnicode, "split")),
+                Map.entry("zeron.lang.stringSplitWhitespace",
+                        staticBinding(stringSplitWhitespace, stringUnicode, "splitWhitespace")),
                 Map.entry("zeron.lang.stringRegexErrorMessage",
                         staticBinding(stringRegexErrorMessage, stringUnicode, "regexErrorMessage")),
                 Map.entry("zeron.lang.stringSplitRegex",

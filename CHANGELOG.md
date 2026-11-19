@@ -4,6 +4,13 @@
 
 ### Compiler and language work
 
+- String literals now support escape sequences. The scanner decodes `\\`, `\"`, `\'`, `\n`, `\r`,
+  `\t`, and braced scalar escapes such as `\u{1F600}` before the value reaches the program, so
+  strings can contain newlines, tabs, quotes, backslashes, and arbitrary Unicode scalars. Character
+  literals share the same escape set and now also accept `\"`. Strings may still span lines, and a
+  backslash immediately before a line break continues the string on the next source line without
+  adding a line break to the value. An invalid escape reports the new `ZR1007` diagnostic, and the
+  grammar reference and strings guide document the sequences.
 - Implemented ZEP-0050 Java host-access trust boundary. Direct Java invocations, constructors, and
   field accesses now require an explicit `unsafe` expression; curated `external class` and
   `external fn` facades remain trusted and unchanged. Under `unsafe`, checked Java exceptions may
@@ -32,6 +39,11 @@
   evidence and reified-slot lowering, and effects from the callee expression and invocation are
   both tracked. Named, member, constructor, and generic calls keep their existing paths, and no
   runtime or API-index ABI changed.
+- Implemented ZEP-0150 safe invocation of nullable function values. `couldBeNull?.()` evaluates the
+  callee once, skips argument evaluation and produces `null` when it is null, and otherwise invokes
+  the function value with the existing shape-interface lowering. The result is nullable, generic and
+  rank-2 values reuse their normal instantiation, receiver functions remain receiver-call syntax,
+  and no runtime or API-index ABI changed.
 - Implemented ZEP-0131 chained flow refinement and implicit receiver access. `is` and `matches`
   facts transfer through composed `and`, `or`, and `not` conditions; `matches` payload bindings are
   available in later operands and the successful branch, with OR alternatives checked for
@@ -132,9 +144,17 @@ non-`mut` properties continue to use the normal access diagnostics.
   them with a strict diagnostic and no migration window. Split the `Option`, `Result`, `Stream`, and
   numeric standard-library witness chains and class implementation blocks one contract at a time,
   and advanced the standard-library API version to `16`.
+- Fixed code generation for function-shaped newtypes. A newtype's `value` member is its
+  representation, so a call such as `formatter.value(record)` now invokes the carrier directly
+  instead of emitting a call to a synthetic newtype class that is never generated. Non-generic
+  function newtypes such as `zeron.log.LogFormatter` compile and run without a missing-class error.
 
 ### Tooling and project configuration
 
+- Added `textDocument/signatureHelp` to the language server, including parameter labels and the
+  active argument, and advertise `(` and `,` as trigger characters. Hovering the closing parenthesis
+  of a function-valued expression invocation now shows its function type, and both hover and
+  signature help cover safe invocation.
 - Fixed TextMate highlighting so a character literal containing a double quote (`'"'`) no longer
   starts a double-quoted string, and escaped quotes inside strings no longer end them early.
 - Added ZEP-0117 declarative project targets and generated CLI/manifest references. `zeron.toml`
@@ -149,6 +169,14 @@ non-`mut` properties continue to use the normal access diagnostics.
 
 ### Standard library
 
+- Added `String.splitWhitespace()`, which splits on runs of Unicode whitespace, ignores leading and
+  trailing whitespace, and returns `Stream<String>`.
+- Added default `Sortable` and `InPlaceSortable` witnesses. `ArrayList` and `LinkedList` support
+  both a sorted copy (`sorted`, `sortedBy(compare)`) and in-place sorting (`sort`,
+  `sortBy(compare)`), while the persistent `ConsList` supports the sorted copy only. The shared
+  implementation is an unstable heapsort with `O(1)` extra space over an `ArrayList` buffer.
+- Added `Stream.sortedBy(compare)`, a stateful intermediate operation that buffers each traversal,
+  sorts it, and yields the elements in order.
 - Added `Path.list()` and `Path.walk()`. `list` returns a directory's immediate children and
   `walk` returns the starting path plus every descendant; both return `Array<Path>` and raise
   `IoFailure` when the filesystem cannot be read.
@@ -168,6 +196,17 @@ non-`mut` properties continue to use the normal access diagnostics.
   capability keeps its members under the clearer name `CollectionBuilder<C<_>>`. The platform
   primitives live in `zeron.runtime.StringUnicode`, no intrinsic ID was added, and the
   standard-library API version advanced to `18`.
+- Added the `zeron.log` logging API. `Level` supplies severity ordering and display text,
+  `Record` carries a monotonic time, level, logger name, message, structured `Value` fields, and an
+  optional cause, and `LogSink` exposes filtering plus a flush hook. `LogSink.console` and the
+  `LogSink.minLevel` extension return mutable sinks so filters can be layered, while `Logger` adds
+  named children, copied context maps, `isEnabled`, and `flush`. `LogFormatter.plain` renders the
+  level, logger, message, and structured fields with escaping for nested lists and text. Sinks,
+  formatters, and loggers are supplied explicitly, so tests can record or replace output.
+- Added `zeron.time.Clock` for injectable monotonic time. `Clock.system()` samples the same
+  monotonic source as `Instant.now()`, and `Clock.fixed(instant)` always reports the supplied
+  instant for deterministic tests; `Logger.withClock` accepts either. Wall-clock timestamps remain
+  outside `zeron.time` per ZEP-0011.
 
 ## [0.7.0] - 2026, 13 NOV
 

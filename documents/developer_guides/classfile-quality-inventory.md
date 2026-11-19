@@ -4,8 +4,8 @@
 | ----- | ----- |
 | Status | Audit / inventory |
 | Scope | JVM bytecode, generated class count and size, allocation, dispatch, and initialization emitted by the Zeron compiler |
-| Date | 2026-11-04 |
-| Baseline | One 55-line source file compiled twice: with the bundled **source** standard library and with a prebuilt **compiled** one |
+| Date | 2026-11-19 |
+| Baseline | One source file compiled twice: with the bundled **source** standard library and with a prebuilt **compiled** one. First measured 2026-11-04; re-measured 2026-11-19 at commit `6287adc1`. |
 
 This document inventories concrete places where the compiler currently produces larger, slower,
 or more allocation-heavy `.class` files than necessary. It is an audit, not an accepted design.
@@ -47,6 +47,37 @@ Two observations dominate the baseline:
 2. **Runtime support classes used to be emitted unconditionally**, including the entire HTTP
    stack. Emission is now demand-driven (`RuntimeSupportEmitter.emitReferencedRuntimeSupport`), so
    the baseline below records the pre-change behavior; see F for the implemented gating.
+
+### 2026-11-19 reassessment
+
+The sample was recompiled at commit `6287adc1`. The only source change was replacing the removed
+`id.value` with a newtype-owned `toInt()` extension; the rest of the sample is unchanged. Absolute
+source-mode counts grew because the bundled standard library has continued to gain modules, not
+because per-program generation regressed. Compiled mode shrank further after demand-driven support
+emission.
+
+| Measurement | 2026-11-04 source | 2026-11-19 source | 2026-11-04 compiled | 2026-11-19 compiled |
+| --- | --- | --- | --- | --- |
+| Total emitted class files | 320 | **406** | 29 | **12** |
+| Total emitted bytes in `dist/` | 381,625 | **1,014,349** | 55,138 | **15,274** |
+| `main.class` | 15,477 B | **22,091 B** | 7,019 B | **6,997 B** |
+| Prebuilt stdlib artifact | — | — | 260,859 B JAR / 314 classes | **459,766 B JAR / 400 classes** |
+
+`UserId` no longer emits a wrapper class; the only remaining holder is the namespace class
+`$zeron$Namespace$UserId`. The reassessment confirmed most structural findings and corrected several
+stale details:
+
+- **Confirmed:** `Unit` singleton returns (A), `Object[]` arrays (C), `Stream`/`Step` lowering (D),
+  Object-shaped function interfaces and adapters (E), top-level initialization checks (G), derived
+  `$zeron$eq`/`$zeron$hash` `MethodHandle.invoke` (H), dead evidence stubs (J.7), and
+  `HashMap<Int, String>` key boxing (L).
+- **Corrected:** `Comparable.compareTo` returns `zeron.lang.Ordering`, not `int` (H and L);
+  `EqSupport` and `HashSupport` now expose direct primitive/String/Unit paths and keep
+  `MethodHandle.invoke` only for nullable generic evidence (H); `Integral<T>`'s 16 evidence
+  parameters come from its flattened inherited and own methods, and `Hashable` — not `Comparable` —
+  requires `Eq` (L); newtypes are already erased (B), so the backlog no longer lists them.
+- **Moved:** line references below are current at `6287adc1`; the earlier audit's line numbers are
+  retained only where the surrounding description is still accurate.
 
 ### Compiled-standard-library baseline
 
@@ -416,8 +447,13 @@ invokevirtual java/lang/invoke/MethodHandle.invoke:(I)I
 
 This is a signature-polymorphic call site per component. It is harder for the JIT to inline than a
 direct `==`, `Integer.compare`, or `Objects.equals`, and it bloats every derived class with
-`MethodHandle` parameters and invocation code. `EqSupport`/`HashSupport` dispatch uses the same
-pattern (`RuntimeSupportEmitter.java:683,730`).
+`MethodHandle` parameters and invocation code.
+
+`EqSupport` and `HashSupport` are no longer part of the problem for concrete types. They expose
+direct `Int`/`Boolean`/`Long`/`Float`/`String`/`Unit` methods and matching nullable overloads, and
+only the generic nullable forms (`EQ_NULLABLE_WITH_HANDLE`, `HASH_NULLABLE_WITH_HANDLE`) still take
+a `MethodHandle` (`RuntimeSupportEmitter.java:753-778,848-856`). The derived-class helpers have not
+received the same treatment.
 
 **Direction:**
 
@@ -509,7 +545,7 @@ witness are primitive as well. Measured witness methods:
 public static final int $zeron$witness$…$add(int, int);      // iload_0; iload_1; iadd; ireturn
 public static final int $zeron$witness$…$div(int, int);      // idiv/irem-based floor division
 public static final int $zeron$witness$…$rem(int, int);      // irem
-public static final int $zeron$witness$…$compareTo(int, int);
+public static final zeron.lang.Ordering $zeron$witness$…$compareTo(int, int);
 ```
 
 `10.div(3)`, `10.rem(3)`, `10.mod(3)`, `10.quot(3)`, `(-10).abs()`, and `10.compareTo(3)` all

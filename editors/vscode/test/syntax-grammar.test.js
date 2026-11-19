@@ -32,12 +32,30 @@ test('highlights character literals before double-quoted strings', () => {
   assert.ok(forIncludes.indexOf('#characters') < forIncludes.indexOf('#strings'));
 });
 
-test('highlights escaped quotes inside double-quoted strings', () => {
+test('highlights escape sequences inside double-quoted strings', () => {
   assert.ok(stringPattern);
-  const escape = stringPattern.patterns
-    .find(pattern => pattern.name === 'constant.character.escape.zeron');
-  assert.ok(escape);
-  assert.ok(new RegExp(escape.match).test("\\\""));
+  const findEscape = suffix => stringPattern.patterns
+    .find(pattern => pattern.name === `constant.character.escape.${suffix}`);
+  const simple = findEscape('zeron');
+  const unicode = findEscape('unicode.zeron');
+  const continuation = findEscape('line-continuation.zeron');
+
+  assert.ok(simple);
+  assert.ok(unicode);
+  assert.ok(continuation);
+
+  const simpleMatcher = new RegExp(simple.match, 'g');
+  assert.deepEqual(
+    Array.from('\\n\\t\\\\\\"\\\''.matchAll(simpleMatcher), match => match[0]),
+    ['\\n', '\\t', '\\\\', '\\"', "\\'"]
+  );
+  assert.equal(new RegExp(simple.match).test('\\q'), false);
+
+  assert.ok(new RegExp(unicode.match).test('\\u{1F600}'));
+  assert.equal(new RegExp(unicode.match).test('\\u1F600'), false);
+
+  assert.ok(new RegExp(continuation.match).test('let text = "first \\'));
+  assert.equal(new RegExp(continuation.match).test('let text = "first \\n";'), false);
 });
 
 test('highlights out only in generic type-argument positions', () => {

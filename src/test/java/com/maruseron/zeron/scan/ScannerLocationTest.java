@@ -171,6 +171,45 @@ public final class ScannerLocationTest {
     }
 
     @Test
+    public void decodesStringEscapesAndPreservesTheSourceSpelling() {
+        final var result = Scanner.from(
+                "\"a\\nb\" \"quote:\\\"q\\\"\" \"slash:\\\\\" \"tab:\\t\" \"scalar:\\u{1F600}\" \"apostrophe:\\'\"")
+                .scanWithDiagnostics();
+
+        assertTrue(result.diagnostics().isEmpty());
+        final var strings = result.tokens().stream()
+                .filter(token -> token.type() == TokenType.STRING).toList();
+        assertEquals(List.of("a\nb", "quote:\"q\"", "slash:\\", "tab:\t", "scalar:😀", "apostrophe:'"),
+                strings.stream().map(token -> (String) token.literal()).toList());
+        assertEquals("\"a\\nb\"", strings.getFirst().lexeme());
+    }
+
+    @Test
+    public void reportsInvalidStringEscapesAndKeepsScanning() {
+        final var result = Scanner.from("\"bad\\q\" \"\\u{}\" \"ok\\n\"", "src/escape.zn")
+                .scanWithDiagnostics();
+
+        assertEquals(2, result.diagnostics().size());
+        assertTrue(result.diagnostics().stream()
+                .allMatch(diagnostic -> diagnostic.code().toString().equals("ZR1007")));
+        assertEquals(List.of("bad", "", "ok\n"), result.tokens().stream()
+                .filter(token -> token.type() == TokenType.STRING)
+                .map(token -> (String) token.literal()).toList());
+    }
+
+    @Test
+    public void joinsStringsContinuedWithATrailingBackslash() {
+        final var result = Scanner.from("\"first\\\nsecond\" \"crlf\\\r\njoined\" \"keep\\\n  indent\"")
+                .scanWithDiagnostics();
+
+        assertTrue(result.diagnostics().toString(), result.diagnostics().isEmpty());
+        assertEquals(List.of("firstsecond", "crlfjoined", "keep  indent"),
+                result.tokens().stream()
+                        .filter(token -> token.type() == TokenType.STRING)
+                        .map(token -> (String) token.literal()).toList());
+    }
+
+    @Test
     public void scansScalarCharacterLiteralsAndSupportedEscapes() {
         final var result = Scanner.from("'A' '\\n' '\\'' '\\\\' '\\u{1F600}' '😀'")
                 .scanWithDiagnostics();

@@ -1,8 +1,8 @@
 # VS Code and the language server
 
 The Zeron VS Code extension combines TextMate syntax highlighting with compiler-backed language
-features. The language server provides diagnostics, completion, hover information, definition navigation,
-and quick fixes for missing contract and witness method implementations. Definitions in bundled
+features. The language server provides diagnostics, completion, hover information, signature help,
+definition navigation, and quick fixes for missing contract and witness method implementations. Definitions in bundled
 standard-library sources open in read-only virtual documents; project source files remain editable.
 
 ## Requirements
@@ -46,7 +46,15 @@ line breaks at its first generic argument list or parameter list and lists one i
 hover over a reference ends with a `Go to definition` link to the declaration that definition
 navigation resolves, including Java and external declarations. Hovering a match case name describes
 the sum case selected for the scrutinee and navigates to its declaration, even when a type with the
-same name is visible in the project.
+same name is visible in the project. Hovering the closing parenthesis of a call whose callee is a
+function-valued expression, such as `makeCallback()(21)`, describes the invokable function value.
+
+## Signature help
+
+While writing a call, the language server shows the callable's parameter list and highlights the
+argument at the cursor. It works for named functions, member calls, function-valued expression
+calls, and safe invocation with `?.()`. Parentheses and commas trigger the request, and nested calls
+are tracked independently.
 
 ## Java and external bindings
 

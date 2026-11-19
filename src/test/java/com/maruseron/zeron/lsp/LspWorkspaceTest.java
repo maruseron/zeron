@@ -13,6 +13,7 @@ import org.eclipse.lsp4j.HoverParams;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.SignatureHelpParams;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.junit.Rule;
 import org.junit.Test;
@@ -290,6 +291,45 @@ public class LspWorkspaceTest {
                 hover.contains("fn compareTo(other: T) -> String"));
         assertTrue(hover, hover.contains("Evaluates the current instance against `other`"));
         assertFalse(hover, hover.contains("extension on zeron.numeric.Integer via"));
+    }
+
+    @Test
+    public void hoversAndSignsFunctionValuedExpressionInvocations() throws Exception {
+        final var source = """
+                fn makeAdder(left: Int): Int -> Int = right -> left + right;
+                fn call(): Int = makeAdder(20)(22);
+                fn maybe(flag: Boolean): (Int -> Int)? =
+                    if (flag) then makeAdder(1) else null;
+                fn safeCall(flag: Boolean): Int? = maybe(flag)?.(2);
+                """;
+        final var project = project(source);
+        final var snapshot = ProjectAnalysisWorkspace.open(project.manifest()).analyze(Map.of());
+
+        final var expressionHover = hoverAt(snapshot, project.entry(), source, ")(22");
+        assertTrue("Unexpected expression hover: " + expressionHover,
+                expressionHover.contains("function value Int -> Int"));
+
+        final var directSignature = signatureHelpAt(snapshot, project.entry(), source,
+                "makeAdder(20", "makeAdder(".length() + 2);
+        assertNotNull(directSignature);
+        assertEquals("fn makeAdder(Int) -> Int -> Int",
+                directSignature.getSignatures().getFirst().getLabel());
+
+        final var expressionSignature = signatureHelpAt(snapshot, project.entry(), source,
+                "(22)", 2);
+        assertNotNull(expressionSignature);
+        assertEquals("function value Int -> Int",
+                expressionSignature.getSignatures().getFirst().getLabel());
+        assertEquals("Int", expressionSignature.getSignatures().getFirst()
+                .getParameters().getFirst().getLabel().getLeft());
+        assertEquals(Integer.valueOf(0), expressionSignature.getActiveParameter());
+
+        final var safeSignature = signatureHelpAt(snapshot, project.entry(), source,
+                "?.(2)", 4);
+        assertNotNull(safeSignature);
+        assertEquals("function value Int -> Int",
+                safeSignature.getSignatures().getFirst().getLabel());
+        assertEquals(Integer.valueOf(0), safeSignature.getActiveParameter());
     }
 
     @Test
@@ -2512,6 +2552,15 @@ public class LspWorkspaceTest {
                 public type Option<T: nullable> = Some(value: T) | None;
                 """);
         return source.toAbsolutePath().normalize();
+    }
+
+    private static org.eclipse.lsp4j.SignatureHelp signatureHelpAt(
+            final ProjectAnalysisWorkspace.Snapshot snapshot, final Path path,
+            final String source, final String searchedText, final int relativeOffset) {
+        final var offset = source.indexOf(searchedText);
+        return LspFeatures.signatureHelp(snapshot, path, new SignatureHelpParams(
+                new TextDocumentIdentifier(path.toUri().toString()),
+                DocumentCoordinates.positionAt(source, offset + relativeOffset)));
     }
 
     private static String hoverAt(final ProjectAnalysisWorkspace.Snapshot snapshot,

@@ -3462,8 +3462,15 @@ public final class Parser {
                 } else if (expr instanceof Expr.Property property) {
                     expr = finishMemberCall(property);
                 } else {
-                    expr = finishInvoke(expr);
+                    final var calleeEnd = current >= 2 ? tokens.get(current - 2) : previous();
+                    expr = finishInvoke(expr, calleeEnd, false);
                 }
+            } else if (check(HUH_DOT) && current + 1 < tokens.size()
+                    && tokens.get(current + 1).type() == LEFT_PAREN) {
+                advance();
+                final var calleeEnd = current >= 3 ? tokens.get(current - 2) : previous();
+                advance();
+                expr = finishInvoke(expr, calleeEnd, true);
             } else if (check(LEFT_BRACE)
                     && (expr instanceof Expr.Variable || expr instanceof Expr.Property
                     || expr instanceof Expr.Call || expr instanceof Expr.MemberCall
@@ -3574,7 +3581,7 @@ public final class Parser {
         return false;
     }
 
-    private Expr finishInvoke(final Expr callee) {
+    private Expr finishInvoke(final Expr callee, final Token calleeEnd, final boolean safe) {
         final var arguments = new ArrayList<Expr>();
         if (!check(RIGHT_PAREN)) {
             do {
@@ -3586,7 +3593,7 @@ public final class Parser {
             } while (match(COMMA));
         }
         final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
-        return new Expr.Invoke(callee, paren, arguments, TypeDescriptor.ofInfer());
+        return new Expr.Invoke(callee, calleeEnd, paren, arguments, TypeDescriptor.ofInfer(), safe);
     }
 
     private Expr finishMemberCall(final Expr.Property property) {

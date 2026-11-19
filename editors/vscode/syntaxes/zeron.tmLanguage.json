@@ -82,8 +82,16 @@
       "end": "\"",
       "patterns": [
         {
+          "name": "constant.character.escape.unicode.zeron",
+          "match": "\\\\u\\{[0-9A-Fa-f]+\\}"
+        },
+        {
+          "name": "constant.character.escape.line-continuation.zeron",
+          "match": "\\\\(?=\\r?$)"
+        },
+        {
           "name": "constant.character.escape.zeron",
-          "match": "\\\\."
+          "match": "\\\\[\\\\'\"nrt]"
         }
       ]
     },

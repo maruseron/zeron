@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -41,6 +42,15 @@ public final class InvocationExpressionTest {
                     return callbacks[0]();
                 }
                 fn immediate(): Int = (() -> 42)();
+                fn maybe(flag: Boolean): (() -> Int)? = if (flag) then (() -> 42) else null;
+                fn safeCall(flag: Boolean): Int? = maybe(flag)?.();
+                fn safeNonNull(): Int? = (() -> 42)?.();
+                let mut argumentEvaluations = 0;
+                fn tick(): Int { argumentEvaluations += 1; return 1; }
+                fn nullableIdentity(flag: Boolean): ((Int) -> Int)? =
+                    if (flag) then (value -> value) else null;
+                fn safeWithArgument(flag: Boolean): Int? = nullableIdentity(flag)?.(tick());
+                fn argumentCount(): Int = argumentEvaluations;
                 class CallbackHolder {
                     public property callback: () -> Int;
                     public constructor new;
@@ -63,6 +73,12 @@ public final class InvocationExpressionTest {
                 assertEquals(84, generated.getMethod("readCallback").invoke(null));
                 assertEquals(42, generated.getMethod("indexed").invoke(null));
                 assertEquals(42, generated.getMethod("immediate").invoke(null));
+                assertEquals(42, generated.getMethod("safeCall", boolean.class).invoke(null, true));
+                assertNull(generated.getMethod("safeCall", boolean.class).invoke(null, false));
+                assertEquals(42, generated.getMethod("safeNonNull").invoke(null));
+                assertEquals(1, generated.getMethod("safeWithArgument", boolean.class).invoke(null, true));
+                assertNull(generated.getMethod("safeWithArgument", boolean.class).invoke(null, false));
+                assertEquals(1, generated.getMethod("argumentCount").invoke(null));
             }
         } finally {
             Files.deleteIfExists(Path.of("dist", className + ".class"));
@@ -78,6 +94,9 @@ public final class InvocationExpressionTest {
 
                 fn genericResult(): Int = makeIdentity()(42);
                 fn rankTwoResult(): String = (selfIdentity)("value");
+                fn maybeIdentity(flag: Boolean): (<T> (T) -> T)? =
+                    if (flag) then makeIdentity() else null;
+                fn safeGeneric(flag: Boolean): Int? = maybeIdentity(flag)?.(42);
                 """);
         final var compiler = CompilationService.forCompilationUnits(List.of(source), className, "");
         try {
@@ -88,6 +107,8 @@ public final class InvocationExpressionTest {
                 final var generated = loader.loadClass(className);
                 assertEquals(42, generated.getMethod("genericResult").invoke(null));
                 assertEquals("value", generated.getMethod("rankTwoResult").invoke(null));
+                assertEquals(42, generated.getMethod("safeGeneric", boolean.class).invoke(null, true));
+                assertNull(generated.getMethod("safeGeneric", boolean.class).invoke(null, false));
             }
         } finally {
             Files.deleteIfExists(Path.of("dist", className + ".class"));
@@ -132,6 +153,7 @@ public final class InvocationExpressionTest {
     public void rejectsNonCallableNullableAndReceiverFunctionExpressions() {
         for (final var source : List.of(
                 "fn invalid(): Int = (42)();",
+                "fn invalid(): Int? = (42)?.();",
                 "fn maybe(flag: Boolean): (() -> Int)? = if (flag) then (() -> 1) else null;"
                         + " fn invalid(flag: Boolean): Int = maybe(flag)();",
                 "class Runner { public run(): Int = 1; }"

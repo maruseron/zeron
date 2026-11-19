@@ -224,21 +224,44 @@ public final class Scanner {
     }
 
     private void string() {
-        while (peek() != '"' && !isAtEnd()) {
-            advance();
+        final var value = new StringBuilder();
+        var closed = false;
+
+        while (!isAtEnd()) {
+            final var currentCharacter = advance();
+            if (currentCharacter == '"') {
+                closed = true;
+                break;
+            }
+            if (currentCharacter != '\\') {
+                value.append(currentCharacter);
+                continue;
+            }
+            if (isAtEnd()) break;
+
+            final var escape = advance();
+            if (escape == '\n' || escape == '\r') {
+                // A trailing backslash continues the string on the next source line.
+                if (escape == '\r' && peek() == '\n') advance();
+                continue;
+            }
+            final var decoded = escapeValue(escape);
+            if (decoded < 0) {
+                recordDiagnostic(DiagnosticCatalog.INVALID_STRING_ESCAPE,
+                        span(tokenStart, position()), escape == 'u'
+                                ? "Malformed Unicode scalar escape in string literal."
+                                : "Unsupported escape sequence in string literal.");
+                continue;
+            }
+            value.appendCodePoint(decoded);
         }
 
-        if (isAtEnd()) {
+        if (!closed) {
             recordDiagnostic(DiagnosticCatalog.UNTERMINATED_STRING,
                     span(tokenStart, position()), "Unterminated string.");
-            addToken(STRING, source.substring(start + 1, current));
-            return;
         }
 
-        // close the string
-        advance();
-
-        addToken(STRING, source.substring(start + 1, current - 1));
+        addToken(STRING, value.toString());
     }
 
     private void character() {
@@ -268,22 +291,12 @@ public final class Scanner {
                     break;
                 }
                 final var escape = advance();
-                value = switch (escape) {
-                    case '\\' -> '\\';
-                    case '\'' -> '\'';
-                    case 'n' -> '\n';
-                    case 'r' -> '\r';
-                    case 't' -> '\t';
-                    case 'u' -> scanScalarEscape();
-                    default -> {
-                        valid = false;
-                        reason = "Unsupported escape sequence in character literal.";
-                        yield -1;
-                    }
-                };
+                value = escapeValue(escape);
                 if (value < 0) {
                     valid = false;
-                    reason = "Malformed Unicode scalar escape in character literal.";
+                    reason = escape == 'u'
+                            ? "Malformed Unicode scalar escape in character literal."
+                            : "Unsupported escape sequence in character literal.";
                     continue;
                 }
             } else if (Character.isHighSurrogate(currentCharacter)
@@ -318,6 +331,19 @@ public final class Scanner {
                     span(tokenStart, position()), reason);
         }
         addToken(CHAR, scalarCount == 1 ? scalar : 0);
+    }
+
+    private int escapeValue(final char escape) {
+        return switch (escape) {
+            case '\\' -> '\\';
+            case '\'' -> '\'';
+            case '"' -> '"';
+            case 'n' -> '\n';
+            case 'r' -> '\r';
+            case 't' -> '\t';
+            case 'u' -> scanScalarEscape();
+            default -> -1;
+        };
     }
 
     private int scanScalarEscape() {

@@ -1,6 +1,7 @@
 package zeron.collections;
 
 import zeron.control.Foldable;
+import zeron.internal.unwrapSome;
 
 class ConsNode<T: mut> {
     storedHead: T;
@@ -125,4 +126,21 @@ public class ConsList<T: mut>
 
     /// Returns an iterator over the elements, from first to last.
     public iterator(): &Iterator<T> = ConsListIterator<T>.from(this.node);
+}
+
+/// A `ConsList` is persistent, so only the copying `Sortable` capability applies.
+default witness Sortable<ConsList<_>> for ConsList<_> {
+    fn sortedBy<A: mut>(
+        this: ConsList<A>,
+        compare: (A, A) -> Ordering
+    ): ConsList<A> {
+        let sorted = sortedArrayList(arrayListOf(this), compare);
+        let mut result: ConsList<A> = ConsList<A>.empty();
+        let mut index = sorted.size - 1;
+        while (index >= 0) {
+            result = result.prepend(unwrapSome(sorted.at(index)));
+            index -= 1;
+        }
+        return result;
+    }
 }

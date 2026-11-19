@@ -6,6 +6,7 @@ import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.PositionEncodingKind;
 import org.eclipse.lsp4j.ServerCapabilities;
+import org.eclipse.lsp4j.SignatureHelpOptions;
 import org.eclipse.lsp4j.TextDocumentSyncKind;
 import org.eclipse.lsp4j.TextDocumentSyncOptions;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
@@ -44,6 +45,8 @@ final class ZeronLanguageServer implements LanguageServer, LanguageClientAware, 
         completion.setTriggerCharacters(java.util.List.of("."));
         capabilities.setCompletionProvider(completion);
         capabilities.setHoverProvider(true);
+        final var signatureHelp = new SignatureHelpOptions(java.util.List.of("(", ","));
+        capabilities.setSignatureHelpProvider(signatureHelp);
         capabilities.setDefinitionProvider(true);
         capabilities.setCodeActionProvider(Either.forLeft(true));
         return CompletableFuture.completedFuture(new InitializeResult(capabilities));

@@ -161,7 +161,23 @@ do not prescribe storage:
 `Deque<T>` is a capability contract requiring `List<T> + Sequenced<T>`, with `addFirst`, `addLast`,
 `removeFirst`, and `removeLast`. `LinkedList` and `ArrayDeque` implement it; `ConsList` does not,
 because a persistent list cannot mutate its ends. A function that only needs those operations can
-take `&Deque<Int>`. `IdentityHashMap` compares keys with `===`, so its keys need neither `Eq` nor
+take `&Deque<Int>`.
+
+Sorting is split the same way. `Sortable<C<_>>` supplies a sorted copy through `sorted` and
+`sortedBy(compare)`, while `InPlaceSortable<C<_>>` supplies `sort` and `sortBy(compare)` for
+collections that can reorder themselves. The standard library provides `Sortable` for `ArrayList`,
+`LinkedList`, and the persistent `ConsList`, and both capabilities for the mutable `ArrayList` and
+`LinkedList`. `sorted` and `sort` require the element type to implement `Comparable`, while
+`sortedBy` and `sortBy` accept any comparator. The standard implementations use an unstable sort,
+so equal elements may change relative order.
+
+```zeron
+import zeron.collections.ArrayList;
+
+let ordered = names.sorted();
+let mut values = ArrayList.of(3, 1, 2);
+values.sortBy((a, b) -> b.compareTo(a)); // 3, 2, 1
+``` `IdentityHashMap` compares keys with `===`, so its keys need neither `Eq` nor
 `Hashable`, and two structurally equal objects are distinct keys.
 
 ```zeron
@@ -187,7 +203,15 @@ let results = doubled.toList();
 
 The stream describes the work to do; `map` and `filter` do not immediately build a new list.
 Values are requested when an operation consumes the stream, such as `toList()`, `count()`, or a
-`for` loop. Use a stream to express a sequence of transformations, and use a list when you need to
+`for` loop. `sortedBy(compare)` is a stateful intermediate operation: the first traversal buffers
+every element, sorts the buffer, and then yields the elements in order, so it costs `O(n)` extra
+space per traversal.
+
+```zeron
+let byLength = Stream<String>.fromArray(["ccc", "a", "bb"])
+    .sortedBy((a, b) -> a.length().compareTo(b.length()))
+    .toList();
+``` Use a stream to express a sequence of transformations, and use a list when you need to
 store the resulting values and change or revisit them.
 
 `collect` reduces a stream through the operations that build a collector: an initial accumulator, a

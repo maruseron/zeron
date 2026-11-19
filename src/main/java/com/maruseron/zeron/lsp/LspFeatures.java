@@ -23,7 +23,11 @@ import org.eclipse.lsp4j.HoverParams;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
+import org.eclipse.lsp4j.ParameterInformation;
 import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.SignatureHelp;
+import org.eclipse.lsp4j.SignatureHelpParams;
+import org.eclipse.lsp4j.SignatureInformation;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 
@@ -703,10 +707,15 @@ final class LspFeatures {
         if (text == null || tokens == null) return null;
         final var offset = DocumentCoordinates.offsetAt(text, params.getPosition());
         final var token = tokenAt(tokens, offset);
-        if (token == null || token.type() != TokenType.IDENTIFIER
-                && token.type() != TokenType.THIS) return null;
+        if (token == null) return null;
         final var symbols = new SymbolIndex(snapshot);
         final var resolution = snapshot.resolution().orElse(null);
+        final var callSiteType = resolution == null ? null : resolution.callSiteFunctionType(token);
+        if (token.type() != TokenType.IDENTIFIER && token.type() != TokenType.THIS
+                && !(callSiteType != null
+                && (token.type() == TokenType.LEFT_PAREN || token.type() == TokenType.RIGHT_PAREN))) {
+            return null;
+        }
         final var typeNamePosition = isTypeNamePosition(tokens, token);
         final var typeParameter = symbols.typeParameterAt(path, token, offset, typeNamePosition);
         if (typeParameter != null) {
@@ -718,7 +727,6 @@ final class LspFeatures {
             return withDefinitionLink(hover, snapshot, path, params);
         }
         final var type = resolution == null ? null : resolution.referenceType(token);
-        final var callSiteType = resolution == null ? null : resolution.callSiteFunctionType(token);
         final var target = resolution == null ? null : resolution.referenceTarget(token);
         final var witnessMethod = target != null && target.lexeme().startsWith("$zeron$witness$");
         final var isDeclaration = type != null && resolution.referenceTarget(token) == null;
@@ -750,7 +758,10 @@ final class LspFeatures {
         final var details = new ArrayList<String>();
         if (callSiteType != null) {
             final var parameterNames = symbol == null ? List.<String>of() : symbols.parameterNames(symbol);
-            final var rawSignature = SymbolIndex.signature(token.lexeme(), callSiteType, parameterNames);
+            final var rawSignature = token.type() == TokenType.LEFT_PAREN
+                    || token.type() == TokenType.RIGHT_PAREN
+                    ? "function value " + TypeFormatter.format(callSiteType)
+                    : SymbolIndex.signature(token.lexeme(), callSiteType, parameterNames);
             final var signature = symbol != null && symbol.kind() == CompletionItemKind.Constructor
                     ? rawSignature.replaceFirst("^fn ", "constructor ") : rawSignature;
             if (witnessMethod) {
@@ -813,6 +824,73 @@ final class LspFeatures {
         final var hover = new Hover(contents);
         hover.setRange(DocumentCoordinates.rangeOf(text, token));
         return withDefinitionLink(hover, snapshot, path, params);
+    }
+
+    static SignatureHelp signatureHelp(final ProjectAnalysisWorkspace.Snapshot snapshot,
+                                       final Path path,
+                                       final SignatureHelpParams params) {
+        final var text = snapshot.sourceText().get(path);
+        final var tokens = snapshot.tokens().get(path);
+        final var resolution = snapshot.resolution().orElse(null);
+        if (text == null || tokens == null || resolution == null) return null;
+        final var offset = DocumentCoordinates.offsetAt(text, params.getPosition());
+        var depth = 0;
+        var openIndex = -1;
+        for (var index = tokens.size() - 1; index >= 0; index--) {
+            final var token = tokens.get(index);
+            if (token.span().start().offset() >= offset) continue;
+            if (token.type() == TokenType.RIGHT_PAREN) {
+                depth++;
+            } else if (token.type() == TokenType.LEFT_PAREN) {
+                if (depth == 0) {
+                    openIndex = index;
+                    break;
+                }
+                depth--;
+            }
+        }
+        if (openIndex <= 0) return null;
+        var calleeIndex = openIndex - 1;
+        if (tokens.get(calleeIndex).type() == TokenType.HUH_DOT) calleeIndex--;
+        if (calleeIndex < 0) return null;
+        final var callee = tokens.get(calleeIndex);
+        final var functionType = resolution.callSiteFunctionType(callee);
+        if (functionType == null) return null;
+        var activeParameter = 0;
+        var parens = 0;
+        var brackets = 0;
+        var braces = 0;
+        for (var index = openIndex + 1; index < tokens.size(); index++) {
+            final var token = tokens.get(index);
+            if (token.span().start().offset() >= offset) break;
+            switch (token.type()) {
+                case LEFT_PAREN -> parens++;
+                case RIGHT_PAREN -> parens--;
+                case LEFT_BRACKET -> brackets++;
+                case RIGHT_BRACKET -> brackets--;
+                case LEFT_BRACE -> braces++;
+                case RIGHT_BRACE -> braces--;
+                case COMMA -> {
+                    if (parens == 0 && brackets == 0 && braces == 0) activeParameter++;
+                }
+                default -> { }
+            }
+        }
+        final var label = callee.type() == TokenType.IDENTIFIER || callee.type() == TokenType.THIS
+                ? SymbolIndex.signature(callee.lexeme(), functionType)
+                : "function value " + TypeFormatter.format(functionType);
+        final var signature = new SignatureInformation(label);
+        final var parameters = new ArrayList<ParameterInformation>();
+        for (final var parameter : functionType.parameters()) {
+            parameters.add(new ParameterInformation(TypeFormatter.format(parameter)));
+        }
+        signature.setParameters(parameters);
+        final var help = new SignatureHelp();
+        help.setSignatures(List.of(signature));
+        help.setActiveSignature(0);
+        help.setActiveParameter(Math.min(activeParameter,
+                Math.max(0, functionType.parameters().size() - 1)));
+        return help;
     }
 
     private static Hover withDefinitionLink(final Hover hover,

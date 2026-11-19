@@ -7,6 +7,8 @@
 - `Unterminated block comment.`
 - `Integer literal is outside the supported Int range.`
 - `Invalid numeric literal.`
+- `Unsupported escape sequence in string literal.`
+- `Malformed Unicode scalar escape in string literal.`
 
 ## Parsing
 

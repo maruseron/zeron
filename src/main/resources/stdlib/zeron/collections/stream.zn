@@ -1,6 +1,7 @@
 package zeron.collections;
 
 import zeron.control.Foldable;
+import zeron.internal.unwrapSome;
 import zeron.control.Functor;
 import zeron.control.Applicative;
 import zeron.control.Monad;
@@ -306,6 +307,42 @@ class TakenWhileStream<T: mut> is Iterable<T> {
     }
 }
 
+class SortedByStream<T: mut> is Iterable<T> {
+    source: Iterable<T>;
+    compare: (T, T) -> Ordering;
+
+    public iterator(): &Iterator<T> {
+        let upstream = source.iterator();
+        let comparator = compare;
+        return object: Iterator<T> {
+            source: &Iterator<T> = upstream;
+            compare: (T, T) -> Ordering = comparator;
+            values: ArrayList<T> = ArrayList<T>.empty();
+            position: Int = 0;
+            sorted: Boolean = false;
+
+            public mut next(): Step<T> {
+                if (not this.sorted) {
+                    let mut buffer = ArrayList<T>.empty();
+                    let mut item = this.source.next();
+                    while (item matches Step.Yield(value)) {
+                        buffer.add(value);
+                        item = this.source.next();
+                    }
+                    sortArrayList(buffer, this.compare);
+                    this.values = buffer;
+                    this.sorted = true;
+                }
+
+                if (this.position >= this.values.size) return Step<T>.Done();
+                let value = unwrapSome(this.values.at(this.position));
+                this.position = this.position + 1;
+                return Step.Yield(value);
+            }
+        };
+    }
+}
+
 fn streamMonadAp<A: mut, B: mut>(values: Stream<A>, functions: Stream<(A) -> B>): Stream<B> =
     Stream<B>.from(AppliedStream<A, B>.new(values, functions));
 
@@ -387,6 +424,15 @@ public class Stream<T: mut>
     /// rejected element.
     public takeWhile(predicate: (T) -> Boolean): Stream<T> =
         Stream<T>.new(TakenWhileStream<T>.new(source, predicate));
+
+    /// Returns a stream of this stream's elements ordered by `compare`.
+    ///
+    /// This is a stateful intermediate operation: the first traversal buffers every element, sorts
+    /// the buffer, and then yields the elements in order. Later traversals sort the source again,
+    /// so the operation costs `O(n)` extra space per traversal. Use `compareTo` for the natural
+    /// order of comparable elements.
+    public sortedBy(compare: (T, T) -> Ordering): Stream<T> =
+        Stream<T>.from(SortedByStream<T>.new(source, compare));
 
     /// Counts the elements by traversing the stream.
     public count(): Int = fold(0, (a, _) -> a + 1);

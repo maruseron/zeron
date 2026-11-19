@@ -21,8 +21,9 @@
    use case-insensitive `0b`, `0o`, and `0x` prefixes for binary, octal, and hexadecimal values.
    Radix-prefixed literals use INT by default and LONG with an `L` suffix; decimal leading zeroes remain
    decimal, and radix prefixes do not support floating-point literals.
-   CHAR is a single-quoted Unicode scalar literal; its escapes are `\\`, `\'`, `\n`, `\r`, `\t`, and
-   braced hexadecimal `\u{...}`.
+   CHAR is a single-quoted Unicode scalar literal and STRING is double-quoted text; both accept the
+   escapes `\\`, `\'`, `\"`, `\n`, `\r`, `\t`, and braced hexadecimal `\u{...}`. A string may also
+   continue on the next source line with a trailing backslash, which adds no line break to the value.
    // and /* */ comments are retained as ranged scanner tokens and exposed by ParseResult,
    but are excluded from the grammar and the compilation unit.
    `type` below is source syntax; design-document-02 describes encoded descriptors.
@@ -356,12 +357,13 @@ postfix = call, { "as", [ "?" ], type | "!!" } ;
 
 (* [CHANGED] ZEP-0090: property references T::p. *)
 (* [CHANGED] ZEP-0134: a call suffix may follow any expression whose resolved type is a non-null
-   function value, not only a name or property. *)
+   function value, not only a name or property. [CHANGED] ZEP-0150: `?.` followed by an argument
+   list safely invokes a nullable function value; the arguments are skipped when it is null. *)
 
 call = ( genericFunctionCall | genericClassFactoryCall | functionValueReference | propertyReference | primary ),
          { callSuffix } ;
-callSuffix = arguments | "[", expression, "]" | ( "." | "?." ), memberName,
-              [ typeArguments, arguments ] | trailingLambda ;
+callSuffix = "?.", arguments | arguments | "[", expression, "]"
+              | ( "." | "?." ), memberName, [ typeArguments, arguments ] | trailingLambda ;
 
 (* [CHANGED] ZEP-0082/0083 and design-document-00: the trailing lambda body is a statement
    sequence (`configure { host = "x"; }`), with an optional final expression (`{ it + 1 }`). *)
@@ -768,19 +770,22 @@ DOUBLE       = decimalText ;
    the token: it is scanned as the next IDENTIFIER token and the parser requires adjacency. *)
 SUFFIXABLE_NUMBER = integerText | decimalText ;
 
-(* STRING: by design the language has no string escape sequences (for now), so a string cannot
-   contain a double quote. It may span lines. The token value is the raw text between the quotes. *)
-STRING       = '"', { ? any UTF-16 code unit except '"' ? }, '"' ;
+(* STRING: escape sequences are decoded by the scanner, so the token value is the decoded text
+   rather than the raw source spelling. A string may span lines, and a double quote or backslash
+   must be escaped. A backslash immediately before a line break removes that break from the value. *)
+STRING         = '"', { stringScalar | lineContinuation | escapeSequence }, '"' ;
+stringScalar   = ? any UTF-16 code unit except '"' and backslash; CR and LF are allowed ? ;
+lineContinuation = backslash, ( CR, LF | CR | LF ) ;
 
 (* CHAR: exactly one Unicode scalar value; its value is its code point. *)
-CHAR         = "'", ( charScalar | charEscape ), "'" ;
+CHAR         = "'", ( charScalar | escapeSequence ), "'" ;
 charScalar   = ? any Unicode scalar value except "'", "\", CR and LF; a surrogate pair is one scalar, a lone surrogate is an error ? ;
 
-(* The \u{...} value must be at most 10FFFF and not a surrogate (D800 to DFFF). `\"` is not an
-   escape. EBNF terminal strings do not use backslash escapes, so the backslash itself is named
-   by the `backslash` production. *)
+(* The \u{...} value must be at most 10FFFF and not a surrogate (D800 to DFFF). EBNF terminal
+   strings do not use backslash escapes, so the backslash itself is named by the `backslash`
+   production. *)
 backslash    = ? the reverse solidus character U+005C ? ;
-charEscape   = backslash, ( backslash | "'" | "n" | "r" | "t" | "u", "{", hexDigit, { hexDigit }, "}" ) ;
+escapeSequence = backslash, ( backslash | "'" | '"' | "n" | "r" | "t" | "u", "{", hexDigit, { hexDigit }, "}" ) ;
 
 (* Comments are scanner tokens excluded from the grammar. *)
 LINE_COMMENT  = "//", { ? any character except CR and LF ? } ;

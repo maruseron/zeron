@@ -1,5 +1,6 @@
 package zeron.collections;
 
+import zeron.internal.unwrapSome;
 import zeron.lang.Hashable;
 import zeron.lang.Pair;
 import zeron.numeric.Integer;
@@ -75,7 +76,7 @@ public contract InPlaceReversible<C<_>> {
 /// A collection that can produce a reordered copy.
 public contract Sortable<C<_>> {
     /// Returns a sorted copy, leaving the receiver unchanged.
-    sortedBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): C<T>;
+    sortedBy<T: mut>(this: C<T>, compare: (T, T) -> Ordering): C<T>;
 
     /// Returns a copy sorted by the natural order of its elements.
     default sorted<T: mut + Comparable<T>>(this: C<T>): C<T> =
@@ -87,7 +88,7 @@ public contract InPlaceSortable<C<_>> {
     /// Sorts the collection in place, using `compare` to order pairs of elements.
     ///
     /// The sort is stable only if an implementation documents it as such.
-    mut sortBy<T: nullable + mut>(this: C<T>, compare: (T, T) -> Ordering): Unit;
+    mut sortBy<T: mut>(this: C<T>, compare: (T, T) -> Ordering): Unit;
 
     /// Sorts the collection in place using the natural order of its elements.
     default mut sort<T: mut + Comparable<T>>(this: &C<T>): Unit =
@@ -274,4 +275,70 @@ class CollectorImpl<T: mut, S: mut, R: mut> is Collector<T, R> {
     }
 
     public finish(): R = this.conversion(this.state);
+}
+
+/// Sorts `values` in place with `compare`.
+///
+/// The implementation is heapsort: `O(n log n)` comparisons, `O(1)` extra space, and not stable.
+/// Collections that are not randomly accessible copy into an `ArrayList` buffer and sort that.
+fn sortArrayList<T: mut>(values: &ArrayList<T>, compare: (T, T) -> Ordering): Unit {
+    let size = values.size;
+    let mut root = size / 2 - 1;
+    while (root >= 0) {
+        siftDownArrayList(values, root, size, compare);
+        root -= 1;
+    }
+
+    let mut end = size - 1;
+    while (end > 0) {
+        swapArrayList(values, 0, end);
+        siftDownArrayList(values, 0, end, compare);
+        end -= 1;
+    }
+}
+
+fn siftDownArrayList<T: mut>(
+    values: &ArrayList<T>,
+    start: Int,
+    end: Int,
+    compare: (T, T) -> Ordering
+): Unit {
+    let mut root = start;
+    loop {
+        let mut child = root * 2 + 1;
+        if (child >= end) return;
+        if (child + 1 < end) {
+            let left = unwrapSome(values.at(child));
+            let right = unwrapSome(values.at(child + 1));
+            if (compare(left, right) matches Ordering.LT()) child += 1;
+        }
+
+        let rootValue = unwrapSome(values.at(root));
+        let childValue = unwrapSome(values.at(child));
+        if (not (compare(rootValue, childValue) matches Ordering.LT())) return;
+
+        swapArrayList(values, root, child);
+        root = child;
+    }
+}
+
+fn swapArrayList<T: mut>(values: &ArrayList<T>, left: Int, right: Int): Unit {
+    let leftValue = unwrapSome(values.at(left));
+    let rightValue = unwrapSome(values.at(right));
+    values.replaceAt(left, rightValue);
+    values.replaceAt(right, leftValue);
+}
+
+fn sortedArrayList<T: mut>(values: ArrayList<T>, compare: (T, T) -> Ordering): ArrayList<T> {
+    let mut buffer = ArrayList<T>.empty();
+    for (let value in values) buffer.add(value);
+    sortArrayList(buffer, compare);
+    return buffer;
+}
+
+/// Copies the values of an `Iterable` into a new `ArrayList`.
+fn arrayListOf<T: mut>(values: Iterable<T>): ArrayList<T> {
+    let mut result = ArrayList<T>.empty();
+    for (let value in values) result.add(value);
+    return result;
 }

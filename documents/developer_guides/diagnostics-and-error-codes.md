@@ -24,7 +24,7 @@ Pick the range that matches the phase that detects the problem.
 
 | Range | Phase | Current use |
 | --- | --- | --- |
-| `ZR1001`–`ZR1099` | Scanning | `1001`–`1006` |
+| `ZR1001`–`ZR1099` | Scanning | `1001`–`1007` |
 | `ZR1101`–`ZR1199` | Parsing | `1101`–`1116` |
 | `ZR2001`–`ZR2999` | Resolution, typing, flow, effects | `2001`–`2026` |
 | `ZR3001`–`ZR3099` | Compilation and warnings | `3001`, `3010`–`3017` |

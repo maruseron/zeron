@@ -70,3 +70,69 @@ fn save(path: Path, text: String): Unit raises IoFailure, DisposeFailure =
 Unchecked Java exceptions retain their ordinary host behavior. The current API does not provide
 streaming readers or writers, incremental directory iteration, byte-oriented I/O, append options, or
 asynchronous operations.
+
+## Logging
+
+`zeron.log` provides severity levels, structured fields, and explicit sinks. Configuration is passed
+by the application rather than stored in a process-global registry, so libraries can accept a logger
+without reconfiguring their host.
+
+```zeron
+import zeron.collections.HashMap;
+import zeron.log.Level;
+import zeron.log.LogFormatter;
+import zeron.log.LogSink;
+import zeron.log.LogSink.minLevel;
+import zeron.log.Logger;
+import zeron.log.Value;
+
+fn billingLogger(): Logger {
+    let sink = LogSink.console(LogFormatter.plain()).minLevel(Level.Info());
+    let fields = HashMap<String, Value>.empty();
+    fields.put("service", Value.Text("billing"));
+    return Logger.of("billing", sink).with(fields);
+}
+
+fn recordOrder(logger: Logger, id: Long): Unit =
+    logger.info(() -> "order " + id.toString());
+```
+
+`LogSink.console` writes to standard output and routes `Warn` and `Error` to standard error.
+`LogSink.minLevel` layers a filter over any sink; both factories return mutable sinks because
+writing and filtering mutate sink state. Import the extension explicitly to use it.
+
+`Logger.of(name, sink)` creates a logger, `named(child)` appends a dotted child name, and `with`
+copies the supplied fields into a fresh context map. `log` evaluates its message thunk only when the
+sink accepts the level, and `isEnabled` lets callers skip building expensive messages:
+
+```zeron
+fn maybeDump(logger: Logger, details: () -> String): Unit {
+    if (logger.isEnabled(Level.Debug())) logger.debug(details);
+}
+```
+
+`LogFormatter.plain` renders the level, logger name, message, and structured fields; text is quoted
+and escaped, and nested lists render recursively. Custom sinks implement `LogSink`, whose `write`
+receives a `Record` with the time, level, logger name, message, fields, and an optional cause.
+`Logger.errorWith` attaches an `Effect` as that cause. Writes are synchronous and preserve call
+order per sink; the API does not add cross-thread locking.
+
+## Injectable time
+
+`zeron.time.Clock` is the source of the monotonic instants used for logging and elapsed-time
+measurement. `Clock.system()` samples the same clock as `Instant.now()`, while
+`Clock.fixed(instant)` always reports the supplied instant. `Logger.withClock(name, sink, clock)`
+accepts a clock; `Logger.of` defaults to `Clock.system()`.
+
+```zeron
+import zeron.log.LogSink;
+import zeron.log.Logger;
+import zeron.time.Clock;
+import zeron.time.Instant;
+
+fn deterministicLogger(sink: &LogSink): Logger =
+    Logger.withClock("app", sink, Clock.fixed(Instant.now()));
+```
+
+`Instant` remains a monotonic elapsed-time value; `zeron.time` does not provide wall-clock
+timestamps.

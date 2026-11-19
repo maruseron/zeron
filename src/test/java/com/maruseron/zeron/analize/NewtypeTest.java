@@ -185,6 +185,39 @@ public final class NewtypeTest {
     }
 
     @Test
+    public void functionNewtypeValueCallInvokesTheCarrier() throws Exception {
+        final var output = Files.createTempDirectory("zeron-function-newtype-value-");
+        final var programName = "FunctionNewtypeValue" + UUID.randomUUID().toString().replace("-", "");
+        final var unit = parse("function-newtype-value.zn", """
+                public newtype Doubler = Int -> Int;
+                public class Calculator {
+                    doubler: Doubler;
+                    private constructor new;
+                    public constructor of(doubler: Doubler) = Calculator.new(doubler);
+                    public apply(value: Int): Int = this.doubler.value(value);
+                }
+                fn direct(): Int = Doubler.new(value -> value * 2).value(21);
+                fn throughField(): Int =
+                    Calculator.of(Doubler.new(value -> value + 1)).apply(41);
+                """);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(unit), programName, "", List.of(), true, List.of(), output);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals(42, program.getMethod("direct").invoke(null));
+                assertEquals(42, program.getMethod("throughField").invoke(null));
+                assertThrows(ClassNotFoundException.class, () -> loader.loadClass("Doubler"));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
     public void validatedAndUnvalidatedNewtypesUseDistinctConstructionRules() throws Exception {
         final var output = Files.createTempDirectory("zeron-newtype-test");
         final var programName = "NewtypeProgram" + UUID.randomUUID().toString().replace("-", "");

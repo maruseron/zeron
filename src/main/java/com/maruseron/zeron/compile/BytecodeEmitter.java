@@ -1533,7 +1533,13 @@ final class BytecodeEmitter {
         }
         final var runtimeType = functionType.isGeneric()
                 ? (FunctionDescriptor) TypeSubstitution.erase(functionType) : functionType;
+        final var nullLabel = invoke.safe ? composer.newLabel() : null;
+        final var doneLabel = invoke.safe ? composer.newLabel() : null;
         emitExpr(context, composer, invoke.callee);
+        if (invoke.safe) {
+            composer.dup();
+            composer.ifnull(nullLabel);
+        }
         for (int index = 0; index < invoke.arguments.size(); index++) {
             emitExpr(context, composer, invoke.arguments.get(index));
             emitConversion(context, composer, context.lastEmittedType,
@@ -1544,12 +1550,22 @@ final class BytecodeEmitter {
         }
         composer.invokeinterface(TypeDescriptor.toJavaClassDesc(runtimeType), "invoke",
                 toJavaMethodDescriptor(runtimeType));
-        if (functionType.isGeneric()) {
-            final var instantiated = TypeSubstitution.erase(invoke.getType());
-            emitConversion(context, composer, runtimeType.returnType(), instantiated);
-            context.lastEmittedType = instantiated;
+        final var resultType = invoke.safe
+                ? TypeSubstitution.erase(invoke.getType())
+                : functionType.isGeneric() ? TypeSubstitution.erase(invoke.getType()) : null;
+        if (resultType != null) {
+            emitConversion(context, composer, runtimeType.returnType(), resultType);
+        }
+        if (invoke.safe) {
+            composer.goto_(doneLabel);
+            composer.labelBinding(nullLabel);
+            composer.pop();
+            composer.aconst_null();
+            composer.labelBinding(doneLabel);
+            context.lastEmittedType = invoke.getType();
         } else {
-            context.lastEmittedType = functionType.returnType();
+            context.lastEmittedType = functionType.isGeneric()
+                    ? resultType : functionType.returnType();
         }
     }
 

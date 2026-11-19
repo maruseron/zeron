@@ -407,11 +407,26 @@ let callbacks: Array<() -> Int> = [() -> 42];
 let answer = callbacks[0]();
 ```
 
-The callee expression is evaluated exactly once, before its arguments. Calling a nullable function
-value requires a null check or `!!`; calling a receiver function through a bare expression is
-rejected because there is no receiver. Generic function values are instantiated from the arguments
-using the same rules as a generic function held in a variable. Effects from the callee expression
-and from the invoked function are both part of the call.
+The callee expression is evaluated exactly once, before its arguments. A nullable function value
+can be called with safe invocation, written `?.()`:
+
+```zeron
+fn maybe(flag: Boolean): (Int -> Int)? =
+    if (flag) then (value -> value + 1) else null;
+
+let result: Int? = maybe(true)?.(41);   // 42
+let missing: Int? = maybe(false)?.(41); // null
+```
+
+If the callee is `null`, the arguments are not evaluated and the result is `null`; otherwise the
+function runs normally. The result is always nullable, even when the function returns a non-null
+type. An ordinary call such as `maybe(flag)(41)` still requires the callee to be non-null, so use a
+null check or `!!` when that is the intended guarantee.
+
+Calling a receiver function through a bare expression is rejected because there is no receiver.
+Generic function values are instantiated from the arguments using the same rules as a generic
+function held in a variable. Effects from the callee expression and from the invoked function are
+both part of the call.
 
 ## How lambdas are represented
 

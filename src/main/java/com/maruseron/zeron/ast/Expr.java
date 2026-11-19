@@ -1197,7 +1197,9 @@ public sealed interface Expr {
 
     final class Invoke implements Expr {
         public final Expr callee;
+        public final Token calleeEnd;
         public final Token paren;
+        public final boolean safe;
         public List<Expr> arguments;
         private TypeDescriptor type;
         private FunctionDescriptor resolvedDescriptor;
@@ -1206,12 +1208,14 @@ public sealed interface Expr {
         private List<EvidenceArgument> evidenceArguments = List.of();
         private List<TypeDescriptor> reifiedArguments = List.of();
 
-        public Invoke(final Expr callee, final Token paren, final List<Expr> arguments,
-                      final TypeDescriptor type) {
+        public Invoke(final Expr callee, final Token calleeEnd, final Token paren,
+                      final List<Expr> arguments, final TypeDescriptor type, final boolean safe) {
             this.callee = callee;
+            this.calleeEnd = calleeEnd;
             this.paren = paren;
             this.arguments = new ArrayList<>(arguments);
             this.type = type;
+            this.safe = safe;
         }
 
         public TypeDescriptor getType() { return type; }
@@ -1242,17 +1246,20 @@ public sealed interface Expr {
             if (obj == this) return true;
             if (!(obj instanceof Invoke that)) return false;
             return Objects.equals(this.callee, that.callee)
+                    && Objects.equals(this.calleeEnd, that.calleeEnd)
                     && Objects.equals(this.paren, that.paren)
+                    && this.safe == that.safe
                     && Objects.equals(this.arguments, that.arguments)
                     && Objects.equals(this.type, that.type);
         }
 
         public int hashCode() {
-            return Objects.hash(callee, paren, arguments, type);
+            return Objects.hash(callee, calleeEnd, paren, safe, arguments, type);
         }
 
         public String toString() {
-            return "Invoke[" + "callee=" + callee + ", " + "paren=" + paren + ", "
+            return "Invoke[" + "callee=" + callee + ", " + "calleeEnd=" + calleeEnd + ", "
+                    + "paren=" + paren + ", " + "safe=" + safe + ", "
                     + "arguments=" + arguments + ", " + "type=" + type + ']';
         }
     }

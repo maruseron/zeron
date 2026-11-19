@@ -232,6 +232,13 @@ public extension String {
     public fn split(separator: String): Stream<String> =
         Stream<String>.fromArray(stringSplit(this, separator));
 
+    /// Returns the parts of this string separated by runs of whitespace.
+    ///
+    /// Leading and trailing whitespace is ignored, and an empty or whitespace-only string has no
+    /// parts. Whitespace is the same Unicode whitespace recognized by `trim` and `isBlank`.
+    public fn splitWhitespace(): Stream<String> =
+        Stream<String>.fromArray(stringSplitWhitespace(this));
+
     /// Returns the parts of this string separated by the regular expression `regex`.
     ///
     /// The expression uses the host regular-expression dialect. An invalid expression returns
@@ -342,6 +349,7 @@ external fn stringTrimEnd(value: String?): String;
 external fn stringIsBlank(value: String?): Boolean;
 external fn stringReplace(value: String?, target: String?, replacement: String?): String;
 external fn stringSplit(value: String?, separator: String?): Array<String>;
+external fn stringSplitWhitespace(value: String?): Array<String>;
 external fn stringRegexErrorMessage(regex: String?): String?;
 external fn stringSplitRegex(value: String?, regex: String?): Array<String>;
 external fn stringLines(value: String?): Array<String>;

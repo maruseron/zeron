@@ -40,7 +40,8 @@ Java, Haskell, Scala, Swift, Kotlin, Ruby, Rust, Groovy, TypeScript, OCaml, C#, 
     and `Float`. These numeric capabilities do not imply algebraic laws such as associativity or
     identity.
 - `zeron.time.Duration` provides signed nanoseconds with checked arithmetic; `Instant` uses a
-    monotonic clock for elapsed-time measurement. Wall-clock time remains out of scope.
+    monotonic clock for elapsed-time measurement, and `Clock` is the injectable source of those
+    instants (`Clock.system()` or `Clock.fixed(instant)`). Wall-clock time remains out of scope.
 - Remainder for `Int`, `Long`, and `Float`, 32-bit `Int` and 64-bit `Long` bitwise and shift operators,
     and their variable-only
     compound assignments. `++`/`--` are not part of the language; use `+= 1` or `-= 1`.

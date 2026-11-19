@@ -28,11 +28,15 @@ final class CallResolver {
 
     TypeDescriptor resolve(final Expr.Invoke invoke) {
         final var calleeType = ExpressionFlowResolver.resolveExpression(context, invoke.callee);
-        final var unwrapped = calleeType instanceof ReferenceDescriptor reference
-                ? reference.baseType() : calleeType;
-        if (unwrapped instanceof NullableDescriptor) {
-            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
-                    invoke.paren, "A nullable function value requires a null check before invocation."));
+        var unwrapped = calleeType;
+        while (unwrapped instanceof ReferenceDescriptor reference) unwrapped = reference.baseType();
+        if (unwrapped instanceof NullableDescriptor nullable) {
+            if (!invoke.safe) {
+                Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.NULLABLE_VALUE_REQUIRES_HANDLING,
+                        invoke.paren, "A nullable function value requires '?.' or a null check before invocation."));
+            }
+            unwrapped = nullable.baseType();
+            while (unwrapped instanceof ReferenceDescriptor reference) unwrapped = reference.baseType();
         }
         if (!(unwrapped instanceof FunctionDescriptor function)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
@@ -52,8 +56,12 @@ final class CallResolver {
             invoke.setEvidenceArguments(synthetic.evidenceArguments());
             invoke.setReifiedArguments(synthetic.reifiedArguments());
             invoke.setResolvedDescriptor(function);
-            invoke.setType(synthetic.getType());
-            return result;
+            invoke.setType(invoke.safe ? result.toNullable() : result);
+            final var callSiteFunction = synthetic.specializedFunctionType() == null
+                    ? function : synthetic.specializedFunctionType();
+            context.recordCallSiteFunctionType(invoke.calleeEnd, callSiteFunction);
+            recordFunctionResult(context, invoke.paren, invoke.getType());
+            return invoke.getType();
         }
         if (invoke.arguments.size() != function.arity()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
@@ -66,9 +74,12 @@ final class CallResolver {
                     MemberInteropResolver.resolveArgument(context, invoke.arguments.get(index), expected),
                     invoke.paren);
         }
+        final var result = invoke.safe ? function.returnType().toNullable() : function.returnType();
         invoke.setResolvedDescriptor(function);
-        invoke.setType(function.returnType());
-        return function.returnType();
+        invoke.setType(result);
+        context.recordCallSiteFunctionType(invoke.calleeEnd, function);
+        recordFunctionResult(context, invoke.paren, result);
+        return result;
     }
 
     TypeDescriptor resolveNamespaceCall(final Expr.MemberCall memberCall, final String functionName) {
@@ -467,6 +478,16 @@ final class CallResolver {
                 && variable.mutability() == BindingMutability.IMMUTABLE
                 && variable.initializer() instanceof Expr.Lambda
                 ? variable : null;
+    }
+
+    private static void recordFunctionResult(final ResolutionContext context, final Token token,
+                                             final TypeDescriptor result) {
+        var type = result;
+        while (type instanceof ReferenceDescriptor reference) type = reference.baseType();
+        if (type instanceof NullableDescriptor) return;
+        if (type instanceof FunctionDescriptor function) {
+            context.recordCallSiteFunctionType(token, function);
+        }
     }
 
     private void recordCallSiteFunctionType(final Token callSite,

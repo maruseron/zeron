@@ -24,6 +24,8 @@ import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.SignatureHelp;
+import org.eclipse.lsp4j.SignatureHelpParams;
 import org.eclipse.lsp4j.TextDocumentEdit;
 import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
@@ -169,6 +171,14 @@ final class ZeronTextDocumentService implements TextDocumentService, AutoCloseab
         return withSnapshot(params.getTextDocument().getUri(), snapshot -> {
             final var path = documentPath(params.getTextDocument().getUri());
             return LspFeatures.hover(snapshot, path, params);
+        }, null);
+    }
+
+    @Override
+    public CompletableFuture<SignatureHelp> signatureHelp(final SignatureHelpParams params) {
+        return withSnapshot(params.getTextDocument().getUri(), snapshot -> {
+            final var path = documentPath(params.getTextDocument().getUri());
+            return LspFeatures.signatureHelp(snapshot, path, params);
         }, null);
     }
 

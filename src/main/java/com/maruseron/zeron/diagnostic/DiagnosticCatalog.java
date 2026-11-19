@@ -29,6 +29,8 @@ public final class DiagnosticCatalog {
             entry("ZR1005", "Invalid character literal");
     public static final Entry INVALID_NUMERIC_LITERAL =
             entry("ZR1006", "Invalid numeric literal");
+    public static final Entry INVALID_STRING_ESCAPE =
+            entry("ZR1007", "Invalid string escape");
 
     public static final Entry EXPECTED_SYNTAX =
             entry("ZR1101", "Expected syntax");
@@ -148,6 +150,7 @@ public final class DiagnosticCatalog {
             INTEGER_LITERAL_OUT_OF_RANGE,
             INVALID_CHARACTER_LITERAL,
             INVALID_NUMERIC_LITERAL,
+            INVALID_STRING_ESCAPE,
             EXPECTED_SYNTAX,
             INVALID_DECLARATION,
             INVALID_VISIBILITY,

@@ -71,6 +71,34 @@ public final class StringTest {
     }
 
     @Test
+    public void stringLiteralsDecodeEscapesBeforeTheyReachTheProgram() throws Exception {
+        final var output = Files.createTempDirectory("zeron-string-escape-test");
+        final var programName = "StringEscapeProgram" + UUID.randomUUID().toString().replace("-", "");
+        final var unit = parse("escapes.zn", """
+                fn escaped(): String = "line\\ncolumn\\ttab:\\tquote:\\"slash:\\\\scalar:\\u{1F600}";
+                fn escapedChar(): Boolean = '\\t'.toInt() == 9 and '\\"' == '"';
+                fn continued(): String = "first\\
+                second";
+                """);
+        final var compiler = CompilationService.forCompilationUnits(
+                List.of(unit), programName, "", List.of(), true, List.of(), output);
+        try {
+            compiler.resolve();
+            compiler.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{output.toUri().toURL()}, getClass().getClassLoader())) {
+                final var program = loader.loadClass(programName);
+                assertEquals("line\ncolumn\ttab:\tquote:\"slash:\\scalar:😀",
+                        program.getMethod("escaped").invoke(null));
+                assertTrue((Boolean) program.getMethod("escapedChar").invoke(null));
+                assertEquals("firstsecond", program.getMethod("continued").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
     public void stringExtensionsWorkFromCompiledStandardLibraryMetadata() throws Exception {
         final var libraryOutput = Files.createTempDirectory("zeron-string-stdlib");
         final var clientOutput = Files.createTempDirectory("zeron-string-client");

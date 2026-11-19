@@ -144,6 +144,27 @@ public final class StringUnicode {
         }
     }
 
+    public static Object[] splitWhitespace(final String value) {
+        final var parts = new ArrayList<Object>();
+        var offset = 0;
+        while (offset < value.length()) {
+            while (offset < value.length()) {
+                final var scalar = value.codePointAt(offset);
+                if (!Character.isWhitespace(scalar)) break;
+                offset += Character.charCount(scalar);
+            }
+            if (offset >= value.length()) break;
+            final var start = offset;
+            while (offset < value.length()) {
+                final var scalar = value.codePointAt(offset);
+                if (Character.isWhitespace(scalar)) break;
+                offset += Character.charCount(scalar);
+            }
+            parts.add(value.substring(start, offset));
+        }
+        return parts.toArray();
+    }
+
     public static String regexErrorMessage(final String pattern) {
         try {
             Pattern.compile(pattern);

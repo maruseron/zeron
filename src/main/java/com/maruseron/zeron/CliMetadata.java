@@ -70,6 +70,11 @@ final class CliMetadata {
                     List.of("--manifest", "--debug", "--deny-warnings", "--no-deny-warnings", "--no-warnings"),
                     "Uses the same target resolution and warning policy as 'zeron build', then launches the "
                     + "generated main class from that target's output directory."),
+            new Command("test", "zeron test [<target>] [options]",
+                    "Build and run the selected test target's generated runner.",
+                    List.of("--manifest", "--debug", "--deny-warnings", "--no-deny-warnings", "--no-warnings"),
+                    "Selects a target with kind = \"test\", or synthesizes an implicit test target when "
+                    + "none exists. The generated runner reports each test and exits with its status."),
             new Command("fmt", "zeron fmt [--check] [<file-or-directory>...]",
                     "Format selected sources or the project's source roots.",
                     List.of("--check"),
@@ -88,22 +93,22 @@ final class CliMetadata {
                     "Show command and option help.", List.of(), ""));
 
     static final List<Option> OPTIONS = List.of(
-            new Option("--manifest", "", "file", Set.of("build", "run", "lsp"),
+            new Option("--manifest", "", "file", Set.of("build", "run", "test", "lsp"),
                     "Select the project manifest.",
                     "Defaults to zeron.toml in the current directory. Paths inside the manifest resolve "
                     + "relative to the manifest file."),
-            new Option("--debug", "-d", "", Set.of("build", "run", "lsp"),
+            new Option("--debug", "-d", "", Set.of("build", "run", "test", "lsp"),
                     "Print compiler traces.",
                     "Writes parser, resolver, and compiler traces to stderr. The short alias is -d."),
-            new Option("--deny-warnings", "", "", Set.of("build", "run"),
+            new Option("--deny-warnings", "", "", Set.of("build", "run", "test"),
                     "Treat reported warnings as a failed build.",
                     "Reports warnings normally, then fails after the stage completes when any warning was "
                     + "produced. Overrides [build].deny-warnings and a target's deny-warnings setting."),
-            new Option("--no-deny-warnings", "", "", Set.of("build", "run"),
+            new Option("--no-deny-warnings", "", "", Set.of("build", "run", "test"),
                     "Allow warnings without failing the build.",
                     "Overrides [build].deny-warnings and a target's deny-warnings setting. Cannot be combined "
                     + "with --deny-warnings."),
-            new Option("--no-warnings", "", "", Set.of("build", "run"),
+            new Option("--no-warnings", "", "", Set.of("build", "run", "test"),
                     "Hide warning diagnostics.",
                     "Errors still print, and collected warnings still participate in --deny-warnings."),
             new Option("--root", "", "dir", Set.of(),
@@ -149,7 +154,10 @@ final class CliMetadata {
                             "Paths resolve relative to the manifest."),
                     new ManifestKey("project", "default-target", "string", "none", "optional",
                             "Target selected by build and run when no positional target is supplied.",
-                            "Must name an existing [targets.<name>] entry."))),
+                            "Must name an existing [targets.<name>] entry."),
+                    new ManifestKey("project", "test-roots", "array of strings", "[\"tests\"]", "optional",
+                            "Directories containing test sources compiled only by test targets.",
+                            "Must not overlap a source root."))),
             new ManifestTable("platform", "Runtime platform configuration.", List.of(
                     new ManifestKey("platform", "stdlib", "string", "automatic", "optional",
                             "Standard-library mode.", "One of source or compiled. Compiled never falls back silently."))),
@@ -166,9 +174,12 @@ final class CliMetadata {
                     new ManifestKey("build", "deny-warnings", "boolean", "false", "optional",
                             "Treat reported warnings as a failed build after the stage completes.",
                             "A target may override this setting; command-line options override both."))),
-            new ManifestTable("targets.<name>", "Named runnable targets.", List.of(
+            new ManifestTable("targets.<name>", "Named application or test targets.", List.of(
+                    new ManifestKey("targets.<name>", "kind", "string", "application", "optional",
+                            "Target kind: application or test.",
+                            "Test targets require test roots and forbid entry."),
                     new ManifestKey("targets.<name>", "entry", "string", "[project].entry", "optional",
-                            "Entry source for this target.",
+                            "Entry source for an application target.",
                             "Must have a .zn extension and be under a configured source root."),
                     new ManifestKey("targets.<name>", "output", "string", "<project.output>/<name>", "optional",
                             "Generated-program directory for this target.",

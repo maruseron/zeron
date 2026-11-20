@@ -142,6 +142,9 @@ let sum = combineWith<Option<_>, Int, Int, Int>(
 );
 ```
 
+A contract method that takes no receiver can also be called on the constructor itself when its
+evidence is active: `Option.pure(5)` resolves through the same implementation as `F.pure(5)`.
+
 `sum` is `Some(3)`. If either argument is `None`, the result is `None`. The values are independent:
 neither depends on the other. When one value must be computed from another, you need a `Monad`.
 

@@ -4,6 +4,37 @@
 
 ### Compiler and language work
 
+- Contract methods that declare no receiver can be called on a constructor name when its witness
+  is active, so `Option.pure(5)` and `Result<Int, String>.pure(5)` dispatch through the
+  `Applicative` implementation's `pure` with no receiver. A `do` block with no `let name <-` bind
+  now lifts unit with that `pure` and maps its remaining clauses over the result, so
+  `do<Option<_>> { let base = 4; yield base * 2; }` is valid; the declared constructor fixes any
+  argument the witness leaves open, such as `E` in `do<Result<_, String>>`.
+- `do` blocks now accept plain `let` bindings before the first bind clause. The leading bindings
+  are lowered into a lambda that encloses the monadic chain, so they run before the first step and
+  constructor inference still comes from the first `<-` bind. The option/result guide documents the
+  form.
+- Class `static fn` declarations are now emitted, and `static fn`s and named constructors satisfy
+  contract methods that the contract does not mark `static`, including through type-class evidence
+  and type-level calls such as `T.create(...)`.
+- Contract-conformance and array-slot mutation diagnostics now point at the class contract clause
+  and the assignment operator instead of a synthetic identifier at the start of the file.
+- Fixed a generic call followed by a trailing lambda. `invokeWith<Int> { 42 }` now parses as a
+  call with explicit type arguments plus a trailing lambda; previously the block was parsed as a
+  value block and reported `ZR1101`, which blocked `buildList<Int> { add(1); }`-style builders.
+- Implemented ZEP-0136 witness bundles and coherent prerequisite evidence. `witness bundle`
+  declarations group members for one target, named bundles are selection-only, `default witness
+  bundle` members are ambient canonical evidence, and selecting a bundle shadows an ambient default
+  for the same applied contract and target as a unit. Bundle members are registered through the
+  existing witness machinery, so owner-directed dispatch and the hidden-evidence ABI are unchanged.
+- Implemented ZEP-0137 explicit witness selection. `using witness (Provider, ...) { ... }` activates
+  named bundles or standalone witnesses lexically, and a direct call may carry a single-invocation
+  `with witness (Provider, ...)` clause. Selected evidence forwards through generic calls and lambda
+  captures, and the block restores the previous selection on exit.
+- Implemented ZEP-0063 standard-library testing APIs. `zeron.test` provides `@Test`, `@Ignore`, the
+  `TestFailure` effect, and the assertion functions; `zeron test` discovers annotated top-level
+  tests in project test roots, generates a deterministic runner, and reports failures and skips
+  with a status exit. The manifest gains `[project].test-roots` and `[targets.<name>].kind`.
 - String literals now support escape sequences. The scanner decodes `\\`, `\"`, `\'`, `\n`, `\r`,
   `\t`, and braced scalar escapes such as `\u{1F600}` before the value reaches the program, so
   strings can contain newlines, tabs, quotes, backslashes, and arbitrary Unicode scalars. Character

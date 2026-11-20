@@ -329,6 +329,7 @@ public sealed interface Stmt {
         private final List<WitnessRequirement> requirements;
         private final boolean higherKinded;
         private final Token closingBrace;
+        private String bundleName;
 
         public Witness(final Token name, final List<TypeParameterDescriptor> typeParameters,
                        final TypeDescriptor contractType, final TypeDescriptor targetType,
@@ -423,6 +424,8 @@ public sealed interface Stmt {
         public List<WitnessRequirement> requirements() { return requirements; }
         public boolean higherKinded() { return higherKinded; }
         public Token closingBrace() { return closingBrace; }
+        public String bundleName() { return bundleName; }
+        public void setBundleName(final String bundleName) { this.bundleName = bundleName; }
         public void addMethod(final WitnessMethod method) { methods.add(method); }
         public void resetMethodsToDeclarations() {
             methods.clear();
@@ -431,6 +434,43 @@ public sealed interface Stmt {
     }
 
     record WitnessRequirement(TypeDescriptor contractType, TypeDescriptor targetType) {}
+
+    final class WitnessBundle implements Stmt, Decl {
+        private final Token name;
+        private final boolean isPublic;
+        private final boolean isDefault;
+        private final List<TypeParameterDescriptor> typeParameters;
+        private final TypeDescriptor targetType;
+        private final List<Witness> members;
+        private final Token closingBrace;
+
+        public WitnessBundle(final Token name, final boolean isPublic, final boolean isDefault,
+                             final List<TypeParameterDescriptor> typeParameters,
+                             final TypeDescriptor targetType, final List<Witness> members,
+                             final Token closingBrace) {
+            this.name = name;
+            this.isPublic = isPublic;
+            this.isDefault = isDefault;
+            this.typeParameters = List.copyOf(typeParameters);
+            this.targetType = targetType;
+            this.members = List.copyOf(members);
+            this.closingBrace = closingBrace;
+        }
+
+        public Token name() { return name; }
+        public boolean isPublic() { return isPublic; }
+        public boolean isDefault() { return isDefault; }
+        public List<TypeParameterDescriptor> typeParameters() { return typeParameters; }
+        public TypeDescriptor targetType() { return targetType; }
+        public List<Witness> members() { return members; }
+        public Token closingBrace() { return closingBrace; }
+    }
+
+    record WitnessSelection(Token keyword, List<Token> providers, Stmt body) implements Stmt {
+        public WitnessSelection {
+            providers = List.copyOf(providers);
+        }
+    }
 
     record WitnessMethod(Token requirementName, Function methodSignature,
                          Function implementation, boolean isStatic) {

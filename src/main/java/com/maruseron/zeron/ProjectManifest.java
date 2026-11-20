@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 record ProjectManifest(List<Path> sourceRoots,
+                       List<Path> testRoots,
                        Path entry,
                        Path outputDirectory,
                        StandardLibraryMode standardLibraryMode,
@@ -29,19 +30,21 @@ record ProjectManifest(List<Path> sourceRoots,
     private static final Set<String> TOP_LEVEL_KEYS =
             Set.of("project", "platform", "dependencies", "build", "targets");
     private static final Set<String> PROJECT_KEYS =
-            Set.of("entry", "source-roots", "output", "default-target");
+            Set.of("entry", "source-roots", "test-roots", "output", "default-target");
     private static final Set<String> PLATFORM_KEYS = Set.of("stdlib");
     private static final Set<String> DEPENDENCY_KEYS =
             Set.of("zeron-libraries", "java-classpath", "java-sources");
     private static final Set<String> BUILD_KEYS = Set.of("deny-warnings");
-    private static final Set<String> TARGET_KEYS = Set.of("entry", "output", "deny-warnings");
+    private static final Set<String> TARGET_KEYS = Set.of("entry", "output", "deny-warnings", "kind");
+    enum TargetKind { APPLICATION, TEST }
     private static final Pattern TARGET_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_-]*");
 
     record ProjectTarget(String name,
                          Path entry,
                          Path outputDirectory,
                          boolean denyWarnings,
-                         boolean implicit) {
+                         boolean implicit,
+                         TargetKind kind) {
         ProjectTarget {
             if (name == null) name = "";
         }
@@ -53,6 +56,7 @@ record ProjectManifest(List<Path> sourceRoots,
 
     ProjectManifest {
         sourceRoots = List.copyOf(sourceRoots);
+        testRoots = List.copyOf(testRoots);
         libraryRoots = List.copyOf(libraryRoots);
         javaClassPathRoots = List.copyOf(javaClassPathRoots);
         javaSourceRoots = List.copyOf(javaSourceRoots);
@@ -79,6 +83,22 @@ record ProjectManifest(List<Path> sourceRoots,
                 requireStringArray(project, "source-roots", "[project]"));
         if (sourceRoots.isEmpty()) {
             throw new IllegalArgumentException("[project].source-roots must contain at least one directory.");
+        }
+        final var testRoots = resolvePaths(baseDirectory,
+                project.contains("test-roots")
+                        ? optionalStringArray(project, "test-roots", "[project]")
+                        : List.of("tests"));
+        if (project.contains("test-roots") && testRoots.isEmpty()) {
+            throw new IllegalArgumentException("[project].test-roots must contain at least one directory.");
+        }
+        for (final var testRoot : testRoots) {
+            final var normalizedTest = testRoot.toAbsolutePath().normalize();
+            if (sourceRoots.stream().map(root -> root.toAbsolutePath().normalize())
+                    .anyMatch(source -> source.startsWith(normalizedTest)
+                            || normalizedTest.startsWith(source))) {
+                throw new IllegalArgumentException("Test root " + testRoot
+                        + " must not overlap a project source root.");
+            }
         }
         final var configuredEntry = optionalPath(baseDirectory, project, "entry", "[project]");
         final var outputDirectory = resolvePath(baseDirectory,
@@ -127,18 +147,38 @@ record ProjectManifest(List<Path> sourceRoots,
                     throw new IllegalArgumentException("[targets." + name + "] must be a TOML table.");
                 }
                 requireKeys(table, TARGET_KEYS, "[targets." + name + "]");
-                final var targetEntry = optionalPath(baseDirectory, table, "entry",
-                        configuredEntry.orElse(null), "[targets." + name + "]");
-                if (targetEntry == null) {
-                    throw new IllegalArgumentException("[targets." + name
-                            + "].entry is required when [project].entry is omitted.");
+                final var targetKind = switch (optionalString(table, "kind", "application",
+                        "[targets." + name + "]")) {
+                    case "application" -> TargetKind.APPLICATION;
+                    case "test" -> TargetKind.TEST;
+                    default -> throw new IllegalArgumentException("[targets." + name
+                            + "].kind must be 'application' or 'test'.");
+                };
+                final Path targetEntry;
+                if (targetKind == TargetKind.TEST) {
+                    if (table.contains("entry")) {
+                        throw new IllegalArgumentException("[targets." + name
+                                + "] must not declare entry for a test target.");
+                    }
+                    if (testRoots.isEmpty()) {
+                        throw new IllegalArgumentException("[targets." + name
+                                + "] requires at least one test root.");
+                    }
+                    targetEntry = null;
+                } else {
+                    targetEntry = optionalPath(baseDirectory, table, "entry",
+                            configuredEntry.orElse(null), "[targets." + name + "]");
+                    if (targetEntry == null) {
+                        throw new IllegalArgumentException("[targets." + name
+                                + "].entry is required when [project].entry is omitted.");
+                    }
                 }
                 final var targetOutput = optionalPath(baseDirectory, table, "output",
                         outputDirectory.resolve(name), "[targets." + name + "]");
                 final var targetDenyWarnings = optionalBoolean(table, "deny-warnings",
                         denyWarnings, "[targets." + name + "]");
                 targets.put(name, new ProjectTarget(name, targetEntry, targetOutput,
-                        targetDenyWarnings, false));
+                        targetDenyWarnings, false, targetKind));
             }
         }
         if (defaultTargetName.isPresent() && !targets.containsKey(defaultTargetName.get())) {
@@ -146,8 +186,11 @@ record ProjectManifest(List<Path> sourceRoots,
                     + defaultTargetName.get());
         }
         final Optional<ProjectTarget> implicitTarget = configuredEntry
-                .map(targetEntry -> new ProjectTarget("", targetEntry, outputDirectory, denyWarnings, true));
-        if (implicitTarget.isEmpty() && defaultTargetName.isEmpty()) {
+                .map(targetEntry -> new ProjectTarget("", targetEntry, outputDirectory, denyWarnings,
+                        true, TargetKind.APPLICATION));
+        if (implicitTarget.isEmpty() && defaultTargetName.isEmpty()
+                && testRoots.isEmpty()
+                && targets.values().stream().noneMatch(target -> target.kind() == TargetKind.TEST)) {
             throw new IllegalArgumentException(
                     "[project].entry is required when no default target is configured.");
         }
@@ -166,15 +209,15 @@ record ProjectManifest(List<Path> sourceRoots,
             }
         }
         for (final var target : effectiveTargets) {
-            validateTargetEntry(sourceRoots, target);
+            if (target.kind() == TargetKind.APPLICATION) validateTargetEntry(sourceRoots, target);
         }
 
         final var selectedEntry = defaultTargetName
                 .map(targets::get)
                 .map(ProjectTarget::entry)
                 .or(() -> implicitTarget.map(ProjectTarget::entry))
-                .orElseThrow();
-        return new ProjectManifest(sourceRoots, selectedEntry, outputDirectory,
+                .orElse(null);
+        return new ProjectManifest(sourceRoots, testRoots, selectedEntry, outputDirectory,
                 standardLibraryMode, libraryRoots, javaClassPathRoots, javaSourceRoots,
                 denyWarnings, defaultTargetName, targets, implicitTarget);
     }
@@ -194,6 +237,36 @@ record ProjectManifest(List<Path> sourceRoots,
                 "No implicit project target is configured and no default target is set."));
     }
 
+    ProjectTarget selectTestTarget(final Optional<String> requestedName) {
+        if (requestedName.isPresent()) {
+            final var requested = requestedName.get();
+            final var target = targets.get(requested);
+            if (target == null) {
+                throw new IllegalArgumentException("Unknown target '" + requested
+                        + "'. Available targets: " + availableTargetNames() + ".");
+            }
+            if (target.kind() != TargetKind.TEST) {
+                throw new IllegalArgumentException("Target '" + requested
+                        + "' is not a test target.");
+            }
+            return target;
+        }
+        if (defaultTargetName.isPresent()
+                && targets.get(defaultTargetName.get()).kind() == TargetKind.TEST) {
+            return targets.get(defaultTargetName.get());
+        }
+        final var testTargets = targets.values().stream()
+                .filter(target -> target.kind() == TargetKind.TEST)
+                .sorted(java.util.Comparator.comparing(ProjectTarget::name)).toList();
+        if (testTargets.size() == 1) return testTargets.getFirst();
+        if (testTargets.size() > 1) {
+            throw new IllegalArgumentException("Several test targets exist; select one: "
+                    + String.join(", ", testTargets.stream().map(ProjectTarget::name).toList()) + ".");
+        }
+        return new ProjectTarget("", null, outputDirectory.resolve("test"), denyWarnings,
+                false, TargetKind.TEST);
+    }
+
     List<ProjectTarget> effectiveTargets() {
         final var effective = new ArrayList<ProjectTarget>();
         implicitTarget.ifPresent(effective::add);
@@ -208,6 +281,7 @@ record ProjectManifest(List<Path> sourceRoots,
     }
 
     private static void validateTargetEntry(final List<Path> sourceRoots, final ProjectTarget target) {
+        if (target.entry() == null) return;
         final var fileName = target.entry().getFileName();
         if (fileName == null || !fileName.toString().endsWith(".zn")) {
             throw new IllegalArgumentException("Target " + target.displayName()

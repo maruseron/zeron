@@ -43,6 +43,8 @@ final class StatementEmitter {
                 endScope(context);
             }
             case Stmt.Using using -> emitUsing(context, composer, using);
+            case Stmt.WitnessBundle _ -> {}
+            case Stmt.WitnessSelection selection -> emitStmt(context, composer, selection.body());
             case Stmt.If(Token _, Expr condition, Stmt thenBranch, Stmt elseBranch) -> {
                 final var value = (Integer) ConstantFolder.fold(condition);
                 if (value != null) {
@@ -249,6 +251,8 @@ final class StatementEmitter {
             case Stmt.Return _, Stmt.Break _, Stmt.Continue _ -> false;
             case Stmt.Block(List<Stmt> statements) -> canCompleteNormally(statements);
             case Stmt.Using using -> canCompleteNormally(using.body());
+            case Stmt.WitnessBundle _ -> true;
+            case Stmt.WitnessSelection selection -> canCompleteNormally(selection.body());
             case Stmt.If(Token _, Expr _, Stmt thenBranch, Stmt elseBranch) ->
                     elseBranch == null || canCompleteNormally(thenBranch) || canCompleteNormally(elseBranch);
             case Stmt.Expression(Expr expression) -> !(expression.getType() instanceof NeverDescriptor);

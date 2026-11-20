@@ -169,6 +169,10 @@ final class LambdaCaptureValidator {
                 }
             }
             case Expr.Grouping grouping -> walkCaptureUsage(grouping.expression, localNames);
+            case Expr.ValueBlock block -> {
+                for (final var statement : block.statements) walkCaptureUsage(statement, localNames);
+                walkCaptureUsage(block.value, localNames);
+            }
             case Expr.If iff -> {
                 walkCaptureUsage(iff.condition, localNames);
                 walkCaptureUsage(iff.thenExpr, namesWithConditionBindings(iff.condition, localNames));

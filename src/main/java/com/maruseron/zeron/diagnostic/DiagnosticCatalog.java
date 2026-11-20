@@ -119,6 +119,8 @@ public final class DiagnosticCatalog {
             entry("ZR2026", "Hashable.hash must return Long");
     public static final Entry UNSAFE_HOST_ACCESS_REQUIRED =
             entry("ZR2027", "Direct Java access requires unsafe");
+    public static final Entry INTRINSIC_HELPER_OUTSIDE_STDLIB =
+            entry("ZR2028", "Intrinsic helper declared outside the standard library");
 
     public static final Entry GENERATED_PROGRAM_NAME_CONFLICT =
             entry("ZR3001", "Generated program name conflicts with a declared type");
@@ -194,6 +196,7 @@ public final class DiagnosticCatalog {
             NULLABLE_TYPE_PARAMETER_REQUIRES_NULL_CHECK,
             HASHABLE_HASH_RETURN_TYPE,
             UNSAFE_HOST_ACCESS_REQUIRED,
+            INTRINSIC_HELPER_OUTSIDE_STDLIB,
             GENERATED_PROGRAM_NAME_CONFLICT,
             ANONYMOUS_WITNESS_DEPRECATED,
             UNUSED_LOCAL_VARIABLE,

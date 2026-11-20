@@ -18,6 +18,7 @@ Project-wide source and output configuration.
 | `source-roots` | array of strings | none | required | Directories included in the project source universe. | At least one directory. Paths resolve relative to the manifest. |
 | `output` | string | dist | optional | Default generated-program directory and parent for named target outputs. | Paths resolve relative to the manifest. |
 | `default-target` | string | none | optional | Target selected by build and run when no positional target is supplied. | Must name an existing [targets.<name>] entry. |
+| `test-roots` | array of strings | ["tests"] | optional | Directories containing test sources compiled only by test targets. | Must not overlap a source root. |
 
 ## `[platform]`
 
@@ -47,11 +48,12 @@ Typed compiler policy shared by all targets.
 
 ## `[targets.<name>]`
 
-Named runnable targets.
+Named application or test targets.
 
 | Key | Type | Default | Requirement | Description | Constraints |
 | --- | --- | --- | --- | --- | --- |
-| `entry` | string | [project].entry | optional | Entry source for this target. | Must have a .zn extension and be under a configured source root. |
+| `kind` | string | application | optional | Target kind: application or test. | Test targets require test roots and forbid entry. |
+| `entry` | string | [project].entry | optional | Entry source for an application target. | Must have a .zn extension and be under a configured source root. |
 | `output` | string | <project.output>/<name> | optional | Generated-program directory for this target. | Effective target outputs must be distinct after normalization. |
 | `deny-warnings` | boolean | [build].deny-warnings | optional | Per-target warning policy. | Command-line options take precedence. |
 

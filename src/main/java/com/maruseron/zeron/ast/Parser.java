@@ -65,6 +65,9 @@ public final class Parser {
     private String sourcePath;
     private final List<ImportDeclaration> imports = new ArrayList<>();
     private Map<String, TypeParameterDescriptor> activeTypeParameters = Map.of();
+    private TypeDescriptor bundleTarget;
+    private List<TypeParameterDescriptor> bundleTypeParameters = List.of();
+    private boolean bundleDefaultMembers;
     /// Non-null only while parsing a declared parameter type. Each anonymous existential found
     /// there is lowered to a hidden type parameter appended to the declared signature.
     private List<TypeParameterDescriptor> pendingAnonymousTypeParameters;
@@ -391,12 +394,16 @@ public final class Parser {
                 consume(WITNESS, "Expect 'witness' after 'delegating'.");
                 return witnessDeclaration(true);
             }
-            if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
+            if (levelMarker == null && match(WITNESS)) {
+                return looksLikeBundleDeclaration()
+                        ? witnessBundleDeclaration(false, false) : witnessDeclaration();
+            }
             if (levelMarker == null && match(DEFAULT)) {
                 final var delegating = matchSoftKeyword("delegating");
                 consume(WITNESS, delegating
                         ? "Expect 'witness' after 'delegating'."
                         : "Expect 'witness' after 'default'.");
+                if (looksLikeBundleDeclaration()) return witnessBundleDeclaration(false, true);
                 return witnessDeclaration(false, true, delegating);
             }
             if (levelMarker == null && matchSoftKeyword("handler")) return namedHandlerDeclaration(false);
@@ -422,7 +429,10 @@ public final class Parser {
                 if (match(EFFECT)) return effectDeclaration(true);
                 if (match(CONTRACT)) return contractDeclaration(true);
                 if (match(TYPE)) return typeDeclaration(true);
-                if (match(WITNESS)) return witnessDeclaration(true, false, false);
+                if (match(WITNESS)) {
+                    return looksLikeBundleDeclaration()
+                            ? witnessBundleDeclaration(true, false) : witnessDeclaration(true, false, false);
+                }
                 if (matchSoftKeyword("delegating")) {
                     consume(WITNESS, "Expect 'witness' after 'delegating'.");
                     return witnessDeclaration(true, false, true);
@@ -447,7 +457,10 @@ public final class Parser {
                 return classDeclaration(false, false, true);
             }
             if (levelMarker == null && match(CLASS)) return classDeclaration(false);
-            if (levelMarker == null && match(WITNESS)) return witnessDeclaration();
+            if (levelMarker == null && match(WITNESS)) {
+                return looksLikeBundleDeclaration()
+                        ? witnessBundleDeclaration(false, false) : witnessDeclaration();
+            }
             if (levelMarker == null && match(EFFECT)) return effectDeclaration(false);
             if (levelMarker == null && match(CONTRACT)) return contractDeclaration(false);
             if (levelMarker == null && match(TYPE)) return typeDeclaration(false);
@@ -777,6 +790,54 @@ public final class Parser {
                 List.of(function));
     }
 
+    private boolean looksLikeBundleDeclaration() {
+        if (current >= tokens.size() || !tokens.get(current).lexeme().equals("bundle")) return false;
+        return current + 1 >= tokens.size() || tokens.get(current + 1).type() != COLON;
+    }
+
+    private Stmt.WitnessBundle witnessBundleDeclaration(final boolean isPublic,
+                                                        final boolean isDefault) {
+        final var bundleKeyword = advance();
+        final Token sourceName;
+        if (check(IDENTIFIER)) {
+            sourceName = advance();
+        } else {
+            sourceName = null;
+        }
+        if (isDefault && sourceName != null) {
+            error(sourceName, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    "A 'default' witness bundle cannot declare a name.");
+        }
+        final var header = sourceName == null ? bundleKeyword : sourceName;
+        final var bundleParameters = typeParameterDeclaration(header, true);
+        consume(FOR, "Expect 'for' after witness bundle target.");
+        final var target = collectType();
+        consume(LEFT_BRACE, "Expect '{' before witness bundle members.");
+        final var members = new ArrayList<Stmt.Witness>();
+        final var previousTarget = bundleTarget;
+        final var previousParameters = bundleTypeParameters;
+        final var previousDefault = bundleDefaultMembers;
+        bundleTarget = target;
+        bundleTypeParameters = List.copyOf(bundleParameters.values());
+        bundleDefaultMembers = isDefault;
+        try {
+            while (!check(RIGHT_BRACE) && !isAtEnd()) {
+                consume(WITNESS, "Expect 'witness' before each bundle member.");
+                final var member = witnessDeclaration(false, false, false);
+                member.setBundleName(sourceName == null ? null : sourceName.lexeme());
+                members.add(member);
+            }
+        } finally {
+            bundleTarget = previousTarget;
+            bundleTypeParameters = previousParameters;
+            bundleDefaultMembers = previousDefault;
+        }
+        final var closingBrace = consume(RIGHT_BRACE, "Expect '}' after witness bundle members.");
+        return new Stmt.WitnessBundle(sourceName == null ? bundleKeyword : sourceName,
+                isPublic, isDefault, List.copyOf(bundleParameters.values()), target,
+                members, closingBrace);
+    }
+
     private Stmt.Witness witnessDeclaration() {
         return witnessDeclaration(false, false, false);
     }
@@ -791,14 +852,22 @@ public final class Parser {
         final var sourceName = looksLikeWitnessName() ? advance() : null;
         final var header = sourceName == null ? keyword : sourceName;
         final var name = keyword;
-        final var typeParameters = typeParameterDeclaration(header, true);
+        final var ownTypeParameters = typeParameterDeclaration(header, true);
+        final var typeParameters = new LinkedHashMap<String, TypeParameterDescriptor>();
+        for (final var parameter : bundleTypeParameters) typeParameters.put(parameter.name(), parameter);
+        typeParameters.putAll(ownTypeParameters);
         final var enclosingTypeParameters = activeTypeParameters;
         activeTypeParameters = new LinkedHashMap<>(typeParameters);
         try {
-            if (sourceName != null) consume(COLON, "Expect ':' after witness name.");
+            if (bundleTarget == null && sourceName != null) consume(COLON, "Expect ':' after witness name.");
             final var contractType = collectType();
-            consume(FOR, "Expect 'for' between witness contract and target type.");
-            final var targetType = collectType();
+            final TypeDescriptor targetType;
+            if (bundleTarget != null) {
+                targetType = bundleTarget;
+            } else {
+                consume(FOR, "Expect 'for' between witness contract and target type.");
+                targetType = collectType();
+            }
         final var higherKinded = targetType instanceof TypeConstructorDescriptor
                 && contractType instanceof GenericDescriptor generic
                 && generic.typeParameters().size() == 1
@@ -875,7 +944,7 @@ public final class Parser {
                         "Witness members must be declared with 'fn'.");
             }
             final var closingBrace = consume(RIGHT_BRACE, "Expect '}' after witness members.");
-            if (sourceName == null) {
+            if (sourceName == null && bundleTarget == null) {
                 if (!isDefault) {
                     Zeron.warning(Diagnostic.atToken(
                             DiagnosticCatalog.ANONYMOUS_WITNESS_DEPRECATED, keyword,
@@ -892,9 +961,11 @@ public final class Parser {
                         "A 'default' witness cannot declare a name; its identity is derived from its "
                                 + "contract and target.");
             }
-            return new Stmt.Witness(keyword, sourceName, isPublic, isDefault,
+            final var effectiveDefault = isDefault || bundleDefaultMembers;
+            final var witness = new Stmt.Witness(keyword, sourceName, isPublic, effectiveDefault,
                     List.copyOf(typeParameters.values()), contractType, targetType, methods,
                     false, List.of(), higherKinded, closingBrace, delegating);
+            return witness;
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -2889,7 +2960,28 @@ public final class Parser {
         return expressionStatement();
     }
 
+    private List<Token> witnessProviderReferences() {
+        consume(LEFT_PAREN, "Expect '(' before witness providers.");
+        final var providers = new ArrayList<Token>();
+        do {
+            final var start = consume(IDENTIFIER, "Expect a witness provider name.");
+            final var name = new StringBuilder(start.lexeme());
+            while (match(DOT)) {
+                final var part = consume(IDENTIFIER, "Expect a name after '.'.");
+                name.append('.').append(part.lexeme());
+            }
+            providers.add(new Token(IDENTIFIER, name.toString(), null, start.span()));
+        } while (match(COMMA));
+        consume(RIGHT_PAREN, "Expect ')' after witness providers.");
+        return List.copyOf(providers);
+    }
+
     private Stmt usingStatement(final Token keyword) {
+        if (match(WITNESS)) {
+            final var providers = witnessProviderReferences();
+            consume(LEFT_BRACE, "Expect '{' before witness selection body.");
+            return new Stmt.WitnessSelection(keyword, providers, new Stmt.Block(block()));
+        }
         consume(LEFT_PAREN, "Expect '(' after 'using'.");
         final var resources = new ArrayList<Stmt.UsingResource>();
         do {
@@ -3058,6 +3150,27 @@ public final class Parser {
         return statements;
     }
 
+    private Expr valueBlock(final Token openingBrace) {
+        final var statements = new ArrayList<Stmt>();
+        while (!check(RIGHT_BRACE) && !isAtEnd() && !isSoftKeyword("yield")) {
+            final var statement = declaration();
+            if (statement != null) statements.add(statement);
+        }
+        if (!isSoftKeyword("yield")) {
+            throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX,
+                    "A value block must end with a 'yield' clause.");
+        }
+        final var yieldKeyword = advance();
+        final var value = expression();
+        consume(SEMICOLON, "Expect ';' after the value block's yielded expression.");
+        if (!check(RIGHT_BRACE)) {
+            throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX,
+                    "A value block's 'yield' clause must be its final clause.");
+        }
+        consume(RIGHT_BRACE, "Expect '}' after the value block.");
+        return new Expr.ValueBlock(openingBrace, statements, value, yieldKeyword);
+    }
+
     private Expr expression() {
         final var start = assignment();
         if (match(DOT_DOT)) {
@@ -3105,7 +3218,8 @@ public final class Parser {
             if (expr instanceof Expr.Index index) {
                 if (operator.type() != EQUAL) error(operator, DiagnosticCatalog.INVALID_ASSIGNMENT_FORM,
                         "Indexed assignment only supports '='.");
-                return new Expr.IndexAssignment(index.array, index.index, value, TypeDescriptor.ofUnit());
+                return new Expr.IndexAssignment(index.array, index.index, value, operator,
+                        TypeDescriptor.ofUnit());
             }
 
             // left assign_op right === left = left op right
@@ -3443,6 +3557,12 @@ public final class Parser {
                 call.setExplicitOwnerTypeArguments(ownerTypeArguments);
                 expr = call;
             } else if (expr instanceof Expr.Variable variable && check(LESS)
+                    && looksLikeTypeArgumentsTrailingLambda()) {
+                advance();
+                final var typeArguments = collectTypeArguments();
+                consume(GREATER, "Expect '>' after type arguments.");
+                expr = new Expr.Variable(variable.name, TypeDescriptor.ofInfer(), typeArguments);
+            } else if (expr instanceof Expr.Variable variable && check(LESS)
                     && looksLikeTypeArgumentsCall()) {
                 advance();
                 final var typeArguments = collectTypeArguments();
@@ -3537,6 +3657,14 @@ public final class Parser {
         return new Expr.PropertyReference(operator, type, propertyName);
     }
 
+    private Expr argument() {
+        if (match(ELLIPSIS)) {
+            final var ellipsis = previous();
+            return new Expr.Spread(ellipsis, expression());
+        }
+        return expression();
+    }
+
     private Expr finishCall(final Token callee, final List<TypeDescriptor> typeArguments) {
         final var arguments = new ArrayList<Expr>();
         if (!check(RIGHT_PAREN)) {
@@ -3545,23 +3673,38 @@ public final class Parser {
                     error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                             "Can't have more than 254 arguments.");
                 }
-                arguments.add(expression());
+                arguments.add(argument());
                 Zeron.debug("added argument to call: " + arguments.getLast());
             } while (match(COMMA));
         }
 
         final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
 
-        return new Expr.Call(callee, paren, arguments, typeArguments, TypeDescriptor.ofInfer());
+        final var call = new Expr.Call(callee, paren, arguments, typeArguments, TypeDescriptor.ofInfer());
+        if (peek().lexeme().equals("with") && current + 1 < tokens.size()
+                && tokens.get(current + 1).type() == WITNESS) {
+            advance();
+            advance();
+            call.setWitnessSelection(witnessProviderReferences());
+        }
+        return call;
     }
 
     private boolean looksLikeTypeArgumentsCall() {
+        return followsMatchingTypeArguments(LEFT_PAREN);
+    }
+
+    private boolean looksLikeTypeArgumentsTrailingLambda() {
+        return followsMatchingTypeArguments(LEFT_BRACE);
+    }
+
+    private boolean followsMatchingTypeArguments(final TokenType following) {
         var depth = 0;
         for (var index = current; index < tokens.size(); index++) {
             final var type = tokens.get(index).type();
             if (type == LESS) depth++;
             else if (type == GREATER && --depth == 0) {
-                return index + 1 < tokens.size() && tokens.get(index + 1).type() == LEFT_PAREN;
+                return index + 1 < tokens.size() && tokens.get(index + 1).type() == following;
             }
         }
         return false;
@@ -3589,7 +3732,7 @@ public final class Parser {
                     error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                             "Can't have more than 254 arguments.");
                 }
-                arguments.add(expression());
+                arguments.add(argument());
             } while (match(COMMA));
         }
         final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
@@ -3612,12 +3755,19 @@ public final class Parser {
             do {
                 if (arguments.size() >= 254) error(peek(), DiagnosticCatalog.TOO_MANY_PARAMETERS_OR_ARGUMENTS,
                         "Can't have more than 254 arguments.");
-                arguments.add(expression());
+                arguments.add(argument());
             } while (match(COMMA));
         }
         final var paren = consume(RIGHT_PAREN, "Expect ')' after arguments.");
-        return new Expr.MemberCall(property.receiver, property.name, paren, arguments,
+        final var call = new Expr.MemberCall(property.receiver, property.name, paren, arguments,
                 explicitTypeArguments, TypeDescriptor.ofInfer(), property.safeNavigation());
+        if (peek().lexeme().equals("with") && current + 1 < tokens.size()
+                && tokens.get(current + 1).type() == WITNESS) {
+            advance();
+            advance();
+            call.setWitnessSelection(witnessProviderReferences());
+        }
+        return call;
     }
 
     private List<TypeDescriptor> collectExplicitMethodTypeArguments() {
@@ -3660,6 +3810,7 @@ public final class Parser {
     }
 
     private Expr primary() {
+        if (match(LEFT_BRACE)) return valueBlock(previous());
         if (isHandlerLiteralStart()) {
             advance();
             return handlerLiteral(previous());
@@ -4310,6 +4461,9 @@ public final class Parser {
         consume(LEFT_BRACE, "Expect '{' after 'do'.");
 
         final var binds = new ArrayList<DoBind>();
+        // A plain 'let' may precede the first bind. Those bindings are evaluated before the
+        // monadic chain, so they are lowered into a lambda that encloses it.
+        final var leadingStatements = new ArrayList<Stmt>();
         Expr yieldExpression = null;
         var monadicResult = false;
         while (!check(RIGHT_BRACE) && !isAtEnd()) {
@@ -4324,13 +4478,13 @@ public final class Parser {
                     final var value = expression();
                     consume(SEMICOLON, "Expect ';' after a 'do' local binding.");
                     if (binds.isEmpty()) {
-                        throw error(let, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                                "A local 'let' in a 'do' block must follow the first bind clause; "
-                                        + "move it outside the block.");
+                        leadingStatements.add(new Stmt.Var(name, TypeDescriptor.ofInfer(), value,
+                                BindingMutability.IMMUTABLE));
+                    } else {
+                        final var current = binds.getLast();
+                        current.localNames().add(name);
+                        current.localValues().add(value);
                     }
-                    final var current = binds.getLast();
-                    current.localNames().add(name);
-                    current.localValues().add(value);
                 } else {
                     throw error(peek(), DiagnosticCatalog.EXPECTED_SYNTAX,
                             "Expect '<-' for a 'do' bind or '=' for a local binding.");
@@ -4353,16 +4507,41 @@ public final class Parser {
             }
         }
         consume(RIGHT_BRACE, "Expect '}' after 'do' clauses.");
-        if (binds.isEmpty()) {
-            throw error(keyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
-                    "A 'do' expression requires at least one 'let name <- expression' bind clause.");
-        }
         if (yieldExpression == null) {
             throw error(keyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
                     "A 'do' expression must end with a 'yield' clause or a final monad-valued expression.");
         }
+        if (binds.isEmpty() && declaredConstructor == null) {
+            throw error(keyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    "A 'do' expression requires at least one 'let name <- expression' bind clause, "
+                            + "or a declared constructor such as do<Option<_>>.");
+        }
 
         Expr lowered = null;
+        if (binds.isEmpty()) {
+            // No bind supplies the constructor, so the declared constructor lifts unit and the
+            // leading statements plus yield map over it. Monads require Applicative evidence.
+            final var constructorName = new Token(TokenType.IDENTIFIER,
+                    declaredConstructor.name(), null, keyword.span());
+            final var receiver = new Expr.Variable(constructorName, TypeDescriptor.ofInfer());
+            final var pureName = new Token(TokenType.IDENTIFIER, "pure", null, keyword.span());
+            final var pureCall = new Expr.MemberCall(receiver, pureName, keyword,
+                    List.of(new Expr.Literal(new UnitLiteral(), TypeDescriptor.ofUnit())),
+                    List.of(), TypeDescriptor.ofInfer());
+            pureCall.setTypeLevelConstructor(declaredConstructor);
+            final var body = new ArrayList<Stmt>(leadingStatements);
+            body.add(new Stmt.Return(yieldExpression, keyword));
+            final var unitParameter = new Token(TokenType.IDENTIFIER, "unitValue", null,
+                    keyword.span());
+            final var lambda = new Expr.Lambda(keyword, List.of(unitParameter), body,
+                    TypeDescriptor.ofInfer());
+            final var stepName = new Token(TokenType.IDENTIFIER,
+                    monadicResult ? "flatMap" : "map", null, keyword.span());
+            final var step = new Expr.MemberCall(pureCall, stepName, keyword, List.of(lambda),
+                    List.of(), TypeDescriptor.ofInfer());
+            step.setWitnessDispatched(true);
+            return new Expr.Do(keyword, declaredConstructor, step);
+        }
         for (var index = binds.size() - 1; index >= 0; index--) {
             final var bind = binds.get(index);
             final var body = new ArrayList<Stmt>();
@@ -4381,6 +4560,13 @@ public final class Parser {
             // never through an instance method that happens to share the name.
             call.setWitnessDispatched(true);
             lowered = call;
+        }
+        if (!leadingStatements.isEmpty()) {
+            final var body = new ArrayList<Stmt>(leadingStatements);
+            body.add(new Stmt.Return(lowered, keyword));
+            final var lambda = new Expr.Lambda(keyword, List.of(), body, TypeDescriptor.ofInfer());
+            lowered = new Expr.Invoke(lambda, keyword, keyword, List.of(),
+                    TypeDescriptor.ofInfer(), false);
         }
         return new Expr.Do(keyword, declaredConstructor, lowered);
     }

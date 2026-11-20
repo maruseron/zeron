@@ -160,12 +160,18 @@ final class LambdaSupportEmitter {
                 context.lambdaPlan.lambdaMethodName(lambda));
 
         final var methodHandleType = TypeDescriptor.ofName("java.lang.invoke.MethodHandle");
+        final var template = context.lambdaPlan.lambdaTemplateFactoryName(lambda) != null;
         final var allParameters = new ArrayList<TypeDescriptor>();
         allParameters.addAll(context.lambdaPlan.captureTypes(lambda));
+        if (template) {
+            allParameters.addAll(Collections.nCopies(evidenceFields.size(), methodHandleType));
+        }
         for (final var parameter : functionType.invocationParameters()) {
             allParameters.add(parameter);
         }
-        allParameters.addAll(Collections.nCopies(evidenceFields.size(), methodHandleType));
+        if (!template) {
+            allParameters.addAll(Collections.nCopies(evidenceFields.size(), methodHandleType));
+        }
         allParameters.addAll(Collections.nCopies(functionType.hiddenDescriptorCount(),
                 RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE));
         final var previousOffset = context.localSlotOffset;
@@ -181,6 +187,13 @@ final class LambdaSupportEmitter {
                 final var captureType = context.lambdaPlan.captureTypes(lambda).get(i);
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, capture, captureType, BindingMutability.IMMUTABLE);
                 context.symbols.define(capture);
+            }
+            if (template) {
+                for (final var evidenceField : evidenceFields) {
+                    context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceField.token(),
+                            methodHandleType, BindingMutability.IMMUTABLE);
+                    context.symbols.define(evidenceField.token());
+                }
             }
             if (functionType.receiverType() != null) {
                 final var receiverToken = lambda.receiverSymbolToken();
@@ -198,10 +211,12 @@ final class LambdaSupportEmitter {
                 context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, param, parameterType, BindingMutability.IMMUTABLE);
                 context.symbols.define(param);
             }
-            for (final var evidenceField : evidenceFields) {
-                context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceField.token(),
-                        methodHandleType, BindingMutability.IMMUTABLE);
-                context.symbols.define(evidenceField.token());
+            if (!template) {
+                for (final var evidenceField : evidenceFields) {
+                    context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, evidenceField.token(),
+                            methodHandleType, BindingMutability.IMMUTABLE);
+                    context.symbols.define(evidenceField.token());
+                }
             }
             for (final var parameter : functionType.typeParameters()) {
                 if (!parameter.isReified()) continue;
@@ -253,15 +268,12 @@ final class LambdaSupportEmitter {
                                           final Expr.Lambda lambda) {
         final var functionType = (FunctionDescriptor) lambda.getType();
         final var erasedFunctionType = (FunctionDescriptor) TypeSubstitution.erase(functionType);
+        final var samType = erasedFunctionType.withHiddenSlots(0, 0);
         final var captures = context.lambdaPlan.captureTypes(lambda);
         final var evidenceCount = BytecodeEmitter.evidenceFields(
                 context, functionType.typeParameters(), "lambda",
                 context.lambdaPlan.lambdaMethodName(lambda)).size();
         final var methodHandleType = ClassDesc.of("java.lang.invoke.MethodHandle");
-        final var capturedTypes = new ArrayList<TypeDescriptor>(captures);
-        capturedTypes.addAll(Collections.nCopies(evidenceCount,
-                TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
-
         final var invokedParameters = new ArrayList<ClassDesc>();
         for (int index = 0; index < captures.size(); index++) {
             composer.aload(0);
@@ -278,13 +290,15 @@ final class LambdaSupportEmitter {
             invokedParameters.add(methodHandleType);
         }
 
-        final var implementationParameters = new ArrayList<TypeDescriptor>(capturedTypes);
+        final var implementationParameters = new ArrayList<TypeDescriptor>(captures);
+        implementationParameters.addAll(Collections.nCopies(evidenceCount,
+                TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
         implementationParameters.addAll(erasedFunctionType.invocationParameters());
         final var implementation = MethodHandleDesc.of(
                 DirectMethodHandleDesc.Kind.STATIC,
                 ClassDesc.of(context.mainClassName),
                 context.lambdaPlan.lambdaMethodName(lambda),
-                toJavaMethodDescriptor(erasedFunctionType, implementationParameters).descriptorString());
+                toJavaMethodDescriptor(samType, implementationParameters).descriptorString());
         final var metafactoryType = MethodTypeDesc.of(
                 ClassDesc.of("java.lang.invoke.CallSite"),
                 ClassDesc.of("java.lang.invoke.MethodHandles$Lookup"),
@@ -301,10 +315,10 @@ final class LambdaSupportEmitter {
         composer.invokedynamic(DynamicCallSiteDesc.of(
                 metafactory,
                 "invoke",
-                MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(erasedFunctionType), invokedParameters),
-                toJavaMethodDescriptor(erasedFunctionType),
+                MethodTypeDesc.of(TypeDescriptor.toJavaClassDesc(samType), invokedParameters),
+                toJavaMethodDescriptor(samType),
                 implementation,
-                toJavaMethodDescriptor(erasedFunctionType)));
+                toJavaMethodDescriptor(samType)));
         composer.areturn();
     }
 
@@ -369,7 +383,9 @@ final class LambdaSupportEmitter {
     static void emitFunctionAdapterImplementation(final CompilationContext context,
                                                            final CodeBuilder composer,
                                                            final FunctionDescriptor sourceType,
-                                                           final FunctionDescriptor targetType) {
+                                                           final FunctionDescriptor targetType,
+                                                           final int witnessCount,
+                                                           final int reifiedCount) {
         composer.aload(0);
         var slot = 1;
         final var targetParameters = targetType.invocationParameters();
@@ -381,8 +397,12 @@ final class LambdaSupportEmitter {
             final var descriptor = TypeDescriptor.toJavaClassDesc(targetParameter).descriptorString();
             slot += descriptor.equals("D") || descriptor.equals("J") ? 2 : 1;
         }
+        for (var hidden = 0; hidden < witnessCount + reifiedCount; hidden++) {
+            composer.aload(slot++);
+        }
         composer.invokeinterface(TypeDescriptor.toJavaClassDesc(sourceType), "invoke",
-            toJavaMethodDescriptor(sourceType));
+            BytecodeEmitter.withHiddenParameters(toJavaMethodDescriptor(sourceType),
+                    witnessCount, reifiedCount));
         final var sourceReturn = sourceType.returnType();
         final var targetReturn = targetType.returnType();
         if (sourceReturn instanceof NeverDescriptor) {

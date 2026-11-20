@@ -21,6 +21,7 @@ final class LambdaConstraintCollector {
     private final List<TypeParameterDescriptor> provisionalParameters;
     private final Map<String, Integer> parameterIndices = new HashMap<>();
     private final Map<Integer, List<TypeDescriptor>> bounds = new HashMap<>();
+    private final Map<Integer, TypeDescriptor> concreteTypes = new HashMap<>();
     private final Set<Integer> generalized = new HashSet<>();
     private final int[] parents;
 
@@ -42,11 +43,12 @@ final class LambdaConstraintCollector {
     static Result collect(final ResolutionContext context, final Expr.Lambda lambda) {
         final var collector = new LambdaConstraintCollector(context, lambda);
         collector.scan(lambda.body);
-        if (collector.generalized.isEmpty()) return null;
+        if (collector.generalized.isEmpty() && collector.concreteTypes.isEmpty()) return null;
 
         final var scope = collector.provisionalParameters.getFirst().scopeId();
         final var rootIndices = new LinkedHashSet<Integer>();
         for (final var index : collector.generalized) rootIndices.add(collector.root(index));
+        for (final var index : collector.concreteTypes.keySet()) rootIndices.add(collector.root(index));
         final var initialRootCount = rootIndices.size();
 
         final var provisionalToCanonical = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
@@ -83,6 +85,7 @@ final class LambdaConstraintCollector {
         final var typeParameters = new ArrayList<TypeParameterDescriptor>(rootIndices.size());
         final var canonicalToFinal = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (final var root : rootIndices) {
+            if (collector.concreteTypes.containsKey(root)) continue;
             final var canonical = collector.provisionalParameters.get(root);
             final var parameter = new TypeParameterDescriptor(scope, canonical.name(),
                     List.copyOf(canonicalBounds.getOrDefault(root, new LinkedHashSet<>())));
@@ -93,8 +96,11 @@ final class LambdaConstraintCollector {
         final var parameters = new ArrayList<TypeDescriptor>(collector.parents.length);
         for (int index = 0; index < collector.parents.length; index++) {
             final var root = collector.root(index);
+            final var concrete = collector.concreteTypes.get(root);
             final var canonical = collector.provisionalParameters.get(root);
-            parameters.add(rootIndices.contains(root)
+            parameters.add(concrete != null
+                    ? concrete
+                    : rootIndices.contains(root)
                     ? canonicalToFinal.get(canonical)
                     : TypeDescriptor.ofInfer());
         }
@@ -174,6 +180,7 @@ final class LambdaConstraintCollector {
     private void scan(final Expr expression) {
         if (expression == null) return;
         switch (expression) {
+            case Expr.Spread spread -> scan(spread.expression);
             case Expr.MemberCall call -> {
                 final var receiverIndex = lambdaParameter(call.receiver);
                 if (receiverIndex >= 0) inferMemberBound(receiverIndex, call);
@@ -194,6 +201,7 @@ final class LambdaConstraintCollector {
                 invoke.arguments.forEach(this::scan);
             }
             case Expr.Binary binary -> {
+                inferOperatorBound(binary);
                 scan(binary.left);
                 scan(binary.right);
             }
@@ -226,7 +234,14 @@ final class LambdaConstraintCollector {
                 scan(assignment.value);
             }
             case Expr.Grouping grouping -> scan(grouping.expression);
-            case Expr.Unary unary -> scan(unary.right);
+            case Expr.ValueBlock block -> {
+                scan(block.statements);
+                scan(block.value);
+            }
+            case Expr.Unary unary -> {
+                inferUnaryOperatorBound(unary);
+                scan(unary.right);
+            }
             case Expr.If conditional -> {
                 scan(conditional.condition);
                 scan(conditional.thenExpr);
@@ -301,6 +316,55 @@ final class LambdaConstraintCollector {
         }
     }
 
+    private void inferOperatorBound(final Expr.Binary binary) {
+        final String contractName;
+        switch (binary.operator.type()) {
+            case PLUS, MINUS, STAR -> contractName = "zeron.numeric.Numeric";
+            case SLASH -> contractName = "zeron.numeric.Fractional";
+            case LESS, LESS_EQUAL, GREATER, GREATER_EQUAL -> contractName = "zeron.lang.Comparable";
+            default -> {
+                return;
+            }
+        }
+        final var left = lambdaParameter(binary.left);
+        final var right = lambdaParameter(binary.right);
+        if (left < 0 && right < 0) return;
+        if (left >= 0 && right >= 0) union(left, right);
+        final var target = left >= 0 ? left : right;
+        final var other = left >= 0 ? binary.right : binary.left;
+        final var concrete = inferConcreteOperandType(other);
+        if (concrete != null) {
+            concreteTypes.putIfAbsent(root(target), concrete);
+            return;
+        }
+        addOperatorBound(target, contractName, binary.operator);
+    }
+
+    private void inferUnaryOperatorBound(final Expr.Unary unary) {
+        if (unary.operator.type() != com.maruseron.zeron.scan.TokenType.MINUS) return;
+        final var operand = lambdaParameter(unary.right);
+        if (operand < 0) return;
+        addOperatorBound(operand, "zeron.numeric.Numeric", unary.operator);
+    }
+
+    private void addOperatorBound(final int parameterIndex, final String contractName,
+                                  final Token where) {
+        final var contract = context.contracts.values().stream()
+                .filter(candidate -> candidate.name().lexeme().equals(contractName))
+                .findFirst().orElse(null);
+        if (contract == null || contract.typeParameters().size() != 1) {
+            Zeron.resolutionError(new ResolutionError(
+                    DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE, where,
+                    "The standard " + contractName + " contract is not available."));
+            return;
+        }
+        final var bound = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName(contract.name().lexeme()),
+                provisionalParameters.get(root(parameterIndex)));
+        bounds.computeIfAbsent(root(parameterIndex), _ -> new ArrayList<>()).add(bound);
+        generalized.add(root(parameterIndex));
+    }
+
     private void inferMemberBound(final int parameterIndex, final Expr.MemberCall call) {
         final var candidates = new ArrayList<TypeDescriptor>();
         for (final var contract : context.contracts.values()) {
@@ -358,6 +422,20 @@ final class LambdaConstraintCollector {
             return null;
         }
         return substitutions;
+    }
+
+    /// A concrete capture or local fixes the operator's receiver type. Literals are deliberately
+    /// excluded: they remain context-typed so `value -> value + 1` can stay polymorphic over
+    /// `Numeric<T>`.
+    private TypeDescriptor inferConcreteOperandType(final Expr expression) {
+        if (expression instanceof Expr.Grouping grouping) {
+            return inferConcreteOperandType(grouping.expression);
+        }
+        if (!(expression instanceof Expr.Variable variable)
+                || lambdaParameter(variable) >= 0
+                || !context.symbols.containsSymbol(variable.name)) return null;
+        final var type = context.symbols.getSymbol(variable.name).type();
+        return type instanceof InferDescriptor || type instanceof TypeParameterDescriptor ? null : type;
     }
 
     private TypeDescriptor inferKnownType(final Expr expression) {
@@ -539,7 +617,11 @@ final class LambdaConstraintCollector {
     private void union(final int left, final int right) {
         final var leftRoot = root(left);
         final var rightRoot = root(right);
-        if (leftRoot != rightRoot) parents[rightRoot] = leftRoot;
+        if (leftRoot != rightRoot) {
+            parents[rightRoot] = leftRoot;
+            final var concrete = concreteTypes.remove(rightRoot);
+            if (concrete != null) concreteTypes.putIfAbsent(leftRoot, concrete);
+        }
     }
 
     private int root(final int index) {

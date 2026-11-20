@@ -432,6 +432,10 @@ final class LambdaCompilationPlan {
                 for (final var argument : invoke.arguments) collectLambdaShapes(argument);
             }
             case Expr.Grouping grouping -> collectLambdaShapes(grouping.expression);
+            case Expr.ValueBlock block -> {
+                for (final var statement : block.statements) collectLambdaShapes(statement);
+                collectLambdaShapes(block.value);
+            }
             case Expr.If iff -> {
                 collectLambdaShapes(iff.condition);
                 collectLambdaShapes(iff.thenExpr);
@@ -772,6 +776,12 @@ final class LambdaCompilationPlan {
                 }
             }
             case Expr.Grouping grouping -> collectCapturedVariables(grouping.expression, localNames, captured, seen);
+            case Expr.ValueBlock block -> {
+                for (final var statement : block.statements) {
+                    collectCapturedVariables(statement, localNames, captured, seen);
+                }
+                collectCapturedVariables(block.value, localNames, captured, seen);
+            }
             case Expr.If iff -> {
                 collectCapturedVariables(iff.condition, localNames, captured, seen);
                 collectCapturedVariables(iff.thenExpr,

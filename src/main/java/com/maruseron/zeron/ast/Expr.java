@@ -153,9 +153,13 @@ public sealed interface Expr {
         private FunctionDescriptor witnessMethodType;
         private boolean witnessMethodHasReceiver = true;
         private TypeDescriptor requiredContractType;
+        private TypeDescriptor typeLevelConstructor;
         private boolean witnessDispatched;
         private List<EvidenceArgument> evidenceArguments = List.of();
         private List<TypeDescriptor> reifiedArguments = List.of();
+        private int spreadArgumentIndex = -1;
+        private Token spreadToken;
+        private List<Token> witnessSelection = List.of();
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -248,6 +252,12 @@ public sealed interface Expr {
         public void setRequiredContractType(final TypeDescriptor contractType) {
             requiredContractType = contractType;
         }
+        /// The constructor pattern a compiler-lowered type-level call was written for, such as
+        /// `Result<_, String>` in `do<Result<_, String>>`. Used to fix a witness's type arguments.
+        public TypeDescriptor typeLevelConstructor() { return typeLevelConstructor; }
+        public void setTypeLevelConstructor(final TypeDescriptor constructor) {
+            typeLevelConstructor = constructor;
+        }
         public boolean witnessDispatched() { return witnessDispatched; }
         public void setWitnessDispatched(final boolean value) { witnessDispatched = value; }
         public void setWitnessMethod(final String owner, final String methodName,
@@ -268,6 +278,16 @@ public sealed interface Expr {
         public List<TypeDescriptor> reifiedArguments() { return reifiedArguments; }
         public void setReifiedArguments(final List<TypeDescriptor> arguments) {
             reifiedArguments = List.copyOf(arguments);
+        }
+        public List<Token> witnessSelection() { return witnessSelection; }
+        public void setWitnessSelection(final List<Token> selection) {
+            witnessSelection = List.copyOf(selection);
+        }
+        public int spreadArgumentIndex() { return spreadArgumentIndex; }
+        public Token spreadToken() { return spreadToken; }
+        public void setSpreadArgument(final int index, final Token token) {
+            spreadArgumentIndex = index;
+            spreadToken = token;
         }
 
         @Override
@@ -566,13 +586,15 @@ public sealed interface Expr {
         public final Expr array;
         public final Expr index;
         public final Expr value;
+        public final Token operator;
         private TypeDescriptor type;
         private ResolvedIntrinsicOperation intrinsicOperation;
 
-        public IndexAssignment(Expr array, Expr index, Expr value, TypeDescriptor type) {
+        public IndexAssignment(Expr array, Expr index, Expr value, Token operator, TypeDescriptor type) {
             this.array = array;
             this.index = index;
             this.value = value;
+            this.operator = operator;
             this.type = type;
         }
 
@@ -1109,6 +1131,9 @@ public sealed interface Expr {
         private int variadicFixedArity = -1;
         private List<EvidenceArgument> evidenceArguments = List.of();
         private List<TypeDescriptor> reifiedArguments = List.of();
+        private int spreadArgumentIndex = -1;
+        private Token spreadToken;
+        private List<Token> witnessSelection = List.of();
 
         public Call(Token callee, Token paren, List<Expr> arguments,
                     List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -1167,6 +1192,16 @@ public sealed interface Expr {
         public List<TypeDescriptor> reifiedArguments() { return reifiedArguments; }
         public void setReifiedArguments(final List<TypeDescriptor> arguments) {
             reifiedArguments = List.copyOf(arguments);
+        }
+        public List<Token> witnessSelection() { return witnessSelection; }
+        public void setWitnessSelection(final List<Token> selection) {
+            witnessSelection = List.copyOf(selection);
+        }
+        public int spreadArgumentIndex() { return spreadArgumentIndex; }
+        public Token spreadToken() { return spreadToken; }
+        public void setSpreadArgument(final int index, final Token token) {
+            spreadArgumentIndex = index;
+            spreadToken = token;
         }
 
         public void setGenericFunctionType(final FunctionDescriptor functionType) {
@@ -1262,6 +1297,41 @@ public sealed interface Expr {
                     + "paren=" + paren + ", " + "safe=" + safe + ", "
                     + "arguments=" + arguments + ", " + "type=" + type + ']';
         }
+    }
+
+    /// A `...expression` argument that expands an array or `Iterable` into a variadic tail.
+    final class Spread implements Expr {
+        public final Token ellipsis;
+        public final Expr expression;
+        private TypeDescriptor type;
+
+        public Spread(final Token ellipsis, final Expr expression) {
+            this.ellipsis = ellipsis;
+            this.expression = expression;
+        }
+
+        @Override public TypeDescriptor getType() { return type; }
+        @Override public void setType(final TypeDescriptor type) { this.type = type; }
+    }
+
+    /// A brace-delimited expression block whose value is introduced by one final `yield`.
+    final class ValueBlock implements Expr {
+        public final Token openingBrace;
+        public final List<Stmt> statements;
+        public final Expr value;
+        public final Token yieldKeyword;
+        private TypeDescriptor type;
+
+        public ValueBlock(final Token openingBrace, final List<Stmt> statements,
+                          final Expr value, final Token yieldKeyword) {
+            this.openingBrace = openingBrace;
+            this.statements = List.copyOf(statements);
+            this.value = value;
+            this.yieldKeyword = yieldKeyword;
+        }
+
+        @Override public TypeDescriptor getType() { return type; }
+        @Override public void setType(final TypeDescriptor type) { this.type = type; }
     }
 
     final class Grouping implements Expr {

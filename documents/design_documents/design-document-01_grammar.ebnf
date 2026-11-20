@@ -371,7 +371,7 @@ callSuffix = "?.", arguments | arguments | "[", expression, "]"
 trailingLambda = "{", [ trailingLambdaParameter, { ",", trailingLambdaParameter }, "->" ],
                    { declaration }, [ expression ], "}" ;
 trailingLambdaParameter = IDENTIFIER, [ ":", type ] ;
-genericFunctionCall = IDENTIFIER, typeArguments, arguments ;
+genericFunctionCall = IDENTIFIER, typeArguments, ( arguments | trailingLambda ) ;
 functionValueReference = IDENTIFIER, "::", typeArguments ;
 
 (* [NEW] ZEP-0090: `::` followed by `<` is function specialization (above); followed by an identifier it is a property reference. The left operand names a type, never an expression. *)
@@ -536,7 +536,8 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    higher-kinded parameter is written `F<_>` and cannot be covariant; class, contract, sum, and
    product covariance is checked for unsafe positions rather than trusted from the annotation.
    - Postfix `!!` asserts that an expression is non-null and produces its non-null type.
-   - A trailing lambda may follow a callable name or call expression. An arrowless block with an
+   - A trailing lambda may follow a callable name, including one with explicit type arguments
+   (`invokeWith<Int> { 42 }`), or a call expression. An arrowless block with an
    expected one-parameter function type receives the implicit binding `it`.
    - Classes and contracts are top-level declarations; each class has exactly one canonical constructor.
    - Each package/namespace callable name and each class/contract method name identifies one

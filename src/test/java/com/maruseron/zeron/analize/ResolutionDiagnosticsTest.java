@@ -17,6 +17,49 @@ import static org.junit.Assert.assertTrue;
 
 public final class ResolutionDiagnosticsTest {
     @Test
+    public void reportsSelfRecursiveIntrinsicHelperOutsideTheStandardLibrary() {
+        final var unit = Parser.of(Scanner.from("""
+                fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
+                """).scanTokens()).parseCompilationUnit("src/collectionbuilders.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(1, result.errors().size());
+        final var error = result.errors().getFirst();
+        assertEquals("ZR2028", error.code().toString());
+        assertTrue(error.message().contains("only calls itself"));
+        assertTrue(error.message().contains("standard-library intrinsic"));
+        assertEquals(List.of(new DiagnosticHelp(
+                        "Allocate arrays with 'zeron.internal.generateArray(size, initializer)' "
+                                + "or use a collection type such as 'ArrayList<T>'.")),
+                error.helps());
+    }
+
+    @Test
+    public void acceptsIntrinsicDeclarationInItsStandardLibraryPackage() {
+        final var unit = Parser.of(Scanner.from("""
+                package zeron.collections;
+
+                fn allocateArray<T: nullable + mut>(size: Int): &Array<T> = allocateArray<T>(size);
+                """).scanTokens()).parseCompilationUnit("zeron/collections/array_list.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertTrue(result.errors().isEmpty());
+    }
+
+    @Test
+    public void acceptsIntrinsicSimpleNameForAnOrdinaryFunction() {
+        final var unit = Parser.of(Scanner.from("""
+                fn unwrapSome(value: Int): Int = value;
+                """).scanTokens()).parseCompilationUnit("src/main.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertTrue(result.errors().isEmpty());
+    }
+
+    @Test
     public void reportsNullableMemberCallsWithAnActionableDiagnostic() {
         final var unit = Parser.of(Scanner.from("""
                 class Widget {
@@ -118,6 +161,25 @@ public final class ResolutionDiagnosticsTest {
         assertEquals("src/main.zn", result.errors().getFirst().primarySpan().sourcePath());
         assertEquals(1, result.errors().getFirst().primarySpan().start().line());
         assertEquals(source.indexOf("\"bad\"") + 1,
+                (int) result.errors().getFirst().primarySpan().start().column());
+    }
+
+    @Test
+    public void locatesArraySlotMutationAtTheAssignmentOperator() {
+        final var source = """
+                fn fill(values: Array<Int>): Unit {
+                    values[0] = 1;
+                }
+                """;
+        final var unit = Parser.of(Scanner.from(source, "src/main.zn").scanTokens())
+                .parseCompilationUnit("src/main.zn");
+
+        final var result = new ResolutionService().resolveUnitsWithDiagnostics(List.of(unit));
+
+        assertEquals(1, result.errors().size());
+        assertEquals("ZR2012", result.errors().getFirst().code().toString());
+        assertEquals(2, result.errors().getFirst().primarySpan().start().line());
+        assertEquals(source.lines().toList().get(1).indexOf('=') + 1,
                 (int) result.errors().getFirst().primarySpan().start().column());
     }
 

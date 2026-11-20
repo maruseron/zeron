@@ -27,6 +27,7 @@ final class ResolutionContext {
     boolean representationContext;
     final Map<String, Stmt.AnnotationDeclaration> annotationDeclarations = new LinkedHashMap<>();
     final List<TypeClassEvidence.WitnessEntry> typeClassWitnesses = new ArrayList<>();
+    final Deque<Set<String>> selectedWitnessBundles = new ArrayDeque<>();
     final Map<String, Stmt.FunctionDeclaration> functions = new LinkedHashMap<>();
     final Map<String, List<Stmt.ExtensionMethod>> extensionMethods = new LinkedHashMap<>();
     final Map<String, Stmt.Var> topLevelValues = new LinkedHashMap<>();

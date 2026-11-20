@@ -465,7 +465,21 @@ final class MemberInteropResolver {
     }
 
     static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call) {
-        return resolveMemberCall(context, call, null);
+        return withWitnessSelection(context, call,
+                () -> resolveMemberCall(context, call, null));
+    }
+
+    private static TypeDescriptor withWitnessSelection(final ResolutionContext context,
+                                                       final Expr.MemberCall call,
+                                                       final java.util.function.Supplier<TypeDescriptor> action) {
+        final var selected = TypeClassEvidence.selectionNames(context, call.witnessSelection());
+        if (selected.isEmpty()) return action.get();
+        context.selectedWitnessBundles.push(selected);
+        try {
+            return action.get();
+        } finally {
+            context.selectedWitnessBundles.pop();
+        }
     }
 
     static TypeDescriptor resolveOperatorContractCall(final ResolutionContext context,
@@ -518,6 +532,13 @@ final class MemberInteropResolver {
 
     static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                             final TypeDescriptor expectedType) {
+        return withWitnessSelection(context, call,
+                () -> resolveMemberCallInSelection(context, call, expectedType));
+    }
+
+    private static TypeDescriptor resolveMemberCallInSelection(final ResolutionContext context,
+                                                               final Expr.MemberCall call,
+                                                               final TypeDescriptor expectedType) {
         if (call.safeNavigation()) {
             final var receiverType = ExpressionFlowResolver.resolveExpression(context, call.receiver);
             final var safeFlows = beginSafeNavigation(context, call.receiver, call.name, receiverType);
@@ -699,6 +720,8 @@ final class MemberInteropResolver {
     private static TypeDescriptor resolveMemberCall(final ResolutionContext context, final Expr.MemberCall call,
                                              final TypeDescriptor alreadyResolvedReceiverType,
                                              final TypeDescriptor expectedType) {
+        final var spread = SpreadSupport.unwrap(call.arguments, call.name);
+        if (spread.present()) call.setSpreadArgument(spread.index(), spread.token());
         // Any method call may require mutable access to its receiver. Treat it conservatively so the
         // unnecessary-projection warning never fires on a receiver that a mutating method could use.
         MutationTracking.markRoot(context, call.receiver);
@@ -743,6 +766,18 @@ final class MemberInteropResolver {
                 return context.callResolver.resolveNamespaceCall(call, namespaceFunctionName);
             }
             if (sumCase == null) {
+                var constructorPattern = call.typeLevelConstructor();
+                if (constructorPattern == null && !call.explicitOwnerTypeArguments().isEmpty()) {
+                    constructorPattern = TypeDescriptor.genericOf(
+                            TypeDescriptor.ofName(sumDeclaration.name().lexeme()),
+                            call.explicitOwnerTypeArguments());
+                }
+                final var staticSelection = TypeClassEvidence.selectStaticConstructorMethod(
+                        context, sumDeclaration.name().lexeme(), call.name.lexeme(),
+                        constructorPattern, call.name);
+                if (staticSelection != null) {
+                    return resolveStaticWitnessCall(context, call, staticSelection);
+                }
                 Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
                         call.name, "Unknown case '" + call.name.lexeme() + "' for sum '"
                                 + sumDeclaration.name().lexeme() + "'."));
@@ -907,13 +942,7 @@ final class MemberInteropResolver {
                 if (variadic) {
                     call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(), fixedArity);
                 }
-                for (int i = 0; i < call.arguments.size(); i++) {
-                    final var expected = memberParameterType(
-                            descriptor.parameters(), i, fixedArity, variadic);
-                    ensureAssignable(context, expected,
-                            resolveArgument(context, call.arguments.get(i), expected),
-                            call.name);
-                }
+                resolveMemberArguments(context, call, descriptor, fixedArity, variadic);
                 final var returnType = exposeProjectedResult(descriptor.returnType(), call.name);
                 call.setType(returnType);
                 return returnType;
@@ -963,13 +992,7 @@ final class MemberInteropResolver {
                         call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(),
                                 fixedArity);
                     }
-                    for (int i = 0; i < call.arguments.size(); i++) {
-                        final var expected = memberParameterType(
-                                descriptor.parameters(), i, fixedArity, variadic);
-                        ensureAssignable(context, expected,
-                                resolveArgument(context, call.arguments.get(i), expected),
-                                call.name);
-                    }
+                    resolveMemberArguments(context, call, descriptor, fixedArity, variadic);
                     final var returnType = exposeProjectedResult(descriptor.returnType(), call.name);
                     call.setType(returnType);
                     return returnType;
@@ -1052,13 +1075,7 @@ final class MemberInteropResolver {
             call.setVariadic(((ArrayDescriptor) instantiatedDescriptor.parameters().getLast()).elementType(),
                     fixedArity);
         }
-        for (int i = 0; i < call.arguments.size(); i++) {
-            final var expected = memberParameterType(
-                    instantiatedDescriptor.parameters(), i, fixedArity, variadic);
-            ensureAssignable(context, expected,
-                    resolveArgument(context, call.arguments.get(i), expected),
-                    call.name);
-        }
+        resolveMemberArguments(context, call, instantiatedDescriptor, fixedArity, variadic);
         call.setType(exposedReturn);
         return exposedReturn;
     }
@@ -1136,6 +1153,44 @@ final class MemberInteropResolver {
         call.setResolvedDescriptor(functionType);
         call.setType(functionType.returnType());
         return functionType.returnType();
+    }
+
+    /// Resolves a type-level contract method called on a constructor name, such as
+    /// `Option.pure(value)`. The witness helper is called directly and receives no receiver.
+    private static TypeDescriptor resolveStaticWitnessCall(final ResolutionContext context,
+                                                           final Expr.MemberCall call,
+                                                           final TypeClassEvidence.WitnessMethodSelection selection) {
+        final var method = selection.method();
+        final var signature = method.methodSignature();
+        final var descriptor = (FunctionDescriptor) TypeSubstitution.substitute(
+                signature.typeDescriptor(), selection.substitutions());
+        context.recordReference(call.name, method.implementation().name(), descriptor);
+        call.setWitnessMethod(selection.helperQualifiedName(),
+                method.implementation().name().lexeme(), selection.helperType(), false);
+        final var fixedArity = Stmt.fixedArity(signature.parameters(), signature.variadic());
+        final var minimumArity = signature.minimumArity();
+        if (descriptor.isGeneric()) {
+            return resolveGenericMemberCall(context, call, descriptor, minimumArity,
+                    signature.variadic(), fixedArity, null, null);
+        }
+        if (!call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE,
+                    call.name, "This method does not declare type parameters."));
+        }
+        call.setResolvedDescriptor(descriptor);
+        ensureMemberCallArity(call, descriptor, minimumArity, signature.variadic());
+        if (signature.variadic()) {
+            call.setVariadic(((ArrayDescriptor) descriptor.parameters().getLast()).elementType(),
+                    fixedArity);
+        }
+        for (int index = 0; index < call.arguments.size(); index++) {
+            final var expected = memberParameterType(descriptor.parameters(), index,
+                    fixedArity, signature.variadic());
+            ensureAssignable(context, expected,
+                    resolveArgument(context, call.arguments.get(index), expected), call.name);
+        }
+        call.setType(descriptor.returnType());
+        return descriptor.returnType();
     }
 
     private static void ensureReceiverFunctionArguments(final ResolutionContext context,
@@ -1400,12 +1455,15 @@ final class MemberInteropResolver {
                     call.name, "Pattern bodies cannot call mutating extension methods."));
         }
         final var signature = method.typeDescriptor();
+        SpreadSupport.requireVariadic(
+                new SpreadSupport.Spread(call.spreadArgumentIndex(), call.spreadToken()),
+                method.variadic(), fixedArity, call.name);
         final var actualArguments = new ArrayList<TypeDescriptor>(call.arguments.size());
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
-            actualArguments.add(defersUntilExpectedType(context, argument,
-                    extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic()))
-                    ? null : ExpressionFlowResolver.resolveExpression(context, argument));
+            final var formal = extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic());
+            actualArguments.add(i == call.spreadArgumentIndex() || !defersUntilExpectedType(context, argument, formal)
+                    ? ExpressionFlowResolver.resolveExpression(context, argument) : null);
         }
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         TypeUnifier.unify(method.receiverType(), selected.projection(), substitutions, call.name, context.typeCompatibility);
@@ -1419,12 +1477,21 @@ final class MemberInteropResolver {
             if (actualArguments.get(i) == null) continue;
             resolvedArguments[i] = actualArguments.get(i);
             final var formal = extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic());
+            if (i == call.spreadArgumentIndex()) {
+                final var spreadElement = SpreadSupport.elementType(
+                        context, resolvedArguments[i], call.spreadToken());
+                if (spreadElement != null && TypeSubstitution.containsTypeParameter(formal)) {
+                    TypeUnifier.unifyForInference(formal, spreadElement, substitutions, call.name,
+                            context.typeCompatibility);
+                }
+                continue;
+            }
             if (TypeSubstitution.containsTypeParameter(formal)) {
                 TypeUnifier.unifyForInference(formal, resolvedArguments[i], substitutions, call.name, context.typeCompatibility);
             }
         }
         for (int i = 0; i < call.arguments.size(); i++) {
-            if (actualArguments.get(i) != null) continue;
+            if (i == call.spreadArgumentIndex() || actualArguments.get(i) != null) continue;
             final var formal = extensionArgumentType(signature.parameters(), i, fixedArity, method.variadic());
             final var expected = TypeSubstitution.substitute(formal, substitutions);
             if (!(expected instanceof FunctionDescriptor)) {
@@ -1472,6 +1539,16 @@ final class MemberInteropResolver {
         for (int i = 0; i < call.arguments.size(); i++) {
             final var expected = extensionArgumentType(instantiatedDescriptor.parameters(), i,
                     fixedArity, method.variadic());
+            if (i == call.spreadArgumentIndex()) {
+                if (!SpreadSupport.accepts(context, expected, resolvedArguments[i], call.spreadToken())) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH, call.spreadToken(),
+                            "A spread argument must be a non-null Array<"
+                                    + TypeFormatter.format(expected) + "> or Iterable<"
+                                    + TypeFormatter.format(expected) + ">."));
+                }
+                continue;
+            }
             ensureAssignable(context, expected, resolvedArguments[i], call.name);
         }
         call.setType(instantiatedDescriptor.returnType());
@@ -1586,6 +1663,30 @@ final class MemberInteropResolver {
         final var parameterIndex = argumentIndex + 1;
         if (!variadic || argumentIndex < fixedArity) return parameters.get(parameterIndex);
         return ((ArrayDescriptor) parameters.getLast()).elementType();
+    }
+
+    private static void resolveMemberArguments(final ResolutionContext context, final Expr.MemberCall call,
+                                               final FunctionDescriptor descriptor,
+                                               final int fixedArity, final boolean variadic) {
+        SpreadSupport.requireVariadic(
+                new SpreadSupport.Spread(call.spreadArgumentIndex(), call.spreadToken()),
+                variadic, fixedArity, call.name);
+        for (int i = 0; i < call.arguments.size(); i++) {
+            final var expected = memberParameterType(descriptor.parameters(), i, fixedArity, variadic);
+            if (i == call.spreadArgumentIndex()) {
+                final var actual = ExpressionFlowResolver.resolveExpression(context, call.arguments.get(i));
+                if (!SpreadSupport.accepts(context, expected, actual, call.spreadToken())) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH, call.spreadToken(),
+                            "A spread argument must be a non-null Array<"
+                                    + TypeFormatter.format(expected) + "> or Iterable<"
+                                    + TypeFormatter.format(expected) + ">."));
+                }
+                continue;
+            }
+            ensureAssignable(context, expected,
+                    resolveArgument(context, call.arguments.get(i), expected), call.name);
+        }
     }
 
     private static void ensureMemberCallArity(final Expr.MemberCall call,
@@ -1708,6 +1809,9 @@ final class MemberInteropResolver {
                 ? signature.arity()
                 : Stmt.fixedArity(factory.named().parameters(), variadic);
         final int minimumArity = factory.canonical() ? signature.arity() : fixedArity;
+        SpreadSupport.requireVariadic(
+                new SpreadSupport.Spread(call.spreadArgumentIndex(), call.spreadToken()),
+                variadic, fixedArity, call.name);
         if (!classFactoryArityMatches(factory, declaration, call)) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.name, variadic
@@ -1737,11 +1841,21 @@ final class MemberInteropResolver {
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
-            if (isDeferredConstructorArgument(context, argument)) continue;
+            if (i != call.spreadArgumentIndex() && isDeferredConstructorArgument(context, argument)) continue;
             final var priorType = priorArgumentTypes == null ? null : priorArgumentTypes.get(i);
             resolvedArguments[i] = priorType == null
                     ? ExpressionFlowResolver.resolveExpression(context, argument) : priorType;
             final var formal = classFactoryParameterType(signature, i, fixedArity, variadic);
+            if (i == call.spreadArgumentIndex()) {
+                final var spreadElement = SpreadSupport.elementType(
+                        context, resolvedArguments[i], call.spreadToken());
+                if (spreadElement != null
+                        && containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
+                    TypeUnifier.unifyForInference(formal, spreadElement, substitutions, call.name,
+                            rowInference, context.typeCompatibility);
+                }
+                continue;
+            }
             if (containsUninferredClassTypeParameter(formal, typeParameters, substitutions)) {
                 TypeUnifier.unifyForInference(formal, resolvedArguments[i], substitutions, call.name, rowInference, context.typeCompatibility);
             }
@@ -1753,7 +1867,7 @@ final class MemberInteropResolver {
 
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
-            if (!isDeferredConstructorArgument(context, argument)) continue;
+            if (i == call.spreadArgumentIndex() || !isDeferredConstructorArgument(context, argument)) continue;
             final var formal = classFactoryParameterType(signature, i, fixedArity, variadic);
             final var expected = TypeSubstitution.substitute(formal, substitutions);
             if (!(argument instanceof Expr.MemberCall)
@@ -1789,6 +1903,16 @@ final class MemberInteropResolver {
                 .toList();
         for (int i = 0; i < resolvedArguments.length; i++) {
             final var expected = classFactoryParameterType(instantiatedParameters, i, fixedArity, variadic);
+            if (i == call.spreadArgumentIndex()) {
+                if (!SpreadSupport.accepts(context, expected, resolvedArguments[i], call.spreadToken())) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH, call.spreadToken(),
+                            "A spread argument must be a non-null Array<"
+                                    + TypeFormatter.format(expected) + "> or Iterable<"
+                                    + TypeFormatter.format(expected) + ">."));
+                }
+                continue;
+            }
             ensureAssignable(context, expected, resolvedArguments[i], call.name);
         }
         if (variadic) {
@@ -2063,13 +2187,26 @@ final class MemberInteropResolver {
             TypeUnifier.unify(receiverParameter, receiverType, substitutions, call.name, rowInference, context.typeCompatibility);
         }
 
+        SpreadSupport.requireVariadic(
+                new SpreadSupport.Spread(call.spreadArgumentIndex(), call.spreadToken()),
+                variadic, fixedArity, call.name);
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
-            if (defersUntilExpectedType(context, argument,
-                    memberParameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
-            resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
             final var formal = memberParameterType(genericType.parameters(), i, fixedArity, variadic);
+            if (i == call.spreadArgumentIndex()) {
+                resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
+                final var spreadElement = SpreadSupport.elementType(
+                        context, resolvedArguments[i], call.spreadToken());
+                if (spreadElement != null) {
+                    TypeUnifier.unifyForInference(formal,
+                            context.typeCompatibility.inferenceView(formal, spreadElement),
+                            substitutions, call.name, rowInference, context.typeCompatibility);
+                }
+                continue;
+            }
+            if (defersUntilExpectedType(context, argument, formal)) continue;
+            resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
             TypeUnifier.unifyForInference(formal,
                     context.typeCompatibility.inferenceView(formal, resolvedArguments[i]),
                     substitutions, call.name, rowInference, context.typeCompatibility);
@@ -2077,6 +2214,7 @@ final class MemberInteropResolver {
 
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
+            if (i == call.spreadArgumentIndex()) continue;
             if (!defersUntilExpectedType(context, argument,
                     memberParameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
             final var expected = TypeSubstitution.substitute(
@@ -2132,8 +2270,18 @@ final class MemberInteropResolver {
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
                 .toList();
         for (int i = 0; i < resolvedArguments.length; i++) {
-            ensureAssignable(context, memberParameterType(instantiatedParameters, i, fixedArity, variadic),
-                    resolvedArguments[i], call.name);
+            final var expected = memberParameterType(instantiatedParameters, i, fixedArity, variadic);
+            if (i == call.spreadArgumentIndex()) {
+                if (!SpreadSupport.accepts(context, expected, resolvedArguments[i], call.spreadToken())) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH, call.spreadToken(),
+                            "A spread argument must be a non-null Array<"
+                                    + TypeFormatter.format(expected) + "> or Iterable<"
+                                    + TypeFormatter.format(expected) + ">."));
+                }
+                continue;
+            }
+            ensureAssignable(context, expected, resolvedArguments[i], call.name);
         }
         final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
         final var exposedReturn = exposeProjectedResult(instantiatedReturn, call.name);
@@ -2961,14 +3109,19 @@ final class MemberInteropResolver {
         final var receiverParameter = receiverOperation ? descriptor.parameters().getFirst() : null;
         final var receiverBaseType = call.receiver.getType() instanceof ReferenceDescriptor reference
                 ? reference.baseType() : call.receiver.getType();
+        // A call spelled on the type parameter itself (`T.create(...)`) has no receiver value, so a
+        // statically implemented requirement is invoked without one.
+        final var typeLevelReceiver = call.receiver instanceof Expr.Variable variable
+                && variable.name.lexeme().equals(parameter.name());
+        final var hasReceiver = !method.isStatic() && !typeLevelReceiver;
         final var evidenceMethodParameters = new ArrayList<TypeDescriptor>();
-        if (!method.isStatic() && !receiverOperation) evidenceMethodParameters.add(call.receiver.getType());
+        if (hasReceiver && !receiverOperation) evidenceMethodParameters.add(call.receiver.getType());
         evidenceMethodParameters.addAll(descriptor.parameters());
         final var evidenceMethodType = TypeDescriptor.functionWithEffectsOf(
                 method.name().lexeme(), descriptor.returnType(), evidenceMethodParameters,
                 descriptor.typeParameters(), descriptor.raisedEffects());
         call.setWitnessMethodEvidence(Expr.methodEvidenceToken(parameter, selectedBoundIndex, selectedMethodIndex),
-                evidenceMethodType, !method.isStatic());
+                evidenceMethodType, hasReceiver);
         final var variadic = method.variadic();
         final var fixedArity = Stmt.fixedArity(method.parameters(), variadic)
                 - (receiverOperation ? 1 : 0);

@@ -58,6 +58,16 @@ Compile and launch the selected project target.
 
 Uses the same target resolution and warning policy as 'zeron build', then launches the generated main class from that target's output directory.
 
+### `test`
+
+```text
+zeron test [<target>] [options]
+```
+
+Build and run the selected test target's generated runner.
+
+Selects a target with kind = "test", or synthesizes an implicit test target when none exists. The generated runner reports each test and exits with its status.
+
 ### `fmt`
 
 ```text
@@ -120,7 +130,7 @@ Select the project manifest.
 
 Defaults to zeron.toml in the current directory. Paths inside the manifest resolve relative to the manifest file.
 
-Applies to: `build`, `lsp`, `run`.
+Applies to: `build`, `lsp`, `run`, `test`.
 
 ### `--debug`
 
@@ -132,7 +142,7 @@ Print compiler traces.
 
 Writes parser, resolver, and compiler traces to stderr. The short alias is -d.
 
-Applies to: `build`, `lsp`, `run`.
+Applies to: `build`, `lsp`, `run`, `test`.
 
 ### `--deny-warnings`
 
@@ -144,7 +154,7 @@ Treat reported warnings as a failed build.
 
 Reports warnings normally, then fails after the stage completes when any warning was produced. Overrides [build].deny-warnings and a target's deny-warnings setting.
 
-Applies to: `build`, `run`.
+Applies to: `build`, `run`, `test`.
 
 ### `--no-deny-warnings`
 
@@ -156,7 +166,7 @@ Allow warnings without failing the build.
 
 Overrides [build].deny-warnings and a target's deny-warnings setting. Cannot be combined with --deny-warnings.
 
-Applies to: `build`, `run`.
+Applies to: `build`, `run`, `test`.
 
 ### `--no-warnings`
 
@@ -168,7 +178,7 @@ Hide warning diagnostics.
 
 Errors still print, and collected warnings still participate in --deny-warnings.
 
-Applies to: `build`, `run`.
+Applies to: `build`, `run`, `test`.
 
 ### `--root`
 

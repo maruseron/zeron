@@ -667,6 +667,15 @@ final class BytecodeEmitter {
                 }
             }
             case Expr.Grouping grouping -> emitExpr(context, composer, grouping.expression);
+            case Expr.ValueBlock block -> {
+                beginScope(context);
+                try {
+                    StatementEmitter.emitStmts(context, composer, block.statements);
+                    emitExpr(context, composer, block.value);
+                } finally {
+                    endScope(context);
+                }
+            }
             case Expr.If iff -> ExpressionFlowEmitter.emitIfExpression(context, composer, iff);
             case Expr.Pipeline pipeline -> ExpressionFlowEmitter.emitForExpression(context, composer, pipeline);
             case Expr.Match match -> ExpressionFlowEmitter.emitMatchExpression(context, composer, match);
@@ -952,7 +961,6 @@ final class BytecodeEmitter {
                     context.lastEmittedType = variable.getType();
                 } else {
                     if (variable.storedFunctionType() != null
-                            && !variable.storedFunctionType().hasHiddenSlots()
                             && LambdaCompilationPlan.hasInferredContractBounds(variable.storedFunctionType())) {
                         emitLambdaTemplateSpecialization(context, composer,
                                 variable.resolvedSymbolToken(), variable.storedFunctionType(),
@@ -1615,11 +1623,18 @@ final class BytecodeEmitter {
             }
             if (call.variadicElementType() != null) {
                 final var fixedArity = call.variadicFixedArity();
+                final var defaults = call.resolvedFunctionDeclaration() == null
+                        ? List.<Expr>of()
+                        : call.resolvedFunctionDeclaration().defaultValues();
+                final var minimumArity = call.resolvedFunctionDeclaration() == null
+                        ? fixedArity : call.resolvedFunctionDeclaration().minimumArity();
                 emitVariadicArguments(context, composer, call.arguments, runtimeType,
-                        fixedArity, call.variadicElementType());
+                        fixedArity, call.variadicElementType(), call.spreadArgumentIndex(),
+                        defaults, minimumArity);
                 emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
-                final var invokedType = call.arguments.size() < fixedArity
-                        ? prefixFunctionType(runtimeType, call.arguments.size())
+                final var emittedArguments = emittedArgumentCount(call, fixedArity);
+                final var invokedType = emittedArguments < fixedArity
+                        ? prefixFunctionType(runtimeType, emittedArguments)
                         : runtimeType;
                 final var invocation = withHiddenParameters(toJavaMethodDescriptor(invokedType),
                         call.evidenceArguments().size(), call.reifiedArguments().size());
@@ -1662,6 +1677,7 @@ final class BytecodeEmitter {
                 : functionType;
         final var constrainedTemplate = LambdaCompilationPlan.hasInferredContractBounds(functionType)
                 && isInferredConstrainedLambdaBinding(binding);
+        final FunctionDescriptor invocationType;
         if (constrainedTemplate) {
             final var specializedType = call.specializedFunctionType();
             if (specializedType == null) {
@@ -1669,27 +1685,33 @@ final class BytecodeEmitter {
             }
             emitLambdaTemplateSpecialization(context, composer, call.resolvedSymbolToken(),
                     functionType, specializedType, call.evidenceArguments());
+            final var concreteType = (FunctionDescriptor) TypeSubstitution.erase(specializedType);
+            emitConversion(context, composer, context.lastEmittedType, concreteType);
+            context.lastEmittedType = concreteType;
+            invocationType = concreteType;
         } else {
             emitVariable(context, composer, call.resolvedSymbolToken());
+            invocationType = runtimeType;
         }
         if (call.variadicElementType() != null) {
-            emitVariadicArguments(context, composer, call.arguments, runtimeType,
-                    call.variadicFixedArity(), call.variadicElementType());
+            emitVariadicArguments(context, composer, call.arguments, invocationType,
+                    call.variadicFixedArity(), call.variadicElementType(),
+                    call.spreadArgumentIndex(), List.of(), 0);
         } else {
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(context, composer, call.arguments.get(i));
-                emitConversion(context, composer, context.lastEmittedType, runtimeType.parameters().get(i));
+                emitConversion(context, composer, context.lastEmittedType, invocationType.parameters().get(i));
             }
         }
-        if (!constrainedTemplate && runtimeType.hasHiddenSlots()) {
+        if (invocationType.hasHiddenSlots()) {
             emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
         }
 
-        composer.invokeinterface(TypeDescriptor.toJavaClassDesc(runtimeType), "invoke",
-                toJavaMethodDescriptor(runtimeType));
-        if (functionType.isGeneric()) {
+        composer.invokeinterface(TypeDescriptor.toJavaClassDesc(invocationType), "invoke",
+                toJavaMethodDescriptor(invocationType));
+        if (functionType.isGeneric() || constrainedTemplate) {
             final var instantiatedReturn = TypeSubstitution.erase(call.getType());
-            emitConversion(context, composer, runtimeType.returnType(), instantiatedReturn);
+            emitConversion(context, composer, invocationType.returnType(), instantiatedReturn);
             context.lastEmittedType = call.getType();
         } else {
             context.lastEmittedType = functionType.returnType();
@@ -1738,16 +1760,19 @@ final class BytecodeEmitter {
             final FunctionDescriptor scheme, final FunctionDescriptor specializedType,
             final List<Expr.EvidenceArgument> evidenceArguments) {
         final var templateClass = ClassDesc.of("zeron.runtime.LambdaTemplateSupport");
-        final var erasedScheme = (FunctionDescriptor) TypeSubstitution.erase(scheme);
+        final var erasedScheme = ((FunctionDescriptor) TypeSubstitution.erase(scheme))
+                .withHiddenSlots(0, 0);
+        final var erasedSpecialized = (FunctionDescriptor) TypeSubstitution.erase(specializedType);
+        final var shapeKey = FunctionShapeKey.of(erasedSpecialized);
+        context.ensureFunctionShape(shapeKey, erasedSpecialized);
         emitVariable(context, composer, binding);
-        composer.ldc(FunctionShapeKey.of(
-                (FunctionDescriptor) TypeSubstitution.erase(specializedType)).canonicalEncoding());
+        composer.ldc(shapeKey.canonicalEncoding());
         emitEvidenceArray(context, composer, evidenceArguments);
         composer.invokevirtual(templateClass, "specialize",
                 MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_String,
                         ClassDesc.of("java.lang.invoke.MethodHandle").arrayType()));
         composer.checkcast(TypeDescriptor.toJavaClassDesc(erasedScheme));
-        context.lastEmittedType = scheme;
+        context.lastEmittedType = erasedScheme;
     }
 
     private static void emitEvidenceArray(final CompilationContext context,
@@ -2345,7 +2370,8 @@ final class BytecodeEmitter {
                             ? array.elementType() : call.variadicElementType();
                     emitVariadicArguments(context, composer, call.arguments,
                             (FunctionDescriptor) TypeSubstitution.erase(resolvedFactory),
-                            call.variadicFixedArity(), resolvedElement);
+                            call.variadicFixedArity(), resolvedElement,
+                            call.spreadArgumentIndex(), List.of(), 0);
                 } else {
                     for (int i = 0; i < call.arguments.size(); i++) {
                         emitExpr(context, composer, call.arguments.get(i));
@@ -2402,7 +2428,8 @@ final class BytecodeEmitter {
         final var runtimeType = (FunctionDescriptor) TypeSubstitution.erase(descriptor);
         if (call.variadicElementType() != null) {
             emitVariadicArguments(context, composer, call.arguments, runtimeType,
-                    call.variadicFixedArity(), call.variadicElementType());
+                    call.variadicFixedArity(), call.variadicElementType(),
+                    call.spreadArgumentIndex(), memberDefaults(call), memberMinimumArity(call));
         } else {
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(context, composer, call.arguments.get(i));
@@ -2419,11 +2446,14 @@ final class BytecodeEmitter {
             }
         }
         emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
+        final var emittedArguments = call.variadicElementType() == null
+                ? call.arguments.size()
+                : emittedArgumentCount(call, call.variadicFixedArity());
         final var invokedType = call.variadicElementType() != null
-                ? call.arguments.size() < call.variadicFixedArity()
-                    ? prefixFunctionType(runtimeType, call.arguments.size())
+                ? emittedArguments < call.variadicFixedArity()
+                    ? prefixFunctionType(runtimeType, emittedArguments)
                     : runtimeType
-                : prefixFunctionType(descriptor, call.arguments.size());
+                : prefixFunctionType(descriptor, emittedArguments);
         final var methodType = withHiddenParameters(toJavaMethodDescriptor(invokedType),
                 call.evidenceArguments().size(), call.reifiedArguments().size());
         if (contractMethod != null) {
@@ -2586,7 +2616,8 @@ final class BytecodeEmitter {
                     sourceType.parameters().subList(1, sourceType.arity()).toArray(TypeDescriptor[]::new));
             emitVariadicArguments(context, composer, call.arguments,
                     (FunctionDescriptor) TypeSubstitution.erase(callableArguments),
-                    call.variadicFixedArity(), call.variadicElementType());
+                    call.variadicFixedArity(), call.variadicElementType(),
+                    call.spreadArgumentIndex(), extension.defaultValues(), extension.minimumArity());
         } else {
             for (int i = 0; i < call.arguments.size(); i++) {
                 emitExpr(context, composer, call.arguments.get(i));
@@ -2595,16 +2626,43 @@ final class BytecodeEmitter {
             }
         }
         emitHiddenArguments(context, composer, call.evidenceArguments(), call.reifiedArguments());
+        final var emittedArguments = call.variadicElementType() == null
+                ? call.arguments.size()
+                : emittedArgumentCount(call, call.variadicFixedArity());
         final var invokedType = call.variadicElementType() != null
-                ? call.arguments.size() < call.variadicFixedArity()
-                    ? prefixFunctionType(runtimeType, call.arguments.size() + 1)
+                ? emittedArguments < call.variadicFixedArity()
+                    ? prefixFunctionType(runtimeType, emittedArguments + 1)
                     : runtimeType
-                : prefixFunctionType(runtimeType, call.arguments.size() + 1);
+                : prefixFunctionType(runtimeType, emittedArguments + 1);
         composer.invokestatic(ClassDesc.of(owner), extension.name().lexeme(),
                 withHiddenParameters(toJavaMethodDescriptor(invokedType),
                         call.evidenceArguments().size(), call.reifiedArguments().size()));
         emitConversion(context, composer, runtimeType.returnType(), call.getType());
         context.lastEmittedType = call.getType();
+    }
+
+    private static List<Expr> memberDefaults(final Expr.MemberCall call) {
+        if (call.resolvedSourceMethod() != null) return call.resolvedSourceMethod().defaultValues();
+        if (call.resolvedContractMethod() != null) return call.resolvedContractMethod().defaultValues();
+        if (call.resolvedExtensionMethod() != null) return call.resolvedExtensionMethod().defaultValues();
+        return List.of();
+    }
+
+    private static int memberMinimumArity(final Expr.MemberCall call) {
+        if (call.resolvedSourceMethod() != null) return call.resolvedSourceMethod().minimumArity();
+        if (call.resolvedContractMethod() != null) return call.resolvedContractMethod().minimumArity();
+        if (call.resolvedExtensionMethod() != null) return call.resolvedExtensionMethod().minimumArity();
+        return 0;
+    }
+
+    private static int emittedArgumentCount(final Expr.MemberCall call, final int fixedArity) {
+        final var spread = call.spreadArgumentIndex();
+        return spread < 0 ? call.arguments.size() : Math.min(spread, fixedArity) + 1;
+    }
+
+    private static int emittedArgumentCount(final Expr.Call call, final int fixedArity) {
+        final var spread = call.spreadArgumentIndex();
+        return spread < 0 ? call.arguments.size() : Math.min(spread, fixedArity) + 1;
     }
 
     private static FunctionDescriptor prefixFunctionType(final FunctionDescriptor functionType,
@@ -2619,29 +2677,192 @@ final class BytecodeEmitter {
                                               final FunctionDescriptor fullType,
                                               final int fixedArity,
                                               final TypeDescriptor elementType) {
-        if (arguments.size() < fixedArity) {
+        emitVariadicArguments(context, composer, arguments, fullType, fixedArity, elementType, -1,
+                List.of(), 0);
+    }
+
+    private static void emitVariadicArguments(final CompilationContext context,
+                                              final CodeBuilder composer,
+                                              final List<Expr> arguments,
+                                              final FunctionDescriptor fullType,
+                                              final int fixedArity,
+                                              final TypeDescriptor elementType,
+                                              final int spreadIndex) {
+        emitVariadicArguments(context, composer, arguments, fullType, fixedArity, elementType,
+                spreadIndex, List.of(), 0);
+    }
+
+    private static void emitVariadicArguments(final CompilationContext context,
+                                              final CodeBuilder composer,
+                                              final List<Expr> arguments,
+                                              final FunctionDescriptor fullType,
+                                              final int fixedArity,
+                                              final TypeDescriptor elementType,
+                                              final int spreadIndex,
+                                              final List<Expr> defaults,
+                                              final int minimumArity) {
+        if (spreadIndex < 0 && arguments.size() < fixedArity) {
             for (int i = 0; i < arguments.size(); i++) {
                 emitExpr(context, composer, arguments.get(i));
                 emitConversion(context, composer, context.lastEmittedType, fullType.parameters().get(i));
             }
             return;
         }
-        final var suppliedFixed = Math.min(arguments.size(), fixedArity);
+        final var suppliedFixed = Math.min(spreadIndex < 0 ? arguments.size() : spreadIndex, fixedArity);
         for (int i = 0; i < suppliedFixed; i++) {
             emitExpr(context, composer, arguments.get(i));
             emitConversion(context, composer, context.lastEmittedType, fullType.parameters().get(i));
         }
-        final var count = Math.max(0, arguments.size() - fixedArity);
-        composer.ldc(count);
-        composer.anewarray(ClassDesc.of("java.lang.Object"));
-        for (int i = 0; i < count; i++) {
-            composer.dup();
-            composer.ldc(i);
+        if (spreadIndex >= 0) {
+            for (int i = suppliedFixed; i < fixedArity; i++) {
+                final var defaultIndex = i - minimumArity;
+                if (defaultIndex < 0 || defaultIndex >= defaults.size()) {
+                    throw new IllegalStateException("Spread call omits a fixed parameter without a default.");
+                }
+                emitExpr(context, composer, defaults.get(defaultIndex));
+                emitConversion(context, composer, context.lastEmittedType, fullType.parameters().get(i));
+            }
+        }
+        if (spreadIndex < 0) {
+            final var count = Math.max(0, arguments.size() - fixedArity);
+            composer.ldc(count);
+            composer.anewarray(ClassDesc.of("java.lang.Object"));
+            for (int i = 0; i < count; i++) {
+                composer.dup();
+                composer.ldc(i);
+                emitExpr(context, composer, arguments.get(fixedArity + i));
+                emitConversion(context, composer, context.lastEmittedType, elementType);
+                emitBox(context, composer, context.lastEmittedType);
+                composer.aastore();
+            }
+            return;
+        }
+        emitSpreadArgument(context, composer, arguments, fixedArity, elementType, spreadIndex);
+    }
+
+    private static void emitSpreadArgument(final CompilationContext context,
+                                           final CodeBuilder composer,
+                                           final List<Expr> arguments,
+                                           final int fixedArity,
+                                           final TypeDescriptor elementType,
+                                           final int spreadIndex) {
+        final var objectArray = TypeDescriptor.arrayOf(TypeDescriptor.ofAny());
+        final var spread = arguments.get(spreadIndex);
+        var spreadType = spread.getType();
+        while (spreadType instanceof ReferenceDescriptor reference) spreadType = reference.baseType();
+        final var normalCount = Math.max(0, spreadIndex - fixedArity);
+        if (spreadType instanceof ArrayDescriptor) {
+            if (normalCount == 0) {
+                emitExpr(context, composer, spread);
+                emitConversion(context, composer, context.lastEmittedType, objectArray);
+                context.lastEmittedType = objectArray;
+                return;
+            }
+            final var prefix = declareStoredTemporary(context, "spreadPrefix", objectArray);
+            composer.ldc(normalCount);
+            composer.anewarray(ClassDesc.of("java.lang.Object"));
+            for (int i = 0; i < normalCount; i++) {
+                composer.dup();
+                composer.ldc(i);
+                emitExpr(context, composer, arguments.get(fixedArity + i));
+                emitConversion(context, composer, context.lastEmittedType, elementType);
+                emitBox(context, composer, context.lastEmittedType);
+                composer.aastore();
+            }
+            composer.storeLocal(TypeKind.REFERENCE, prefix + context.localSlotOffset);
+            emitExpr(context, composer, spread);
+            emitConversion(context, composer, context.lastEmittedType, objectArray);
+            final var spreadArray = declareStoredTemporary(context, "spreadArray", objectArray);
+            composer.storeLocal(TypeKind.REFERENCE, spreadArray + context.localSlotOffset);
+            composer.aload(prefix + context.localSlotOffset);
+            composer.arraylength();
+            composer.aload(spreadArray + context.localSlotOffset);
+            composer.arraylength();
+            composer.iadd();
+            composer.anewarray(ClassDesc.of("java.lang.Object"));
+            final var result = declareStoredTemporary(context, "spreadResult", objectArray);
+            composer.storeLocal(TypeKind.REFERENCE, result + context.localSlotOffset);
+            composer.aload(prefix + context.localSlotOffset);
+            composer.iconst_0();
+            composer.aload(result + context.localSlotOffset);
+            composer.iconst_0();
+            composer.aload(prefix + context.localSlotOffset);
+            composer.arraylength();
+            composer.invokestatic(ClassDesc.of("java.lang.System"), "arraycopy",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object,
+                            ConstantDescs.CD_int, ConstantDescs.CD_Object,
+                            ConstantDescs.CD_int, ConstantDescs.CD_int));
+            composer.aload(spreadArray + context.localSlotOffset);
+            composer.iconst_0();
+            composer.aload(result + context.localSlotOffset);
+            composer.aload(prefix + context.localSlotOffset);
+            composer.arraylength();
+            composer.aload(spreadArray + context.localSlotOffset);
+            composer.arraylength();
+            composer.invokestatic(ClassDesc.of("java.lang.System"), "arraycopy",
+                    MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object,
+                            ConstantDescs.CD_int, ConstantDescs.CD_Object,
+                            ConstantDescs.CD_int, ConstantDescs.CD_int));
+            composer.aload(result + context.localSlotOffset);
+            context.lastEmittedType = objectArray;
+            return;
+        }
+
+        final var listClass = ClassDesc.of("java.util.ArrayList");
+        composer.new_(listClass);
+        composer.dup();
+        composer.invokespecial(listClass, "<init>", MethodTypeDesc.of(ConstantDescs.CD_void));
+        final var list = declareStoredTemporary(context, "spreadList",
+                TypeDescriptor.ofName("java.util.ArrayList"));
+        composer.storeLocal(TypeKind.REFERENCE, list + context.localSlotOffset);
+        for (int i = 0; i < normalCount; i++) {
+            composer.aload(list + context.localSlotOffset);
             emitExpr(context, composer, arguments.get(fixedArity + i));
             emitConversion(context, composer, context.lastEmittedType, elementType);
             emitBox(context, composer, context.lastEmittedType);
-            composer.aastore();
+            composer.invokevirtual(listClass, "add",
+                    MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
+            composer.pop();
         }
+        emitExpr(context, composer, spread);
+        final var iterableType = TypeDescriptor.genericOf(
+                TypeDescriptor.ofName("zeron.collections.Iterable"), elementType);
+        emitConversion(context, composer, context.lastEmittedType, iterableType);
+        final var iterable = declareStoredTemporary(context, "spreadIterable", iterableType);
+        composer.storeLocal(TypeKind.REFERENCE, iterable + context.localSlotOffset);
+        composer.aload(iterable + context.localSlotOffset);
+        composer.invokeinterface(ClassDesc.of("zeron.collections.Iterable"), "iterator",
+                MethodTypeDesc.of(ClassDesc.of("zeron.collections.Iterator")));
+        final var iterator = declareStoredTemporary(context, "spreadIterator",
+                TypeDescriptor.ofName("zeron.collections.Iterator"));
+        composer.storeLocal(TypeKind.REFERENCE, iterator + context.localSlotOffset);
+        final var loopStart = composer.newLabel();
+        final var loopExit = composer.newLabel();
+        composer.labelBinding(loopStart);
+        composer.aload(iterator + context.localSlotOffset);
+        composer.invokeinterface(ClassDesc.of("zeron.collections.Iterator"), "next",
+                MethodTypeDesc.of(ClassDesc.of("zeron.collections.Step")));
+        final var step = declareStoredTemporary(context, "spreadStep",
+                TypeDescriptor.ofName("zeron.collections.Step"));
+        composer.storeLocal(TypeKind.REFERENCE, step + context.localSlotOffset);
+        composer.aload(step + context.localSlotOffset);
+        composer.instanceOf(ClassDesc.of("zeron.collections.Step$$sum$Done"));
+        composer.ifne(loopExit);
+        composer.aload(list + context.localSlotOffset);
+        composer.aload(step + context.localSlotOffset);
+        final var yieldClass = ClassDesc.of("zeron.collections.Step$$sum$Yield");
+        composer.checkcast(yieldClass);
+        composer.invokevirtual(yieldClass, "$zeron$payload$0",
+                MethodTypeDesc.of(ConstantDescs.CD_Object));
+        composer.invokevirtual(listClass, "add",
+                MethodTypeDesc.of(ConstantDescs.CD_boolean, ConstantDescs.CD_Object));
+        composer.pop();
+        composer.goto_(loopStart);
+        composer.labelBinding(loopExit);
+        composer.aload(list + context.localSlotOffset);
+        composer.invokevirtual(listClass, "toArray",
+                MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+        context.lastEmittedType = objectArray;
     }
 
     private static void emitJavaMemberCall(CompilationContext context, final CodeBuilder composer,

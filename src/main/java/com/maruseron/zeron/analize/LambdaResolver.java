@@ -533,6 +533,16 @@ final class LambdaResolver {
                 || referencesAnyVariable(context, assignment.index, names)
                 || referencesAnyVariable(context, assignment.value, names);
             case Expr.Grouping grouping -> referencesAnyVariable(context, grouping.expression, names);
+            case Expr.Spread spread -> referencesAnyVariable(context, spread.expression, names);
+            case Expr.ValueBlock block -> block.statements.stream().anyMatch(statement -> switch (statement) {
+                    case Stmt.Expression statementExpression ->
+                            referencesAnyVariable(context, statementExpression.expression(), names);
+                    case Stmt.Var variable -> variable.initializer() != null
+                            && referencesAnyVariable(context, variable.initializer(), names);
+                    case Stmt.Return returned -> returned.value() != null
+                            && referencesAnyVariable(context, returned.value(), names);
+                    default -> false;
+                }) || referencesAnyVariable(context, block.value, names);
             case Expr.If iff -> {
                 final var thenNames = new HashSet<>(names);
                 final var candidate = iff.condition instanceof Expr.Grouping grouping

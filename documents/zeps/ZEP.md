@@ -8,6 +8,13 @@ Release states are defined in ZEP-0000. `Candidate` means a proposed release tar
 commitment; `Planned` means approved for a target bundle. Deferred rows have no release target or
 release reference. The proposal lifecycle status and release state are separate.
 
+A `Deferred` proposal has no approved design or implementation work. A `Deferred` release state
+means the proposal was considered and intentionally excluded from current release planning. Both
+are recorded for [ZEP-0121](./ZEP-0121.md): it is not unscheduled work that can enter a bundle
+without reopening the design. `Implemented` records the accepted design that landed; follow-up
+scope owned by other proposals does not keep the original row `Accepted` after its release row is
+`Shipped` (see [ZEP-0068](./ZEP-0068.md)).
+
 | Number | Name | Proposal status | Release state | Release / bundle reference |
 | ------ | ---- | --------------- | ------------- | -------------------------- |
 | [ZEP-0000](./ZEP-0000.md) | Zeron Enhancement Proposal Process | Accepted | Not applicable | — |
@@ -51,8 +58,8 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0038](./ZEP-0038.md) | CLI Version Command | Implemented | Shipped | 0.5.0 |
 | [ZEP-0039](./ZEP-0039.md) | Digit Separators in Numeric Literals | Implemented | Shipped | 0.5.0 |
 | [ZEP-0040](./ZEP-0040.md) | Radix-Prefixed Integer Literals | Implemented | Shipped | 0.5.0 |
-| [ZEP-0041](./ZEP-0041.md) | Unsigned Fixed-Width Integer Types | Draft | Unscheduled | — |
-| [ZEP-0042](./ZEP-0042.md) | Arbitrary-Precision Numeric Types | Draft | Unscheduled | — |
+| [ZEP-0041](./ZEP-0041.md) | Unsigned Fixed-Width Integer Types | Rejected | Unscheduled | — |
+| [ZEP-0042](./ZEP-0042.md) | Arbitrary-Precision Numeric Types | Implemented | Shipped | 0.6.0 |
 | [ZEP-0043](./ZEP-0043.md) | Custom Numeric Literal Suffixes | Implemented | Shipped | 0.5.0 |
 | [ZEP-0044](./ZEP-0044.md) | Unit Literals and Scaled Units | Draft | Unscheduled | — |
 | [ZEP-0045](./ZEP-0045.md) | Heterogeneous Operator Signatures | Draft | Unscheduled | — |
@@ -73,12 +80,12 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0060](./ZEP-0060.md) | Treating Arrays as Iterable Values | Implemented | Shipped | 0.6.0 |
 | [ZEP-0061](./ZEP-0061.md) | Java and External Interop Language Support | Implemented | Shipped | 0.6.0 |
 | [ZEP-0062](./ZEP-0062.md) | Mutable-Type Admissibility for Generic Parameters | Superseded | Shipped | 0.5.0 |
-| [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Accepted | Candidate | 0.8.0 |
+| [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Implemented | Candidate | 0.8.0 |
 | [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Implemented | Candidate | 0.8.0 |
 | [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Implemented | Shipped | 0.6.0 |
 | [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Draft | Unscheduled | — |
 | [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Unscheduled | — |
-| [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Accepted | Shipped | 0.6.0 |
+| [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Implemented | Shipped | 0.6.0 |
 | [ZEP-0069](./ZEP-0069.md) | Transparent Data Classes | Implemented | Shipped | 0.6.0 |
 | [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Implemented | Candidate | 0.8.0 |
 | [ZEP-0071](./ZEP-0071.md) | Numeric Hierarchy and Context-Directed Literals | Implemented | Shipped | 0.6.0 |
@@ -101,13 +108,13 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0088](./ZEP-0088.md) | Non-Null Assertion Operator | Implemented | Shipped | 0.6.0 |
 | [ZEP-0089](./ZEP-0089.md) | Explicit Unchecked Casts | Draft | Unscheduled | - |
 | [ZEP-0090](./ZEP-0090.md) | Property References | Implemented | Shipped | 0.6.0 |
-| [ZEP-0091](./ZEP-0091.md) | Annotation Consumption | Accepted | Unscheduled | - |
+| [ZEP-0091](./ZEP-0091.md) | Annotation Consumption | Accepted | Candidate | 0.10.0 |
 | [ZEP-0092](./ZEP-0092.md) | Generated Serialization Operations | Implemented | Shipped | 0.6.0 |
 | [ZEP-0093](./ZEP-0093.md) | Unified Property Identity and a Typed Code-Model API | Implemented | Shipped | 0.6.0 |
 | [ZEP-0094](./ZEP-0094.md) | Collection Contracts | Implemented | Shipped | 0.6.0 |
 | [ZEP-0095](./ZEP-0095.md) | Bytecode Quality and Evidence Inlining | Draft | Unscheduled | — |
 | [ZEP-0096](./ZEP-0096.md) | Primitive Specialization for Generic Code | Draft | Unscheduled | — |
-| [ZEP-0097](./ZEP-0097.md) | Annotation Target for Model Mapping Clauses | Accepted | Unscheduled | — |
+| [ZEP-0097](./ZEP-0097.md) | Annotation Target for Model Mapping Clauses | Accepted | Candidate | 0.10.0 |
 | [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Candidate | 0.8.0 |
 | [ZEP-0099](./ZEP-0099.md) | Row-Polymorphic Derived Witnesses and Inclusion Matching | Draft | Unscheduled | — |
 | [ZEP-0100](./ZEP-0100.md) | Callable References for Methods, Constructors, and Static Functions | Implemented | Shipped | 0.7.0 |
@@ -131,7 +138,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Draft | Unscheduled | — |
 | [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Unscheduled | — |
 | [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Unscheduled | — |
-| [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Unscheduled | — |
+| [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Deferred | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Shipped | 0.7.0 |
 | [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Explicit Effect Responses | Draft | Unscheduled | — |
 | [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Implemented | Candidate | 0.8.0 |
@@ -146,8 +153,8 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0133](./ZEP-0133.md) | Operator-Constraint Inference for Typeless Lambdas | Accepted | Candidate | 0.8.0 |
 | [ZEP-0134](./ZEP-0134.md) | Invocation of Function-Valued Expressions | Implemented | Candidate | 0.8.0 |
 | [ZEP-0135](./ZEP-0135.md) | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Candidate | 0.8.0 |
-| [ZEP-0136](./ZEP-0136.md) | Witness Bundles and Coherent Prerequisite Evidence | Accepted | Candidate | 0.8.0 |
-| [ZEP-0137](./ZEP-0137.md) | Explicit Witness Selection and Witness Contexts | Accepted | Candidate | 0.8.0 |
+| [ZEP-0136](./ZEP-0136.md) | Witness Bundles and Coherent Prerequisite Evidence | Implemented | Candidate | 0.8.0 |
+| [ZEP-0137](./ZEP-0137.md) | Explicit Witness Selection and Witness Contexts | Implemented | Candidate | 0.8.0 |
 | [ZEP-0138](./ZEP-0138.md) | Predicate and Fact IR for Static Verification | Draft | Unscheduled | - |
 | [ZEP-0139](./ZEP-0139.md) | Checked Construction for Guarded Newtypes | Draft | Unscheduled | - |
 | [ZEP-0140](./ZEP-0140.md) | Comparison and Refined-Type Flow Facts | Draft | Unscheduled | - |
@@ -161,6 +168,7 @@ release reference. The proposal lifecycle status and release state are separate.
 | [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Implemented | Candidate | 0.8.0 |
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
 | [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Candidate | 0.8.0 |
+| [ZEP-0151](./ZEP-0151.md) | Spread Arguments for Variadic Parameters | Draft | Candidate | 0.8.0 |
 
 ## Release bundles
 
@@ -172,10 +180,11 @@ sequencing.
 
 | Bundle | Theme | Current state | Contents |
 | --- | --- | --- | --- |
-| `0.6.0` | Stabilization | Shipped | 24 rows |
+| `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 24 candidates | ZEP-0050, ZEP-0063, ZEP-0064, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148, ZEP-0150; ZEP-0132 is the immediate corrective |
+| `0.8.0` | Normalization and nominal implementation | Proposed; 25 candidates | ZEP-0050, ZEP-0063, ZEP-0064, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148, ZEP-0150, ZEP-0151; ZEP-0132 is the immediate corrective |
 | `0.9.0` | Effect control and response typing | Proposed; 1 candidate | ZEP-0118 and ZEP-0147 headline the bundle |
+| `0.10.0` | Model system completion and annotation metadata | Proposed; 2 candidates | ZEP-0091 and ZEP-0097; ZEP-0101–ZEP-0103 require acceptance before candidacy |
 
 ### `0.7.0` — type identity, reification, and type bounds
 
@@ -203,7 +212,7 @@ and is likewise outside the bundle. The bundle shipped on 2026-11-14; its rows a
 ### `0.8.0` — normalization and nominal implementation
 
 The bundle targets smaller normalization and smoothing work rather than new control-flow semantics.
-Its twenty-four candidates are:
+Its twenty-five candidates are:
 
 - [ZEP-0050](./ZEP-0050.md) — Java host-access trust boundary. Direct Java host access becomes an
   explicit `unsafe` boundary; curated facades remain the trusted, compiler-validated tier; checked
@@ -292,6 +301,11 @@ Its twenty-four candidates are:
   position ends with one final `yield` and produces that value; statement blocks and every
   statement-block consumer remain unchanged. The proposal is still `Draft`; its `0.8.0` candidacy
   records the intended target, not an accepted design.
+- [ZEP-0151](./ZEP-0151.md) — spread arguments for variadic parameters. `...values` forwards an
+  existing array to a variadic parameter without repacking it, or expands any `Iterable<E>` into
+  the packed array through the existing iteration protocol. The spread must be the final argument
+  and contributes the remaining variadic elements; it introduces no runtime or API-index
+  representation.
 
 ZEP-0124 and ZEP-0125 are implementation-coupled through one static/receiverless matcher, even
 though they are independently decidable designs. They should be implemented and validated together
@@ -306,10 +320,10 @@ lookup, external contracts for Java interfaces, external enums, JPMS, binding ex
 conformance. It is unscheduled, so none of it ships with `0.8.0` by implication. The bundle does not
 change `raise` or `handle` typing.
 
-These twenty-four are the current target; further small normalization items may join `0.8.0` as
-additional candidates. The acceptance queue remains open. ZEP-0098 and ZEP-0113 were accepted and
-implemented on 2026-11-16; ZEP-0146 remains the only draft row and must be accepted before
-implementation, and its `Candidate` state records the intended bundle only. ZEP-0135 was accepted,
+These twenty-five are the current target; ZEP-0151 is the last proposed addition before the
+candidate list is frozen. The acceptance queue remains open. ZEP-0098 and ZEP-0113 were accepted and
+implemented on 2026-11-16; ZEP-0146 and ZEP-0151 remain draft rows and must be accepted before
+implementation, and their `Candidate` state records the intended bundle only. ZEP-0135 was accepted,
 implemented, and added as a candidate for the same bundle; ZEP-0136 and ZEP-0137 were accepted and
 added on 2026-11-15. ZEP-0050 and ZEP-0148 were accepted on 2026-11-17 and added as candidates for
 the bundle; both are now `Implemented` / `Candidate`. ZEP-0148 was implemented on 2026-11-18.
@@ -364,11 +378,32 @@ vocabulary for both abortive and resumptive effects.
 clause and response-indexed effect markers, and its `effect<R>` form depends on ZEP-0118. It
 remains `Unscheduled` and is not a candidate.
 
-### Post-`0.9.0` — static newtype verification (proposed)
+### `0.10.0` — model system completion and annotation metadata (tentative)
 
-Seven `Draft` / `Unscheduled` proposals record a static-verification track intended to follow the
-effect-control bundle. They are not candidates, do not change the `0.9.0` scope, and have no release
-target. The proposed order is dependency-driven:
+This bundle gives the model-metadata orphans a coherent home rather than scheduling annotation
+work in isolation. It is tentative and not scheduled, and it follows the `0.9.0` effect-control
+work. The accepted candidates are [ZEP-0091](./ZEP-0091.md) (annotation consumption) and
+[ZEP-0097](./ZEP-0097.md) (`MAPPING` annotation target for model clauses). ZEP-0097 depends on
+ZEP-0091's compiler-recognized annotation model; ZEP-0091 Direction B also unblocks external names
+in [ZEP-0092](./ZEP-0092.md).
+
+The model-improvement drafts [ZEP-0101](./ZEP-0101.md) (field representation adapters),
+[ZEP-0102](./ZEP-0102.md) (generic models through factories), and
+[ZEP-0103](./ZEP-0103.md) (polymorphic models for closed sums) are intended for the same bundle,
+but remain `Draft` / `Unscheduled` until their designs are accepted. They cannot be marked
+`Candidate` yet. The shipped model foundation is [ZEP-0079](./ZEP-0079.md), [ZEP-0092](./ZEP-0092.md),
+[ZEP-0093](./ZEP-0093.md), and [ZEP-0098](./ZEP-0098.md).
+
+[ZEP-0107](./ZEP-0107.md) is not part of this bundle. It extends runtime descriptors with ancestor
+metadata for generic effects, not model declarations or annotation metadata. It stays
+`Accepted` / `Unscheduled` until the generic-effect propagation slice it depends on exists; folding
+it into the model bundle would couple two unrelated API-index changes.
+
+### Static newtype verification (proposed, unscheduled)
+
+Seven `Draft` / `Unscheduled` proposals record a static-verification track outside the current
+effect-control and model bundles. They are not candidates and have no release target. The proposed
+order is dependency-driven:
 
 1. [ZEP-0138](./ZEP-0138.md) — predicate and fact IR. This is the shared foundation and should be
    designed and accepted before the feature ZEPs.

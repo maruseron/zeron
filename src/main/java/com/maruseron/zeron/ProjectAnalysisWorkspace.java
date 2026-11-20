@@ -160,6 +160,10 @@ public final class ProjectAnalysisWorkspace {
                 throw new IllegalArgumentException("Project source root is not a directory: " + root);
             }
         }
+        final var analysisRoots = new java.util.ArrayList<>(project.sourceRoots());
+        for (final var root : project.testRoots()) {
+            if (Files.isDirectory(root)) analysisRoots.add(root);
+        }
         final var standardLibrary = Zeron.resolveStandardLibrary(
                 project.standardLibraryMode(), project.libraryRoots());
         Zeron.validateJavaClassPathRoots(project.javaClassPathRoots());
@@ -169,7 +173,7 @@ public final class ProjectAnalysisWorkspace {
                         "Java source attachment is not a directory: " + root);
             }
         }
-        return new ProjectAnalysisWorkspace(project.sourceRoots(), Optional.of(project.entry()),
+        return new ProjectAnalysisWorkspace(analysisRoots, Optional.ofNullable(project.entry()),
                 standardLibrary.bundleStandardLibrarySources(), standardLibrary.libraries(),
                 project.javaClassPathRoots(), project.javaSourceRoots());
     }

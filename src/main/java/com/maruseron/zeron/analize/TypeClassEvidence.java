@@ -530,7 +530,36 @@ final class TypeClassEvidence {
         return substitutions;
     }
 
-    private static String simpleName(final String qualifiedName) {
+    /// Source-written constructor patterns may name their head without a package, while a witness
+    /// target records the resolved nominal name. Reuse the pattern's head so the arguments can be
+    /// matched to recover the witness type arguments.
+    private static TypeDescriptor alignConstructor(final TypeDescriptor pattern,
+                                                   final TypeDescriptor actual) {
+        if (!(pattern instanceof TypeConstructorDescriptor patternConstructor)) return actual;
+        final var base = actual instanceof ReferenceDescriptor reference
+                ? reference.baseType() : actual;
+        if (patternConstructor.baseType().equals(base instanceof TypeConstructorDescriptor constructor
+                ? constructor.baseType() : base)) return actual;
+        if (!simpleName(patternConstructor.baseType().name())
+                .equals(simpleName(nominalName(base)))) return actual;
+        if (base instanceof TypeConstructorDescriptor actualConstructor) {
+            return new TypeConstructorDescriptor(patternConstructor.baseType(),
+                    actualConstructor.arguments());
+        }
+        if (!(base instanceof GenericDescriptor generic)
+                || generic.typeParameters().size() != patternConstructor.arguments().size()) {
+            return actual;
+        }
+        final var arguments = new ArrayList<TypeDescriptor>(patternConstructor.arguments().size());
+        for (int index = 0; index < patternConstructor.arguments().size(); index++) {
+            final var patternArgument = patternConstructor.arguments().get(index);
+            arguments.add(patternArgument instanceof InferDescriptor
+                    ? patternArgument : generic.typeParameters().get(index));
+        }
+        return new TypeConstructorDescriptor(patternConstructor.baseType(), arguments);
+    }
+
+    static String simpleName(final String qualifiedName) {
         final var separator = qualifiedName.lastIndexOf('.');
         return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
     }
@@ -1418,6 +1447,7 @@ final class TypeClassEvidence {
             var matchingWitnesses = 0;
             for (final var entry : context.typeClassWitnesses) {
                 if (!isActive(context, entry)) continue;
+                if (shadowedBySelection(context, entry.declaration(), actual)) continue;
                 if (entry.declaration().derived()
                         && isEqContract(contractType)
                         && isHashableContract(entry.declaration().contractType())) continue;
@@ -1663,10 +1693,11 @@ final class TypeClassEvidence {
                 requiredType.returnType(), methodParameters, requiredType.typeParameters(),
                 requiredType.raisedEffects());
 
-        if (requirement.isStatic()) {
-            final var classDeclaration = context.classes.get(nominalName(concrete));
-            if (classDeclaration != null) {
-                final var candidate = classDeclaration.staticFunctions().stream()
+        final var classDeclaration = context.classes.get(nominalName(concrete));
+        if (classDeclaration != null && (requirement.isStatic()
+                || !DeclarationResolver.hasInstanceImplementation(context, classDeclaration,
+                        requiredType, requirement))) {
+            final var candidate = classDeclaration.staticFunctions().stream()
                         .filter(function -> function.name().lexeme().equals(requirement.name().lexeme()))
                         .filter(function -> function.isPublic()
                                 && function.variadic() == requirement.variadic()
@@ -1695,7 +1726,6 @@ final class TypeClassEvidence {
                             constructor.name().lexeme(), descriptor, null, true,
                             Expr.EvidenceHandleKind.STATIC);
                 }
-            }
         }
 
         if (TypeCompatibility.isArrayIterableProjection(requiredBound, concrete)) {
@@ -2306,6 +2336,46 @@ final class TypeClassEvidence {
         return selectMethod(context, actualType, requiredContractType, methodName, where, false);
     }
 
+    /// Selects a type-level contract method (one without a receiver parameter) for a concrete
+    /// constructor, so `Option.pure(value)` can dispatch through `Applicative<Option<_>>`.
+    static WitnessMethodSelection selectStaticConstructorMethod(final ResolutionContext context,
+                                                               final String constructorName,
+                                                               final String methodName,
+                                                               final TypeDescriptor declaredConstructor,
+                                                               final com.maruseron.zeron.scan.Token where) {
+        final var matches = new ArrayList<WitnessMethodSelection>();
+        for (final var entry : context.typeClassWitnesses) {
+            if (!isActive(context, entry)) continue;
+            final var target = entry.declaration().targetType();
+            final var base = target instanceof ReferenceDescriptor reference
+                    ? reference.baseType() : target;
+            final var targetName = base instanceof TypeConstructorDescriptor constructor
+                    ? constructor.name() : nominalName(base);
+            if (targetName == null
+                    || !simpleName(targetName).equals(simpleName(constructorName))) continue;
+            final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
+            if (declaredConstructor != null
+                    && !matchPattern(target, alignConstructor(target, declaredConstructor),
+                            entry.declaration().typeParameters(), substitutions)) continue;
+            for (final var method : entry.declaration().methods()) {
+                if (!method.requirementName().lexeme().equals(methodName)) continue;
+                if (Stmt.hasReceiverParameter(method.methodSignature().parameters())) continue;
+                final var helperType = (FunctionDescriptor) TypeSubstitution.substitute(
+                        method.implementation().typeDescriptor(), substitutions);
+                matches.add(new WitnessMethodSelection(method,
+                        method.implementation().name().lexeme(),
+                        qualifyPackage(entry.packageName(), method.implementation().name().lexeme()),
+                        helperType, false, 0, Map.copyOf(substitutions)));
+            }
+        }
+        if (matches.size() > 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS, where,
+                    "Ambiguous type-level contract method '" + methodName + "' for constructor '"
+                            + constructorName + "'."));
+        }
+        return matches.isEmpty() ? null : matches.getFirst();
+    }
+
     private static WitnessMethodSelection selectMethod(final ResolutionContext context,
                                                final TypeDescriptor actualType,
                                                final TypeDescriptor requiredContractType,
@@ -2317,6 +2387,7 @@ final class TypeClassEvidence {
         final var matches = new ArrayList<WitnessMethodSelection>();
         for (final var entry : context.typeClassWitnesses) {
             if (!isActive(context, entry)) continue;
+            if (shadowedBySelection(context, entry.declaration(), actual)) continue;
             final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
             if (!matchPattern(entry.declaration().targetType(), actual,
                     entry.declaration().typeParameters(), substitutions)) continue;
@@ -2396,8 +2467,70 @@ final class TypeClassEvidence {
         return matches.isEmpty() ? null : matches.getFirst();
     }
 
+    /// A selected provider, whether a bundle member or a standalone named witness, shadows an
+    /// ambient provider for the same applied contract and target inside the selection scope.
+    private static boolean shadowedBySelection(final ResolutionContext context,
+                                               final Stmt.Witness ambient,
+                                               final TypeDescriptor actual) {
+        for (final var entry : context.typeClassWitnesses) {
+            final var member = entry.declaration();
+            if (member == ambient || isSelected(context, ambient) || !isSelected(context, member)) continue;
+            if (!nominalName(member.contractType()).equals(nominalName(ambient.contractType()))) continue;
+            if (matchPattern(member.targetType(), actual, member.typeParameters(),
+                    new LinkedHashMap<>())) return true;
+        }
+        return false;
+    }
+
+    private static boolean isSelected(final ResolutionContext context, final Stmt.Witness witness) {
+        if (witness.bundleName() != null) {
+            return context.selectedWitnessBundles.stream()
+                    .anyMatch(selected -> selected.contains(witness.bundleName()));
+        }
+        if (witness.isDefault() || witness.name() == null) return false;
+        final var name = simpleName(witness.name().lexeme());
+        return context.selectedWitnessBundles.stream()
+                .anyMatch(selected -> selected.contains(name));
+    }
+
+    static Set<String> selectionNames(final ResolutionContext context, final List<Token> tokens) {
+        if (tokens.isEmpty()) return Set.of();
+        final var names = new LinkedHashSet<String>();
+        for (final var token : tokens) {
+            var name = simpleName(token.lexeme());
+            final var imported = context.currentImports.witnesses().get(name);
+            if (imported != null) name = simpleName(imported);
+            final var resolvedName = name;
+            final var known = context.typeClassWitnesses.stream().anyMatch(entry -> {
+                final var witness = entry.declaration();
+                return resolvedName.equals(witness.bundleName())
+                        || !witness.isDefault() && witness.name() != null
+                        && resolvedName.equals(simpleName(witness.name().lexeme()));
+            });
+            if (!known) {
+                throw new ResolutionError(DiagnosticCatalog.NAME_NOT_FOUND, token,
+                        "Unknown witness provider '" + token.lexeme() + "'.");
+            }
+            if (!names.add(name)) {
+                throw new ResolutionError(DiagnosticCatalog.DUPLICATE_OR_CONFLICTING_NAME, token,
+                        "Witness provider '" + token.lexeme() + "' is selected more than once.");
+            }
+        }
+        return names;
+    }
+
     private static boolean isActive(final ResolutionContext context, final WitnessEntry entry) {
         final var witness = entry.declaration();
+        if (witness.bundleName() != null) {
+            return context.selectedWitnessBundles.stream()
+                    .anyMatch(selected -> selected.contains(witness.bundleName()));
+        }
+        if (!witness.isDefault() && witness.name() != null) {
+            final var name = simpleName(witness.name().lexeme());
+            if (context.selectedWitnessBundles.stream().anyMatch(selected -> selected.contains(name))) {
+                return true;
+            }
+        }
         // Derived witnesses, class-scoped implementation blocks, and unnamed defaults are
         // canonical evidence for their target type. They activate with that type rather than
         // requiring a witness import or a package star import.

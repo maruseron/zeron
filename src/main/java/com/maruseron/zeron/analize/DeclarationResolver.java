@@ -756,7 +756,8 @@ final class DeclarationResolver {
                 if (invalidContractUses.contains(contractUse)) continue;
                 final var contract = context.contracts.get(contractUse.name().lexeme());
                 if (contract == null) continue;
-                Resolver.attemptMember(context, () -> checkConformance(context, declaration, contractUse, contract));
+                Resolver.attemptMember(context, () -> checkConformance(context, declaration, contractUse,
+                        contract, contractUse.name()));
             }
         } finally {
             context.frame.currentClassName = previousClass;
@@ -1222,7 +1223,8 @@ final class DeclarationResolver {
 
     private static void checkConformance(final ResolutionContext context, final Stmt.ClassDecl declaration,
                                   final Stmt.ContractUse contractUse,
-                                  final Stmt.ContractDecl contract) {
+                                  final Stmt.ContractDecl contract,
+                                  final Token origin) {
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < contract.typeParameters().size(); i++) {
             substitutions.put(contract.typeParameters().get(i), contractUse.typeArguments().get(i));
@@ -1251,7 +1253,7 @@ final class DeclarationResolver {
                         && !blockImplementation && !required.isDefault()) {
                     methodErrors.add(new ResolutionError(
                             DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                            contractUse.name(),
+                            origin,
                             "Contract '" + TypeFormatter.format(TypeDescriptor.genericOf(
                                     TypeDescriptor.ofName(contractUse.name().lexeme()),
                                     contractUse.typeArguments()))
@@ -1268,12 +1270,29 @@ final class DeclarationResolver {
                                     method.typeDescriptor(), method.variadic()))
                     .findFirst()
                     .orElse(null);
-            final var defaults = implementation == null
+            final var staticImplementation = implementation == null
+                    ? declaration.staticFunctions().stream()
+                            .filter(function -> function.name().lexeme().equals(required.name().lexeme()))
+                            .filter(function -> function.isPublic()
+                                    && function.variadic() == required.variadic()
+                                    && compatibleMethodSignatures(context, requiredType,
+                                            required.variadic(), function.typeDescriptor(),
+                                            function.variadic()))
+                            .findFirst()
+                            .orElse(null)
+                    : null;
+            final var constructorImplementation = implementation == null
+                    && staticImplementation == null
+                    ? constructorImplementation(context, declaration, required.name().lexeme(),
+                            requiredType, required.variadic(), Map.of())
+                    : null;
+            final var defaults = implementation == null && staticImplementation == null
+                    && constructorImplementation == null
                     ? defaultMethodsFor(context, declaration, requiredType, required.variadic())
                     : List.<Resolver.DefaultMethodSelection>of();
             if (defaults.size() > 1) {
                 methodErrors.add(new ResolutionError(DiagnosticCatalog.INVALID_SEALED_CONTRACT_OR_MATCH,
-                        contractUse.name(),
+                        origin,
                         "Multiple default contract methods named '" + required.name().lexeme()
                                 + "' require an explicit class implementation."));
                 continue;
@@ -1282,11 +1301,8 @@ final class DeclarationResolver {
                     && defaults.getFirst().method().isMutating() == required.isMutating()
                     ? defaults.getFirst()
                     : null;
-            if (implementation == null && defaultMethod == null
-                    || implementation != null && (!implementation.isPublic()
-                    || implementation.isMutating() != required.isMutating()
-                    || !compatibleMethodSignatures(context, requiredType, required.variadic(),
-                            implementation.typeDescriptor(), implementation.variadic()))) {
+            if (implementation == null && staticImplementation == null
+                    && constructorImplementation == null && defaultMethod == null) {
                 final var candidates = declaration.methods().stream()
                         .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
                         .map(DeclarationResolver::formatMethodCandidate)
@@ -1301,7 +1317,7 @@ final class DeclarationResolver {
                         : "Found " + String.join("; ", candidates) + ".";
                 final var methodError = new ResolutionError(
                         DiagnosticCatalog.INVALID_DECLARATION_OR_PROGRAM_STRUCTURE,
-                        contractUse.name(),
+                        origin,
                         "Contract '" + TypeFormatter.format(contractType) + "' requires "
                                 + formatMethodSignature(required.name().lexeme(), requiredType,
                                         required.isMutating())
@@ -1342,7 +1358,7 @@ final class DeclarationResolver {
                     || (required.isMutating() && !implementation.isMutating())
                     || !requiredType.equals(implementation.type())) {
                 propertyErrors.add(new ResolutionError(DiagnosticCatalog.TYPE_MISMATCH_OR_FAILED_INFERENCE,
-                        contractUse.name(),
+                        origin,
                         "Class does not provide a compatible public contract property '"
                                 + required.name().lexeme() + "'."));
             }
@@ -1352,7 +1368,7 @@ final class DeclarationResolver {
         final var closure = ContractComposition.closure(context, contractUse);
         for (int index = 1; index < closure.size(); index++) {
             final var inherited = closure.get(index);
-            checkConformance(context, declaration, inherited.use(), inherited.declaration());
+            checkConformance(context, declaration, inherited.use(), inherited.declaration(), origin);
         }
     }
 
@@ -1433,12 +1449,31 @@ final class DeclarationResolver {
                                         method.typeDescriptor(), method.variadic()))
                         .findFirst()
                         .orElse(null);
-                final var defaults = implementation == null
+                final var staticImplementation = implementation == null
+                        ? declaration.staticFunctions().stream()
+                                .filter(function -> function.name().lexeme()
+                                        .equals(required.name().lexeme()))
+                                .filter(function -> function.isPublic()
+                                        && function.variadic() == required.variadic()
+                                        && compatibleMethodSignatures(context, requiredType,
+                                                required.variadic(), function.typeDescriptor(),
+                                                function.variadic()))
+                                .findFirst()
+                                .orElse(null)
+                        : null;
+                final var constructorImplementation = implementation == null
+                        && staticImplementation == null
+                        ? constructorImplementation(context, declaration, required.name().lexeme(),
+                                requiredType, required.variadic(), Map.of())
+                        : null;
+                final var defaults = implementation == null && staticImplementation == null
+                        && constructorImplementation == null
                         ? defaultMethodsFor(context, declaration, requiredType, required.variadic())
                         : List.<Resolver.DefaultMethodSelection>of();
                 final var hasDefault = defaults.size() == 1
                         && defaults.getFirst().method().isMutating() == required.isMutating();
-                if (implementation != null || hasDefault) continue;
+                if (implementation != null || staticImplementation != null
+                        || constructorImplementation != null || hasDefault) continue;
                 if (defaults.size() > 1 || required.isStatic() || required.variadic()
                         || !required.defaultValues().isEmpty() || !stubNames.add(required.name().lexeme())) {
                     return List.of();
@@ -1572,6 +1607,17 @@ final class DeclarationResolver {
         return EffectRows.includedIn(implementation.raisedEffects(), requiredEffects,
                 context.effectHierarchy)
                 && context.typeCompatibility.canAssign(requiredReturn, implementation.returnType());
+    }
+
+    static boolean hasInstanceImplementation(final ResolutionContext context,
+                                             final Stmt.ClassDecl declaration,
+                                             final FunctionDescriptor requiredType,
+                                             final Stmt.ContractMethod required) {
+        return declaration.methods().stream()
+                .filter(method -> method.name().lexeme().equals(required.name().lexeme()))
+                .anyMatch(method -> method.isPublic() && method.isMutating() == required.isMutating()
+                        && compatibleMethodSignatures(context, requiredType, required.variadic(),
+                                method.typeDescriptor(), method.variadic()));
     }
 
     static Stmt.NamedConstructor constructorImplementation(

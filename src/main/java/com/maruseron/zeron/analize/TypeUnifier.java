@@ -89,6 +89,11 @@ final class TypeUnifier {
             return;
         }
         if (pattern instanceof TypeParameterDescriptor parameter) {
+            final var bound = substitutions.get(parameter);
+            if (bound != null && !bound.equals(parameter)) {
+                unify(bound, actual, substitutions, where, rows, covariant, projector, bindOnly);
+                return;
+            }
             if (parameter.isEffectRowKind()) {
                 if (isEffectValue(actual)) {
                     rows.addLowerBound(parameter, EffectRows.asRow(actual));

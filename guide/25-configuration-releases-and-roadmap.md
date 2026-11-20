@@ -108,6 +108,14 @@ sessions remain plain.
 Single-file compilation remains available for scripts; project commands centralize the common
 source, output, standard-library, and dependency options.
 
+Use a target with `kind = "test"` and `zeron test [<target>]` to compile the project's source roots
+together with its `test-roots`, discover top-level `@Test` functions, and run the generated runner.
+Tests use the `zeron.test` annotations and assertions: `assertEquals` and friends report a failure by
+raising `TestFailure`, while `@Ignore(reason = "...")` records a skipped test. The runner reports
+one line per test and exits with status 0 only when every runnable test passes. Application targets
+never compile test roots or emit the runner. See [Testing with zeron.test](42-testing.md) for the
+annotations, assertions, project layout, and runner behavior.
+
 If a build succeeds but a program fails to launch, check that dependency paths resolve from the
 manifest and that runtime dependencies are available. The `zeron-libraries` entries provide
 Zeron API metadata for compilation and class files for execution; Java dependencies belong under

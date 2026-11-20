@@ -51,6 +51,7 @@ Note: do not use the numbers preceding a file name as a chapter order. They're c
 1. [Configuration, releases, and the roadmap](25-configuration-releases-and-roadmap.md)
 1. [Command reference](39-command-reference.md)
 1. [Project manifest reference](40-manifest-reference.md)
+1. [Testing with zeron.test](42-testing.md)
 
 ## Part VI — Editor and CLI tools
 

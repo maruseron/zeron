@@ -27,6 +27,11 @@ final class CallResolver {
     }
 
     TypeDescriptor resolve(final Expr.Invoke invoke) {
+        final var spread = SpreadSupport.unwrap(invoke.arguments, invoke.paren);
+        if (spread.present()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                    spread.token(), "An indirect function-value call does not accept a spread argument."));
+        }
         final var calleeType = ExpressionFlowResolver.resolveExpression(context, invoke.callee);
         var unwrapped = calleeType;
         while (unwrapped instanceof ReferenceDescriptor reference) unwrapped = reference.baseType();
@@ -85,6 +90,9 @@ final class CallResolver {
     TypeDescriptor resolveNamespaceCall(final Expr.MemberCall memberCall, final String functionName) {
         final var call = new Expr.Call(memberCall.name, memberCall.paren, memberCall.arguments,
                 memberCall.explicitTypeArguments, TypeDescriptor.ofInfer());
+        if (memberCall.spreadArgumentIndex() >= 0) {
+            call.setSpreadArgument(memberCall.spreadArgumentIndex(), memberCall.spreadToken());
+        }
         resolve(call, functionName, null);
         memberCall.setNamespaceCall(call);
         memberCall.setType(call.getType());
@@ -105,6 +113,7 @@ final class CallResolver {
         final var constructor = new Expr.MemberCall(receiver,
                 new Token(TokenType.IDENTIFIER, "new", null, call.callee.span()),
                 call.paren, call.arguments, List.of(), TypeDescriptor.ofInfer());
+        constructor.setSpreadArgument(call.spreadArgumentIndex(), call.spreadToken());
         constructor.setExplicitOwnerTypeArguments(call.explicitTypeArguments);
         final var result = MemberInteropResolver.resolveMemberCall(context, constructor);
         call.setImplicitMemberCall(constructor);
@@ -114,6 +123,8 @@ final class CallResolver {
 
     private TypeDescriptor resolve(final Expr.Call call, final String forcedFunctionName,
                                    final TypeDescriptor expectedType) {
+        final var spread = SpreadSupport.unwrap(call.arguments, call.callee);
+        if (spread.present()) call.setSpreadArgument(spread.index(), spread.token());
         if (forcedFunctionName == null && !call.explicitTypeArguments.isEmpty()) {
             final var constructor = resolveGenericEffectConstructorShorthand(call);
             if (constructor != null) return constructor;
@@ -170,6 +181,7 @@ final class CallResolver {
                         TypeDescriptor.ofInfer());
                 final var implicitCall = new Expr.MemberCall(receiver, call.callee, call.paren,
                         call.arguments, call.explicitTypeArguments, TypeDescriptor.ofInfer());
+                implicitCall.setSpreadArgument(call.spreadArgumentIndex(), call.spreadToken());
                 call.setImplicitMemberCall(implicitCall);
                 final var resultType = MemberInteropResolver.resolveMemberCall(context, implicitCall);
                 recordCallSiteFunctionType(call.callee, implicitCall.resolvedDescriptor(),
@@ -210,6 +222,7 @@ final class CallResolver {
             final var arrayType = parameters.getLast();
             call.setVariadic(((ArrayDescriptor) arrayType).elementType(), fixedArity);
         }
+        SpreadSupport.requireVariadic(spread(call), variadic, fixedArity, call.callee);
         Zeron.debug("resolving call              " + call.callee.lexeme() + parameters
                 + " -> " + descriptor.returnType());
         final var minimumArity = minimumArity(call, descriptor);
@@ -228,6 +241,13 @@ final class CallResolver {
             for (var i = 0; i < call.arguments.size(); i++) {
                 final var argument = call.arguments.get(i);
                 final var expected = parameterType(parameters, i, fixedArity, variadic);
+                if (i == call.spreadArgumentIndex()) {
+                    final var actual = ExpressionFlowResolver.resolveExpression(context, argument);
+                    if (!SpreadSupport.accepts(context, expected, actual, call.spreadToken())) {
+                        spreadMismatch(call, expected);
+                    }
+                    continue;
+                }
                 final var resolved = MemberInteropResolver.resolveArgument(context, argument, expected);
                 Resolver.ensureAssignable(context, expected, resolved, call.callee);
             }
@@ -288,6 +308,7 @@ final class CallResolver {
                 TypeDescriptor.ofInfer());
         final var memberCall = new Expr.MemberCall(receiver, call.callee, call.paren, call.arguments,
                 call.explicitTypeArguments, TypeDescriptor.ofInfer());
+        memberCall.setSpreadArgument(call.spreadArgumentIndex(), call.spreadToken());
         call.setImplicitMemberCall(memberCall);
         final var result = MemberInteropResolver.resolveMemberCall(context, memberCall, expectedType);
         call.setType(result);
@@ -295,40 +316,50 @@ final class CallResolver {
     }
 
     private void attachIntrinsicOperation(final Expr.Call call) {
-        if ("zeron.collections.allocateArray".equals(call.resolvedFunctionName())
-                || "zeron.internal.allocateArray".equals(call.resolvedFunctionName())) {
-            final var arrayElement = IntrinsicResolver.arrayElementType(context, call.getType(), call.callee);
-            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.ARRAY_ALLOC,
-                    List.of(arrayElement),
-                    call.arguments.stream().map(Expr::getType).toList(), call.callee));
-        } else if ("zeron.internal.allocateByteArray".equals(call.resolvedFunctionName())
-                || "zeron.io.allocateByteArray".equals(call.resolvedFunctionName())) {
-            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.BYTE_ARRAY_ALLOC,
-                    List.of(), call.arguments.stream().map(Expr::getType).toList(), call.callee));
-        } else if ("zeron.internal.intToByte".equals(call.resolvedFunctionName())) {
-            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.INT_TO_BYTE,
-                    List.of(), call.arguments.stream().map(Expr::getType).toList(), call.callee));
-        } else if ("zeron.internal.byteToInt".equals(call.resolvedFunctionName())) {
-            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.BYTE_TO_INT,
-                    List.of(), call.arguments.stream().map(Expr::getType).toList(), call.callee));
-        } else if ("zeron.collections.clearArraySlot".equals(call.resolvedFunctionName())) {
-            final var arrayElement = IntrinsicResolver.arrayElementType(context,
-                    call.arguments.getFirst().getType(), call.callee);
-            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.ARRAY_CLEAR_SLOT,
-                    List.of(arrayElement),
-                    call.arguments.stream().map(Expr::getType).toList(), call.callee));
-        } else if ("zeron.internal.unwrapSome".equals(call.resolvedFunctionName())) {
-            var optionType = call.arguments.getFirst().getType();
-            if (optionType instanceof ReferenceDescriptor reference) optionType = reference.baseType();
-            final var optionValue = ((GenericDescriptor) optionType).typeParameters().getFirst();
-            call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, IntrinsicId.OPTION_UNWRAP_SOME,
-                    List.of(optionValue),
-                    call.arguments.stream().map(Expr::getType).toList(), call.callee));
+        final var intrinsic = IntrinsicFunctions.intrinsicFor(call.resolvedFunctionName());
+        if (intrinsic == null) return;
+        final var actualParameterTypes = call.arguments.stream().map(Expr::getType).toList();
+        switch (intrinsic) {
+            case ARRAY_ALLOC -> {
+                final var arrayElement = IntrinsicResolver.arrayElementType(context, call.getType(), call.callee);
+                call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, intrinsic,
+                        List.of(arrayElement), actualParameterTypes, call.callee));
+            }
+            case BYTE_ARRAY_ALLOC, INT_TO_BYTE, BYTE_TO_INT ->
+                    call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, intrinsic,
+                            List.of(), actualParameterTypes, call.callee));
+            case ARRAY_CLEAR_SLOT -> {
+                final var arrayElement = IntrinsicResolver.arrayElementType(context,
+                        call.arguments.getFirst().getType(), call.callee);
+                call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, intrinsic,
+                        List.of(arrayElement), actualParameterTypes, call.callee));
+            }
+            case OPTION_UNWRAP_SOME -> {
+                var optionType = call.arguments.getFirst().getType();
+                if (optionType instanceof ReferenceDescriptor reference) optionType = reference.baseType();
+                final var optionValue = ((GenericDescriptor) optionType).typeParameters().getFirst();
+                call.setIntrinsicOperation(IntrinsicResolver.resolveIntrinsic(context, intrinsic,
+                        List.of(optionValue), actualParameterTypes, call.callee));
+            }
+            default -> throw new IllegalStateException(
+                    "Unexpected call-site intrinsic " + intrinsic.stableName());
         }
     }
 
     private TypeDescriptor resolveGenericCall(final Expr.Call call,
                                               final FunctionDescriptor genericType) {
+        final var selected = TypeClassEvidence.selectionNames(context, call.witnessSelection());
+        if (selected.isEmpty()) return resolveGenericCallInSelection(call, genericType);
+        context.selectedWitnessBundles.push(selected);
+        try {
+            return resolveGenericCallInSelection(call, genericType);
+        } finally {
+            context.selectedWitnessBundles.pop();
+        }
+    }
+
+    private TypeDescriptor resolveGenericCallInSelection(final Expr.Call call,
+                                                         final FunctionDescriptor genericType) {
         call.setGenericFunctionType(genericType);
         final var typeParameters = genericType.typeParameters();
         final var explicitTypeParameters = genericType.explicitTypeParameters();
@@ -349,6 +380,7 @@ final class CallResolver {
         if (variadic) {
             call.setVariadic(((ArrayDescriptor) genericType.parameters().getLast()).elementType(), fixedArity);
         }
+        SpreadSupport.requireVariadic(spread(call), variadic, fixedArity, call.callee);
         if (call.arguments.size() < minimumArity || !variadic && call.arguments.size() > genericType.arity()) {
             Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
                     call.callee,
@@ -370,21 +402,33 @@ final class CallResolver {
         final var resolvedArguments = new TypeDescriptor[call.arguments.size()];
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
+            final var expectedParameter = parameterType(genericType.parameters(), i, fixedArity, variadic);
+            if (i == call.spreadArgumentIndex()) {
+                resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
+                if (!hasExplicitTypeArguments) {
+                    final var spreadElement = SpreadSupport.elementType(
+                            context, resolvedArguments[i], call.spreadToken());
+                    if (spreadElement != null) {
+                        TypeUnifier.unifyForInference(expectedParameter,
+                                context.typeCompatibility.inferenceView(expectedParameter, spreadElement),
+                                substitutions, call.callee, rowInference, context.typeCompatibility);
+                    }
+                }
+                continue;
+            }
             if (argument instanceof Expr.Lambda || isFunctionReferenceCandidate(argument)
-                    || MemberInteropResolver.defersUntilExpectedType(context, argument,
-                            parameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
+                    || MemberInteropResolver.defersUntilExpectedType(context, argument, expectedParameter)) continue;
             resolvedArguments[i] = ExpressionFlowResolver.resolveExpression(context, argument);
             if (!hasExplicitTypeArguments) {
-                TypeUnifier.unifyForInference(parameterType(genericType.parameters(), i, fixedArity, variadic),
-                        context.typeCompatibility.inferenceView(
-                                parameterType(genericType.parameters(), i, fixedArity, variadic),
-                                resolvedArguments[i]),
+                TypeUnifier.unifyForInference(expectedParameter,
+                        context.typeCompatibility.inferenceView(expectedParameter, resolvedArguments[i]),
                         substitutions, call.callee, rowInference, context.typeCompatibility);
             }
         }
 
         for (int i = 0; i < call.arguments.size(); i++) {
             final var argument = call.arguments.get(i);
+            if (i == call.spreadArgumentIndex()) continue;
             if (!(argument instanceof Expr.Lambda) && !isFunctionReferenceCandidate(argument)
                     && !MemberInteropResolver.defersUntilExpectedType(context, argument,
                             parameterType(genericType.parameters(), i, fixedArity, variadic))) continue;
@@ -452,9 +496,14 @@ final class CallResolver {
                 .map(parameter -> TypeSubstitution.substitute(parameter, substitutions))
                 .toList();
         for (int i = 0; i < resolvedArguments.length; i++) {
-            Resolver.ensureAssignable(context,
-                    parameterType(instantiatedParameters, i, fixedArity, variadic),
-                    resolvedArguments[i], call.callee);
+            final var expected = parameterType(instantiatedParameters, i, fixedArity, variadic);
+            if (i == call.spreadArgumentIndex()) {
+                if (!SpreadSupport.accepts(context, expected, resolvedArguments[i], call.spreadToken())) {
+                    spreadMismatch(call, expected);
+                }
+                continue;
+            }
+            Resolver.ensureAssignable(context, expected, resolvedArguments[i], call.callee);
         }
         final var instantiatedReturn = TypeSubstitution.substitute(genericType.returnType(), substitutions);
         final var instantiatedEffects = genericType.raisedEffects().stream()
@@ -552,5 +601,16 @@ final class CallResolver {
     private FunctionDescriptor functionType(final TypeDescriptor type) {
         if (type instanceof ReferenceDescriptor reference) return functionType(reference.baseType());
         return type instanceof FunctionDescriptor function ? function : null;
+    }
+
+    private static SpreadSupport.Spread spread(final Expr.Call call) {
+        return new SpreadSupport.Spread(call.spreadArgumentIndex(), call.spreadToken());
+    }
+
+    private void spreadMismatch(final Expr.Call call, final TypeDescriptor elementType) {
+        Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.ARGUMENT_OR_PARAMETER_COUNT_MISMATCH,
+                call.spreadToken(), "A spread argument must be a non-null Array<"
+                        + TypeFormatter.format(elementType) + "> or Iterable<"
+                        + TypeFormatter.format(elementType) + ">."));
     }
 }

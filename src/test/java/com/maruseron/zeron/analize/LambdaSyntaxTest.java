@@ -28,6 +28,8 @@ public final class LambdaSyntaxTest {
                 fn curried(f: Int -> Int -> Int): Int = 0;
                 fn invokeUnit(action: () -> Unit): Unit = action();
                 fn withTrailingBlock(): Unit = invokeUnit { 1; };
+                fn invokeWith<T>(action: () -> T): T = action();
+                fn withGenericTrailingLambda(): Int = invokeWith<Int> { 9 };
                 """;
         try {
             final var unit = Parser.of(Scanner.from(source, className + ".zn").scanTokens())
@@ -44,6 +46,7 @@ public final class LambdaSyntaxTest {
                 assertEquals(7, generated.getMethod("withTypedLambda").invoke(null));
                 assertEquals(7, generated.getMethod("withTwoParameters").invoke(null));
                 assertEquals("Unit", generated.getMethod("withTrailingBlock").invoke(null).toString());
+                assertEquals(9, generated.getMethod("withGenericTrailingLambda").invoke(null));
             }
         } finally {
             Files.deleteIfExists(Path.of("dist", className + ".class"));

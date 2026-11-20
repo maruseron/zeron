@@ -98,6 +98,14 @@ The expected function type determines whether an arrowless trailing block has on
 zero. Zero-parameter callbacks keep their existing block form; callbacks with multiple parameters
 must name them explicitly.
 
+Explicit call type arguments go before the trailing lambda:
+
+```zeron
+fn invokeWith<T>(action: () -> T): T = action();
+
+let value = invokeWith<Int> { 42 };
+```
+
 ## Property references
 
 A lambda such as `user -> user.name` reads a property, but the value itself carries no

@@ -272,6 +272,7 @@
 - `Duplicate or ambiguous function import '{name}'.`
 - `Expected a non-null Array<T> value.`
 - `The internal array operation requires an array value.`
+- `Function '{name}' only calls itself and is not the standard-library intrinsic declaration; it compiles as unbounded recursion.`
 - `Cannot capture mutable binding '{name}' in a lambda.`
 - `Cannot infer type parameter '{name}' for polymorphic lambda at this use.`
 - `Function reference does not resolve to a top-level function.`

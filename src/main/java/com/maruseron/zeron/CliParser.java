@@ -38,7 +38,7 @@ final class CliParser {
                     if (args.length != 1) return invalid("Usage: zeron init");
                     return parsed(new Initialize());
                 }
-                case "build", "run" -> {
+                case "build", "run", "test" -> {
                     return parseProjectCommand(args);
                 }
                 case "fmt" -> {
@@ -112,6 +112,7 @@ final class CliParser {
 
     private static ParseResult parseProjectCommand(final String[] args) {
         final var launch = args[0].equals("run");
+        final var testCommand = args[0].equals("test");
         var manifest = Paths.get("zeron.toml");
         var debug = false;
         Boolean denyWarnings = null;
@@ -174,14 +175,20 @@ final class CliParser {
         }
         final ProjectManifest.ProjectTarget target;
         try {
-            target = project.selectTarget(Optional.ofNullable(targetName));
+            target = testCommand
+                    ? project.selectTestTarget(Optional.ofNullable(targetName))
+                    : project.selectTarget(Optional.ofNullable(targetName));
         } catch (final IllegalArgumentException exception) {
             return invalid(exception.getMessage());
         }
+        if (launch && target.kind() == ProjectManifest.TargetKind.TEST) {
+            return invalid("Target '" + target.displayName()
+                    + " is a test target; use 'zeron test' instead.");
+        }
         final var projectPathError = projectPathError(project);
         if (projectPathError.isPresent()) return invalid(projectPathError.get());
-        return parsed(new ProjectCommand(launch, manifest, debug, Optional.ofNullable(targetName),
-                project, target, denyWarnings, noWarnings));
+        return parsed(new ProjectCommand(launch, testCommand, manifest, debug,
+                Optional.ofNullable(targetName), project, target, denyWarnings, noWarnings));
     }
 
     private static ParseResult parseLspCommand(final String[] args) {
@@ -218,16 +225,23 @@ final class CliParser {
     }
 
     private static Optional<String> projectPathError(final ProjectManifest project) {
+        for (final var testRoot : project.testRoots()) {
+            if (!Files.exists(testRoot)) continue;
+            final var directoryError = readableDirectoryError(testRoot, "Project test root");
+            if (directoryError.isPresent()) return directoryError;
+        }
         for (final var sourceRoot : project.sourceRoots()) {
             final var directoryError = readableDirectoryError(sourceRoot, "Project source root");
             if (directoryError.isPresent()) return directoryError;
         }
         for (final var target : project.effectiveTargets()) {
-            final var entryDescription = target.implicit()
-                    ? "Project entry source"
-                    : "Project target '" + target.name() + "' entry source";
-            final var entryError = readableFileError(target.entry(), entryDescription);
-            if (entryError.isPresent()) return entryError;
+            if (target.entry() != null) {
+                final var entryDescription = target.implicit()
+                        ? "Project entry source"
+                        : "Project target '" + target.name() + "' entry source";
+                final var entryError = readableFileError(target.entry(), entryDescription);
+                if (entryError.isPresent()) return entryError;
+            }
             final var outputDescription = target.implicit()
                     ? "Project output"
                     : "Project target '" + target.name() + "' output";
@@ -552,7 +566,8 @@ final class CliParser {
         public boolean debug() { return false; }
     }
 
-    record ProjectCommand(boolean launch, Path manifest, boolean debug, Optional<String> targetName,
+    record ProjectCommand(boolean launch, boolean testCommand, Path manifest, boolean debug,
+                          Optional<String> targetName,
                           ProjectManifest project, ProjectManifest.ProjectTarget target,
                           Boolean denyWarningsOverride, boolean noWarnings) implements Invocation {
         ProjectCommand {

@@ -246,6 +246,90 @@ public final class ClassContractTest {
     }
 
     @Test
+    public void staticFunctionsImplementInstanceTypeclassRequirements() throws Exception {
+        final var programName = "StaticInstanceRequirement" + UUID.randomUUID().toString()
+                .replace("-", "");
+        final var source = """
+                contract Factory<T> {
+                    create(value: Int): T;
+                }
+                class Box is Factory<Box> {
+                    public property value: Int;
+                    public constructor new;
+                    public static fn create(value: Int): Box = Box.new(value);
+                }
+                fn make<T: Factory<T>>(value: Int): T = T.create(value);
+                fn run(): Int = make<Box>(7).value;
+                """;
+        final var program = new CompilationService(parse(source), programName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            program.resolve();
+            program.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(7, loader.loadClass(programName)
+                        .getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void namedConstructorsImplementInstanceTypeclassRequirements() throws Exception {
+        final var programName = "ConstructorInstanceRequirement" + UUID.randomUUID().toString()
+                .replace("-", "");
+        final var source = """
+                contract Factory<T> {
+                    create(value: Int): T;
+                }
+                class Box is Factory<Box> {
+                    public property value: Int;
+                    public constructor new;
+                    public constructor create(value: Int) = Box.new(value);
+                }
+                fn make<T: Factory<T>>(value: Int): T = T.create(value);
+                fn run(): Int = make<Box>(7).value;
+                """;
+        final var program = new CompilationService(parse(source), programName);
+
+        try {
+            deleteTree(Path.of("dist"));
+            program.resolve();
+            program.compile();
+            try (final var loader = new URLClassLoader(
+                    new java.net.URL[]{Path.of("dist").toUri().toURL()}, getClass().getClassLoader())) {
+                assertEquals(7, loader.loadClass(programName)
+                        .getMethod("run").invoke(null));
+            }
+        } finally {
+            deleteTree(Path.of("dist"));
+        }
+    }
+
+    @Test
+    public void inheritedConformanceDiagnosticsReportTheClassContractClause() {
+        final var source = """
+                contract Inner {
+                    value(): Int;
+                }
+                contract Outer requires Inner {}
+                class Box is Outer {
+                }
+                """;
+        final var result = new ResolutionService().resolveWithDiagnostics(parse(source));
+        final var diagnostic = result.errors().stream()
+                .filter(error -> error.message().contains("requires 'value"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(5, diagnostic.primarySpan().start().line());
+        assertEquals(source.lines().toList().get(4).indexOf("Outer") + 1,
+                (int) diagnostic.primarySpan().start().column());
+    }
+
+    @Test
     public void genericClassStaticRequirementsCanUseFirstOrderImplementationBlocks() {
         final var result = new ResolutionService().resolveWithDiagnostics(parse("""
                 contract StaticFactory {

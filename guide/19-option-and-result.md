@@ -111,14 +111,16 @@ The trailing `match` produces `Option<Int>`, so the last bind uses `flatMap` rat
 another `Option` layer with `yield`. The same applies to `IO<Unit>` and any other constructor with a
 `Monad` implementation.
 
-A plain `let name = expression` clause computes a local for the clauses that follow it. It must
-appear after the first bind:
+A plain `let name = expression` clause computes a local for the clauses that follow it. It may
+appear before or after the first bind; a binding before the first bind is evaluated before the
+first monadic step:
 
 ```zeron
 fn labelled(): Option<String> = do {
+    let prefix = "value: ";
     let value <- Option.Some(21);
     let doubled = value * 2;
-    yield "value: " + doubled.toString();
+    yield prefix + doubled.toString();
 };
 ```
 
@@ -131,6 +133,22 @@ and `Result` binds must agree on `E`; adapt a single expression with `mapError` 
 differs. Write `do<Option<_>>` or `do<Result<_, E>>` to state the constructor explicitly; the
 declared constructor must match the chain's inferred one. Because the constructor is not chosen
 from the surrounding expected type, an empty or ambiguous chain is an error rather than a guess.
+
+A block with no binds has nothing to infer its constructor from, so it must declare one. Such a
+block lifts unit with the constructor's `pure` and maps its remaining clauses over the result, using
+`flatMap` instead when the last clause is already monadic:
+
+```zeron
+fn scaled(): Option<Int> = do<Option<_>> {
+    let base = 4;
+    let doubled = base * 2;
+    yield doubled + 1;
+};
+```
+
+The declared constructor also fixes any argument the witness leaves open, such as the error type in
+`do<Result<_, String>>`. The `pure` step is a type-level contract call, so `Option.pure(5)` and
+`Result<Int, String>.pure(5)` work anywhere the constructor's `Applicative` evidence is active.
 
 There are no `do` guards and no `collect` clause: put an `if` expression in a bind when a step is
 conditional, and use a [for-expression](16-for-expressions.md) when you want to collect values.

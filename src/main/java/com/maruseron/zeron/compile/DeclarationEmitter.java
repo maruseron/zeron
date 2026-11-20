@@ -3,6 +3,7 @@ package com.maruseron.zeron.compile;
 import com.maruseron.zeron.ast.*;
 import com.maruseron.zeron.domain.*;
 import com.maruseron.zeron.scan.Token;
+import com.maruseron.zeron.scan.TokenType;
 
 import java.lang.classfile.*;
 import java.lang.classfile.attribute.SignatureAttribute;
@@ -147,7 +148,8 @@ final class DeclarationEmitter {
                                     methodBuilder.withCode(BytecodeEmitter::emitEvidenceUnavailable);
                                 });
                     }
-                    emitDefaultArgumentWrappers(context, classBuilder, function, functionType);
+                    emitDefaultArgumentWrappers(context, classBuilder, function, functionType,
+                            witnessSlots.size(), reifiedSlots.size());
                     if (sourceFunction != null) {
                         generateHktImplementationBridge(context, classBuilder,
                                 ClassDesc.of(context.currentHolderName), sourceFunction,
@@ -221,9 +223,16 @@ final class DeclarationEmitter {
                     final var evidenceFields = BytecodeEmitter.evidenceFields(
                             context, functionType.typeParameters(), "lambda",
                             context.lambdaPlan.lambdaMethodName(lambda));
+                    final var template = context.lambdaPlan.lambdaTemplateFactoryName(lambda) != null;
+                    if (template) {
+                        implementationParameters.addAll(Collections.nCopies(evidenceFields.size(),
+                                TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
+                    }
                     implementationParameters.addAll(functionType.invocationParameters());
-                    implementationParameters.addAll(Collections.nCopies(evidenceFields.size(),
-                            TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
+                    if (!template) {
+                        implementationParameters.addAll(Collections.nCopies(evidenceFields.size(),
+                                TypeDescriptor.ofName("java.lang.invoke.MethodHandle")));
+                    }
                     implementationParameters.addAll(Collections.nCopies(
                             functionType.hiddenDescriptorCount(),
                             RuntimeTypeDescriptorEmitter.DESCRIPTOR_TYPE));
@@ -324,7 +333,8 @@ final class DeclarationEmitter {
         generateHktImplementationBridge(context, classBuilder,
                 ClassDesc.of(context.metadata.functionOwner(function)), function,
                 context.metadata.hktBridgeSignature(function));
-        emitDefaultArgumentWrappers(context, classBuilder, function, typeDescriptor);
+        emitDefaultArgumentWrappers(context, classBuilder, function, typeDescriptor,
+                witnessSlots.size(), reifiedSlots.size());
     }
 
     static void emitFunctionAdapters(final CompilationContext context, final ClassBuilder classBuilder) {
@@ -336,12 +346,16 @@ final class DeclarationEmitter {
             final var parameters = new ArrayList<TypeDescriptor>();
             parameters.add(sourceType);
             parameters.addAll(targetType.invocationParameters());
+            final var witnessCount = BytecodeEmitter.witnessSlots(context, sourceType).size();
+            final var reifiedCount = BytecodeEmitter.reifiedSlots(sourceType).size();
+            final var adapterDescriptor = BytecodeEmitter.withHiddenParameters(
+                    toJavaMethodDescriptor(targetType, parameters), witnessCount, reifiedCount);
             classBuilder.withMethodBody(
                     adapter.name(),
-                    toJavaMethodDescriptor(targetType, parameters),
+                    adapterDescriptor,
                     ClassFile.ACC_PUBLIC | ClassFile.ACC_STATIC | ClassFile.ACC_SYNTHETIC,
                     composer -> LambdaSupportEmitter.emitFunctionAdapterImplementation(
-                            context, composer, sourceType, targetType));
+                            context, composer, sourceType, targetType, witnessCount, reifiedCount));
         }
     }
 
@@ -402,7 +416,9 @@ final class DeclarationEmitter {
     private static void emitDefaultArgumentWrappers(final CompilationContext context,
                                                     final ClassBuilder classBuilder,
                                                     final Stmt.FunctionDeclaration function,
-                                                    final FunctionDescriptor functionType) {
+                                                    final FunctionDescriptor functionType,
+                                                    final int witnessCount,
+                                                    final int reifiedCount) {
         if (function.defaultValues().isEmpty()) return;
         final var qualifiedName = context.resolution.functionName(function.name());
         final var owner = context.metadata.functionOwner(qualifiedName);
@@ -416,7 +432,15 @@ final class DeclarationEmitter {
                     functionType.returnType(), functionType.parameters().subList(0, suppliedArity)
                             .toArray(TypeDescriptor[]::new));
             final var runtimeWrapper = (FunctionDescriptor) TypeSubstitution.erase(wrapperType);
-            classBuilder.withMethod(function.name().lexeme(), toJavaMethodDescriptor(runtimeWrapper),
+            final var wrapperDescriptor = BytecodeEmitter.withReifiedParameters(
+                    BytecodeEmitter.withEvidenceParameters(
+                            toJavaMethodDescriptor(runtimeWrapper), witnessCount), reifiedCount);
+            final var hiddenStart = java.util.stream.IntStream.range(0, suppliedArity)
+                    .map(index -> TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(
+                            TypeSubstitution.erase(functionType.parameters().get(index)))
+                            .descriptorString()).slotSize())
+                    .sum();
+            classBuilder.withMethod(function.name().lexeme(), wrapperDescriptor,
                     flags, methodBuilder -> methodBuilder.withCode(code -> {
                         final var previousOffset = context.localSlotOffset;
                         final var previousReturnType = context.currentReturnType;
@@ -429,6 +453,14 @@ final class DeclarationEmitter {
                                 context.symbols.declareSymbol(function, parameter,
                                         functionType.parameters().get(i), BindingMutability.IMMUTABLE);
                                 context.symbols.define(parameter);
+                            }
+                            for (var hidden = 0; hidden < witnessCount + reifiedCount; hidden++) {
+                                final var hiddenParameter = new Token(TokenType.IDENTIFIER,
+                                        "$hidden$" + hidden, null, function.name().span());
+                                context.symbols.declareSymbol(function, hiddenParameter,
+                                        TypeDescriptor.ofName("java.lang.invoke.MethodHandle"),
+                                        BindingMutability.IMMUTABLE);
+                                context.symbols.define(hiddenParameter);
                             }
                             for (int i = suppliedArity; i < fixedArity; i++) {
                                 emitExpr(context, code, function.defaultValues().get(i - function.minimumArity()));
@@ -461,8 +493,16 @@ final class DeclarationEmitter {
                                 emitConversion(context, code, context.lastEmittedType,
                                         parameterType);
                             }
+                            for (var hidden = 0; hidden < witnessCount + reifiedCount; hidden++) {
+                                code.loadLocal(TypeKind.REFERENCE, hiddenStart + hidden);
+                            }
+                            final var implementationDescriptor = BytecodeEmitter.withReifiedParameters(
+                                    BytecodeEmitter.withEvidenceParameters(
+                                            toJavaMethodDescriptor((FunctionDescriptor)
+                                                    TypeSubstitution.erase(functionType)), witnessCount),
+                                    reifiedCount);
                             code.invokestatic(ClassDesc.of(owner), function.name().lexeme(),
-                                    toJavaMethodDescriptor((FunctionDescriptor) TypeSubstitution.erase(functionType)));
+                                    implementationDescriptor);
                             code.return_(TypeKind.fromDescriptor(TypeDescriptor.toJavaClassDesc(
                                     TypeSubstitution.erase(functionType.returnType())).descriptorString()));
                         } finally {

@@ -597,7 +597,7 @@ final class ExpressionFlowResolver {
                         || !(reference.baseType() instanceof ArrayDescriptor
                             || reference.baseType() instanceof ByteArrayDescriptor)) {
                     Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.MUTATION_NOT_PERMITTED,
-                            SYNTHETIC_IDENTIFIER,
+                            assignment.operator,
                             "Array slot assignment requires a mutable &Array<T> view."));
                     yield TypeDescriptor.ofUnit();
                 }
@@ -744,6 +744,10 @@ final class ExpressionFlowResolver {
                 if (isNumericOperator(binary.operator.type())
                         && !isBuiltInArithmeticType(leftType)
                         && !(leftType instanceof InferDescriptor)) {
+                    if (TypeSubstitution.containsTypeParameter(leftType)
+                            && binary.right instanceof Expr.Literal) {
+                        resolveExpectedExpression(context, binary.right, leftType);
+                    }
                     final var contractName = binary.operator.type() == TokenType.SLASH
                             ? "zeron.numeric.Fractional" : "zeron.numeric.Numeric";
                     final var methodName = switch (binary.operator.type()) {
@@ -873,6 +877,18 @@ final class ExpressionFlowResolver {
                 final var resolvedType = resolve(context, grouping.expression);
                 grouping.setType(resolvedType);
                 yield resolvedType;
+            }
+            case Expr.Spread spread -> resolve(context, spread.expression);
+            case Expr.ValueBlock block -> {
+                context.symbols.beginScope();
+                try {
+                    context.statementResolver.resolveStatements(block.statements);
+                    final var resolvedType = resolve(context, block.value);
+                    block.setType(resolvedType);
+                    yield resolvedType;
+                } finally {
+                    context.symbols.endScope();
+                }
             }
             case Expr.If iff -> {
                 yield resolveIfExpression(context, iff, null);

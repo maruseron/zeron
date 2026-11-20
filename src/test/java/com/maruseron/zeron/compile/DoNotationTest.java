@@ -134,6 +134,118 @@ public final class DoNotationTest {
     }
 
     @Test
+    public void leadingLocalBindingsRunBeforeTheFirstBind() throws Exception {
+        final var packageName = "doLeading" + suffix();
+        final var source = """
+                package %s;
+
+                fn total(): Option<Int> = do {
+                    let base = 3;
+                    let prefix = base * 2;
+                    let found <- Option.Some(prefix + 1);
+                    yield found + base;
+                };
+
+                fn value(): Int = match (total()) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+
+                fn inferred(): Int = match (do {
+                    let base = 2;
+                    let found <- Option.Some(4);
+                    yield base + found;
+                }) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+                """.formatted(packageName);
+        try (final var loader = compile(packageName, source)) {
+            final var main = loader.loadClass(packageName + ".Main");
+            assertEquals(10, main.getMethod("value").invoke(null));
+            assertEquals(6, main.getMethod("inferred").invoke(null));
+        }
+    }
+
+    @Test
+    public void bindFreeBlocksLiftUnitAndMapTheirLeadingBindings() throws Exception {
+        final var packageName = "doBindFree" + suffix();
+        final var source = """
+                package %s;
+
+                fn plain(): Option<Int> = do<Option<_>> {
+                    let base = 4;
+                    let scaled = base * 2;
+                    yield scaled + 1;
+                };
+
+                fn monadic(): Option<Int> = do<Option<_>> {
+                    if (1 > 0) then Option.Some(5) else Option.None<Int>();
+                };
+
+                fn plainValue(): Int = match (plain()) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+
+                fn monadicValue(): Int = match (monadic()) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+                """.formatted(packageName);
+        try (final var loader = compile(packageName, source)) {
+            final var main = loader.loadClass(packageName + ".Main");
+            assertEquals(9, main.getMethod("plainValue").invoke(null));
+            assertEquals(5, main.getMethod("monadicValue").invoke(null));
+        }
+    }
+
+    @Test
+    public void bindFreeResultBlockBindsTheWitnessErrorType() throws Exception {
+        final var packageName = "doBindFreeResult" + suffix();
+        final var source = """
+                package %s;
+
+                fn ok(): Result<Int, String> = do<Result<_, String>> {
+                    let base = 6;
+                    yield base * 7;
+                };
+
+                fn value(): Int = match (ok()) {
+                    case Result.Ok(found) -> found;
+                    case Result.Err(_) -> -1;
+                };
+                """.formatted(packageName);
+        try (final var loader = compile(packageName, source)) {
+            final var main = loader.loadClass(packageName + ".Main");
+            assertEquals(42, main.getMethod("value").invoke(null));
+        }
+    }
+
+    @Test
+    public void typeLevelContractMethodsDispatchThroughTheConstructorWitness() throws Exception {
+        final var packageName = "doStaticPure" + suffix();
+        final var source = """
+                package %s;
+
+                fn value(): Int = match (Option.pure(5)) {
+                    case Option.Some(found) -> found;
+                    case Option.None() -> -1;
+                };
+
+                fn resultValue(): Int = match (Result<Int, String>.pure(7)) {
+                    case Result.Ok(found) -> found;
+                    case Result.Err(_) -> -1;
+                };
+                """.formatted(packageName);
+        try (final var loader = compile(packageName, source)) {
+            final var main = loader.loadClass(packageName + ".Main");
+            assertEquals(5, main.getMethod("value").invoke(null));
+            assertEquals(7, main.getMethod("resultValue").invoke(null));
+        }
+    }
+
+    @Test
     public void streamChainsLazilyMapEveryElement() throws Exception {
         final var packageName = "doStream" + suffix();
         final var source = """
@@ -223,13 +335,6 @@ public final class DoNotationTest {
                     let value <- Option.Some(1);
                 };
                 """, "must end with a 'yield' clause");
-        assertDiagnostic("""
-                fn hoisted(): Option<Int> = do {
-                    let early = 1;
-                    let value <- Option.Some(early);
-                    yield value;
-                };
-                """, "must follow the first bind clause");
         assertDiagnostic("""
                 fn slot(): Option<Int> = do<Option<Int>> {
                     let value <- Option.Some(1);

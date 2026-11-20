@@ -644,6 +644,31 @@ final class NominalTypeEmitter {
                         }
                         emitClassDefaultArgumentWrappers(context, builder, declaration, classDesc, method, flags);
                     }
+                    for (final var function : declaration.staticFunctions()) {
+                        final var witnessSlots = BytecodeEmitter.witnessSlots(
+                                context, function.typeDescriptor());
+                        final var reifiedSlots = BytecodeEmitter.reifiedSlots(
+                                function.typeDescriptor());
+                        final var functionDescriptor = BytecodeEmitter.withHiddenParameters(
+                                toJavaMethodDescriptor(function.typeDescriptor()),
+                                witnessSlots.size(), reifiedSlots.size());
+                        final var flags = (function.isPublic()
+                                ? ClassFile.ACC_PUBLIC : ClassFile.ACC_PRIVATE)
+                                | ClassFile.ACC_STATIC;
+                        builder.withMethod(function.name().lexeme(), functionDescriptor, flags,
+                                methodBuilder -> {
+                                    final var functionSignature = ClassSignatureEmitter.methodSignature(
+                                            function.typeDescriptor());
+                                    if (functionSignature != null && witnessSlots.isEmpty()
+                                            && reifiedSlots.isEmpty()) {
+                                        methodBuilder.with(SignatureAttribute.of(
+                                                methodBuilder.constantPool().utf8Entry(
+                                                        functionSignature)));
+                                    }
+                                    methodBuilder.withCode(code -> emitClassStaticFunction(
+                                            context, code, function));
+                                });
+                    }
                     for (final var pattern : declaration.patterns()) {
                         emitClassPattern(context, builder, declaration, pattern);
                     }
@@ -1962,6 +1987,34 @@ final class NominalTypeEmitter {
         declareClassEvidenceSlots(context, code, owner, ClassDesc.of(owner.name().lexeme()));
         try {
             StatementEmitter.emitStmts(context, code, method.body());
+            if (context.currentReturnType instanceof UnitDescriptor) {
+                emitUnitValue(context, code);
+                code.areturn();
+            }
+        } finally {
+            endScope(context);
+            context.localSlotOffset = previousOffset;
+            context.currentReturnType = previousReturnType;
+        }
+    }
+
+    private static void emitClassStaticFunction(final CompilationContext context,
+                                                final CodeBuilder code,
+                                                final Stmt.Function function) {
+        final var previousReturnType = context.currentReturnType;
+        final var previousOffset = context.localSlotOffset;
+        context.currentReturnType = function.typeDescriptor().returnType();
+        context.localSlotOffset = 0;
+        beginScope(context);
+        for (int i = 0; i < function.parameters().size(); i++) {
+            final var parameter = function.parameters().get(i);
+            context.symbols.declareSymbol(Resolver.SYNTHETIC_VAR, parameter,
+                    function.typeDescriptor().parameters().get(i), BindingMutability.IMMUTABLE);
+            context.symbols.define(parameter);
+        }
+        declareEvidenceSlots(context, function.typeDescriptor());
+        try {
+            StatementEmitter.emitStmts(context, code, function.body());
             if (context.currentReturnType instanceof UnitDescriptor) {
                 emitUnitValue(context, code);
                 code.areturn();

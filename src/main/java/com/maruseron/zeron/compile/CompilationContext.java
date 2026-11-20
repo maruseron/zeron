@@ -6,6 +6,9 @@ import com.maruseron.zeron.ast.CompilationUnit;
 import com.maruseron.zeron.ast.NamespaceMembers;
 import com.maruseron.zeron.ast.Stmt;
 import com.maruseron.zeron.domain.FunctionBindingRegistry;
+import com.maruseron.zeron.domain.FunctionDescriptor;
+import com.maruseron.zeron.domain.FunctionShapeKey;
+import com.maruseron.zeron.domain.FunctionShapeNames;
 import com.maruseron.zeron.domain.SymbolTable;
 import com.maruseron.zeron.domain.TypeDescriptor;
 import com.maruseron.zeron.domain.ZeronLibraryIndex;
@@ -15,6 +18,7 @@ import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassHierarchyResolver;
 import java.lang.classfile.Label;
 import java.lang.constant.ClassDesc;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -124,6 +128,8 @@ final class CompilationContext {
         }
         sourceTypes.put(ClassDesc.of("zeron.runtime.RaisedEffect"),
                 ClassHierarchyResolver.ClassHierarchyInfo.ofClass(ClassDesc.of("java.lang.RuntimeException")));
+        sourceTypes.put(ClassDesc.of("zeron.lang.Unit"),
+                ClassHierarchyResolver.ClassHierarchyInfo.ofClass(ClassDesc.of("java.lang.Object")));
         final var fallback = ClassHierarchyResolver.defaultResolver();
         return resolver -> {
             final var sourceType = sourceTypes.get(resolver);
@@ -135,6 +141,17 @@ final class CompilationContext {
 
     void registerGeneratedInterface(final String name) {
         generatedTypes.put(ClassDesc.of(name), ClassHierarchyResolver.ClassHierarchyInfo.ofInterface());
+    }
+
+    void ensureFunctionShape(final FunctionShapeKey key, final FunctionDescriptor erasedType) {
+        final var name = FunctionShapeNames.interfaceName(key);
+        if (generatedTypes.containsKey(ClassDesc.of(name))) return;
+        registerGeneratedInterface(name);
+        try {
+            RuntimeSupportEmitter.emitFunctionShape(outputDirectory, key, erasedType);
+        } catch (final IOException failure) {
+            throw new IllegalStateException("Could not emit function shape " + name, failure);
+        }
     }
 
     void refreshResolvedDeclarations() {

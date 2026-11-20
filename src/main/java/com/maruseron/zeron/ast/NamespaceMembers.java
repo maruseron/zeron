@@ -47,7 +47,11 @@ public final class NamespaceMembers {
         final var combinedAnnotations = declaration instanceof Stmt.AnnotatedDeclaration annotated
                 ? annotated.annotations() : annotations;
         members.add(new Member(namespaceName, unwrapped, combinedAnnotations));
-        if (unwrapped instanceof Stmt.Witness witness) {
+        if (unwrapped instanceof Stmt.WitnessBundle bundle) {
+            for (final var member : bundle.members()) {
+                add(members, namespaceName, member, List.of());
+            }
+        } else if (unwrapped instanceof Stmt.Witness witness) {
             for (final var method : witness.methods()) {
                 members.add(new Member(namespaceName, method.implementation()));
             }

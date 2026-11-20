@@ -193,12 +193,88 @@ public class Zeron {
     private static int runProjectCommand(final CliParser.ProjectCommand command) throws IOException {
         final var project = command.project();
         final var target = command.target();
-        final var compilation = runProject(project.sourceRoots(), target.entry(), project.libraryRoots(),
-                project.javaClassPathRoots(), project.standardLibraryMode(),
-                target.outputDirectory());
-        if (compilation == null || !command.launch() || exitCode() != 0) return exitCode();
+        final var testTarget = target.kind() == ProjectManifest.TargetKind.TEST;
+        final var compilation = testTarget
+                ? runTestProject(project.sourceRoots(), project.testRoots(),
+                        project.libraryRoots(), project.javaClassPathRoots(),
+                        project.standardLibraryMode(), target.outputDirectory(), target.displayName())
+                : runProject(project.sourceRoots(), target.entry(), project.libraryRoots(),
+                        project.javaClassPathRoots(), project.standardLibraryMode(),
+                        target.outputDirectory());
+        if (compilation == null || exitCode() != 0) return exitCode();
+        if (!command.launch() && !command.testCommand()) return exitCode();
         return runGeneratedClass(compilation.mainClass(), target.outputDirectory(),
                 compilation.libraryRoots(), project.javaClassPathRoots());
+    }
+
+    private static ProjectCompilation runTestProject(final List<Path> sourceRoots,
+                                                     final List<Path> testRoots,
+                                                     final List<Path> libraryRoots,
+                                                     final List<Path> javaClassPathRoots,
+                                                     final StandardLibraryMode standardLibraryMode,
+                                                     final Path outputDirectory,
+                                                     final String targetName) throws IOException {
+        final var setup = resolveStandardLibrary(standardLibraryMode, libraryRoots);
+        validateJavaClassPathRoots(javaClassPathRoots);
+        final var allRoots = new java.util.ArrayList<Path>();
+        sourceRoots.stream().map(path -> path.toAbsolutePath().normalize()).forEach(allRoots::add);
+        testRoots.stream().map(path -> path.toAbsolutePath().normalize()).forEach(allRoots::add);
+        final var sourceCount = sourceRoots.size();
+        final var sourcePaths = new java.util.TreeSet<Path>();
+        for (var index = 0; index < allRoots.size(); index++) {
+            final var root = allRoots.get(index);
+            if (!Files.isDirectory(root)) continue;
+            try (final var paths = Files.walk(root)) {
+                paths.filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString().endsWith(".zn"))
+                        .filter(path -> !path.toAbsolutePath().normalize()
+                                .startsWith(outputDirectory.toAbsolutePath().normalize()))
+                        .map(path -> path.toAbsolutePath().normalize())
+                        .forEach(sourcePaths::add);
+            }
+        }
+        final var units = new ArrayList<CompilationUnit>();
+        final var testSourcePaths = new java.util.HashSet<String>();
+        for (final var sourcePath : sourcePaths) {
+            final var rootIndex = sourceRootIndex(allRoots, sourcePath);
+            final var root = allRoots.get(rootIndex);
+            final var relativePath = root.relativize(sourcePath);
+            final var relativeDirectory = relativePath.getParent() == null
+                    ? "" : relativePath.getParent().toString().replace('\\', '/').replace('/', '.');
+            final var unitSourcePath = "root" + rootIndex + "/"
+                    + relativePath.toString().replace('\\', '/');
+            final var source = Files.readString(sourcePath);
+            rememberSource(unitSourcePath, source);
+            final var result = Parser.of(Scanner.from(source, unitSourcePath).scanWithDiagnostics())
+                    .parseCompilationUnitWithDiagnostics(unitSourcePath);
+            reportParseDiagnostics(result.diagnostics());
+            final var unit = result.compilationUnit();
+            if (!unit.packageName().equals(relativeDirectory)) {
+                reportParseDiagnostic(new Diagnostic(DiagnosticCatalog.PACKAGE_SOURCE_DIRECTORY_MISMATCH.code(),
+                        Severity.ERROR,
+                        "Package '" + (unit.packageName().isEmpty() ? "<default>" : unit.packageName())
+                        + "' in " + sourcePath + " must match its directory under source root '"
+                        + root + "' (expected '"
+                        + (relativeDirectory.isEmpty() ? "<default>" : relativeDirectory) + "').",
+                        new SourceSpan(unitSourcePath, new SourcePosition(1, 1, 0),
+                                new SourcePosition(1, 1, 0)), List.of(), List.of(), List.of()));
+                continue;
+            }
+            units.add(unit);
+            if (rootIndex >= sourceCount) testSourcePaths.add(unitSourcePath);
+        }
+        if (hadError) return null;
+        final var tests = TestRunner.discover(units, testSourcePaths);
+        final var runnerSource = TestRunner.generate(tests, targetName);
+        final var runner = Parser.of(Scanner.from(runnerSource, "test-runner.zn").scanWithDiagnostics())
+                .parseCompilationUnitWithDiagnostics("test-runner.zn");
+        reportParseDiagnostics(runner.diagnostics());
+        if (hadError) return null;
+        units.addFirst(runner.compilationUnit());
+        final var programName = "zeron.generated.test.TestRunner";
+        runUnits(units, programName, "zeron.generated.test", setup.libraries(),
+                setup.bundleStandardLibrarySources(), javaClassPathRoots, outputDirectory);
+        return new ProjectCompilation(programName, setup.libraryRoots());
     }
 
     private static int exitCode() {

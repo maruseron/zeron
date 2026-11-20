@@ -43,6 +43,8 @@ final class StatementResolver {
                 context.symbols.endScope();
             }
             case Stmt.Using using -> resolveUsing(using);
+            case Stmt.WitnessBundle _ -> {}
+            case Stmt.WitnessSelection selection -> resolveWitnessSelection(selection);
             case Stmt.Break(Token keyword) -> {
                 if (context.frame.resolvingPattern) {
                     Zeron.resolutionError(new ResolutionError(
@@ -96,6 +98,7 @@ final class StatementResolver {
                 }
                 try {
                     LambdaResolver.resolveFunction(context, fn);
+                    IntrinsicDeclarationGuard.check(context, fn);
                 } finally {
                     context.frame.currentClassName = previousClassName;
                     context.frame.currentMethodOwner = previousMethodOwner;
@@ -328,6 +331,19 @@ final class StatementResolver {
                     + resolvedType + " from initializer");
         }
         context.symbols.define(symbolName);
+    }
+
+    private void resolveWitnessSelection(final Stmt.WitnessSelection selection) {
+        final var selected = TypeClassEvidence.selectionNames(context, selection.providers());
+        context.selectedWitnessBundles.push(selected);
+        context.symbols.beginScope();
+        try {
+            resolveStatements(selection.body() instanceof Stmt.Block block
+                    ? block.statements() : List.of(selection.body()));
+        } finally {
+            context.symbols.endScope();
+            context.selectedWitnessBundles.pop();
+        }
     }
 
     private void resolveUsing(final Stmt.Using using) {

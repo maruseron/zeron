@@ -67,7 +67,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0047](./ZEP-0047.md) | Java Type and Array Mapping Semantics | Implemented | Shipped | 0.5.0 |
 | [ZEP-0048](./ZEP-0048.md) | Java Generic Interoperability | Implemented | Shipped | 0.5.0 |
 | [ZEP-0049](./ZEP-0049.md) | Java Exceptions and Typed Effects | Implemented | Shipped | 0.5.0 |
-| [ZEP-0050](./ZEP-0050.md) | Java Host-Access Trust Boundary | Implemented | Candidate | 0.8.0 |
+| [ZEP-0050](./ZEP-0050.md) | Java Host-Access Trust Boundary | Implemented | Shipped | 0.8.0 |
 | [ZEP-0051](./ZEP-0051.md) | Generic Covariance for Zeron | Implemented | Shipped | 0.5.0 |
 | [ZEP-0052](./ZEP-0052.md) | Use-Site Variance and Type Projections | Implemented | Shipped | 0.5.0 |
 | [ZEP-0053](./ZEP-0053.md) | Generic-Aware Runtime Type Tests and Safe Casts | Implemented | Shipped | 0.5.0 |
@@ -80,14 +80,14 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0060](./ZEP-0060.md) | Treating Arrays as Iterable Values | Implemented | Shipped | 0.6.0 |
 | [ZEP-0061](./ZEP-0061.md) | Java and External Interop Language Support | Implemented | Shipped | 0.6.0 |
 | [ZEP-0062](./ZEP-0062.md) | Mutable-Type Admissibility for Generic Parameters | Superseded | Shipped | 0.5.0 |
-| [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Implemented | Candidate | 0.8.0 |
-| [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Implemented | Candidate | 0.8.0 |
+| [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Implemented | Shipped | 0.8.0 |
+| [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Implemented | Shipped | 0.8.0 |
 | [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Implemented | Shipped | 0.6.0 |
 | [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Draft | Unscheduled | — |
 | [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Unscheduled | — |
 | [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Implemented | Shipped | 0.6.0 |
 | [ZEP-0069](./ZEP-0069.md) | Transparent Data Classes | Implemented | Shipped | 0.6.0 |
-| [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Implemented | Candidate | 0.8.0 |
+| [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Implemented | Shipped | 0.8.0 |
 | [ZEP-0071](./ZEP-0071.md) | Numeric Hierarchy and Context-Directed Literals | Implemented | Shipped | 0.6.0 |
 | [ZEP-0072](./ZEP-0072.md) | Class-Scoped Static Functions as Companion Namespace Members | Implemented | Shipped | 0.7.0 |
 | [ZEP-0073](./ZEP-0073.md) | Documentation Comments for Declarations | Implemented | Shipped | 0.6.0 |
@@ -115,7 +115,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0095](./ZEP-0095.md) | Bytecode Quality and Evidence Inlining | Draft | Unscheduled | — |
 | [ZEP-0096](./ZEP-0096.md) | Primitive Specialization for Generic Code | Draft | Unscheduled | — |
 | [ZEP-0097](./ZEP-0097.md) | Annotation Target for Model Mapping Clauses | Accepted | Candidate | 0.10.0 |
-| [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Candidate | 0.8.0 |
+| [ZEP-0098](./ZEP-0098.md) | Annotation Targets for Native Products, Sums, and Newtypes | Implemented | Shipped | 0.8.0 |
 | [ZEP-0099](./ZEP-0099.md) | Row-Polymorphic Derived Witnesses and Inclusion Matching | Draft | Unscheduled | — |
 | [ZEP-0100](./ZEP-0100.md) | Callable References for Methods, Constructors, and Static Functions | Implemented | Shipped | 0.7.0 |
 | [ZEP-0101](./ZEP-0101.md) | Field Representation Adapters for Model Mappings | Draft | Unscheduled | — |
@@ -130,31 +130,31 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0110](./ZEP-0110.md) | Block-Bodied Handler Expressions | Superseded | Unscheduled | — |
 | [ZEP-0111](./ZEP-0111.md) | Witness-Dispatched Do-Notation | Implemented | Shipped | 0.7.0 |
 | [ZEP-0112](./ZEP-0112.md) | Structured Concurrency on Virtual Threads | Draft | Unscheduled | — |
-| [ZEP-0113](./ZEP-0113.md) | Declaration-Site Covariance for Sum and Product Types | Implemented | Candidate | 0.8.0 |
+| [ZEP-0113](./ZEP-0113.md) | Declaration-Site Covariance for Sum and Product Types | Implemented | Shipped | 0.8.0 |
 | [ZEP-0114](./ZEP-0114.md) | Named Witness Declarations, Default Witnesses, and Explicit Witness Imports | Implemented | Shipped | 0.7.0 |
 | [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Shipped | 0.7.0 |
 | [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Shipped | 0.7.0 |
-| [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Candidate | 0.8.0 |
+| [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Shipped | 0.8.0 |
 | [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Draft | Unscheduled | — |
 | [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Unscheduled | — |
 | [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Unscheduled | — |
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Deferred | — |
 | [ZEP-0122](./ZEP-0122.md) | Runtime Applied-Type Match Patterns | Implemented | Shipped | 0.7.0 |
 | [ZEP-0123](./ZEP-0123.md) | Admissibility Clauses and Explicit Effect Responses | Draft | Unscheduled | — |
-| [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Implemented | Candidate | 0.8.0 |
-| [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Implemented | Candidate | 0.8.0 |
-| [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Implemented | Candidate | 0.8.0 |
-| [ZEP-0127](./ZEP-0127.md) | Data Class Component Access and Positional Destructuring | Implemented | Candidate | 0.8.0 |
-| [ZEP-0128](./ZEP-0128.md) | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented | Candidate | 0.8.0 |
-| [ZEP-0129](./ZEP-0129.md) | Unary Products versus Arbitrary-Valued Newtypes | Implemented | Candidate | 0.8.0 |
-| [ZEP-0130](./ZEP-0130.md) | Standard-Library-Owned Intrinsic Declarations | Implemented | Candidate | 0.8.0 |
-| [ZEP-0131](./ZEP-0131.md) | Chained Flow Refinement and Implicit Receiver Access | Implemented | Candidate | 0.8.0 |
-| [ZEP-0132](./ZEP-0132.md) | Nullable Safe-Cast Correction | Implemented | Candidate | 0.8.0 |
-| [ZEP-0133](./ZEP-0133.md) | Operator-Constraint Inference for Typeless Lambdas | Accepted | Candidate | 0.8.0 |
-| [ZEP-0134](./ZEP-0134.md) | Invocation of Function-Valued Expressions | Implemented | Candidate | 0.8.0 |
-| [ZEP-0135](./ZEP-0135.md) | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Candidate | 0.8.0 |
-| [ZEP-0136](./ZEP-0136.md) | Witness Bundles and Coherent Prerequisite Evidence | Implemented | Candidate | 0.8.0 |
-| [ZEP-0137](./ZEP-0137.md) | Explicit Witness Selection and Witness Contexts | Implemented | Candidate | 0.8.0 |
+| [ZEP-0124](./ZEP-0124.md) | Nominal Static Contract Implementation | Implemented | Shipped | 0.8.0 |
+| [ZEP-0125](./ZEP-0125.md) | Optional Higher-Kinded Implementation Blocks | Implemented | Shipped | 0.8.0 |
+| [ZEP-0126](./ZEP-0126.md) | Compiler-Owned Main Entry-Point Contract | Implemented | Shipped | 0.8.0 |
+| [ZEP-0127](./ZEP-0127.md) | Data Class Component Access and Positional Destructuring | Implemented | Shipped | 0.8.0 |
+| [ZEP-0128](./ZEP-0128.md) | Sum-Type Parameter Bounds and Case-Local Type Parameters | Implemented | Shipped | 0.8.0 |
+| [ZEP-0129](./ZEP-0129.md) | Unary Products versus Arbitrary-Valued Newtypes | Implemented | Shipped | 0.8.0 |
+| [ZEP-0130](./ZEP-0130.md) | Standard-Library-Owned Intrinsic Declarations | Implemented | Shipped | 0.8.0 |
+| [ZEP-0131](./ZEP-0131.md) | Chained Flow Refinement and Implicit Receiver Access | Implemented | Shipped | 0.8.0 |
+| [ZEP-0132](./ZEP-0132.md) | Nullable Safe-Cast Correction | Implemented | Shipped | 0.8.0 |
+| [ZEP-0133](./ZEP-0133.md) | Operator-Constraint Inference for Typeless Lambdas | Accepted | Shipped | 0.8.0 |
+| [ZEP-0134](./ZEP-0134.md) | Invocation of Function-Valued Expressions | Implemented | Shipped | 0.8.0 |
+| [ZEP-0135](./ZEP-0135.md) | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Shipped | 0.8.0 |
+| [ZEP-0136](./ZEP-0136.md) | Witness Bundles and Coherent Prerequisite Evidence | Implemented | Shipped | 0.8.0 |
+| [ZEP-0137](./ZEP-0137.md) | Explicit Witness Selection and Witness Contexts | Implemented | Shipped | 0.8.0 |
 | [ZEP-0138](./ZEP-0138.md) | Predicate and Fact IR for Static Verification | Draft | Unscheduled | - |
 | [ZEP-0139](./ZEP-0139.md) | Checked Construction for Guarded Newtypes | Draft | Unscheduled | - |
 | [ZEP-0140](./ZEP-0140.md) | Comparison and Refined-Type Flow Facts | Draft | Unscheduled | - |
@@ -163,12 +163,12 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0143](./ZEP-0143.md) | IntRange Bounds and Loop Facts | Draft | Unscheduled | - |
 | [ZEP-0144](./ZEP-0144.md) | Parameter Type Refinement and Call-Site Preconditions | Draft | Unscheduled | - |
 | [ZEP-0145](./ZEP-0145.md) | Unified Namespace and Extension Container | Draft | Unscheduled | - |
-| [ZEP-0146](./ZEP-0146.md) | Value-Producing Block Expressions | Implemented | Candidate | 0.8.0 |
+| [ZEP-0146](./ZEP-0146.md) | Value-Producing Block Expressions | Implemented | Shipped | 0.8.0 |
 | [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Draft | Candidate | 0.9.0 |
-| [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Implemented | Candidate | 0.8.0 |
+| [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Implemented | Shipped | 0.8.0 |
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
-| [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Candidate | 0.8.0 |
-| [ZEP-0151](./ZEP-0151.md) | Spread Arguments for Variadic Parameters | Implemented | Candidate | 0.8.0 |
+| [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Shipped | 0.8.0 |
+| [ZEP-0151](./ZEP-0151.md) | Spread Arguments for Variadic Parameters | Implemented | Shipped | 0.8.0 |
 
 ## Release bundles
 
@@ -182,7 +182,7 @@ sequencing.
 | --- | --- | --- | --- |
 | `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
-| `0.8.0` | Normalization and nominal implementation | Proposed; 25 candidates | ZEP-0050, ZEP-0063, ZEP-0064, ZEP-0070, ZEP-0098, ZEP-0113, ZEP-0117, ZEP-0124–ZEP-0137, ZEP-0146, ZEP-0148, ZEP-0150, ZEP-0151; ZEP-0132 is the immediate corrective |
+| `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
 | `0.9.0` | Effect control and response typing | Proposed; 1 candidate | ZEP-0118 and ZEP-0147 headline the bundle |
 | `0.10.0` | Model system completion and annotation metadata | Proposed; 2 candidates | ZEP-0091 and ZEP-0097; ZEP-0101–ZEP-0103 require acceptance before candidacy |
 
@@ -211,8 +211,8 @@ and is likewise outside the bundle. The bundle shipped on 2026-11-14; its rows a
 
 ### `0.8.0` — normalization and nominal implementation
 
-The bundle targets smaller normalization and smoothing work rather than new control-flow semantics.
-Its twenty-five candidates are:
+The bundle targeted smaller normalization and smoothing work rather than new control-flow semantics.
+It shipped on 2026-11-20 with these twenty-five rows:
 
 - [ZEP-0050](./ZEP-0050.md) — Java host-access trust boundary. Direct Java host access becomes an
   explicit `unsafe` boundary; curated facades remain the trusted, compiler-validated tier; checked
@@ -320,35 +320,15 @@ lookup, external contracts for Java interfaces, external enums, JPMS, binding ex
 conformance. It is unscheduled, so none of it ships with `0.8.0` by implication. The bundle does not
 change `raise` or `handle` typing.
 
-These twenty-five are the current target; ZEP-0151 is the last proposed addition before the
-candidate list is frozen. The acceptance queue remains open. ZEP-0098 and ZEP-0113 were accepted and
-implemented on 2026-11-16; ZEP-0146 and ZEP-0151 were accepted and implemented on 2026-11-20 and are
-`Implemented` / `Candidate`. ZEP-0135 was accepted,
-implemented, and added as a candidate for the same bundle; ZEP-0136 and ZEP-0137 were accepted and
-added on 2026-11-15. ZEP-0050 and ZEP-0148 were accepted on 2026-11-17 and added as candidates for
-the bundle; both are now `Implemented` / `Candidate`. ZEP-0148 was implemented on 2026-11-18.
-
-The `0.8.0` acceptance queue remains open for further normalization items. ZEP-0126, ZEP-0127,
-ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135, ZEP-0128, ZEP-0127, ZEP-0070, ZEP-0131,
-ZEP-0132, and ZEP-0134 are now `Implemented` / `Candidate`, while the others are `Accepted` /
-`Candidate`.
-ZEP-0070 was promoted from the backlog. ZEP-0134 and ZEP-0146 were added directly as `Draft` /
-`Candidate` rows for `0.8.0`; ZEP-0134 was accepted and implemented on 2026-11-18, and ZEP-0146
-followed on 2026-11-20. ZEP-0136 and ZEP-0137 were
-accepted on 2026-11-15 and are `Accepted` / `Candidate`. ZEP-0050 owns the implemented `unsafe`
-host-access boundary and ZEP-0148 implements Java SAM conversion; together they replace the original
-interop umbrella's `0.8.0` slice. ZEP-0149 holds the remaining interop inventory, including external
-contracts for Java interfaces and external enums, and is `Draft` / `Unscheduled`, so it does not
-count in the bundle above.
-
-ZEP-0130 was implemented on 2026-11-17 and is `Implemented` / `Candidate`. ZEP-0132 and ZEP-0134
-were implemented on 2026-11-18 and are `Implemented` / `Candidate`. ZEP-0150 was accepted and
-implemented on 2026-11-18 as the safe-invocation companion to ZEP-0134 and is `Implemented` /
-`Candidate`. ZEP-0063 was accepted for `0.8.0` on 2026-11-19 as the testing and tooling companion
-to ZEP-0064 and ZEP-0117 and is `Accepted` / `Candidate`; the testing APIs are not implemented yet.
-The `String` inventory is
-declared in standard-library source, multi-value results are `Stream<String>`, `StringJoiner` owns
-joining, and `Stream.collectWith` is the general terminal operation behind it, over collectors the
+All twenty-five rows shipped in `0.8.0` on 2026-11-20; the acceptance queue is closed.
+ZEP-0098 and ZEP-0113 were accepted and implemented on 2026-11-16, and ZEP-0146 and ZEP-0151
+were accepted and implemented on 2026-11-20. ZEP-0134 and ZEP-0146 began as `Draft` /
+`Candidate` rows and were completed before the release. ZEP-0133 still reads `Accepted` in
+proposal status even though its operator-constraint inference shipped; review that status
+separately. ZEP-0149 holds the remaining interop inventory and stays `Draft` / `Unscheduled`,
+so it is not part of the bundle. The `String` inventory is declared in standard-library
+source, multi-value results are `Stream<String>`, `StringJoiner` owns joining, and
+`Stream.collectWith` is the general terminal operation behind it, over collectors the
 `Collector` namespace provides. No intrinsic ID was added.
 
 ### `0.9.0` — effect control and response typing

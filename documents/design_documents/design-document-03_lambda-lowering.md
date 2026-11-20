@@ -158,11 +158,10 @@ Remaining rank-2 work is separate from the hidden-slot ABI:
   still unsupported.
 
 This is an initial, intentionally constrained generalization rule. Reassignable bindings, nested
-polymorphic schemes, and explicit `forall` are not generalized. The current implementation leaves
-operator-constrained lambdas monomorphic and does not infer their `Numeric<T>`, `Fractional<T>`, or
-`Comparable<T>` bounds. [ZEP-0133](../zeps/ZEP-0133.md) is accepted for `0.8.0` and extends this same rank-1,
-direct immutable-`let` path with numeric and comparison operator-constraint inference; implementation
-is pending.
+polymorphic schemes, and explicit `forall` are not generalized. The current implementation infers
+`Numeric<T>`, `Fractional<T>`, or `Comparable<T>` bounds for eligible direct immutable-`let`
+lambdas. [ZEP-0133](../zeps/ZEP-0133.md) shipped that extension of this same rank-1, direct
+immutable-`let` path in `0.8.0`.
 
 ### Multi-parameter lambda syntax
 

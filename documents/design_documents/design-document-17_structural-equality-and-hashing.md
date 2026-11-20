@@ -144,8 +144,8 @@ and `GT`. The operators preserve their conventional meanings: `<` accepts only `
 
 Integer and floating-point relational comparisons continue to use their existing built-in lowering.
 Other operands require applicable `Comparable<T>` evidence, including an explicit
-`Comparable<T>` bound in generic code. [ZEP-0133](../zeps/ZEP-0133.md), accepted for `0.8.0` and
-pending implementation, may infer that bound into an eligible typeless `let`-bound lambda. Operands
+`Comparable<T>` bound in generic code. [ZEP-0133](../zeps/ZEP-0133.md), shipped in `0.8.0`, infers
+that bound into an eligible typeless `let`-bound lambda. Operands
 must have the same non-null applied type. This contract is separate from `Eq<T>`: ordering does not
 imply equality, and `==` does not imply an ordering.
 

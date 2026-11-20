@@ -112,8 +112,8 @@ immutable `let` initializers: infer applied-contract bounds from direct member u
 bounds of generic callees, then quantify only type variables absent from the captured environment.
 Raised effects remain fixed in the function signature. Mutable bindings, nested schemes, and
 arbitrary lambda-valued expressions remain outside that rule. Operator constraints were originally
-outside it as well; [ZEP-0133](../zeps/ZEP-0133.md) is accepted for `0.8.0` and extends the same
-rank-1 path with inferred numeric and comparison operator bounds, pending implementation.
+outside it as well; [ZEP-0133](../zeps/ZEP-0133.md) shipped in `0.8.0` and extends the same rank-1
+path with inferred numeric and comparison operator bounds.
 
 At a direct generic call, the resolver seeds substitutions from explicit type arguments, if given,
 then resolves non-lambda arguments and structurally matches their types against the generic

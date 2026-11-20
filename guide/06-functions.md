@@ -112,6 +112,21 @@ array containing those arguments, so the function can use array operations such 
 A variadic parameter must be the last parameter, and a function can have only one. It can follow
 ordinary parameters, including ones with defaults.
 
+When the values are already in an array or another collection, spread them into the variadic tail
+with `...` instead of listing them one by one:
+
+```zeron
+let numbers = [4, 7, 9];
+let all = count(...numbers);
+let mixed = count(1, ...[2, 3]);
+```
+
+The spread must be the final argument, and a call may contain only one. An array passes through as
+the packed array the function already receives, without a copy; any other `Iterable` is expanded
+through the normal iteration protocol and packed first. The operand is evaluated once, and a
+nullable operand is rejected, so check it for null before spreading. A parameter that is not
+variadic cannot receive a spread.
+
 This chapter uses top-level functions. A function can also be declared as part of a class, where it
 works with an instance; those are called methods and are covered in
 [classes and constructors](09-classes-and-constructors.md). Functions can later be passed as

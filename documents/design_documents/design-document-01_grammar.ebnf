@@ -379,7 +379,10 @@ functionValueReference = IDENTIFIER, "::", typeArguments ;
 propertyReference = qualifiedName, [ typeArguments ], "::", IDENTIFIER ;
 genericClassFactoryCall = IDENTIFIER, [ typeArguments ], ".", IDENTIFIER,
                           [ typeArguments ], arguments ;
-arguments = "(", [ expression, { ",", expression } ], ")" ;
+(* [NEW] ZEP-0151: `...` marks the variadic tail. At most one spread is allowed, it must be the
+   final argument, and the target parameter must be variadic. *)
+arguments = "(", [ argument, { ",", argument } ], ")" ;
+argument = [ "..." ], expression ;
 typeArguments = "<", typeArgument, { ",", typeArgument }, ">" ;
 
 (* [CHANGED] ZEP-0086: an explicit type argument for an effect-row parameter is written as a set
@@ -437,6 +440,7 @@ primary = INT
         | handleExpr
         | handlerLiteral
         | arrayLiteral
+        | valueBlock
         | lambda
         | qualifiedName, ".", "this"
         | "true"
@@ -457,6 +461,11 @@ handlerBody = "{", handleArm, { handleArm }, "}" ;
 handleArm = "case", matchPattern, [ "as", IDENTIFIER ], [ "if", expression ],
               [ 'with', 'suppressed', "as", IDENTIFIER ], "->", expression, ";" ;
 arrayLiteral = "[", [ expression, { ",", expression } ], "]" ;
+
+(* [NEW] ZEP-0146: a brace block in expression position is a value block. It must contain exactly
+   one final `yield` clause, which supplies the block's value. The same braces in statement position
+   remain an ordinary statement block of type Unit. *)
+valueBlock = "{", { declaration }, "yield", expression, ";", "}" ;
 ifExpr = "if", "(", expression, ")", "then", expression, "else", expression ;
 matchExpr = "match", "(", expression, ")", "{", matchArm, { matchArm }, "}" ;
 matchArm = "case", matchCasePattern, [ "as", IDENTIFIER ], [ "if", expression ],
@@ -671,8 +680,14 @@ anonymousObjectMember = [ "public" | "private" ], [ "mut" ], "property", IDENTIF
    parameter, and it must be last. Its declared element type is
    exposed as Array<T>; direct calls pack positional arguments after fixed parameters, while
    function values retain the full Array<T> parameter. Defaults may precede it but cannot apply to
-   it. Named constructors do not support defaults. Spread calls, canonical constructors, and
-   external-class methods do not support variadics.
+   it. Named constructors do not support defaults. Canonical constructors and external-class
+   methods do not support variadics. A call may spread at most one argument, and it must be the
+   last: an `Array<E>` operand is forwarded as the packed array, while any other `Iterable<E>` is
+   expanded through the iteration protocol; a nullable operand is rejected.
+   - A brace block in expression position is a value block and produces the value of its final
+   `yield` clause; a brace block in statement position stays an ordinary `Unit` block. `yield`
+   belongs to the innermost value block, and `return`, `break`, and `continue` keep their existing
+   meanings. A missing or non-final `yield` is a parse error.
    - `..` takes any two `Int` expressions and constructs an inclusive `zeron.ranges.IntRange`,
    evaluating each endpoint once. It is the lowest-precedence, right-associative operator, so
    `0 .. n - 1` groups as `0 .. (n - 1)`; parenthesize a range before applying an operator to it.

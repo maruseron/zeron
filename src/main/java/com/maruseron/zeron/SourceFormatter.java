@@ -995,7 +995,7 @@ final class SourceFormatter {
                 return before != TokenType.LEFT_PAREN && before != TokenType.LEFT_BRACKET;
             }
             if (after == TokenType.BANG || after == TokenType.TILDE) return false;
-            if (after == TokenType.LEFT_BRACKET) return false;
+            if (after == TokenType.LEFT_BRACKET) return !endsIndexableValue(before);
             if (before == TokenType.EQUAL || after == TokenType.EQUAL) return true;
             if (before == TokenType.AMPERSAND && isReferencePrefix(previousIndex)) return false;
             if ((after == TokenType.LESS || after == TokenType.GREATER)
@@ -1005,6 +1005,17 @@ final class SourceFormatter {
                 return true;
             }
             return true;
+        }
+
+        /// A bracket directly after a value indexes it, so no space belongs before it. After an
+        /// operator, keyword, opening delimiter, or comma the bracket starts an array literal and
+        /// keeps the normal space.
+        private static boolean endsIndexableValue(final TokenType type) {
+            return switch (type) {
+                case IDENTIFIER, STRING, CHAR, INT, LONG, DOUBLE, SUFFIXABLE_NUMBER,
+                        RIGHT_PAREN, RIGHT_BRACKET, TRUE, FALSE, NULL, THIS -> true;
+                default -> false;
+            };
         }
 
         private boolean isHandlerArrowTilde(final int index) {

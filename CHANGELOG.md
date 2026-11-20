@@ -4,6 +4,19 @@
 
 ### Compiler and language work
 
+- Added value-producing block expressions from ZEP-0146. A brace block in expression position ends
+  with one final `yield` and produces that value, so `let total = { let subtotal = a + b; yield
+  subtotal * 2; };` works without a helper function. A block in statement position keeps its `Unit`
+  meaning, so `if` branches, loop bodies, `using` bodies, and function bodies do not change. The
+  emitter writes the statements and the value inline with no closure or runtime ABI, the parser
+  rejects a missing or non-final `yield`, and the formatter indents the form.
+- Added spread arguments for variadic parameters from ZEP-0151. `f(...values)` forwards an existing
+  `Array<E>` to the variadic parameter without repacking it, or expands any other `Iterable<E>`
+  through the existing iteration protocol into the packed array. A call allows one spread, as its
+  final argument, its element type participates in generic inference, and a nullable operand is
+  rejected. The feature adds no runtime representation or API-index field.
+- Fixed the formatter dropping the space before an array literal, which turned `let values = [1];`
+  into `let values =[1];` and joined a literal to the preceding comma.
 - Contract methods that declare no receiver can be called on a constructor name when its witness
   is active, so `Option.pure(5)` and `Result<Int, String>.pure(5)` dispatch through the
   `Applicative` implementation's `pure` with no receiver. A `do` block with no `let name <-` bind

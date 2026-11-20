@@ -79,6 +79,29 @@ let label = if (count == 1) then "one" else "many";
 Use the statement form to choose actions, and the expression form when the choice itself should
 produce a value. Both forms test a `Boolean` condition, but their punctuation and purpose differ.
 
+## Value-producing blocks
+
+A brace block in expression position can produce a value. End it with a single `yield` clause, and
+the yielded expression becomes the value of the whole block:
+
+```zeron
+let total = {
+    let subtotal = first + second;
+    yield subtotal * 2;
+};
+```
+
+The same braces in statement position are an ordinary block of type `Unit`, so nothing changes for
+`if` branches, loop bodies, `using` bodies, or function bodies. The `yield` belongs to the innermost
+block that produces a value, and `return`, `break`, and `continue` keep their usual meanings. It
+must also be the last clause: a value block without a `yield`, or with a clause after it, is a
+syntax error. A block that has nothing to produce writes `yield ();` explicitly, matching the
+"say what the result is" style of `do` expressions.
+
+A value block is useful when a small computation needs its own bindings but not a separate
+function. It can be a `let` initializer, an argument, a `match` arm, or a function's expression
+body.
+
 ## Working with types
 
 Some operators ask questions about a value instead of combining it with another one. The is

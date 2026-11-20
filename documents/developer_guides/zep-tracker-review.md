@@ -164,8 +164,8 @@ fix and should land before the rest.
 | ZEP-0135 | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented | Direct provision, canonical prerequisite evidence, and owner-directed method dispatch remove shared-ancestor ambiguity |
 | ZEP-0136 | Witness Bundles and Coherent Prerequisite Evidence | Implemented | Group a target's providers into a named or `default` bundle with a recorded prerequisite closure; named bundles are selection-only |
 | ZEP-0137 | Explicit Witness Selection and Witness Contexts | Implemented | `using witness (...)` selects bundles or named witnesses lexically, shadows ambient defaults locally, and has no runtime lookup |
-| ZEP-0146 | Value-Producing Block Expressions | Draft | Add expression-position brace blocks with one final `yield`; statement-block consumers remain unchanged |
-| ZEP-0151 | Spread Arguments for Variadic Parameters | Draft | Forward an array unchanged or expand an `Iterable<E>` into a variadic tail; one final spread, no runtime or API-index change |
+| ZEP-0146 | Value-Producing Block Expressions | Implemented | Add expression-position brace blocks with one final `yield`; statement-block consumers remain unchanged |
+| ZEP-0151 | Spread Arguments for Variadic Parameters | Implemented | Forward an array unchanged or expand an `Iterable<E>` into a variadic tail; one final spread, no runtime or API-index change |
 
 ZEP-0132 is the first implementation item. It is a localized correctness fix, and leaving the old
 behavior in place while ZEP-0131 adds chained refinement would let new conditions rely on an
@@ -188,14 +188,15 @@ schema pass where practical, and neither may change ambient overlap checking out
 block.
 
 ZEP-0146 is independent syntax work. It supersedes ZEP-0110's handler-only block and deliberately
-does not migrate statement-block consumers. Its `0.8.0` row is a proposed target while the design
-remains `Draft`; it adds no runtime ABI or control-flow mechanism.
+does not migrate statement-block consumers. It was accepted and implemented on 2026-11-20 as an
+`Implemented` / `Candidate` row; it adds no runtime ABI or control-flow mechanism.
 
 ZEP-0151 is also independent syntax work. It makes `...values` the call-site dual of a `T...`
 parameter: an array in the variadic tail is forwarded without repacking, while any other
 `Iterable<E>` is traversed with the existing iteration protocol and packed into the callee's array.
 It adds no runtime representation or API-index field and is the last proposed addition before the
-candidate list is frozen. Its design remains `Draft` until reviewed.
+candidate list is frozen. It was accepted and implemented on 2026-11-20 as an `Implemented` /
+`Candidate` row.
 
 ZEP-0117 is independent. It landed in two stages: command, option, and manifest-schema metadata
 with generated reference pages and a staleness test, then `[build]`, `[targets]`, default-target
@@ -245,8 +246,8 @@ was added on 2026-11-19 as the final proposed addition before the candidate list
 | ZEP-0135 | Witness Provision, Requirement Evidence, and Owner-Directed Dispatch | Implemented / `Candidate` | Separate provided contracts from prerequisite evidence and resolve operations by declaring contract |
 | ZEP-0136 | Witness Bundles and Coherent Prerequisite Evidence | Implemented / `Candidate` | Group a target's providers into a coherent bundle and record prerequisite evidence at declaration time |
 | ZEP-0137 | Explicit Witness Selection and Witness Contexts | Implemented / `Candidate` | Select bundles or named witnesses lexically with `using witness`; no dynamic scope or runtime lookup |
-| ZEP-0146 | Value-Producing Block Expressions | Draft / `Candidate` | Add a value form for expression-position blocks using a final `yield`; leave statement blocks and their consumers unchanged |
-| ZEP-0151 | Spread Arguments for Variadic Parameters | Draft / `Candidate` | Add `...values` for a variadic tail, forwarding arrays unchanged and packing `Iterable<E>` through the existing iterator protocol |
+| ZEP-0146 | Value-Producing Block Expressions | Implemented / `Candidate` | Add a value form for expression-position blocks using a final `yield`; leave statement blocks and their consumers unchanged |
+| ZEP-0151 | Spread Arguments for Variadic Parameters | Implemented / `Candidate` | Add `...values` for a variadic tail, forwarding arrays unchanged and packing `Iterable<E>` through the existing iterator protocol |
 | ZEP-0098 | Annotation Targets for Native Products, Sums, and Newtypes | Implemented / `Candidate` | Complete annotation coverage for product and sum declarations, components, and cases while keeping annotation consumption separate |
 | ZEP-0113 | Declaration-Site Covariance for Sum and Product Types | Implemented / `Candidate` | Extend declaration-site covariance to sums and products so read-only carriers widen safely |
 
@@ -467,9 +468,10 @@ would combine an effect-runtime ABI change with a purely compile-time annotation
 - `0.7.0` was published on 2026-11-14; its 15 rows are `Shipped` / `0.7.0`, and its acceptance
   queue is closed.
 - ZEP-0111 shipped in `0.7.0`; it does not fall back to `0.9.0`.
-- The `0.8.0` candidate set now has twenty-five rows: nineteen implemented designs, four accepted
-  designs, plus the draft ZEP-0146 and ZEP-0151. ZEP-0151 is the final proposed addition before
-  scope freeze; decide whether to freeze there or admit further normalization items.
+- The `0.8.0` candidate set now has twenty-five rows: twenty-one implemented designs and four
+  accepted designs. ZEP-0146 and ZEP-0151 were accepted and implemented on 2026-11-20, and ZEP-0151
+  is the final proposed addition before scope freeze; decide whether to freeze there or admit
+  further normalization items.
 - ZEP-0050 was accepted on 2026-11-17 and implemented on 2026-11-18 as the host-access trust
   boundary and `0.8.0` candidate. Direct Java access requires `unsafe`, facades stay the trusted
   tier, and `raises` stays control flow rather than purity.
@@ -722,13 +724,13 @@ These decisions shape the current plan. Details live in each ZEP.
 - Proposal status and release state are independent. A row can be `Implemented` and still
   `Unscheduled`; that is not an error by itself.
 - A ZEP normally cannot move to `Candidate` while it is `Draft` or `Deferred`; accept the design
-  first. ZEP-0098 and ZEP-0113 were accepted and implemented on 2026-11-16. ZEP-0146, ZEP-0147, and
-  ZEP-0151 are recorded as draft targets by explicit maintainer direction; treat their `Candidate`
-  rows as proposed until their design reviews are complete.
+  first. ZEP-0098 and ZEP-0113 were accepted and implemented on 2026-11-16, and ZEP-0146 and
+  ZEP-0151 were accepted and implemented on 2026-11-20. ZEP-0147 remains a draft target; treat its
+  `Candidate` row as proposed until its design review is complete.
 - `Candidate` is a proposed release target, not a commitment. `Planned` records an approved bundle.
 - The `0.7.0` description is shipped scope: its 15 rows are `Shipped` / `0.7.0`. The `0.8.0`
-  description has twenty-five candidates (nineteen implemented designs, four accepted designs, plus
-  draft ZEP-0146 and ZEP-0151); its acceptance queue remains open. The `0.9.0` description has one
+  description has twenty-five candidates (twenty-one implemented designs and four accepted
+  designs); its acceptance queue remains open. The `0.9.0` description has one
   draft candidate, ZEP-0147, and remains a planning record. The `0.10.0` description has two
   accepted candidates, ZEP-0091 and ZEP-0097, plus three draft model proposals that cannot become
   candidates until accepted.

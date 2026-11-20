@@ -640,4 +640,30 @@ public final class SourceFormatterTest {
                 .formattedSource().orElseThrow());
     }
 
+    @Test
+    public void keepsASpaceBeforeArrayLiteralsButNotBeforeIndexes() throws Exception {
+        final var style = CanonicalStyle.load();
+        final var source = """
+                fn take(values:Array<Int>){println(values.toString());}
+                fn main(){
+                    let first=[1,2];
+                    take([3,4]);
+                    take(if(true) then first else [5,6]);
+                    let second=first[0];
+                    let call=total()[1];
+                }
+                """;
+
+        final var formatted = SourceFormatter.format(source, "ArraySpacing.zn", style)
+                .formattedSource().orElseThrow();
+
+        assertTrue(formatted, formatted.contains("let first = [1, 2];"));
+        assertTrue(formatted, formatted.contains("take([3, 4]);"));
+        assertTrue(formatted, formatted.contains("else [5, 6]"));
+        assertTrue(formatted, formatted.contains("let second = first[0];"));
+        assertTrue(formatted, formatted.contains("total()[1]"));
+        assertEquals(formatted, SourceFormatter.format(formatted, "ArraySpacing.zn", style)
+                .formattedSource().orElseThrow());
+    }
+
 }

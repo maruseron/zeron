@@ -163,12 +163,12 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0143](./ZEP-0143.md) | IntRange Bounds and Loop Facts | Draft | Unscheduled | - |
 | [ZEP-0144](./ZEP-0144.md) | Parameter Type Refinement and Call-Site Preconditions | Draft | Unscheduled | - |
 | [ZEP-0145](./ZEP-0145.md) | Unified Namespace and Extension Container | Draft | Unscheduled | - |
-| [ZEP-0146](./ZEP-0146.md) | Value-Producing Block Expressions | Draft | Candidate | 0.8.0 |
+| [ZEP-0146](./ZEP-0146.md) | Value-Producing Block Expressions | Implemented | Candidate | 0.8.0 |
 | [ZEP-0147](./ZEP-0147.md) | Replace `raise` and `raises` with `perform` and `performs` | Draft | Candidate | 0.9.0 |
 | [ZEP-0148](./ZEP-0148.md) | Java SAM Conversion | Implemented | Candidate | 0.8.0 |
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
 | [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Candidate | 0.8.0 |
-| [ZEP-0151](./ZEP-0151.md) | Spread Arguments for Variadic Parameters | Draft | Candidate | 0.8.0 |
+| [ZEP-0151](./ZEP-0151.md) | Spread Arguments for Variadic Parameters | Implemented | Candidate | 0.8.0 |
 
 ## Release bundles
 
@@ -299,8 +299,8 @@ Its twenty-five candidates are:
   locally, and captures evidence in closures without runtime lookup or dynamic scope.
 - [ZEP-0146](./ZEP-0146.md) — value-producing block expressions. A brace block in expression
   position ends with one final `yield` and produces that value; statement blocks and every
-  statement-block consumer remain unchanged. The proposal is still `Draft`; its `0.8.0` candidacy
-  records the intended target, not an accepted design.
+  statement-block consumer remain unchanged. Accepted and implemented on 2026-11-20; the `0.8.0`
+  candidacy records the bundle it targets.
 - [ZEP-0151](./ZEP-0151.md) — spread arguments for variadic parameters. `...values` forwards an
   existing array to a variadic parameter without repacking it, or expands any `Iterable<E>` into
   the packed array through the existing iteration protocol. The spread must be the final argument
@@ -322,8 +322,8 @@ change `raise` or `handle` typing.
 
 These twenty-five are the current target; ZEP-0151 is the last proposed addition before the
 candidate list is frozen. The acceptance queue remains open. ZEP-0098 and ZEP-0113 were accepted and
-implemented on 2026-11-16; ZEP-0146 and ZEP-0151 remain draft rows and must be accepted before
-implementation, and their `Candidate` state records the intended bundle only. ZEP-0135 was accepted,
+implemented on 2026-11-16; ZEP-0146 and ZEP-0151 were accepted and implemented on 2026-11-20 and are
+`Implemented` / `Candidate`. ZEP-0135 was accepted,
 implemented, and added as a candidate for the same bundle; ZEP-0136 and ZEP-0137 were accepted and
 added on 2026-11-15. ZEP-0050 and ZEP-0148 were accepted on 2026-11-17 and added as candidates for
 the bundle; both are now `Implemented` / `Candidate`. ZEP-0148 was implemented on 2026-11-18.
@@ -333,8 +333,8 @@ ZEP-0128–ZEP-0133, and ZEP-0135 were reviewed there; ZEP-0135, ZEP-0128, ZEP-0
 ZEP-0132, and ZEP-0134 are now `Implemented` / `Candidate`, while the others are `Accepted` /
 `Candidate`.
 ZEP-0070 was promoted from the backlog. ZEP-0134 and ZEP-0146 were added directly as `Draft` /
-`Candidate` rows for `0.8.0`; ZEP-0134 was accepted and implemented on 2026-11-18, while ZEP-0146's
-acceptance review is still pending. ZEP-0136 and ZEP-0137 were
+`Candidate` rows for `0.8.0`; ZEP-0134 was accepted and implemented on 2026-11-18, and ZEP-0146
+followed on 2026-11-20. ZEP-0136 and ZEP-0137 were
 accepted on 2026-11-15 and are `Accepted` / `Candidate`. ZEP-0050 owns the implemented `unsafe`
 host-access boundary and ZEP-0148 implements Java SAM conversion; together they replace the original
 interop umbrella's `0.8.0` slice. ZEP-0149 holds the remaining interop inventory, including external

@@ -135,9 +135,9 @@ standard library, and diagnostic descriptions from the same compatible build, so
 matching runtime support and actionable errors.
 
 Zeron is evolving. Examples of current limits include no class inheritance, no general Java
-generics or callback conversion, no dependency fetching or incremental build, no `Stable` generic
-constraint for hash-key admissibility, and constraints on generic inference, pattern exhaustiveness,
-and raised effects. `Hashable` and hash-based collections are implemented; keys must retain their
+generics, Java callback conversion only for explicitly written functional interfaces, no dependency
+fetching or incremental build, no `Stable` generic constraint for hash-key admissibility, and
+constraints on generic inference, pattern exhaustiveness, and raised effects. `Hashable` and hash-based collections are implemented; keys must retain their
 equality- and hash-relevant state while stored. The design documents distinguish implemented
 behavior from proposals and deferred work; treat those documents' status sections as the source of
 truth rather than assuming a roadmap item is already part of the language. In particular, see

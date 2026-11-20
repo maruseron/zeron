@@ -106,8 +106,8 @@ requires suitable component evidence. Equality and hashing semantics are shared 
 sums; see [design-document-17_structural-equality-and-hashing.md](design-document-17_structural-equality-and-hashing.md).
 
 Source parsing, initialization, equality, hashing, and compiled-library metadata are implemented.
-Serialization through the canonical model remains pending implementation of the `Encode`/`Decode`
-capabilities from ZEP-0068; the data-class declaration alone does not currently enable serialization.
+Serialization is available through opt-in derivation of the `Encode` and `Decode` capabilities from
+ZEP-0092; the data-class declaration alone does not enable serialization.
 
 ## Sum types
 
@@ -308,8 +308,8 @@ in source metadata only. Annotation consumption remains a separate feature.
 
 A newtype declares a distinct nominal type over one statically known representation, including
 type parameters, nominal classes, products, sums, function types, and explicitly declared Java
-external classes. [ZEP-0070](../zeps/ZEP-0070.md) implements generic and nominal representations
-for `0.8.0`, and [ZEP-0129](../zeps/ZEP-0129.md) applies them to single-value shapes such as a
+external classes. [ZEP-0070](../zeps/ZEP-0070.md) shipped generic and nominal representations in
+`0.8.0`, and [ZEP-0129](../zeps/ZEP-0129.md) applies them to single-value shapes such as a
 function-shaped `IO`.
 For example:
 

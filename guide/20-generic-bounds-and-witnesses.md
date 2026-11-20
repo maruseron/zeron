@@ -177,8 +177,9 @@ inherited operation with an error that names the contract that declares it.
 
 For a concrete target type and fully applied contract, Zeron must find exactly one applicable
 provider in the active scope. If it finds none, the bound cannot be satisfied; if it finds more
-than one, the selection is ambiguous. The compiler does not choose a “closest” witness, and a
-witness for a child contract is not a provider for its prerequisites.
+than one, the selection is ambiguous unless an explicit selection chooses a provider. The compiler
+does not choose a “closest” witness, and a witness for a child contract is not a provider for its
+prerequisites.
 
 Witnesses in the current package are active automatically, and a star import such as
 `import labels.*;` activates every witness exported by that package. A named public witness can
@@ -212,7 +213,7 @@ type import, or a package star import. Intrinsic targets are always in scope. `i
 activates a default, and writing a fully qualified type name does not import the type, so it does not
 activate its defaults. At most one default may apply to a fully applied contract and target,
 overlapping defaults are declaration errors, and a default has no priority over an ordinary witness:
-importing both makes the selection ambiguous.
+importing both makes the selection ambiguous unless an explicit selection disambiguates it.
 
 A default witness of a public target must use a public contract, because it becomes public
 canonical evidence for that type.
@@ -249,6 +250,91 @@ declares it; the compiler does not choose among sibling witnesses that happen to
 their prerequisites. If two providers compete for the same declaring contract, the call is
 ambiguous. A generic helper with an explicit bound is often a clearer way to state which contract
 behavior the code requires.
+
+## Witness bundles
+
+Some contracts build on each other. `Monoid<T>` requires `Semigroup<T>`, and a witness for the
+monoid is only usable when a compatible semigroup is selected too. A **witness bundle** groups
+witnesses for one target type under a single name so they can be selected together.
+
+```zeron
+public witness bundle Multiplication for Int {
+    witness Semigroup<Int> {
+        fn combine(other: Int): Int = this * other;
+    }
+
+    witness Monoid<Int> {
+        static fn empty(): Int = 1;
+    }
+}
+```
+
+A bundle is a declaration, not a runtime object. It directly provides the contracts named by its
+members, and selecting it activates those members together; they cannot be selected individually
+through the bundle name. Its closure also activates the recorded canonical defaults for member
+prerequisites that no member supplies. A generic bundle such as
+`public witness bundle ListMonoid<T> for List<T>` declares members that refer to the bundle's own
+type parameters.
+
+A bundle marked `default` is active wherever its target type is used, just like a default witness:
+
+```zeron
+default witness bundle for Int {
+    // canonical members
+}
+```
+
+A default bundle is unnamed, cannot be marked `public`, and must appear beside the type it targets,
+just like a default witness. Unlike a standalone witness, a named (non-default) bundle becomes active
+only through a selection; importing its name does not activate its members. This is deliberate: it
+avoids an import silently introducing several overlapping witnesses. Use a bundle when the members
+form a coherent set, and a standalone witness when a file needs exactly one piece of evidence.
+
+## Selecting a bundle or witness explicitly
+
+A `using witness` block selects providers for the enclosed statements. The name may be a bundle or a
+standalone named witness:
+
+```zeron
+using witness (Multiplication) {
+    let total = combineAll(3, 4);
+}
+```
+
+Several providers can be selected in one clause, and a qualified name is allowed:
+
+```zeron
+using witness (HexDisplay, zeron.collections.DescendingComparable) {
+    let hex = describe(255);
+    let ordered = sort(values);
+}
+```
+
+A selection is local to its block. It does not leak into later code or nested declarations, and
+two selections in the same scope that provide the same contract for the same type are an error
+rather than a silent choice. Selecting a provider that is already active is allowed and has no
+extra effect. A selection cannot override evidence a class already implements nominally, structural
+`Eq`/`Hashable` evidence, derived serialization evidence, or intrinsic arithmetic lowering.
+
+A single call can also select a provider for that invocation only:
+
+```zeron
+let additive = combineAll(3, 4);
+let product = combineAll(3, 4) with witness (Multiplication);
+let additiveAgain = combineAll(3, 4);
+```
+
+The call-site clause is considered before an enclosing `using witness` block, which is considered
+before ambient defaults and nominal conformance. It applies only to calls that still have hidden
+evidence parameters to fill; selecting a witness for a call that already fixed its evidence inside a
+non-generic body is an error. Function values, class constructors, operator invocations, and `do`
+operations do not accept the call-site form, and a function value captures its evidence when it is
+created.
+
+Explicit selection is for resolving a choice the compiler cannot make on its own. Generic code that
+always needs the same contract is usually clearer with a bound, such as
+`fn sum<T: Monoid<T>>(...)`, because the requirement then appears in the signature instead of at
+selected call sites.
 
 ## Runtime representation and current limits
 

@@ -54,7 +54,7 @@ zeron dump dist
 zeron dump --stdlib zeron.collections
 
 # Read an API index directly
-zeron dump dist/META-INF/zeron/api-v14.bin
+zeron dump dist/META-INF/zeron/api-v16.bin
 ```
 
 The API index filename is versioned: `api-v<API_INDEX_SCHEMA_VERSION>.bin`, under

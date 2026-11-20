@@ -239,6 +239,48 @@ Without either source of type arguments, the reference is rejected. Bound refere
 callable references; write a lambda instead. A callable reference is a constant, so a model can
 assign a constructor reference to a parent-contract property.
 
+## Inferring a bound from operators
+
+A lambda without parameter annotations normally needs an expected function type. One case is
+different: a lambda written directly as the initializer of an immutable local `let` can infer a
+bounded, generic type from the operators in its body.
+
+```zeron
+let add = (a, b) -> a + b;        // <T: Numeric<T>> (T, T) -> T
+let less = (a, b) -> a < b;       // <T: Comparable<T>> (T, T) -> Boolean
+let ratio = (a, b) -> a / b;      // <T: Fractional<T>> (T, T) -> T
+
+let total = add(1, 2);            // Int, using Numeric<Int>
+let ordered = less(1.5, 2.5);     // Boolean, using Comparable<Float>
+```
+
+Each operator contributes a contract requirement instead of fixing a concrete type:
+
+| Form | Inferred requirement | Types |
+| --- | --- | --- |
+| `a + b`, `a - b`, `a * b`, `-a` | `Numeric<T>` | operands and result are `T` |
+| `a / b` | `Fractional<T>` | operands and result are `T` |
+| `a < b`, `a <= b`, `a > b`, `a >= b` | `Comparable<T>` | operands are `T`; result is `Boolean` |
+
+The inference is rank-1: the lambda becomes a polymorphic function value whose binders are solved
+separately at each call, so `add` above works for `Int`, `Long`, `Float`, or any other type with
+active `Numeric` evidence. The evidence is not captured once; each use checks the requirements at
+its own type. If no evidence is available at a use site, that call is an error even though the lambda
+itself was accepted.
+
+For operator inference, all of these must hold: the lambda initializes an immutable local binding,
+there is no expected function type, at least one parameter is unannotated, and the body uses a
+mapped operator. An expected type wins and is checked without this scheme. A lambda stored in a
+reassignable binding is not generalized, because different assignments could require incompatible
+instantiations. Annotating one or more parameters also constrains the result, and any parameter that
+remains unresolved is diagnosed rather than defaulted.
+
+Some operators are deliberately outside the mapping. `+` on unresolved operands means numeric
+addition, not string concatenation; annotate the parameters or provide an expected function type
+when concatenation is intended. Equality and identity operators do not contribute a requirement, and
+mixed operand types are not promoted by this inference. When an operator's operands are already
+concrete, ordinary checking applies and no hidden requirement is added.
+
 ## Polymorphic function values
 
 A function type can quantify its own type parameters. A leading binder list makes it **rank-2**:

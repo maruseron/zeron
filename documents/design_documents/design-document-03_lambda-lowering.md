@@ -209,9 +209,9 @@ Address the remaining work in this order:
   expression and binding. Expected types flow through declarations, assignments, calls, and returns.
   Conditional expressions pass the expected type independently to both result branches.
   Safe immutable let-bound identity/constant lambdas generalize to rank-1 schemes and instantiate
-  freshly at each use. The current implementation keeps operator-constrained lambdas on
-  monomorphic contextual inference; ZEP-0133 extends the rank-1 path with inferred numeric and
-  comparison operator bounds for eligible lambdas, pending implementation.
+  freshly at each use. Operator-constrained lambdas on the eligible direct immutable-`let` path
+  infer `Numeric<T>`, `Fractional<T>`, or `Comparable<T>` bounds through ZEP-0133, which shipped in
+  `0.8.0`.
 3. **Add multi-parameter lambdas: implemented.** The AST, parser, resolver, and lowering logic now support zero-argument, single-argument, and multi-argument lambda forms, and they lower each shape to the appropriate generated functional interface.
 4. **Specify capture semantics before classes: implemented.** Captures are immutable by default: a lambda may close over immutable values, but it must not implicitly capture and mutate stack-scoped locals. Mutation must happen through explicitly shared heap state such as objects or a dedicated cell/reference abstraction.
 5. **Extend polymorphic lambda inference: rank-1 generalization and rank-2 support

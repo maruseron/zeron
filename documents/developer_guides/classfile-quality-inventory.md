@@ -186,7 +186,7 @@ without changing generic representation.
 Newtypes no longer emit a wrapper class, backing field, or `.value` accessor. The type checker keeps
 nominal identity while JVM descriptors use the carrier directly. `.new` emits its representation
 argument and `.tryNew` emits the guarded `Option`; erased boundaries box as required. The API index
-records type parameters and representation types under schema version `15`.
+records type parameters and representation types under schema version `16`.
 
 ## C. `Array<T>` erases to `Object[]`, so primitives are boxed end-to-end
 

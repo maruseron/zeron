@@ -83,8 +83,8 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0063](./ZEP-0063.md) | Standard Library Testing APIs | Implemented | Shipped | 0.8.0 |
 | [ZEP-0064](./ZEP-0064.md) | Standard Library Logging APIs | Implemented | Shipped | 0.8.0 |
 | [ZEP-0065](./ZEP-0065.md) | Standard Library JSON Parser | Implemented | Shipped | 0.6.0 |
-| [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Draft | Unscheduled | — |
-| [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Unscheduled | — |
+| [ZEP-0066](./ZEP-0066.md) | Standard Library TOML Parser | Draft | Candidate | 0.9.0 |
+| [ZEP-0067](./ZEP-0067.md) | Standard Library XML Parser | Draft | Candidate | 0.9.0 |
 | [ZEP-0068](./ZEP-0068.md) | Serialization Contracts for Zeron | Implemented | Shipped | 0.6.0 |
 | [ZEP-0069](./ZEP-0069.md) | Transparent Data Classes | Implemented | Shipped | 0.6.0 |
 | [ZEP-0070](./ZEP-0070.md) | Generic and Nominal Newtype Representations | Implemented | Shipped | 0.8.0 |
@@ -169,6 +169,14 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0149](./ZEP-0149.md) | Remaining Java Interoperability Work | Draft | Unscheduled | - |
 | [ZEP-0150](./ZEP-0150.md) | Safe Invocation of Nullable Function Values | Implemented | Shipped | 0.8.0 |
 | [ZEP-0151](./ZEP-0151.md) | Spread Arguments for Variadic Parameters | Implemented | Shipped | 0.8.0 |
+| [ZEP-0152](./ZEP-0152.md) | Standard Library Randomness | Draft | Candidate | 0.9.0 |
+| [ZEP-0153](./ZEP-0153.md) | Descriptive Statistics in `zeron.math` | Draft | Candidate | 0.9.0 |
+| [ZEP-0154](./ZEP-0154.md) | Ordered Collections | Draft | Candidate | 0.9.0 |
+| [ZEP-0155](./ZEP-0155.md) | Binary Buffers and Encodings | Draft | Candidate | 0.9.0 |
+| [ZEP-0156](./ZEP-0156.md) | Text Formatting and Regular Expressions | Draft | Candidate | 0.9.0 |
+| [ZEP-0157](./ZEP-0157.md) | Collection Building APIs | Draft | Candidate | 0.9.0 |
+| [ZEP-0158](./ZEP-0158.md) | Lambda Resource Handles with Scoped Receivers | Draft | Candidate | 0.10.0 |
+| [ZEP-0159](./ZEP-0159.md) | Generated Standard-Library Reference | Draft | Unscheduled | — |
 
 ## Release bundles
 
@@ -183,8 +191,8 @@ sequencing.
 | `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing | Proposed; 6 candidates | ZEP-0118 (headline), ZEP-0119, ZEP-0120, ZEP-0123, ZEP-0147, and ZEP-0112; all designs `Draft` |
-| `0.10.0` | Model system completion and annotation metadata | Proposed; 2 candidates | ZEP-0091 and ZEP-0097; ZEP-0101–ZEP-0103 require acceptance before candidacy |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline), ZEP-0119, ZEP-0120, ZEP-0123, ZEP-0147, ZEP-0112, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; all designs `Draft` |
+| `0.10.0` | Model system completion, annotation metadata, and resource handling | Proposed; 3 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158 is a tentative resource-handling companion |
 
 ### `0.7.0` — type identity, reification, and type bounds
 
@@ -333,7 +341,9 @@ source, multi-value results are `Stream<String>`, `StringJoiner` owns joining, a
 
 ### `0.9.0` — effect control and response typing
 
-`0.9.0` is the effect-control bundle. It has six `Candidate` rows, all with `Draft` designs:
+`0.9.0` is the effect-control bundle. It has fourteen `Candidate` rows, all with `Draft` designs; the
+effect-control rows carry the depth, and the library rows add surface that does not touch handler
+typing or code generation:
 
 - [ZEP-0118](./ZEP-0118.md) — response-typed effects and tail-resumptive handlers. The headline
   row: an effect declares a response type, `raise` becomes an expression whose value the handler
@@ -353,6 +363,27 @@ source, multi-value results are `Stream<String>`, `StringJoiner` owns joining, a
 - [ZEP-0119](./ZEP-0119.md) — one-shot continuations, deep handlers, and cancellation.
   Prototype-gated: candidacy records the intended target, and the backend prototype plus the
   continuation ABI questions must be resolved before acceptance.
+- [ZEP-0066](./ZEP-0066.md) — standard-library TOML parser. A `zeron.parsers.toml` package with
+  explicit value, date/time, and diagnostic semantics, following the shipped JSON parser.
+- [ZEP-0067](./ZEP-0067.md) — standard-library XML parser. A `zeron.parsers.xml` package with
+  explicit namespace, document-model, and resource-handling semantics and safe defaults.
+- [ZEP-0152](./ZEP-0152.md) — standard-library randomness. A seedable `Random` with primitive and
+  bounded generation, uniform collection picking, and in-place shuffling.
+- [ZEP-0153](./ZEP-0153.md) — descriptive statistics in `zeron.math`. Mean, median, variance, and
+  standard deviation with explicit population and sample variants and explicit empty-input results.
+- [ZEP-0154](./ZEP-0154.md) — ordered collections. A binary-heap `PriorityQueue` and red–black-tree
+  `SortedSet` and `SortedMap` ordered by `Comparable`.
+- [ZEP-0155](./ZEP-0155.md) — binary buffers and encodings. `ByteBuffer`, `ByteReader`, endianness,
+  LEB128 varints, bit helpers, and checked hex and Base64 codecs in `zeron.buffer`.
+- [ZEP-0156](./ZEP-0156.md) — text formatting and regular expressions. A placeholder `Formatter`
+  and a compiled `Regex` with matches, group access, replacement, and match iteration.
+- [ZEP-0157](./ZEP-0157.md) — collection building APIs. `List.build`, `Set.build`, `Map.build`, and
+  `Stream.build` receiver-lambda blocks over curated builder types.
+
+The library rows are additive and independent of the effect work. They are preferred over
+bytecode-quality rows here because ZEP-0095 is a compiler-wide emission program and ZEP-0096 is
+ABI-changing primitive specialization; both would widen the release's internal surface at the same
+time as the response-typing and continuation work.
 
 ZEP-0000 requires an Accepted design before a `Candidate` row becomes `Planned`, so this is a
 proposed release set, not an approved scope. ZEP-0107 is `Accepted` but stays `Unscheduled`: its
@@ -366,7 +397,11 @@ ZEP-0110 is superseded by [ZEP-0146](./ZEP-0146.md), which shipped in `0.8.0`.
 This bundle gives the model-metadata orphans a coherent home rather than scheduling annotation
 work in isolation. It is tentative and not scheduled, and it follows the `0.9.0` effect-control
 work. The accepted candidates are [ZEP-0091](./ZEP-0091.md) (annotation consumption) and
-[ZEP-0097](./ZEP-0097.md) (`MAPPING` annotation target for model clauses). ZEP-0097 depends on
+[ZEP-0097](./ZEP-0097.md) (`MAPPING` annotation target for model clauses).
+[ZEP-0158](./ZEP-0158.md) is a tentative third candidate: lambda resource handles with
+non-denotable scoped receivers. It is placed here because it depends on the effect-control and
+continuation work in `0.9.0` settling first, and because its cleanup rules must agree with
+ZEP-0112's scope lifetime and ZEP-0119's resumption points. ZEP-0097 depends on
 ZEP-0091's compiler-recognized annotation model; ZEP-0091 Direction B also unblocks external names
 in [ZEP-0092](./ZEP-0092.md).
 

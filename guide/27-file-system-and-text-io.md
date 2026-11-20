@@ -67,9 +67,10 @@ fn save(path: Path, text: String): Unit raises IoFailure, DisposeFailure =
     writeText(path, text);
 ```
 
-Unchecked Java exceptions retain their ordinary host behavior. The current API does not provide
-streaming readers or writers, incremental directory iteration, byte-oriented I/O, append options, or
-asynchronous operations.
+Unchecked Java exceptions retain their ordinary host behavior. The text helpers do not provide
+append options or asynchronous operations, and directory listing is eager. Byte-oriented streams
+are available through the lower-level `zeron.io.Reader` and `zeron.io.Writer` contracts, which this
+chapter does not cover.
 
 ## Logging
 

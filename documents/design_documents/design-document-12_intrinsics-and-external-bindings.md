@@ -32,7 +32,7 @@ separate interop facilities.
 - `String` operations in `zeron.lang` are ordinary Zeron extensions backed by a curated set of
   typed immutable `java.lang.String` instance-method bindings. Their indexing units follow Java's
   UTF-16 code-unit semantics; substring validates bounds and returns `Option<String>`.
-  [ZEP-0130](../zeps/ZEP-0130.md) is accepted for `0.8.0` and settles that intrinsic operations are
+  [ZEP-0130](../zeps/ZEP-0130.md) shipped in `0.8.0` and settles that intrinsic operations are
   standard-library-owned declarations in canonical `zeron.lang` modules, not a second class or an
   ordinary intrinsic ID; its first application is a broad `String` inventory covering splitting,
   character access, case conversion, trimming, replacement, lines, simple parsing, and joining.

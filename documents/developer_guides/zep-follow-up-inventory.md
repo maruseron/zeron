@@ -3,6 +3,7 @@
 | Field | Value |
 | ----- | ----- |
 | Date | 2026-11-13 |
+| Updated | 2026-11-20 |
 | Scope | Remaining follow-up work found in implemented or shipped ZEPs |
 | Purpose | Inventory remaining follow-up work and identify which items are covered by an existing proposal |
 
@@ -21,13 +22,13 @@ These are confirmed gaps, but they should extend an existing proposal rather tha
 | --- | --- | --- |
 | Numeric literals, newtypes, widening, heterogeneous operators | 0036, 0043, 0071 | ZEP-0041, 0042, 0044, 0045, 0046, 0070, 0074, 0075 |
 | Remaining Java interop (inherited members, external contracts/interfaces, external enums, JPMS, extensible bindings, conformance) | 0047-0050, 0148 | ZEP-0149 (Draft; unscheduled inventory) |
-| Java SAM conversion | 0047-0050 | ZEP-0148 (Implemented; `0.8.0` candidate) |
-| Standard-library testing/logging/TOML/XML | 0011, 0065 | ZEP-0063, 0064, 0066, 0067 |
+| Java SAM conversion | 0047-0050 | ZEP-0148 (Implemented; shipped in `0.8.0`) |
+| Standard-library testing/logging/TOML/XML | 0011, 0065 | ZEP-0063 and ZEP-0064 shipped in `0.8.0`; ZEP-0066 and ZEP-0067 are `0.9.0` candidates |
 | Model, callable, and existential follow-ups | 0079, 0081, 0090, 0093 | ZEP-0100–0109 (implemented, accepted, deferred, or Draft) |
 | 64-bit hashing, mutable projections, unchecked casts | 0008, 0085, 0089 | ZEP-0084, 0085, 0089 |
 | Annotation consumption | 0031 | ZEP-0091 (Accepted) |
 | Annotation target for model mapping clauses | 0079 | ZEP-0097 (Accepted) |
-| Block values, `do` notation, suspension | 0007, 0058, 0019 | ZEP-0146 (supersedes ZEP-0110), ZEP-0111, ZEP-0112; resumption split across ZEP-0118–ZEP-0121 |
+| Block values, `do` notation, suspension | 0007, 0058, 0019 | ZEP-0146 shipped in `0.8.0` (supersedes ZEP-0110); ZEP-0111 shipped in `0.7.0`; ZEP-0112 is a `0.9.0` candidate; resumption split across ZEP-0118–ZEP-0121 |
 
 **Overlap:** ZEP-0092 is implemented and closed the generated serialization operations for
 ZEP-0068/0069. The remaining serialization follow-ups are annotation consumption in ZEP-0091 and the
@@ -40,8 +41,8 @@ aliases that ZEP-0092 defers.
 
 Source: ZEP-0094, ZEP-0060.
 
-- `MapBackedSet`, `SortedMap`, `TreeMap` (red-black, internal), later B-tree and skip-list
-  implementations `[E]`.
+- `MapBackedSet`, later B-tree and skip-list implementations `[E]`. `SortedMap` and the internal
+  red-black tree moved to [ZEP-0154](../zeps/ZEP-0154.md).
 - `sameElements` / `elementsHash`, conditional `Eq`/`Hashable` derivation on `ArrayList` `[E]`.
 - `Collector`-based construction in `Stream.toList` `[E]`.
 - Decoding contract-typed fields in generated serialization `[E]`.

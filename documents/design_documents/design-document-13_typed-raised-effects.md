@@ -26,9 +26,9 @@ translation.
 
 Declared effects may escape from the entry-point `main`; top-level initializers remain effect-free.
 Handlers remain expression-scoped; no statement-level `try`/`catch` form is introduced. The protected
-operand is a single expression. [ZEP-0146](../zeps/ZEP-0146.md) proposes value-producing block
+operand is a single expression. [ZEP-0146](../zeps/ZEP-0146.md) implements value-producing block
 expressions with a final `yield`, which lets a handler protect a block while keeping the handler an
-expression and changing no coverage or runtime rule; it supersedes ZEP-0110 and is `Draft`.
+expression and changing no coverage or runtime rule; it shipped in `0.8.0` and supersedes ZEP-0110.
 
 Synchronous resource cleanup is provided separately by statement-style `using` scopes and the
 `zeron.resource.Disposable` contract. Such scopes contribute body and disposal effects to the

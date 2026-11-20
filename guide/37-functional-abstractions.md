@@ -173,6 +173,25 @@ calling the function. Chaining `pure` changes nothing. Chaining two functions in
 chaining their combination. The standard library's `Option`, `Result`, and `Stream` implement
 `Monad`, so generic code written against it works with all three.
 
+A `do` block is the readable syntax for this chaining. It is not specific to `Option` or `Result`:
+the constructor's `Monad` (and, for a block with no binds, `Applicative`) evidence determines what
+`bind` and `pure` mean. The constructor can usually be inferred from the expected type, or stated
+explicitly as `do<Option<_>> { ... }`. Within a block, `let name <- expression` continues only when
+the step succeeds; a leading `let name = expression` is an ordinary pure binding. The final `yield`
+(or final monadic expression) produces the result.
+
+```zeron
+fn parseHalf(text: String): Result<Int, String> = do {
+    let value <- parseNumber(text);
+    let half <- divide(value, 2);
+    yield half;
+};
+```
+
+Because the operations dispatch through witnesses, a type that implements `Monad` gets the same
+syntax without special support in the compiler. [Chapter 19](19-option-and-result.md) covers
+`Option` and `Result` blocks in detail, including blocks with no binds.
+
 ## Folding any structure
 
 Reducing a structure to a single value is another shared pattern. `Foldable` captures it with one

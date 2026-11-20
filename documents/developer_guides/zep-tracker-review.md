@@ -13,10 +13,10 @@ when bundle scope or sequencing changes.
 
 ## Current state
 
-The tracker records 152 ZEPs: 78 shipped, 0 planned, 28 candidates, 39 unscheduled, and 7 rows
-that are deferred or not applicable. `0.7.0` shipped on 2026-11-14; `0.8.0` is the normalization
-bundle with twenty-five candidates, `0.9.0` is the proposed effect-control follow-on, and `0.10.0`
-is a tentative model-metadata bundle.
+The tracker records 152 ZEPs: 103 shipped, 0 planned, 4 candidates, 38 unscheduled, and 7 rows
+that are deferred or not applicable. `0.7.0` shipped on 2026-11-14, `0.8.0` shipped on 2026-11-20,
+`0.9.0` is the proposed effect-control follow-on with two draft candidates, and `0.10.0` is a
+tentative model-metadata bundle.
 
 ### Bundle summary
 
@@ -25,7 +25,7 @@ is a tentative model-metadata bundle.
 | `0.6.0` | Stabilization of already implemented work | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing | Proposed; 1 candidate | ZEP-0118 and ZEP-0147 headline the bundle |
+| `0.9.0` | Effect control and response typing | Proposed; 2 candidates | ZEP-0118 (headline) and ZEP-0147; both design reviews pending |
 | `0.10.0` | Model system completion and annotation metadata | Proposed; 2 candidates | ZEP-0091 and ZEP-0097; ZEP-0101–ZEP-0103 require acceptance before candidacy |
 
 `0.7.0` shipped on 2026-11-14. Its 15 rows are `Shipped`; release scope is approved and complete.
@@ -34,7 +34,7 @@ nominal representation, standard-library ownership plus testing and logging APIs
 operator-inference improvement, function-valued expression invocation including safe nullable
 invocation, witness provision, and witness bundles with explicit selection rather than control flow,
 plus the annotation-target and variance smoothing items, the Java host-access trust boundary, and
-Java SAM conversion. `0.9.0` is a planning target with one draft candidate, not a scheduled
+Java SAM conversion. `0.9.0` is a planning target with two draft candidates, not a scheduled
 release.
 
 The bundles stay separate because `0.7.0` changes type identity, runtime descriptors, type-bound
@@ -380,14 +380,14 @@ metadata.
 
 ## `0.9.0` — Effect control and response typing
 
-The effect-control bundle moves to `0.9.0` now that `0.8.0` carries normalization. It is not
-scheduled: the headline proposals remain `Draft`, and the bundle has one proposed candidate,
-ZEP-0147. ZEP-0107 is `Accepted` but has been removed from the program bundle and is
+The effect-control bundle carries `0.9.0`. It is not scheduled: both rows are `Draft` and hold
+`Candidate` release state for the bundle, so the candidacy records the intended target rather than
+an approved scope. ZEP-0107 is `Accepted` but has been removed from the program bundle and is
 `Unscheduled`.
 
 | ZEP | Name | Status | Role |
 | --- | --- | --- | --- |
-| ZEP-0118 | Response-Typed Effects and Tail-Resumptive Handlers | Draft | Headline: a `raise` returns a handler-supplied value |
+| ZEP-0118 | Response-Typed Effects and Tail-Resumptive Handlers | Draft / `Candidate` | Headline: a `raise` returns a handler-supplied value |
 | ZEP-0147 | Replace `raise` and `raises` with `perform` and `performs` | Draft / `Candidate` | Hard-drop the exception-oriented keywords; use neutral effect-operation vocabulary |
 | ZEP-0111 | Witness-Dispatched Do-Notation | Shipped `0.7.0` | Not part of `0.9.0` |
 | ZEP-0112 | Structured Concurrency on Virtual Threads | Draft | Independent library track: `Scope`, `Task`, cancellation, timeouts |
@@ -409,8 +409,8 @@ candidate.
    ZEP-0118.
 2. **Accept ZEP-0147 as the effect-operation rename.** It changes spellings, not effect semantics,
    and removes `raise`/`raises` rather than introducing aliases.
-3. **Mark ZEP-0118 and ZEP-0147 `Planned` for `0.9.0` after acceptance**, not before. ZEP-0147's
-   `Candidate` row records the intended target while its design remains `Draft`.
+3. **Mark ZEP-0118 and ZEP-0147 `Planned` for `0.9.0` after acceptance**, not before. Their
+   `Candidate` rows record the intended target while both designs remain `Draft`.
 4. **ZEP-0111 shipped in `0.7.0`.** It is notation-only and is not part of the `0.9.0` candidate
    path. ZEP-0110 is superseded by [ZEP-0146](../zeps/ZEP-0146.md), which targets `0.8.0`.
 
@@ -724,12 +724,13 @@ These decisions shape the current plan. Details live in each ZEP.
   `Unscheduled`; that is not an error by itself.
 - A ZEP normally cannot move to `Candidate` while it is `Draft` or `Deferred`; accept the design
   first. ZEP-0098 and ZEP-0113 were accepted and implemented on 2026-11-16, and ZEP-0146 and
-  ZEP-0151 were accepted and implemented on 2026-11-20. ZEP-0147 remains a draft target; treat its
-  `Candidate` row as proposed until its design review is complete.
+  ZEP-0151 were accepted and implemented on 2026-11-20. ZEP-0118 and ZEP-0147 remain draft targets;
+  treat their `Candidate` rows as proposed until their design reviews are complete.
 - `Candidate` is a proposed release target, not a commitment. `Planned` records an approved bundle.
 - The `0.7.0` description is shipped scope: its 15 rows are `Shipped` / `0.7.0`. The `0.8.0`
-  description shipped on 2026-11-20 with twenty-five rows; its acceptance queue is closed. The `0.9.0` description has one
-  draft candidate, ZEP-0147, and remains a planning record. The `0.10.0` description has two
+  description shipped on 2026-11-20 with twenty-five rows; its acceptance queue is closed. The
+  `0.9.0` description has two draft candidates, ZEP-0118 and ZEP-0147, and remains a planning
+  record. The `0.10.0` description has two
   accepted candidates, ZEP-0091 and ZEP-0097, plus three draft model proposals that cannot become
   candidates until accepted.
 - The `0.7.0` acceptance queue is closed. The 15 shipped rows are the release set; ZEP-0107 and

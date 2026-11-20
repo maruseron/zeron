@@ -757,7 +757,7 @@ final class DeclarationResolver {
                 final var contract = context.contracts.get(contractUse.name().lexeme());
                 if (contract == null) continue;
                 Resolver.attemptMember(context, () -> checkConformance(context, declaration, contractUse,
-                        contract, contractUse.name()));
+                        contract, contractUse.name(), true));
             }
         } finally {
             context.frame.currentClassName = previousClass;
@@ -1224,7 +1224,8 @@ final class DeclarationResolver {
     private static void checkConformance(final ResolutionContext context, final Stmt.ClassDecl declaration,
                                   final Stmt.ContractUse contractUse,
                                   final Stmt.ContractDecl contract,
-                                  final Token origin) {
+                                  final Token origin,
+                                  final boolean includeStubHelp) {
         final var substitutions = new LinkedHashMap<TypeParameterDescriptor, TypeDescriptor>();
         for (int i = 0; i < contract.typeParameters().size(); i++) {
             substitutions.put(contract.typeParameters().get(i), contractUse.typeArguments().get(i));
@@ -1334,7 +1335,10 @@ final class DeclarationResolver {
             }
         }
         if (!methodErrors.isEmpty()) {
-            final var missingMethodStubs = missingMethodStubs(context, declaration, contractUse);
+            // The class's own contract use already offers stubs for the whole closure, so an
+            // inherited failure at the same class clause does not repeat the quick fix.
+            final var missingMethodStubs = includeStubHelp
+                    ? missingMethodStubs(context, declaration, contractUse) : List.<String>of();
             if (!missingMethodStubs.isEmpty() && firstMethodError != null) {
                 final var closingBraceSpan = declaration.closingBrace().span();
                 final var position = closingBraceSpan.start();
@@ -1368,7 +1372,8 @@ final class DeclarationResolver {
         final var closure = ContractComposition.closure(context, contractUse);
         for (int index = 1; index < closure.size(); index++) {
             final var inherited = closure.get(index);
-            checkConformance(context, declaration, inherited.use(), inherited.declaration(), origin);
+            checkConformance(context, declaration, inherited.use(), inherited.declaration(), origin,
+                    false);
         }
     }
 

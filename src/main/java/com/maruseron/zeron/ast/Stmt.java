@@ -493,7 +493,7 @@ public sealed interface Stmt {
                      boolean dataClass, List<ProductComponent> dataComponents,
                      List<InitializerBlock> initializerBlocks,
                      List<TypeDescriptor> declaredConstructorEffects,
-                     Token closingBrace) implements Stmt, Decl {
+                     Token closingBrace, TypeDescriptor responseType) implements Stmt, Decl {
         public ClassDecl {
             patterns = List.copyOf(patterns);
             staticFunctions = List.copyOf(staticFunctions);
@@ -527,7 +527,7 @@ public sealed interface Stmt {
                     methods, List.of(), patterns, isPublic, isEffect, List.of(), derivedContracts,
                     storedStateOrder, higherKindedContractUses, higherKindedImplementations,
                     literalSuffixes, dataClass, dataComponents, initializerBlocks,
-                    declaredConstructorEffects, null);
+                    declaredConstructorEffects, null, null);
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,
@@ -547,7 +547,7 @@ public sealed interface Stmt {
                     namedConstructors, methods, List.of(), patterns, isPublic, isEffect,
                     underEffects, derivedContracts, storedStateOrder, higherKindedContractUses,
                     higherKindedImplementations, literalSuffixes, dataClass, dataComponents,
-                    initializerBlocks, declaredConstructorEffects, closingBrace);
+                    initializerBlocks, declaredConstructorEffects, closingBrace, null);
         }
 
         public ClassDecl(Token name, List<TypeParameterDescriptor> typeParameters,

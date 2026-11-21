@@ -34,6 +34,61 @@ the function's type.
 Effects are useful when a failure should interrupt the current operation and be handled at a
 meaningful level above it, rather than being checked and transformed after every call.
 
+## Response-typed effects
+
+An effect may declare that its handler answers with a value. Add `responds` with the response type
+before the payload body:
+
+```zeron
+public effect Ask<T> responds T {}
+
+public effect Yield<T> responds Unit {
+    public property value: T;
+}
+```
+
+A `raise` of a responding effect is an expression of the response type, so the raise site can use
+the handler's answer:
+
+```zeron
+fn question(): String raises Ask<String> =
+    "Hello, " + raise Ask<String>() + "!";
+
+fn answered(): String = handle (question()) with {
+    case Ask<String>, k -> k.resume("Ada");
+};
+```
+
+`answered()` produces `"Hello, Ada!"`. The value passed to `k.resume` becomes the result of the
+`raise` expression, and the protected computation continues from there. An effect without
+`responds` remains abortive: its `raise` still has type `Never` and does not continue.
+
+Only a tail-resumptive handler is supported. The resume token `k` is not a value: it may appear
+only as `k.resume(value)` in tail position of its own case, and that call must be the entire case
+body. Storing `k`, passing it to a function, resuming it twice, or doing work after `resume` is
+rejected. A case may instead omit the token and let the effect abort through the ordinary handler
+path. Resuming cases are supported in inline `handle` expressions; named and first-class handler
+values currently reject them.
+
+The standard-library effects `Ask<T>`, `Yield<T>`, and `Log` use this model.
+`Ask<T>` requests a `T`; `Yield<T>` carries a `T` and responds with `Unit`, which is the push half of
+iteration; and `Log` carries a `String` message and responds with `Unit`. A `Yield` handler consumes
+each value and resumes immediately:
+
+```zeron
+fn numbers(): Unit raises Yield<Int> {
+    raise Yield<Int>(1);
+    raise Yield<Int>(2);
+}
+
+fn printNumbers(): Unit = handle (numbers()) with {
+    case Yield<Int>(value), k -> {
+        println(value.toString());
+        k.resume(());
+    }
+};
+```
+
 ## Generic effects and exact applied identity
 
 An effect may declare type parameters used by its payload. Applications are invariant and must be
@@ -185,6 +240,20 @@ propagating. If no case matches, the same effect propagates to the surrounding h
 Effects raised by a handler arm also propagate unless that handler is itself inside another handler
 or the enclosing callable declares them.
 
+A handler case for a responding effect may bind a resume token after the pattern, separated by a
+comma:
+
+```zeron
+handle (raise Ask<Int>()) with {
+    case Ask<Int>, k -> k.resume(8);
+};
+```
+
+The token makes the case tail-resumptive: the response is delivered to the raise site and the
+protected computation continues. Nested inline handlers work, and effects raised while evaluating
+the resume argument are handled by the next enclosing handler. Abortive effects in the same handler
+continue to use the ordinary unwinding path, so a mixed handler can resume `Ask` and abort `Failure`.
+
 ## Reusable and first-class handlers
 
 When a policy should be reused, declare a named handler. It is an immutable value and can be
@@ -284,6 +353,13 @@ by the enclosing function. [ZEP-0148](../documents/zeps/ZEP-0148.md) implements 
 lambda or top-level function reference converted to a Java functional interface must have an empty
 `raises` row, so a `RaisedEffect` never crosses into Java; handle or map the effect inside the
 callback instead.
+
+Tail-resumptive handlers use a synchronous thread-local handler-frame stack rather than capturing a
+continuation. A responding `raise` selects the innermost matching frame, temporarily removes it while
+the handler runs, and returns the response to the raise site. If the case does not match, the same
+carrier continues outward. No continuation object, stack capture, or asynchronous suspension is
+involved, and a first-class handler value with a resuming case is rejected rather than lowered
+incorrectly.
 
 Effect payload declarations remain synchronous and nominal. Non-generic effects keep their
 descriptor-free payload ABI; generic effects add a descriptor for exact application identity.

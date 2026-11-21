@@ -160,6 +160,7 @@ public sealed interface Expr {
         private int spreadArgumentIndex = -1;
         private Token spreadToken;
         private List<Token> witnessSelection = List.of();
+        private boolean resumeCall;
 
         public MemberCall(Expr receiver, Token name, Token paren, List<Expr> arguments,
                           List<TypeDescriptor> explicitTypeArguments, TypeDescriptor type) {
@@ -283,6 +284,9 @@ public sealed interface Expr {
         public void setWitnessSelection(final List<Token> selection) {
             witnessSelection = List.copyOf(selection);
         }
+        /// Marks `k.resume(value)`, which lowers to the value itself.
+        public boolean resumeCall() { return resumeCall; }
+        public void setResumeCall(final boolean value) { resumeCall = value; }
         public int spreadArgumentIndex() { return spreadArgumentIndex; }
         public Token spreadToken() { return spreadToken; }
         public void setSpreadArgument(final int index, final Token token) {
@@ -936,18 +940,15 @@ public sealed interface Expr {
     final class Raise implements Expr {
         public final Token keyword;
         public final Expr effect;
+        private TypeDescriptor type = TypeDescriptor.ofNever();
 
         public Raise(final Token keyword, final Expr effect) {
             this.keyword = keyword;
             this.effect = effect;
         }
 
-        public TypeDescriptor getType() { return TypeDescriptor.ofNever(); }
-        public void setType(final TypeDescriptor type) {
-            if (!(type instanceof com.maruseron.zeron.domain.NeverDescriptor)) {
-                throw new IllegalArgumentException("A raise expression has type Never.");
-            }
-        }
+        public TypeDescriptor getType() { return type; }
+        public void setType(final TypeDescriptor type) { this.type = type; }
     }
 
     final class Unsafe implements Expr {
@@ -971,21 +972,30 @@ public sealed interface Expr {
         private final Expr guard;
         private final Expr expression;
         private final Token suppressedBinding;
+        private final Token resumeBinding;
         private TypeDescriptor resolvedEffectType;
 
         public HandleArm(final Token keyword, final TypeDescriptor effectType,
                          final MatchPattern pattern, final Expr guard, final Expr expression) {
-            this(keyword, effectType, pattern, guard, null, expression);
+            this(keyword, effectType, pattern, guard, null, null, expression);
         }
 
         public HandleArm(final Token keyword, final TypeDescriptor effectType,
                          final MatchPattern pattern, final Expr guard,
                          final Token suppressedBinding, final Expr expression) {
+            this(keyword, effectType, pattern, guard, suppressedBinding, null, expression);
+        }
+
+        public HandleArm(final Token keyword, final TypeDescriptor effectType,
+                         final MatchPattern pattern, final Expr guard,
+                         final Token suppressedBinding, final Token resumeBinding,
+                         final Expr expression) {
             this.keyword = keyword;
             this.effectType = effectType;
             this.pattern = pattern;
             this.guard = guard;
             this.suppressedBinding = suppressedBinding;
+            this.resumeBinding = resumeBinding;
             this.expression = expression;
         }
 
@@ -994,6 +1004,7 @@ public sealed interface Expr {
         public MatchPattern pattern() { return pattern; }
         public Expr guard() { return guard; }
         public Token suppressedBinding() { return suppressedBinding; }
+        public Token resumeBinding() { return resumeBinding; }
         public Expr expression() { return expression; }
         public TypeDescriptor resolvedEffectType() { return resolvedEffectType; }
         public void setResolvedEffectType(final TypeDescriptor type) { resolvedEffectType = type; }
@@ -1004,6 +1015,7 @@ public sealed interface Expr {
         public final Expr expression;
         public final List<HandleArm> arms;
         public final Expr handler;
+        private Expr frameHandler;
         private TypeDescriptor type = TypeDescriptor.ofInfer();
 
         public Handle(final Token keyword, final Expr expression, final List<HandleArm> arms) {
@@ -1020,6 +1032,9 @@ public sealed interface Expr {
 
         public TypeDescriptor getType() { return type; }
         public void setType(final TypeDescriptor type) { this.type = type; }
+        /// The synthesized resuming handler installed while the protected expression runs.
+        public Expr frameHandler() { return frameHandler; }
+        public void setFrameHandler(final Expr handler) { frameHandler = handler; }
     }
 
     final class HandlerDispatch implements Expr {

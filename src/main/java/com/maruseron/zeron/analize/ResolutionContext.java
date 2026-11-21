@@ -46,6 +46,7 @@ final class ResolutionContext {
     final Set<Stmt.Function> newtypeWitnessHelpers =
             Collections.newSetFromMap(new IdentityHashMap<>());
     final Map<Token, TypeDescriptor> referenceTypes = new IdentityHashMap<>();
+    final Map<String, Deque<TypeDescriptor>> resumeTokens = new LinkedHashMap<>();
     final Map<Token, FunctionDescriptor> callSiteFunctionTypes = new IdentityHashMap<>();
     private final Deque<OpeningScope> openingScopes = new ArrayDeque<>();
     boolean resolvingOpeningCondition;
@@ -112,6 +113,7 @@ final class ResolutionContext {
         frame.dataInitializerOwner = null;
         frame.dataInitializerWritableFields = java.util.Map.of();
         openingScopes.clear();
+        resumeTokens.clear();
         resolvingOpeningCondition = false;
     }
 

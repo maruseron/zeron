@@ -486,6 +486,7 @@ final class LambdaCompilationPlan {
             case Expr.Handle handle -> {
                 collectLambdaShapes(handle.expression);
                 collectLambdaShapes(handle.handler);
+                collectLambdaShapes(handle.frameHandler());
                 for (final var arm : handle.arms) {
                     collectLambdaShapes(arm.guard());
                     collectLambdaShapes(arm.expression());
@@ -832,9 +833,13 @@ final class LambdaCompilationPlan {
                 if (handle.handler != null) {
                     collectCapturedVariables(handle.handler, localNames, captured, seen);
                 }
+                if (handle.frameHandler() != null) {
+                    collectCapturedVariables(handle.frameHandler(), localNames, captured, seen);
+                }
                 for (final var arm : handle.arms) {
                     final var armNames = new HashSet<>(localNames);
                     arm.pattern().bindingNames().forEach(name -> armNames.add(name.lexeme()));
+                    if (arm.resumeBinding() != null) armNames.add(arm.resumeBinding().lexeme());
                     if (arm.guard() != null) {
                         collectCapturedVariables(arm.guard(), armNames, captured, seen);
                     }
@@ -847,6 +852,7 @@ final class LambdaCompilationPlan {
                 for (final var arm : dispatch.arms) {
                     final var armNames = new HashSet<>(localNames);
                     arm.pattern().bindingNames().forEach(name -> armNames.add(name.lexeme()));
+                    if (arm.resumeBinding() != null) armNames.add(arm.resumeBinding().lexeme());
                     if (arm.guard() != null) {
                         collectCapturedVariables(arm.guard(), armNames, captured, seen);
                     }

@@ -1,0 +1,18 @@
+package zeron.lang;
+
+/// An effect that yields a value to a surrounding resumable handler.
+///
+/// A tail-resumptive handler answers with `Unit`, after which the raise expression continues with
+/// the resumed value.
+public effect Yield<T> responds Unit {
+    public property value: T;
+}
+
+/// An effect that asks a surrounding resumable handler for a value of type `T`.
+public effect Ask<T> responds T {
+}
+
+/// An effect that reports a message to a surrounding resumable handler.
+public effect Log responds Unit {
+    public property message: String;
+}

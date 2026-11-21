@@ -173,6 +173,134 @@ public final class TypedRaisedEffectsTest {
     }
 
     @Test
+    public void respondingRaisesResumeThroughTailResumptiveHandlers() throws Exception {
+        final var packageName = "respondingEffects" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-responding-effects-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                public effect Ask<T> responds T {}
+                public effect Yield<T> responds Unit {
+                    public property value: T;
+                }
+                public effect Failure {
+                    public property message: String;
+                }
+                fn compute(): Int raises Ask<Int> = raise Ask<Int>() + 22;
+                fn asked(): Int = handle (compute()) with {
+                    case Ask<Int>, k -> k.resume(8);
+                };
+                fn yielded(): Unit = handle (raise Yield<Int>(5)) with {
+                    case Yield<Int>(value), k -> k.resume(());
+                };
+                fn nested(): Int = handle (raise Ask<Int>()) with {
+                    case Ask<Int>, outer -> outer.resume(handle (raise Ask<Int>()) with {
+                        case Ask<Int>, inner -> inner.resume(3);
+                    });
+                };
+                fn mixed(): Int = handle (raise Ask<Int>() + 1) with {
+                    case Ask<Int>, k -> k.resume(5);
+                    case Failure as failure -> failure.message.length();
+                };
+                fn abortiveStillWorks(): Int = handle (raise Failure.new("boom")) with {
+                    case Ask<Int>, k -> k.resume(1);
+                    case Failure -> 9;
+                };
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit),
+                    packageName + ".Main", packageName, List.of(), true, List.of(), output);
+            final var resolution = compiler.resolveWithDiagnostics();
+            assertTrue(resolution.errors().toString(), resolution.errors().isEmpty());
+            final var compilation = compiler.compileWithDiagnostics();
+            assertTrue(compilation.diagnostics().toString(), compilation.successful());
+
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                final var main = loader.loadClass(packageName + ".Main");
+                assertEquals(30, main.getMethod("asked").invoke(null));
+                main.getMethod("yielded").invoke(null);
+                assertEquals(3, main.getMethod("nested").invoke(null));
+                assertEquals(6, main.getMethod("mixed").invoke(null));
+                assertEquals(9, main.getMethod("abortiveStillWorks").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void standardLibraryRespondingEffectsAreUsable() throws Exception {
+        final var packageName = "stdlibResponding" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-stdlib-responding-");
+        final var unit = parse("Main.zn", """
+                package %s;
+                import zeron.lang.Ask;
+                import zeron.lang.Yield;
+                import zeron.lang.Log;
+                fn asked(): Int = handle (raise Ask<Int>()) with {
+                    case Ask<Int>, k -> k.resume(7);
+                };
+                fn yielded(): Unit = handle (raise Yield<Int>(1)) with {
+                    case Yield<Int>(value), k -> k.resume(());
+                };
+                fn logged(): Unit = handle (raise Log.new("message")) with {
+                    case Log(message), k -> k.resume(());
+                };
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit),
+                    packageName + ".Main", packageName, List.of(), true, List.of(), output);
+            final var resolution = compiler.resolveWithDiagnostics();
+            assertTrue(resolution.errors().toString(), resolution.errors().isEmpty());
+            final var compilation = compiler.compileWithDiagnostics();
+            assertTrue(compilation.diagnostics().toString(), compilation.successful());
+            try (final var loader = new URLClassLoader(new java.net.URL[]{output.toUri().toURL()},
+                    getClass().getClassLoader())) {
+                assertEquals(7, loader.loadClass(packageName + ".Main").getMethod("asked").invoke(null));
+            }
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
+    public void responseTypesRoundTripThroughCompiledLibraryIndex() throws Exception {
+        final var packageName = "respondingIndex" + UUID.randomUUID().toString().replace("-", "");
+        final var output = Files.createTempDirectory(Path.of("target"), "zeron-responding-index-");
+        final var unit = parse("Library.zn", """
+                package %s;
+                public effect Ask<T> responds T {}
+                public effect Log responds Unit {
+                    public property message: String;
+                }
+                """.formatted(packageName));
+        try {
+            final var compiler = CompilationService.forCompilationUnits(List.of(unit),
+                    packageName + ".Library", packageName, List.of(), true, List.of(), output);
+            compiler.resolve();
+            compiler.compile();
+
+            final var index = ZeronLibraryIndex.readFromDirectory(output);
+            final var classes = index.declarations().stream()
+                    .filter(ZeronLibraryIndex.ClassExport.class::isInstance)
+                    .map(ZeronLibraryIndex.ClassExport.class::cast)
+                    .toList();
+            final var ask = classes.stream()
+                    .filter(export -> export.qualifiedName().equals(packageName + ".Ask"))
+                    .findFirst().orElseThrow();
+            assertTrue(ask.responseType()
+                    instanceof com.maruseron.zeron.domain.TypeParameterDescriptor);
+            assertEquals("T", ask.responseType().name());
+            final var log = classes.stream()
+                    .filter(export -> export.qualifiedName().equals(packageName + ".Log"))
+                    .findFirst().orElseThrow();
+            assertEquals(com.maruseron.zeron.domain.TypeDescriptor.ofUnit(), log.responseType());
+        } finally {
+            deleteTree(output);
+        }
+    }
+
+    @Test
     public void extensionRaisedClausesParseIntoTheirFunctionTypes() {
         final var unit = parse("Extension.zn", """
                 effect Failure { public property message: String; }

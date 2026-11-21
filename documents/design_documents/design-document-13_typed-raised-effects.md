@@ -15,6 +15,13 @@ handler types. Effects and handler shapes are checked by the resolver and repres
 compiled-library API metadata. Handler cases use the existing named-pattern syntax, can bind the
 whole payload with `as`, and can include Boolean guards.
 
+[ZEP-0118](../zeps/ZEP-0118.md) adds response-typed effects and tail-resumptive handlers. An effect
+may declare `responds R`; `raise` then produces `R` instead of `Never`, and an inline handler case
+may bind a resume token with `case Effect(...), k -> k.resume(value);`. The response is delivered
+synchronously to the raise site and the protected computation continues. Continuation capture,
+storage, and resumption after the handler returns remain outside this implementation and belong to
+[ZEP-0119](../zeps/ZEP-0119.md).
+
 The implementation supports effect-row polymorphism through declaration-level `effect...` type
 parameters. It also supports explicit effect-only subtyping with `under` and the denotable top
 `Effect`; the relation is independent of ordinary contract conformance. Generic effect payloads use
@@ -42,6 +49,17 @@ An effect is declared with a nominal payload type:
 ```zeron
 public effect NotFound {
     public property path: String;
+}
+```
+
+An effect may also declare the type its handler returns to the raise site. `responds` follows the
+optional `is`, `under`, and `deriving` clauses:
+
+```zeron
+public effect Ask<T> responds T {}
+
+public effect Yield<T> responds Unit {
+    public property value: T;
 }
 ```
 
@@ -85,6 +103,21 @@ handle (read(path)) with {
 OR-pattern alternatives in a handler case must name the same effect type. Multiple cases for the
 same effect are allowed. Comparable cases are tried most-specific first regardless of source
 order, and the parser requires at least one case.
+
+A case for a responding effect may bind a resume token after the pattern and any `as`, guard, or
+suppressed binding, separated by a comma:
+
+```zeron
+fn answered(): String = handle (raise Ask<String>()) with {
+    case Ask<String>, k -> k.resume("Ada");
+};
+```
+
+The case is tail-resumptive: `k.resume(value)` must be its entire body and the argument must fit the
+effect's response type. The token is not a first-class value, so it cannot be stored, passed,
+returned, or resumed more than once. A case that omits the token keeps the ordinary abortive
+behavior. Named and anonymous handler values currently reject resuming cases; the feature is
+implemented for inline `handle` expressions.
 
 ### Named and first-class handlers
 
@@ -160,6 +193,28 @@ A subeffect satisfies a broader `raises` requirement, and a handler case for a s
 its subeffects. Handler payloads retain the case's declared static type, so a parent-typed case
 exposes inherited payload but not subtype-only members. Coverage removes every raised element that
 is a subtype of a fully handled case, while a broader element remains.
+
+### Responses and resumption
+
+A response type is part of the effect declaration and is resolved in the effect's type-parameter
+scope. `raise` on a responding effect produces the response type after substituting the applied
+effect's arguments; on an effect without `responds` it stays `Never`. A responding `raise` is a
+normal expression, so the statements after it remain reachable, while an abortive `raise` still
+makes the rest of the block unreachable. The response type is not a second effect and never appears
+in the raised row.
+
+A tail-resumptive case binds a resume token after its pattern. The resolver records the token with
+the response type for the arm's effect and accepts only `token.resume(argument)` as the complete arm
+body, with the argument assignable to the response type. Using the token anywhere else, resuming
+through a different token, or using a resume token on an effect without `responds` is an error.
+Resuming cases are accepted in inline `handle` expressions. A named or anonymous handler value
+cannot currently contain one, because its implementation is compiled without the inline handler
+frame; this is a scoped limitation, not a different typing rule.
+
+The runtime answer needs no continuation object and no stack capture. Only concrete or applied
+effects can be resumed: generic code that raises through an `effect` or `effect...` parameter has no
+known response, so it must forward the effect instead. Generic libraries can still declare and
+export responding effects, and clients substitute concrete response types.
 
 ### Effect-row polymorphism
 
@@ -281,12 +336,14 @@ result and dispatch argument; effect capabilities remain in source-level descrip
 metadata.
 
 The compiled-library index serializes effect and row markers, callable raised sets, direct `under`
-edges, handler shapes on exported values, and external-facade exception mappings needed for
-separately compiled clients. The effective payload shape needs no separate record: the exported
-canonical-constructor parameter types and names already describe the child's complete payload.
-The standard-library API version remains independent of the binary schema version. Consumers of
-schemas that predate the relevant metadata must rebuild or use a compatible compiler; such an index
-cannot communicate effect markers, row parameters, raised signatures, handler capabilities, or
+edges, handler shapes on exported values, response types on exported effects, and external-facade
+exception mappings needed for separately compiled clients. The effective payload shape needs no
+separate record: the exported canonical-constructor parameter types and names already describe the
+child's complete payload. Response metadata was added with API-index schema 17; indexes written by
+older compilers have no field and are read as if the effect were abortive. The standard-library API
+version remains independent of the binary schema version. Consumers of schemas that predate the
+relevant metadata must rebuild or use a compatible compiler; such an index cannot communicate
+effect markers, row parameters, raised signatures, handler capabilities, response types, or
 exception mappings safely.
 
 ## Runtime model
@@ -300,7 +357,18 @@ A handler compiles its protected expression into a JVM exception-table region ca
 first, evaluate a guard only after its pattern matches, and evaluate the arm only when both pattern
 and guard succeed. If no case matches, the same carrier is rethrown. Ordinary Java exceptions are not caught
 by effect handlers; only an explicit external-facade mapping translates the declared checked
-exception at its Java call site. An unhandled carrier escaping the
+exception at its Java call site.
+
+A responding `raise` compiles differently. The compiler emits a call to
+`zeron.runtime.EffectSupport.perform(payload)` instead of throwing, and an inline handler installs a
+synchronous thread-local frame around its protected expression. `perform` invokes the innermost
+frame's synthesized handler with the carrier, temporarily removing that frame while the handler
+runs. A matching resuming arm evaluates `k.resume(value)` as `value`, so the frame returns the
+response and the raise site continues. A non-matching handler rethrows the same carrier, `perform`
+continues outward, and the frame is not restored. Effects raised while evaluating the response see
+the next enclosing frame. The frame is restored on normal return and removed on every exceptional
+exit, so no handler leaks past its protected expression. This is a direct call plus a handler stack;
+it allocates no continuation and captures no stack. An unhandled carrier escaping the
 generated `main` method likewise propagates unchanged across the host boundary;
 the current compiler does not add a launcher that catches and formats it. A future launcher may
 report an uncaught Zeron effect by catching only `RaisedEffect`, without translating Java exceptions
@@ -351,24 +419,22 @@ Other follow-up areas:
 8. [ZEP-0056](../zeps/ZEP-0056.md) and [ZEP-0057](../zeps/ZEP-0057.md) implement named reusable
    handlers and first-class structural handler types. These remain abortive and preserve `match` for
    ordinary value inspection; resumable continuations are a separate design question.
-9. Decide whether raised effects should remain abortive or eventually grow into fully resumable
-   algebraic effects. Resumption is not part of the current runtime model: `raise` throws a carrier
-   and unwinds the JVM stack to a handler. Supporting resumable operations would require capturing
-   and invoking continuations and would change the compiler/runtime model substantially. Do not
-   assume Project Loom's virtual threads provide arbitrary continuation capture and resumption;
-   investigate a compiler-managed strategy such as CPS transformation, starting with one-shot
-   continuations, before committing to this direction.
-   [ZEP-0007](../zeps/ZEP-0007.md) records the mechanism analysis, including why a monadic lowering
-   of a handled block is a resumption mechanism and which type-system pieces it needs. The
-   separable parts are proposed separately: value-producing block expressions
+9. [ZEP-0118](../zeps/ZEP-0118.md) implements response-typed effects and tail-resumptive handlers.
+   `raise` on a responding effect produces the response type, and an inline handler case can resume
+   synchronously with `k.resume(value)` through a thread-local handler frame. This adds no
+   continuation and does not change abortive effects. [ZEP-0119](../zeps/ZEP-0119.md) covers general
+   one-shot continuations, deep handlers, and cancellation; [ZEP-0120](../zeps/ZEP-0120.md) covers the
+   async/task surface. Supporting general resumable operations would require capturing and invoking
+   continuations and would change the compiler/runtime model substantially. Do not assume Project
+   Loom's virtual threads provide arbitrary continuation capture and resumption; investigate a
+   compiler-managed strategy such as CPS transformation, starting with one-shot continuations,
+   before committing to this direction. [ZEP-0007](../zeps/ZEP-0007.md) records the mechanism
+   analysis. The separable parts are proposed separately: value-producing block expressions
    ([ZEP-0146](../zeps/ZEP-0146.md)), witness-dispatched `do` notation at library level
    ([ZEP-0111](../zeps/ZEP-0111.md)), and direct-style suspension with structured concurrency
-   ([ZEP-0112](../zeps/ZEP-0112.md)). None of them changes `raise` or `handle` semantics.
-   The scoped resumption design is now [ZEP-0118](../zeps/ZEP-0118.md) (response types and
-   tail-resumptive handlers), [ZEP-0119](../zeps/ZEP-0119.md) (one-shot continuations and
-   cancellation), and [ZEP-0120](../zeps/ZEP-0120.md) (async/task surface). Multi-shot continuations
-   remain deferred in [ZEP-0121](../zeps/ZEP-0121.md); [ZEP-0007](../zeps/ZEP-0007.md) is superseded
-   and remains the mechanism comparison.
+   ([ZEP-0112](../zeps/ZEP-0112.md)). Multi-shot continuations remain deferred in
+   [ZEP-0121](../zeps/ZEP-0121.md); [ZEP-0007](../zeps/ZEP-0007.md) is superseded and remains the
+   mechanism comparison.
 
 Effect-set polymorphism is implemented in [ZEP-0086](../zeps/ZEP-0086.md); its design and
 validation coverage are recorded there. `Result<T, E>` remains ordinary and is not a migration

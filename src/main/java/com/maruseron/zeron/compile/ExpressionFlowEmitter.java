@@ -947,9 +947,6 @@ final class ExpressionFlowEmitter {
     }
 
     static void emitRaise(final CompilationContext context, final CodeBuilder composer, final Expr.Raise raise) {
-        final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
-        composer.new_(carrier);
-        composer.dup();
         emitExpr(context, composer, raise.effect);
         emitConversion(context, composer, context.lastEmittedType, TypeDescriptor.ofAny());
         if (raise.effect.getType() instanceof TypeParameterDescriptor parameter && parameter.isEffectKind()) {
@@ -957,15 +954,38 @@ final class ExpressionFlowEmitter {
             composer.invokestatic(support, "requireEffect",
                     MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
         }
+        if (hasResponse(context, raise.effect.getType())) {
+            composer.invokestatic(ClassDesc.of("zeron.runtime.EffectSupport"), "perform",
+                    MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object));
+            emitConversion(context, composer, TypeDescriptor.ofAny(), raise.getType());
+            context.lastEmittedType = raise.getType();
+            return;
+        }
+        final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+        composer.new_(carrier);
+        composer.dup_x1();
+        composer.swap();
         composer.invokespecial(carrier, "<init>",
                 MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object));
         composer.athrow();
         context.lastEmittedType = TypeDescriptor.ofNever();
     }
 
+    private static boolean hasResponse(final CompilationContext context, final TypeDescriptor effectType) {
+        var erased = TypeSubstitution.erase(effectType);
+        if (erased instanceof ReferenceDescriptor reference) erased = reference.baseType();
+        if (!(erased instanceof NominalDescriptor nominal)) return false;
+        final var declaration = context.resolution.classes().get(nominal.name());
+        return declaration != null && declaration.responseType() != null;
+    }
+
     static void emitHandle(final CompilationContext context, final CodeBuilder composer, final Expr.Handle handle) {
         if (handle.handler != null) {
             emitHandlerApplication(context, composer, handle);
+            return;
+        }
+        if (handle.frameHandler() != null) {
+            emitResumingHandle(context, composer, handle);
             return;
         }
         final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
@@ -1028,6 +1048,98 @@ final class ExpressionFlowEmitter {
         composer.athrow();
         composer.labelBinding(done);
         composer.exceptionCatch(start, end, handler, carrier);
+        endScope(context);
+        context.lastEmittedType = handle.getType();
+    }
+
+    private static void emitResumingHandle(final CompilationContext context,
+                                           final CodeBuilder composer,
+                                           final Expr.Handle handle) {
+        final var frameType = (FunctionDescriptor) handle.frameHandler().getType();
+        final var frame = declareLoopLocal(context, nextLoopTemporary(context, "handlerFrame"), frameType);
+        emitExpr(context, composer, handle.frameHandler());
+        storePipelineValue(context, composer, frame, frameType);
+        loadPipelineValue(context, composer, frame, frameType);
+        final var invokeType = MethodTypeDesc.of(ConstantDescs.CD_Object, ConstantDescs.CD_Object);
+        composer.ldc(MethodHandleDesc.ofMethod(DirectMethodHandleDesc.Kind.INTERFACE_VIRTUAL,
+                TypeDescriptor.toJavaClassDesc(frameType), "invoke", invokeType));
+        composer.invokestatic(ClassDesc.of("zeron.runtime.EffectSupport"), "push",
+                MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_Object,
+                        ConstantDescs.CD_MethodHandle));
+
+        final var carrier = ClassDesc.of("zeron.runtime.RaisedEffect");
+        beginScope(context);
+        final var start = composer.newLabel();
+        final var end = composer.newLabel();
+        final var handler = composer.newLabel();
+        final var throwableHandler = composer.newLabel();
+        final var done = composer.newLabel();
+
+        composer.labelBinding(start);
+        emitExpr(context, composer, handle.expression);
+        emitConversion(context, composer, context.lastEmittedType, handle.getType());
+        composer.invokestatic(ClassDesc.of("zeron.runtime.EffectSupport"), "pop",
+                MethodTypeDesc.of(ConstantDescs.CD_void));
+        composer.goto_(done);
+        composer.labelBinding(end);
+
+        composer.labelBinding(handler);
+        composer.invokestatic(ClassDesc.of("zeron.runtime.EffectSupport"), "pop",
+                MethodTypeDesc.of(ConstantDescs.CD_void));
+        final var exception = declareLoopLocal(context, nextLoopTemporary(context, "handlerException"),
+                TypeDescriptor.ofAny());
+        final var payload = declareLoopLocal(context, nextLoopTemporary(context, "handlerPayload"),
+                TypeDescriptor.ofAny());
+        storePipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(carrier);
+        composer.invokevirtual(carrier, "payload", MethodTypeDesc.of(ConstantDescs.CD_Object));
+        storePipelineValue(context, composer, payload, TypeDescriptor.ofAny());
+
+        final var orderedArms = orderedHandlerArms(context, handle.arms);
+        for (final var arm : orderedArms) {
+            final var next = composer.newLabel();
+            beginScope(context);
+            try {
+                declareMatchBindings(context, arm.pattern());
+                emitExactEffectMatchTest(context, composer, payload, arm.resolvedEffectType(), next);
+                emitMatchPattern(context, composer, arm.pattern(), payload, next);
+                if (arm.suppressedBinding() != null) {
+                    final var suppressedType = TypeDescriptor.arrayOf(TypeDescriptor.ofAny().toNullable());
+                    final var suppressed = declareLoopLocal(
+                            context, arm.suppressedBinding(), suppressedType);
+                    loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+                    composer.checkcast(carrier);
+                    composer.invokevirtual(carrier, "suppressedOutcomes",
+                            MethodTypeDesc.of(ConstantDescs.CD_Object.arrayType()));
+                    composer.astore(suppressed.lvt() + context.localSlotOffset);
+                }
+                if (arm.guard() != null) {
+                    emitExpr(context, composer, arm.guard());
+                    composer.ifeq(next);
+                }
+                emitAmbiguousEffectCheck(context, composer, arm, orderedArms, payload);
+                emitExpr(context, composer, arm.expression());
+                emitConversion(context, composer, context.lastEmittedType, handle.getType());
+            } finally {
+                endScope(context);
+            }
+            composer.goto_(done);
+            composer.labelBinding(next);
+        }
+
+        loadPipelineValue(context, composer, exception, TypeDescriptor.ofAny());
+        composer.checkcast(carrier);
+        composer.athrow();
+
+        composer.labelBinding(throwableHandler);
+        composer.invokestatic(ClassDesc.of("zeron.runtime.EffectSupport"), "pop",
+                MethodTypeDesc.of(ConstantDescs.CD_void));
+        composer.athrow();
+
+        composer.labelBinding(done);
+        composer.exceptionCatch(start, end, handler, carrier);
+        composer.exceptionCatch(start, end, throwableHandler, ConstantDescs.CD_Throwable);
         endScope(context);
         context.lastEmittedType = handle.getType();
     }

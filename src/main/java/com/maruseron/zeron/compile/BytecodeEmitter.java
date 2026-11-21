@@ -2151,6 +2151,12 @@ final class BytecodeEmitter {
     }
 
     private static void emitMemberCall(CompilationContext context, final CodeBuilder composer, final Expr.MemberCall call ){
+        if (call.resumeCall()) {
+            emitExpr(context, composer, call.arguments.getFirst());
+            emitConversion(context, composer, context.lastEmittedType, call.getType());
+            context.lastEmittedType = call.getType();
+            return;
+        }
         if (call.namespaceCall() != null) {
             emitCall(context, composer, call.namespaceCall());
             return;

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0] - Unreleased
+
+### Compiler and language work
+
+- Implemented ZEP-0118 response-typed effects and tail-resumptive handlers. An effect may declare
+  `responds R`; `raise` then has type `R`, and an inline `handle` case may bind a resume token with
+  `case Ask<Int>, k -> k.resume(8);`. The handler answer returns directly to the raise site through
+  a synchronous thread-local handler frame with no continuation capture, while effects without a
+  response and cases without a token keep the existing abortive behavior. The standard library
+  gains `Ask<T>`, `Yield<T>`, and `Log`; compiled-library API metadata stores response types under
+  schema 17 and reads older indexes as abortive, and `STANDARD_LIBRARY_API_VERSION` is now 20.
+  Stored or captured resume tokens, non-tail resumption, resuming cases in named or first-class
+  handler values, and generic or row-variable responding raises are rejected or remain unsupported;
+  general continuations are ZEP-0119.
+
 ## [0.8.0] - 2026, 20 NOV
 
 ### Compiler and language work

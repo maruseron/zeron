@@ -539,6 +539,11 @@ final class MemberInteropResolver {
     private static TypeDescriptor resolveMemberCallInSelection(final ResolutionContext context,
                                                                final Expr.MemberCall call,
                                                                final TypeDescriptor expectedType) {
+        if (call.receiver instanceof Expr.Variable receiver
+                && context.resumeTokens.containsKey(receiver.name.lexeme())) {
+            return resolveResumeCall(context, call,
+                    context.resumeTokens.get(receiver.name.lexeme()).peek());
+        }
         if (call.safeNavigation()) {
             final var receiverType = ExpressionFlowResolver.resolveExpression(context, call.receiver);
             final var safeFlows = beginSafeNavigation(context, call.receiver, call.name, receiverType);
@@ -553,6 +558,34 @@ final class MemberInteropResolver {
             return nullableResult;
         }
         return resolveMemberCall(context, call, null, expectedType);
+    }
+
+    private static TypeDescriptor resolveResumeCall(final ResolutionContext context,
+                                                    final Expr.MemberCall call,
+                                                    final TypeDescriptor responseType) {
+        if (!call.name.lexeme().equals("resume")) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.name, "A resume token only provides 'resume'."));
+        }
+        if (call.safeNavigation() || !call.explicitTypeArguments.isEmpty()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.name, "A resume token call cannot be a safe call or have type arguments."));
+        }
+        if (call.arguments.size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.name, "'resume' expects exactly one response argument."));
+        }
+        TypeDescriptor argumentType = TypeDescriptor.ofNever();
+        if (call.arguments.size() == 1) {
+            argumentType = ExpressionFlowResolver.resolveExpression(context, call.arguments.getFirst());
+            if (!TypeDescriptor.ofNever().equals(responseType)) {
+                ensureAssignable(context, responseType, argumentType, call.name);
+            }
+        }
+        call.setResumeCall(true);
+        final var result = TypeDescriptor.ofNever().equals(responseType) ? argumentType : responseType;
+        call.setType(result);
+        return result;
     }
 
     private static TypeDescriptor resolveHigherKindedCall(final ResolutionContext context,

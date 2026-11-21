@@ -199,7 +199,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                     null, List.of(), true, pattern.refutable()))
                             .toList();
                     statements.add(new Stmt.ClassDecl(className, classExport.typeParameters(), contractUses,
-                        fields, properties, constructor, namedConstructors, methods, patterns,
+                        fields, properties, constructor, namedConstructors, methods, List.of(), patterns,
                         true, classExport.effect(),
                         classExport.underEffects().stream()
                                 .map(name -> new Stmt.ContractUse(token(name), List.of()))
@@ -214,7 +214,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                                 .toList()))
                                 .toList(),
                         classExport.dataClass(), dataComponents, List.of(),
-                        classExport.canonicalConstructorEffects(), null));
+                        classExport.canonicalConstructorEffects(), null, classExport.responseType()));
                 }
                 case ContractExport contract -> {
                     final var contractName = token(contract.qualifiedName());
@@ -606,7 +606,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                               List<LiteralSuffixExport> literalSuffixes,
                               boolean dataClass,
                               List<TypeDescriptor> canonicalConstructorEffects,
-                              List<String> underEffects)
+                              List<String> underEffects,
+                              TypeDescriptor responseType)
             implements ExportedDeclaration {
         public ClassExport {
             Objects.requireNonNull(qualifiedName);
@@ -647,7 +648,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             this(qualifiedName, typeParameters, contracts, canonicalConstructorParameters,
                     canonicalConstructorParameterNames, canonicalConstructorPublic, effect,
                     namedConstructors, methods, properties, patterns, literalSuffixes,
-                    dataClass, canonicalConstructorEffects, List.of());
+                    dataClass, canonicalConstructorEffects, List.of(), null);
         }
 
         public ClassExport(String qualifiedName,
@@ -666,7 +667,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
             this(qualifiedName, typeParameters, contracts, canonicalConstructorParameters,
                     canonicalConstructorParameterNames, canonicalConstructorPublic, effect,
                     namedConstructors, methods, properties, patterns, literalSuffixes,
-                    dataClass, List.of());
+                    dataClass, List.of(), List.of(), null);
         }
 
         public ClassExport(String qualifiedName,
@@ -1244,7 +1245,8 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                                 classDeclaration.dataClass(), classDeclaration.constructorEffects(),
                                 classDeclaration.underEffects().stream()
                                         .map(use -> use.name().lexeme())
-                                        .toList()));
+                                        .toList(),
+                                classDeclaration.responseType()));
                         classDeclaration.methods().stream().filter(Stmt.Method::isPublic)
                                 .forEach(method -> addDocumentationExport(exports, unit,
                                         classQualifiedName + "." + method.name().lexeme(), method.name()));
@@ -1527,7 +1529,7 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                         .map(property -> new PropertyExport(property.name().lexeme(), property.type(),
                                 property.isMutating()))
                         .toList(),
-                List.of(), List.of(), false, List.of());
+                List.of(), List.of(), false, List.of(), List.of(), null);
     }
 
     private static boolean targetTypeIsPublic(final CompilationUnit unit,
@@ -1780,6 +1782,10 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 output.writeBoolean(classExport.dataClass());
                 writeTypes(output, classExport.canonicalConstructorEffects(), context);
                 writeStrings(output, classExport.underEffects());
+                output.writeBoolean(classExport.responseType() != null);
+                if (classExport.responseType() != null) {
+                    writeType(output, classExport.responseType(), context);
+                }
             }
             case ContractExport contract -> {
                 output.writeByte(3);
@@ -2082,9 +2088,11 @@ public record ZeronLibraryIndex(int standardLibraryApiVersion,
                 final var dataClass = input.readBoolean();
                 final var constructorEffects = readTypes(input, context);
                 final var underEffects = readStrings(input);
+                final var responseType = version >= 17 && input.readBoolean()
+                        ? readType(input, context) : null;
                 yield new ClassExport(name, typeParameters, contracts, constructorParameters,
                         constructorParameterNames, canonicalPublic, effect, constructors, methods, properties,
-                        patterns, literalSuffixes, dataClass, constructorEffects, underEffects);
+                        patterns, literalSuffixes, dataClass, constructorEffects, underEffects, responseType);
             }
             case 3 -> {
                 final var name = input.readUTF();

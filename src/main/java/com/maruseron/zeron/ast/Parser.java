@@ -1730,6 +1730,14 @@ public final class Parser {
                     underEffects.add(new Stmt.ContractUse(effectName, List.of()));
                 } while (match(COMMA));
             }
+            TypeDescriptor responseType = null;
+            if (matchSoftKeyword("responds")) {
+                if (!isEffect) {
+                    error(previous(), DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "Only effect declarations may declare a response type with 'responds'.");
+                }
+                responseType = collectType();
+            }
             final var derivedContracts = parseDerivedContracts();
             consume(LEFT_BRACE, "Expect '{' before class members.");
 
@@ -1931,7 +1939,8 @@ public final class Parser {
                     List.copyOf(patterns), isTopLevelPublic, isEffect, List.copyOf(underEffects),
                     derivedContracts, storedStateOrder,
                     higherKindedContractUses, higherKindedImplementations, literalSuffixes,
-                    isDataClass, dataComponents, initializerBlocks, List.of(), closingBrace);
+                    isDataClass, dataComponents, initializerBlocks, List.of(), closingBrace,
+                    responseType);
         } finally {
             activeTypeParameters = enclosingTypeParameters;
         }
@@ -4150,10 +4159,19 @@ public final class Parser {
                 consume(AS, "Expect 'as' after 'with suppressed'.");
                 suppressedBinding = consume(IDENTIFIER, "Expect binding name after 'as'.");
             }
+            Token resumeBinding = null;
+            if (match(COMMA)) {
+                resumeBinding = consume(IDENTIFIER, "Expect resume-token binding after ','.");
+                if (suppressedBinding != null) {
+                    error(resumeBinding, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                            "A handler case cannot both suppress an effect and bind its resume token.");
+                }
+            }
             consume(ARROW, "Expect '->' after handler case.");
             final var body = expression();
             consume(SEMICOLON, "Expect ';' after handler case.");
-            arms.add(new Expr.HandleArm(caseKeyword, effectType, pattern, guard, suppressedBinding, body));
+            arms.add(new Expr.HandleArm(caseKeyword, effectType, pattern, guard, suppressedBinding,
+                    resumeBinding, body));
         }
         consume(RIGHT_BRACE, "Expect '}' after handler cases.");
         if (arms.isEmpty()) error(keyword, DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,

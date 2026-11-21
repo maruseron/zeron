@@ -206,10 +206,12 @@ plainParameter = { annotationApplication }, IDENTIFIER, ":", type ;
 classDecl = "class", IDENTIFIER, [ typeParameters ], [ "is", contractUse, { ",", contractUse } ],
               [ derivingClause ], "{", { classMember }, "}" ;
 (* [CHANGED] Effects use the class-member syntax and additionally accept type parameters,
-   nominal contract uses after `is`, effect supertypes after `under`, and `deriving`. *)
+   nominal contract uses after `is`, effect supertypes after `under`, a response type after
+   `responds`, and `deriving`. ZEP-0118. *)
 effectDecl = "effect", IDENTIFIER, [ typeParameters ],
               [ "is", contractUse, { ",", contractUse } ],
               [ "under", qualifiedName, { ",", qualifiedName } ],
+              [ "responds", type ],
               [ derivingClause ], "{", { classMember }, "}" ;
 extensionDecl = "extension", [ typeParameters ], type, "{", { extensionMember }, "}" ;
 
@@ -458,8 +460,11 @@ suffixedNumericLiteral = SUFFIXABLE_NUMBER, IDENTIFIER ;
 handleExpr = "handle", "(", expression, ")", 'with', ( handlerBody | expression ) ;
 handlerLiteral = 'handler', handlerBody ;
 handlerBody = "{", handleArm, { handleArm }, "}" ;
+(* [CHANGED] ZEP-0118: a responding effect's case may bind a resume token after the pattern
+   and any guard or suppressed binding. *)
 handleArm = "case", matchPattern, [ "as", IDENTIFIER ], [ "if", expression ],
-              [ 'with', 'suppressed', "as", IDENTIFIER ], "->", expression, ";" ;
+              [ 'with', 'suppressed', "as", IDENTIFIER ], [ ",", IDENTIFIER ],
+              "->", expression, ";" ;
 arrayLiteral = "[", [ expression, { ",", expression } ], "]" ;
 
 (* [NEW] ZEP-0146: a brace block in expression position is a value block. It must contain exactly

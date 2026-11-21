@@ -135,7 +135,7 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0115](./ZEP-0115.md) | Warning-Severity Compiler Diagnostics | Implemented | Shipped | 0.7.0 |
 | [ZEP-0116](./ZEP-0116.md) | Remaining Existential Opening and Escape Work | Implemented | Shipped | 0.7.0 |
 | [ZEP-0117](./ZEP-0117.md) | Declarative Project Targets and Generated CLI/Manifest Reference | Implemented | Shipped | 0.8.0 |
-| [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Draft | Candidate | 0.9.0 |
+| [ZEP-0118](./ZEP-0118.md) | Response-Typed Effects and Tail-Resumptive Handlers | Implemented | Candidate | 0.9.0 |
 | [ZEP-0119](./ZEP-0119.md) | One-Shot Continuations, Deep Handlers, and Cancellation | Draft | Candidate | 0.9.0 |
 | [ZEP-0120](./ZEP-0120.md) | Async as an Effect and the Future/Task Surface | Draft | Candidate | 0.9.0 |
 | [ZEP-0121](./ZEP-0121.md) | Multi-Shot Continuations and Backtracking | Deferred | Deferred | — |
@@ -177,6 +177,9 @@ scope owned by other proposals does not keep the original row `Accepted` after i
 | [ZEP-0157](./ZEP-0157.md) | Collection Building APIs | Draft | Candidate | 0.9.0 |
 | [ZEP-0158](./ZEP-0158.md) | Lambda Resource Handles with Scoped Receivers | Draft | Candidate | 0.10.0 |
 | [ZEP-0159](./ZEP-0159.md) | Generated Standard-Library Reference | Draft | Unscheduled | — |
+| [ZEP-0160](./ZEP-0160.md) | Scoped Projection Types | Draft | Candidate | 0.10.0 |
+| [ZEP-0161](./ZEP-0161.md) | Scoped Receiver Methods and Contract Conformance | Draft | Candidate | 0.10.0 |
+| [ZEP-0162](./ZEP-0162.md) | Scoped Generic Admissibility | Draft | Unscheduled | — |
 
 ## Release bundles
 
@@ -191,8 +194,8 @@ sequencing.
 | `0.6.0` | Stabilization | Shipped | 25 rows |
 | `0.7.0` | Type identity, reification, and type bounds | Shipped 2026-11-14 | 15 shipped; acceptance queue closed |
 | `0.8.0` | Normalization and nominal implementation | Shipped 2026-11-20 | 25 shipped; acceptance queue closed |
-| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline), ZEP-0119, ZEP-0120, ZEP-0123, ZEP-0147, ZEP-0112, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; all designs `Draft` |
-| `0.10.0` | Model system completion, annotation metadata, and resource handling | Proposed; 3 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158 is a tentative resource-handling companion |
+| `0.9.0` | Effect control and response typing plus library breadth | Proposed; 14 candidates | ZEP-0118 (headline, implemented), ZEP-0119, ZEP-0120, ZEP-0123, ZEP-0147, ZEP-0112, ZEP-0066, ZEP-0067, and ZEP-0152–ZEP-0157; remaining designs `Draft` |
+| `0.10.0` | Model system completion, scoped types, and resource handling | Proposed; 5 candidates | ZEP-0091 and ZEP-0097 model metadata; ZEP-0158, ZEP-0160, and ZEP-0161 scoped resource handling; ZEP-0162 generic admissibility is unscheduled |
 
 ### `0.7.0` — type identity, reification, and type bounds
 
@@ -341,15 +344,15 @@ source, multi-value results are `Stream<String>`, `StringJoiner` owns joining, a
 
 ### `0.9.0` — effect control and response typing
 
-`0.9.0` is the effect-control bundle. It has fourteen `Candidate` rows, all with `Draft` designs; the
-effect-control rows carry the depth, and the library rows add surface that does not touch handler
-typing or code generation:
+`0.9.0` is the effect-control bundle. It has fourteen `Candidate` rows; [ZEP-0118](./ZEP-0118.md)
+is implemented, and the remaining designs are `Draft`. The effect-control rows carry the depth, and
+the library rows add surface that does not touch handler typing or code generation:
 
-- [ZEP-0118](./ZEP-0118.md) — response-typed effects and tail-resumptive handlers. The headline
-  row: an effect declares a response type, `raise` becomes an expression whose value the handler
+- [ZEP-0118](./ZEP-0118.md) — response-typed effects and tail-resumptive handlers. Implemented:
+  an effect declares a response type, `raise` becomes an expression whose value the handler
   supplies, and tail-resumptive cases compile to direct handler calls without stack capture. It
   also introduces the `Yield<T>`, `Ask<T>`, and `Log` library effects and the push direction of
-  generators.
+  generators. The row stays `Candidate` until the bundle ships.
 - [ZEP-0147](./ZEP-0147.md) — replace `raise` and `raises` with `perform` and `performs`. A
   source-breaking rename of the effect-operation vocabulary; it does not change response typing,
   effect identity, or handler behavior.
@@ -392,18 +395,22 @@ applications containing type parameters, forwarding through generic calls, and o
 arguments. ZEP-0121 remains `Deferred` and outside the bundle. ZEP-0111 shipped in `0.7.0`, and
 ZEP-0110 is superseded by [ZEP-0146](./ZEP-0146.md), which shipped in `0.8.0`.
 
-### `0.10.0` — model system completion and annotation metadata (tentative)
+### `0.10.0` — model system completion, scoped types, and resource handling (tentative)
 
 This bundle gives the model-metadata orphans a coherent home rather than scheduling annotation
 work in isolation. It is tentative and not scheduled, and it follows the `0.9.0` effect-control
 work. The accepted candidates are [ZEP-0091](./ZEP-0091.md) (annotation consumption) and
 [ZEP-0097](./ZEP-0097.md) (`MAPPING` annotation target for model clauses).
-[ZEP-0158](./ZEP-0158.md) is a tentative third candidate: lambda resource handles with
-non-denotable scoped receivers. It is placed here because it depends on the effect-control and
-continuation work in `0.9.0` settling first, and because its cleanup rules must agree with
-ZEP-0112's scope lifetime and ZEP-0119's resumption points. ZEP-0097 depends on
-ZEP-0091's compiler-recognized annotation model; ZEP-0091 Direction B also unblocks external names
-in [ZEP-0092](./ZEP-0092.md).
+[ZEP-0160](./ZEP-0160.md) defines `scoped` projection types, origins, and the escape checker;
+[ZEP-0161](./ZEP-0161.md) defines `scoped fn`, `scoped mut fn`, `Self` propagation, and contract
+conformance; and [ZEP-0158](./ZEP-0158.md) is the expression-valued resource block that consumes a
+`scoped &File` receiver. The three form a resource-handling companion. They are placed here because
+the blocks depend on the effect-control and continuation work in `0.9.0` settling first, and
+because their cleanup rules must agree with ZEP-0112's scope lifetime and ZEP-0119's resumption
+points. [ZEP-0162](./ZEP-0162.md) records the future generic admissibility rules and remains
+`Draft` / `Unscheduled`; version 1 deliberately rejects scoped type arguments and container
+scoping. ZEP-0097 depends on ZEP-0091's compiler-recognized annotation model; ZEP-0091 Direction B
+also unblocks external names in [ZEP-0092](./ZEP-0092.md).
 
 The model-improvement drafts [ZEP-0101](./ZEP-0101.md) (field representation adapters),
 [ZEP-0102](./ZEP-0102.md) (generic models through factories), and

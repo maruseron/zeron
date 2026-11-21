@@ -903,8 +903,9 @@ final class ExpressionFlowResolver {
                         ? reference.baseType() : effectType;
                 TypeResolver.requireEffectType(context, nominalType, raise.keyword);
                 RaisedEffectFlow.add(context, nominalType, raise.keyword);
-                raise.setType(TypeDescriptor.ofNever());
-                yield TypeDescriptor.ofNever();
+                final var responseType = EffectResponses.responseOf(context, nominalType);
+                raise.setType(responseType);
+                yield responseType;
             }
             case Expr.Handle handle -> resolveHandle(context, handle);
             case Expr.HandlerLiteral handler -> resolveHandlerLiteral(context, handler);
@@ -1086,6 +1087,11 @@ final class ExpressionFlowResolver {
                 yield TypeDescriptor.ofInfer();
             }
             case Expr.Variable variable -> {
+                if (context.resumeTokens.containsKey(variable.name.lexeme())) {
+                    Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                            variable.name,
+                            "A resume token may only be used as 'k.resume(value)' in the tail position of its handler case."));
+                }
                 if (variable.name.type() == TokenType.THIS) {
                     final var receiverScope = variable.name.lexeme().equals("this")
                             ? context.frame.receiverScopes.peek()
@@ -1499,18 +1505,24 @@ final class ExpressionFlowResolver {
                             suppressedType, BindingMutability.IMMUTABLE);
                     context.symbols.define(arm.suppressedBinding());
                 }
+                final var resumeType = beginResumeToken(context, arm);
                 if (arm.guard() != null) {
                     final var guardType = resolve(context, arm.guard());
                     ensureAssignable(context, TypeDescriptor.ofBoolean(), guardType, arm.keyword());
                 }
                 final var armType = resolve(context, arm.expression());
+                if (resumeType != null) validateTailResume(context, arm);
                 resultType = resultType == null ? armType
                         : ensureCommonParent(context, arm.keyword(), resultType, armType);
                 armsFlow.add(context.frame.flowState.copy());
             } finally {
+                if (arm.resumeBinding() != null) popResumeToken(context, arm.resumeBinding());
                 context.symbols.endScope();
             }
         }
+        final var resumingArms = handle.arms.stream()
+                .filter(arm -> arm.resumeBinding() != null).toList();
+        if (!resumingArms.isEmpty()) handle.setFrameHandler(synthesizeFrameHandler(handle, resumingArms));
         var joined = protectedType instanceof NeverDescriptor
                 ? FlowState.unreachable() : protectedFlow;
         for (final var flow : armsFlow) joined = FlowState.join(joined, flow);
@@ -1518,6 +1530,74 @@ final class ExpressionFlowResolver {
         if (resultType == null) resultType = protectedType;
         handle.setType(resultType);
         return resultType;
+    }
+
+    private static TypeDescriptor beginResumeToken(final ResolutionContext context,
+                                                    final Expr.HandleArm arm) {
+        if (arm.resumeBinding() == null) return null;
+        if (!EffectResponses.declaresResponse(context, arm.resolvedEffectType())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    arm.resumeBinding(),
+                    "Effect '" + arm.resolvedEffectType().name()
+                            + "' does not declare a response type, so its handler cannot resume."));
+        }
+        final var response = EffectResponses.responseOf(context, arm.resolvedEffectType());
+        context.resumeTokens.computeIfAbsent(arm.resumeBinding().lexeme(),
+                ignored -> new java.util.ArrayDeque<>()).push(response);
+        return response;
+    }
+
+    private static void popResumeToken(final ResolutionContext context, final Token binding) {
+        final var stack = context.resumeTokens.get(binding.lexeme());
+        if (stack == null) return;
+        if (!stack.isEmpty()) stack.pop();
+        if (stack.isEmpty()) context.resumeTokens.remove(binding.lexeme());
+    }
+
+    private static void validateTailResume(final ResolutionContext context,
+                                           final Expr.HandleArm arm) {
+        if (!(arm.expression() instanceof Expr.MemberCall call) || !call.resumeCall()) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    arm.resumeBinding(),
+                    "A resuming handler case must end with 'k.resume(value)' as its entire body."));
+            return;
+        }
+        if (!(call.receiver instanceof Expr.Variable receiver)
+                || !receiver.name.lexeme().equals(arm.resumeBinding().lexeme())) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE,
+                    arm.resumeBinding(),
+                    "A resuming handler case must call its own resume token."));
+            return;
+        }
+        if (call.arguments.size() != 1) {
+            Zeron.resolutionError(new ResolutionError(DiagnosticCatalog.INVALID_MEMBER_ACCESS,
+                    call.name, "'resume' expects exactly one response argument."));
+        }
+        final var stack = context.resumeTokens.get(arm.resumeBinding().lexeme());
+        final var response = stack == null ? null : stack.peek();
+        if (response != null && !(response instanceof NeverDescriptor)) {
+            final var argumentType = call.arguments.getFirst().getType();
+            if (argumentType != null) {
+                ensureAssignable(context, response, argumentType, call.name);
+            }
+        }
+    }
+
+    private static Expr synthesizeFrameHandler(final Expr.Handle handle,
+                                               final List<Expr.HandleArm> resumingArms) {
+        final var carrier = new Token(com.maruseron.zeron.scan.TokenType.IDENTIFIER,
+                "$zeron$frame$carrier", null, handle.keyword.span());
+        final var dispatch = new Expr.HandlerDispatch(handle.keyword, carrier,
+                List.copyOf(resumingArms));
+        dispatch.setType(TypeDescriptor.ofAny());
+        final var implementation = new Expr.Lambda(handle.keyword, List.of(carrier),
+                List.of(new Stmt.Return(dispatch, handle.keyword)), TypeDescriptor.ofInfer());
+        final var frame = new Expr.HandlerLiteral(handle.keyword, List.copyOf(resumingArms),
+                implementation);
+        final var effects = resumingArms.stream()
+                .map(Expr.HandleArm::resolvedEffectType).toList();
+        frame.setType(TypeDescriptor.handlerOf(TypeDescriptor.ofAny(), effects, List.of()));
+        return frame;
     }
 
     /// Diagnoses incomparable handler cases that can both match a visible effect. A later library
@@ -1565,6 +1645,11 @@ final class ExpressionFlowResolver {
         TypeDescriptor resultType = null;
         try {
             for (final var arm : handler.arms) {
+                if (arm.resumeBinding() != null) {
+                    Zeron.resolutionError(new ResolutionError(
+                            DiagnosticCatalog.INVALID_DECLARATION_STRUCTURE, arm.resumeBinding(),
+                            "Resuming handler cases are only supported in inline 'handle' expressions."));
+                }
                 if (arm.effectType() instanceof TypeParameterDescriptor) {
                     Zeron.resolutionError(new ResolutionError(
                             DiagnosticCatalog.INVALID_GENERIC_USE_OR_INFERENCE, arm.keyword(),
@@ -1595,16 +1680,21 @@ final class ExpressionFlowResolver {
                                 suppressedType, BindingMutability.IMMUTABLE);
                         context.symbols.define(arm.suppressedBinding());
                     }
+                    final var resumeType = beginResumeToken(context, arm);
                     if (arm.guard() != null) {
                         final var guardType = resolve(context, arm.guard());
                         ensureAssignable(context, TypeDescriptor.ofBoolean(), guardType, arm.keyword());
                     }
                     final var armType = resolve(context, arm.expression());
+                    if (resumeType != null) validateTailResume(context, arm);
                     if (!(armType instanceof NeverDescriptor)) {
                         resultType = resultType == null ? armType
                                 : ensureExact(context, arm.keyword(), resultType, armType);
                     }
                 } finally {
+                    if (handler.arms.get(index).resumeBinding() != null) {
+                        popResumeToken(context, handler.arms.get(index).resumeBinding());
+                    }
                     context.symbols.endScope();
                 }
             }

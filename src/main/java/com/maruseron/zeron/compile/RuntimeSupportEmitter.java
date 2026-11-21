@@ -48,12 +48,15 @@ final class RuntimeSupportEmitter {
     private static final List<SupportUnit> RUNTIME_SUPPORT_UNITS = List.of(
             new SupportUnit("zeron/lang/Unit", List.of("zeron/lang/Unit"), Set.of(),
                     context -> emitUnitClass(context.outputDirectory)),
-            new SupportUnit("zeron/runtime/RaisedEffect", List.of("zeron/runtime/RaisedEffect"), Set.of(),
+            new SupportUnit("zeron/runtime/RaisedEffect", List.of("zeron/runtime/RaisedEffect"),
+                    Set.of("zeron/runtime/EffectCarrier"),
                     context -> emitRaisedEffectClass(context.outputDirectory)),
+            new SupportUnit("zeron/runtime/EffectCarrier", List.of("zeron/runtime/EffectCarrier"), Set.of(),
+                    context -> emitRuntimeClass(context.outputDirectory, "EffectCarrier")),
             new SupportUnit("zeron/runtime/EffectValue", List.of("zeron/runtime/EffectValue"), Set.of(),
                     context -> emitRuntimeClass(context.outputDirectory, "EffectValue")),
             new SupportUnit("zeron/runtime/EffectSupport", List.of("zeron/runtime/EffectSupport"),
-                    Set.of("zeron/runtime/EffectValue"),
+                    Set.of("zeron/runtime/EffectValue", "zeron/runtime/RaisedEffect"),
                     context -> emitRuntimeClass(context.outputDirectory, "EffectSupport")),
             new SupportUnit("zeron/runtime/ResourceSupport", List.of("zeron/runtime/ResourceSupport"),
                     Set.of("zeron/runtime/RaisedEffect", "zeron/lang/Unit"),
@@ -496,6 +499,7 @@ final class RuntimeSupportEmitter {
             builder.withVersion(ClassFile.JAVA_25_VERSION, 0);
             builder.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL);
             builder.withSuperclass(RUNTIME_EXCEPTION_CLASS);
+            builder.withInterfaceSymbols(List.of(ClassDesc.of("zeron.runtime.EffectCarrier")));
             builder.withField("payload", ConstantDescs.CD_Object,
                     field -> field.withFlags(ClassFile.ACC_PRIVATE | ClassFile.ACC_FINAL));
             builder.withField("suppressedOutcomes", ARRAY_LIST_CLASS,
